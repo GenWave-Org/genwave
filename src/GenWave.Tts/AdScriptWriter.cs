@@ -124,7 +124,7 @@ public sealed partial class AdScriptWriter(
             // finding F3 handling) — zero I/O, so systemPrompt: null skips the ring record below:
             // nothing was ever attempted.
             return Failed(
-                "Llm:Endpoint is not configured", ruleId: null, LlmCallCause.ConnectionFailure, request.Brand,
+                "Llm:Endpoint is not configured", ruleId: null, LlmCallCause.ConnectionFailure, request.SponsorName,
                 timeProvider.GetUtcNow(), mode, systemPrompt: null, userPrompt: null, cfg.Model);
         }
 
@@ -188,7 +188,7 @@ public sealed partial class AdScriptWriter(
             {
                 return Resolved(Failed(
                     "the completion was cut short by max_tokens (finish_reason: length) — a truncated script is never aired",
-                    ruleId: null, LlmCallCause.OverLength, request.Brand, startedAt, mode, systemPrompt, userPrompt,
+                    ruleId: null, LlmCallCause.OverLength, request.SponsorName, startedAt, mode, systemPrompt, userPrompt,
                     cfg.Model, reply.Content));
             }
 
@@ -197,15 +197,15 @@ public sealed partial class AdScriptWriter(
             {
                 return Resolved(Failed(
                     "the completion was empty after cleanup", ruleId: null, LlmCallCause.EmptyCompletion,
-                    request.Brand, startedAt, mode, systemPrompt, userPrompt, cfg.Model, reply.Content));
+                    request.SponsorName, startedAt, mode, systemPrompt, userPrompt, cfg.Model, reply.Content));
             }
 
             return validate(cleaned) switch
             {
                 AdScriptValidationOutcome.Accepted => Resolved(
-                    Accept(cleaned, request.Brand, systemPrompt, userPrompt, reply.Content, startedAt, mode, cfg.Model)),
+                    Accept(cleaned, request.SponsorName, systemPrompt, userPrompt, reply.Content, startedAt, mode, cfg.Model)),
                 AdScriptValidationOutcome.Refused refused => BuildRefused(
-                    refused, request.Brand, startedAt, mode, systemPrompt, userPrompt, cfg.Model, reply.Content),
+                    refused, request.SponsorName, startedAt, mode, systemPrompt, userPrompt, cfg.Model, reply.Content),
                 _ => throw new UnreachableException($"Unhandled {nameof(AdScriptValidationOutcome)} case."),
             };
         }
@@ -220,11 +220,11 @@ public sealed partial class AdScriptWriter(
             var (outcome, cause, detail) = LlmCopyWriter.ClassifyForRing(ex);
 
             recorder.Record(
-                request.Brand, systemPrompt, userPrompt, response: null, startedAt, ElapsedMs(startedAt),
+                request.SponsorName, systemPrompt, userPrompt, response: null, startedAt, ElapsedMs(startedAt),
                 outcome, detail, mode, cause, cfg.Model, LlmCallKind.AdScript);
             logger.LogInformation(
                 "Ad script failed (brand: {Brand}): {Detail}",
-                request.Brand.ReplaceLineEndings(" "), detail.ReplaceLineEndings(" "));
+                request.SponsorName.ReplaceLineEndings(" "), detail.ReplaceLineEndings(" "));
             return Resolved(new AdScriptWriteResult.Failed(detail, RuleId: null, cause));
         }
     }

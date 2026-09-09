@@ -22,7 +22,12 @@ public sealed class FakeSponsorStore(Func<long, string?> nameLookup) : ISponsorS
 {
     readonly HashSet<long> pausedSponsorIds = [];
     readonly Dictionary<long, string> packSlugsBySponsorId = new();
+    readonly Dictionary<long, string> taglinesBySponsorId = new();
+    readonly Dictionary<long, string> aboutsBySponsorId = new();
     readonly Dictionary<long, string> phonesBySponsorId = new();
+    readonly Dictionary<long, string> addressesBySponsorId = new();
+    readonly Dictionary<long, string> websitesBySponsorId = new();
+    readonly Dictionary<long, string> tonesBySponsorId = new();
 
     /// <summary>Marks a sponsor paused for a scenario exercising <see cref="AdSpotWorker"/>'s own
     /// paused-sponsor handling — <see cref="GetAsync"/> reflects it back on <see cref="Sponsor.Paused"/>.</summary>
@@ -53,6 +58,34 @@ public sealed class FakeSponsorStore(Func<long, string?> nameLookup) : ISponsorS
         return this;
     }
 
+    /// <summary>Sets every one of a sponsor's own facts for a scenario exercising
+    /// <see cref="AdSpotWorker"/>'s own wiring of the SIX <see cref="Tts.AdScriptWriteRequest"/> sponsor
+    /// fields (SPEC F174.8, STORY-428, PLAN T443 ruling) — <see cref="GetAsync"/> reflects each one
+    /// back on the matching <see cref="Sponsor"/> property. Every parameter is independently optional
+    /// (the <see cref="WithPhone"/> precedent, widened to all six facts): a fact never passed here
+    /// stays unset for this sponsor, the SAME <see langword="null"/> <see cref="GetAsync"/> already
+    /// returns for it. <paramref name="phone"/> writes the SAME backing map <see cref="WithPhone"/>
+    /// does, so either seeding call — or both, on the same sponsor — leaves one consistent phone
+    /// number, never two.</summary>
+    public FakeSponsorStore WithFacts(
+        long sponsorId, string? tagline = null, string? about = null, string? phone = null,
+        string? address = null, string? website = null, string? tone = null)
+    {
+        if (tagline is not null)
+            taglinesBySponsorId[sponsorId] = tagline;
+        if (about is not null)
+            aboutsBySponsorId[sponsorId] = about;
+        if (phone is not null)
+            phonesBySponsorId[sponsorId] = phone;
+        if (address is not null)
+            addressesBySponsorId[sponsorId] = address;
+        if (website is not null)
+            websitesBySponsorId[sponsorId] = website;
+        if (tone is not null)
+            tonesBySponsorId[sponsorId] = tone;
+        return this;
+    }
+
     public Task<Sponsor?> GetAsync(long id, CancellationToken cancellationToken)
     {
         var name = nameLookup(id);
@@ -60,9 +93,10 @@ public sealed class FakeSponsorStore(Func<long, string?> nameLookup) : ISponsorS
             return Task.FromResult<Sponsor?>(null);
 
         return Task.FromResult<Sponsor?>(new Sponsor(
-            id, name, packSlugsBySponsorId.GetValueOrDefault(id), Tagline: null, About: null,
-            phonesBySponsorId.GetValueOrDefault(id), Address: null, Website: null, Tone: null,
-            pausedSponsorIds.Contains(id), PausedAt: null,
+            id, name, packSlugsBySponsorId.GetValueOrDefault(id), taglinesBySponsorId.GetValueOrDefault(id),
+            aboutsBySponsorId.GetValueOrDefault(id), phonesBySponsorId.GetValueOrDefault(id),
+            addressesBySponsorId.GetValueOrDefault(id), websitesBySponsorId.GetValueOrDefault(id),
+            tonesBySponsorId.GetValueOrDefault(id), pausedSponsorIds.Contains(id), PausedAt: null,
             CreatedAt: DateTime.UtcNow, UpdatedAt: DateTime.UtcNow, Version: "1"));
     }
 
