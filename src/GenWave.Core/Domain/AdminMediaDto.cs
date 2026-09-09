@@ -55,6 +55,15 @@ namespace GenWave.Core.Domain;
 /// never a sentinel 0/false). Only the single-row detail read (<c>GET /api/media/{id}</c>) populates
 /// them; the paged browse projection leaves them null, the same "only populated by projections that
 /// select it" posture <c>Bpm</c>/<c>TrackEnergy</c> already establish above.
+///
+/// <c>Pack</c>/<c>JingleRole</c> (SPEC F165.2/F165.3, F174.7, PLAN T446) surface a jingle-pack
+/// row's own <c>library.media.pack_slug</c>-derived display name and
+/// <c>library.media.jingle_role</c> storage token; both <see langword="null"/> for every row that
+/// did not arrive through a jingle-pack install (every scanned row, every other imaging kind).
+/// <c>Pack</c> is the installing pack's own display name, not its slug — the jingle-pack install's
+/// own insert (<c>JinglePackRepository.AssetUpsertSql</c>) already stamps <c>artist</c> to the pack
+/// name for exactly these rows (SPEC F165.2), so the browse projection reads <c>artist</c> back
+/// under this row's own <c>pack_slug is not null</c> guard rather than opening a second lookup.
 /// </summary>
 public sealed record AdminMediaDto(
     string MediaId,
@@ -86,4 +95,6 @@ public sealed record AdminMediaDto(
     long? ShowId = null,
     int? Plays = null,
     DateTimeOffset? FirstAiredAt = null,
-    DateTimeOffset? LastAiredAt = null);
+    DateTimeOffset? LastAiredAt = null,
+    string? Pack = null,
+    string? JingleRole = null);

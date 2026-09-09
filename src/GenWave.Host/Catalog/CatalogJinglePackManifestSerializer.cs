@@ -60,10 +60,14 @@ public static partial class CatalogJinglePackManifestSerializer
     /// <summary>
     /// SPEC F165.3's closed set, mirroring <c>library.media.jingle_role</c>'s own CHECK (db/45:
     /// <c>check (jingle_role is null or jingle_role in ('bed', 'sting', 'station_id'))</c>) verbatim —
-    /// this is the ONE place this app declares that set for parse-time validation; a value outside it
-    /// degrades the whole manifest to <see langword="null"/> rather than reaching the database at all.
+    /// this is the ONE place this app declares that set: parse-time manifest validation here, and
+    /// (PLAN T446 ruling) <c>MediaController</c>'s own <c>jingleRole</c> browse-filter validation
+    /// (SPEC F174.7) reads this exact set too rather than carrying a second literal list. A value
+    /// outside it degrades the whole manifest to <see langword="null"/> here, or 400s the browse
+    /// request there — never reaches the database either way.
     /// </summary>
-    static readonly string[] ValidRoles = ["bed", "sting", "station_id"];
+    internal static readonly IReadOnlySet<string> ValidRoles =
+        new HashSet<string>(["bed", "sting", "station_id"], StringComparer.Ordinal);
 
     /// <summary>The genwave-catalog schema's own closed license set.</summary>
     static readonly string[] ValidLicenses = ["CC0", "CC-BY"];
