@@ -6,8 +6,9 @@ namespace GenWave.Ads.Tests.Fakes;
 /// <summary>
 /// <see cref="IAdBriefStore"/> double for <see cref="AdSpotWorker"/> specs (PLAN T402) — a small,
 /// deterministic in-memory brief pool. <see cref="SampleEnabledAsync"/> returns the FIRST enabled brief
-/// (never actually random) so a scenario can assert exactly which brief a generation attempt used,
-/// mirroring <see cref="FakeAdSpotCatalog"/>'s own "deterministic, not random" precedent one file over.
+/// of an unpaused sponsor (never actually random) so a scenario can assert exactly which brief a
+/// generation attempt used, mirroring <see cref="FakeAdSpotCatalog"/>'s own "deterministic, not
+/// random" precedent one file over.
 /// <see cref="UpsertAsync"/>/<see cref="ListAllAsync"/>/<see cref="CreateOwnerAsync"/>/
 /// <see cref="SetEnabledAsync"/> (PLAN T403b's own Briefs-admin widening),
 /// <see cref="UpsertAllAsync"/> (PLAN T405's own ad-pack install widening), and
@@ -21,7 +22,24 @@ public sealed class FakeAdBriefStore : IAdBriefStore
     long nextId = 1;
     long nextSponsorId = 1;
 
+    /// <summary>Models <see cref="GenWave.MediaLibrary.Station.AdBriefRepository.SampleEnabledAsync"/>'s
+    /// own <c>join station.sponsor s ... and not s.paused</c> predicate (SPEC F173.2, PLAN T440):
+    /// <see cref="SampleEnabledAsync"/> below skips any brief whose sponsor this function reports
+    /// paused. Defaults to "nobody paused" so a scenario that never calls
+    /// <see cref="ExcludePausedSponsors"/> keeps this fake's pre-T440 behavior exactly.</summary>
+    Func<long, bool> isPausedSponsor = _ => false;
+
     public int SampleCallCount { get; private set; }
+
+    /// <summary>Wires this store's own <see cref="SampleEnabledAsync"/> to a paused-sponsor check —
+    /// <see cref="AdSpotWorkerHarness.Build"/>'s own construction order (this store is built BEFORE
+    /// <see cref="FakeSponsorStore"/>, whose <see cref="FakeSponsorStore.IsPaused"/> it wires here) is
+    /// why this is a post-construction setter rather than a constructor parameter.</summary>
+    public FakeAdBriefStore ExcludePausedSponsors(Func<long, bool> isPaused)
+    {
+        isPausedSponsor = isPaused;
+        return this;
+    }
 
     /// <summary>Every brand this fake has ever seen, mapped to a synthetic sponsor id it fabricates on
     /// first use (PLAN T432) — specs still seed by brand STRING (the pre-sponsors call shape, unchanged
@@ -55,7 +73,7 @@ public sealed class FakeAdBriefStore : IAdBriefStore
     public Task<AdBrief?> SampleEnabledAsync(CancellationToken ct)
     {
         SampleCallCount++;
-        return Task.FromResult(briefs.FirstOrDefault(b => b.Enabled));
+        return Task.FromResult(briefs.FirstOrDefault(b => b.Enabled && !isPausedSponsor(b.SponsorId)));
     }
 
     public Task<AdBrief> UpsertAsync(

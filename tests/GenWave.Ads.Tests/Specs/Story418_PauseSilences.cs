@@ -1,6 +1,7 @@
-// STORY-418 — Pausing a sponsor silences their spots on the very next pick (SPEC F173.1/F173.2 · PLAN T439)
+// STORY-418 — Pausing a sponsor silences their spots on the very next pick (SPEC F173.1/F173.2 · PLAN T439, T440)
 
 using GenWave.Ads.Tests.Fakes;
+using GenWave.Ads.Tests.Support;
 
 namespace GenWave.Ads.Tests.Specs;
 
@@ -79,13 +80,76 @@ public static class FeaturePausingASponsorSilencesTheirSpotsOnTheVeryNextPick
 
     public sealed class ScenarioRefillSkipsPausedSponsorsBriefs
     {
-        [Fact]
-        public void NoSpotIsCreatedFromAPausedSponsorsBriefs()
-            => Assert.Fail("pending: T440 RefillIfNeededAsync joins unpaused — AC3 (T440)");
+        static readonly DateTimeOffset Now = new(2026, 9, 9, 12, 0, 0, TimeSpan.Zero);
 
         [Fact]
-        public void NoLlmCompletionIsLogged()
-            => Assert.Fail("pending: T440 no spend — AC3 (T440)");
+        public async Task NoSpotIsCreatedFromAPausedSponsorsBriefs()
+        {
+            // Given zero ready spots and one enabled brief whose ONLY sponsor is paused —
+            // FakeAdBriefStore.SampleEnabledAsync's own paused-sponsor filter (wired to
+            // FakeSponsorStore.IsPaused by AdSpotWorkerHarness.Build, mirroring
+            // AdBriefRepository.SampleEnabledAsync's real EXISTS/"and not s.paused" predicate, SPEC
+            // F173.2, PLAN T440) has nothing else to return — and the LLM handler is one that WOULD
+            // serve a valid script if ever reached, so a red here can only mean the sample itself let
+            // the paused sponsor's brief through...
+            var logger = new CapturingLogger<AdSpotWorker>();
+            var handler = AdSpotWorkerHarness.ServeSameReplyEveryTime(AdSpotWorkerHarness.WellFormedReply);
+            var harness = AdSpotWorkerHarness.Build(Now, llmHandler: handler, workerLogger: logger);
+            harness.Briefs.AddEnabled("Cravin's Diner", premise: "A retro diner with a twist", tone: "warm and playful");
+            harness.Sponsors.Pause(harness.Briefs.SponsorIdsByBrand["Cravin's Diner"]);
+
+            // When the stock pass runs...
+            await harness.Worker.TickOnceAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+
+            // Then no spot is created — the paused sponsor's own brief was never sampled into a
+            // generation attempt — and RefillIfNeededAsync's own no-brief-sampled branch fired instead,
+            // the discriminating line that proves WHY: the sample returned null, not some unrelated
+            // early-out.
+            Assert.Equal(0, harness.Store.CreateCallCount);
+            Assert.Contains(
+                logger.Messages, m => m.Contains("but no enabled brief to sample from", StringComparison.Ordinal));
+        }
+
+        [Fact]
+        public async Task NoLlmCompletionIsLogged()
+        {
+            // Given the SAME setup, with the SAME would-succeed LLM handler wired in...
+            var handler = AdSpotWorkerHarness.ServeSameReplyEveryTime(AdSpotWorkerHarness.WellFormedReply);
+            var harness = AdSpotWorkerHarness.Build(Now, llmHandler: handler);
+            harness.Briefs.AddEnabled("Cravin's Diner", premise: "A retro diner with a twist", tone: "warm and playful");
+            harness.Sponsors.Pause(harness.Briefs.SponsorIdsByBrand["Cravin's Diner"]);
+
+            // When the stock pass runs...
+            await harness.Worker.TickOnceAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+
+            // Then the handler never received a single request — the sample returned null before
+            // GenerateOneAsync could ever build one, so no spend on the paused sponsor's own brief
+            // (AC3): a handler that WOULD have answered proves the LLM was skipped by the sample, not
+            // by an unrelated fault swallowed on the way there.
+            Assert.Empty(handler.Requests);
+        }
+
+        [Fact]
+        public async Task TheGeneratingLineIsNotLoggedWhenNoBriefIsSampled()
+        {
+            // Given the SAME setup, with the SAME would-succeed LLM handler wired in and the tick's
+            // own logger captured...
+            var logger = new CapturingLogger<AdSpotWorker>();
+            var handler = AdSpotWorkerHarness.ServeSameReplyEveryTime(AdSpotWorkerHarness.WellFormedReply);
+            var harness = AdSpotWorkerHarness.Build(Now, llmHandler: handler, workerLogger: logger);
+            harness.Briefs.AddEnabled("Cravin's Diner", premise: "A retro diner with a twist", tone: "warm and playful");
+            harness.Sponsors.Pause(harness.Briefs.SponsorIdsByBrand["Cravin's Diner"]);
+
+            // When the stock pass runs...
+            await harness.Worker.TickOnceAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+
+            // Then STORY-420 AC1's own "generating one" line never fires here — it belongs to the
+            // OTHER branch of RefillIfNeededAsync (PLAN T440), the one only reached once a brief was
+            // actually sampled, so its absence pins the placement: the line sits strictly after the
+            // no-brief-sampled early-out this scenario's own sample (correctly) took instead.
+            Assert.DoesNotContain(
+                logger.Messages, m => m.Contains("Ad stock below target: generating one", StringComparison.Ordinal));
+        }
     }
 
     // ---------------------------------------------------------------------

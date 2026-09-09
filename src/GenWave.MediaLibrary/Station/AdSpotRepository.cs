@@ -421,16 +421,22 @@ sealed class AdSpotRepository(Lazy<NpgsqlDataSource> dataSource) : IAdSpotStore
 
     /// <summary><see cref="IAdSpotStore.CountStockGeneratedAsync"/> — the SPEC F159.3 stock count,
     /// draft through ready (gh-#689: the ready shelf alone left the draft pile unbounded under
-    /// <c>AutoApprove=false</c>).</summary>
+    /// <c>AutoApprove=false</c>). <c>join station.sponsor s</c> + <c>and not s.paused</c> (SPEC F173.4,
+    /// PLAN T440): unpaused sponsors ONLY — a paused sponsor's own pipeline never counts toward
+    /// <c>TargetCount</c>, the SAME <c>join station.sponsor s on s.id = a.sponsor_id</c> shape
+    /// <see cref="ListAiringExclusionsAsync"/> already uses later in this class (PLAN T439).</summary>
     public async Task<int> CountStockGeneratedAsync(CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
         return await conn.ExecuteScalarAsync<int>(new CommandDefinition(
             """
-            select count(*)::int from station.ad_spot
-            where state in ('draft'::station.ad_state, 'approved'::station.ad_state,
-                            'rendering'::station.ad_state, 'ready'::station.ad_state)
-              and source in ('llm'::station.ad_source, 'pack'::station.ad_source)
+            select count(*)::int
+            from station.ad_spot a
+            join station.sponsor s on s.id = a.sponsor_id
+            where a.state in ('draft'::station.ad_state, 'approved'::station.ad_state,
+                               'rendering'::station.ad_state, 'ready'::station.ad_state)
+              and a.source in ('llm'::station.ad_source, 'pack'::station.ad_source)
+              and not s.paused
             """,
             cancellationToken: ct));
     }

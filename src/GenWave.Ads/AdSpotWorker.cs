@@ -238,8 +238,14 @@ public sealed class AdSpotWorker(
     }
 
     /// <summary>SPEC F159.3's stock half — one generation attempt when the stock count (draft through
-    /// ready, llm/pack — gh-#689's rider, see the class remarks) sits below target, never a catch-up
-    /// burst (this class's own remarks).</summary>
+    /// ready, llm/pack, UNPAUSED sponsors only — gh-#689's rider and SPEC F173.4's own pause narrowing,
+    /// PLAN T440, see the class remarks and <see cref="IAdSpotStore.CountStockGeneratedAsync"/>'s own
+    /// remarks) sits below target, never a catch-up burst (this class's own remarks). The one
+    /// Information line below (STORY-420 AC1's own literal, "Ad stock below target: generating one")
+    /// fires right before the ONE attempt this pass ever makes — <see cref="briefStore"/>'s own
+    /// <see cref="IAdBriefStore.SampleEnabledAsync"/> already excludes a paused sponsor's briefs (SPEC
+    /// F173.2), so reaching this line at all already proves the sampled brief belongs to an unpaused
+    /// sponsor.</summary>
     async Task RefillIfNeededAsync(AdStockSettings settings, CancellationToken ct)
     {
         var stockCount = await spotStore.CountStockGeneratedAsync(ct);
@@ -255,6 +261,8 @@ public sealed class AdSpotWorker(
             return;
         }
 
+        logger.LogInformation(
+            "Ad stock below target: generating one ({StockCount}/{TargetCount})", stockCount, settings.TargetCount);
         await GenerateOneAsync(brief, settings.AutoApprove, ct);
     }
 

@@ -144,15 +144,23 @@ sealed class AdBriefRepository(Lazy<NpgsqlDataSource> dataSource) : IAdBriefStor
     /// the SAME "let the database pick" shape <c>LibraryAdSpotSource</c>'s own live-Postgres random
     /// read uses one project over; the brief universe is small (an operator-curated catalog, not a
     /// media library), so a full-table <c>ORDER BY random()</c> costs nothing worth a more elaborate
-    /// sampling scheme here.</summary>
+    /// sampling scheme here. <c>and exists (select 1 from station.sponsor s ... and not s.paused)</c>
+    /// (SPEC F173.2, PLAN T440): a paused sponsor's briefs never feed the writer, so this read is
+    /// unpaused sponsors ONLY. EXISTS, not a join, ON PURPOSE: <c>ad_brief.sponsor_id</c> is
+    /// <c>NOT NULL</c> with an <c>ON DELETE RESTRICT</c> FK to <c>sponsor.id</c> (db/46 step 6/step 7),
+    /// so the two are equivalent here — EXISTS keeps <see cref="Columns"/> bare and shared with every
+    /// other method on this class, rather than hand-listing the same eight columns a second time with a
+    /// <c>b.</c> prefix; Postgres resolves each bare column name against the query's only FROM table
+    /// (<c>ad_brief b</c>), so the subquery introduces no ambiguity.</summary>
     public async Task<AdBrief?> SampleEnabledAsync(CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
         return await conn.QuerySingleOrDefaultAsync<AdBrief?>(new CommandDefinition(
             $"""
             select {Columns}
-            from station.ad_brief
-            where enabled
+            from station.ad_brief b
+            where b.enabled
+              and exists (select 1 from station.sponsor s where s.id = b.sponsor_id and not s.paused)
             order by random()
             limit 1
             """,

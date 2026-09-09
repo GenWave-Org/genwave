@@ -186,15 +186,18 @@ public interface IAdSpotStore
     Task<AdSpotPage> ListByStateAsync(AdState? state, long? sponsorId, int limit, int offset, CancellationToken ct);
 
     /// <summary>
-    /// How many generated spots (<see cref="AdSource.Llm"/> or <see cref="AdSource.Pack"/> source) sit
-    /// anywhere in the stock pipeline — <see cref="AdState.Draft"/>, <see cref="AdState.Approved"/>,
-    /// <see cref="AdState.Rendering"/>, or <see cref="AdState.Ready"/> (SPEC F159.3's own
-    /// <c>Station:Ads:TargetCount</c> stock count, as-built rider gh-#689). A draft waiting for the
-    /// owner's eye under <c>AutoApprove=false</c> IS stock on its way — counting only the ready shelf
-    /// left that pile unbounded (one new draft per tick, forever). <see cref="AdState.Failed"/> never
-    /// counts (it waits for an operator retry or discard and must never block refill),
-    /// <see cref="AdState.Retired"/> is terminal, and <see cref="AdSource.Owner"/> spots never count
-    /// toward the target the stock pass refills.
+    /// How many generated spots (<see cref="AdSource.Llm"/> or <see cref="AdSource.Pack"/> source) of
+    /// an UNPAUSED sponsor sit anywhere in the stock pipeline — <see cref="AdState.Draft"/>,
+    /// <see cref="AdState.Approved"/>, <see cref="AdState.Rendering"/>, or <see cref="AdState.Ready"/>
+    /// (SPEC F159.3's own <c>Station:Ads:TargetCount</c> stock count, as-built rider gh-#689; narrowed
+    /// by SPEC F173.4's own "stock keeping counts only spots of unpaused sponsors", PLAN T440). A
+    /// draft waiting for the owner's eye under <c>AutoApprove=false</c> IS stock on its way — counting
+    /// only the ready shelf left that pile unbounded (one new draft per tick, forever).
+    /// <see cref="AdState.Failed"/> never counts (it waits for an operator retry or discard and must
+    /// never block refill), <see cref="AdState.Retired"/> is terminal, <see cref="AdSource.Owner"/>
+    /// spots never count toward the target the stock pass refills, and NEITHER does a spot whose own
+    /// sponsor is currently paused — <c>TargetCount</c> refills from the other sponsors' briefs while
+    /// one is paused, rather than reading the station as already "full" on spots that will never air.
     /// </summary>
     Task<int> CountStockGeneratedAsync(CancellationToken ct);
 

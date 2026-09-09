@@ -16,27 +16,6 @@ namespace GenWave.MediaLibrary.Tests.Specs;
 public static class FeaturePausingASponsorSilencesTheirSpotsOnTheVeryNextPick
 {
     // ---------------------------------------------------------------------
-    // Helpers
-    // ---------------------------------------------------------------------
-
-    static NewAdSpot Approved(long sponsorId) =>
-        new(sponsorId, "Ready spot", Brief: "A cozy hardware shop", Script: null, AdSource.Llm,
-            PackSlug: null, SpotSeconds: 30, VoicePlan: null, BedMediaId: null,
-            InitialState: AdState.Approved, FailReason: null);
-
-    /// <summary>Drives one spot from Approved to Ready under <paramref name="sponsorId"/>, stamping
-    /// <paramref name="mediaId"/> — one full create/claim/mark-ready cycle per call so
-    /// <c>ClaimNextApprovedAsync</c>'s own oldest-first claim never picks up a DIFFERENT sponsor's
-    /// still-Approved row (only one Approved row exists at a time, this cycle's own).</summary>
-    static async Task<long> SeedReadySpotAsync(AdSpotRepository repo, long sponsorId, long mediaId)
-    {
-        await repo.CreateAsync(Approved(sponsorId), CancellationToken.None);
-        var claimed = (await repo.ClaimNextApprovedAsync(CancellationToken.None))!;
-        await repo.MarkReadyAsync(claimed.Id, mediaId, CancellationToken.None);
-        return claimed.Id;
-    }
-
-    // ---------------------------------------------------------------------
     // HAPPY PATH — the paused half (AC1)
     // ---------------------------------------------------------------------
 
@@ -53,7 +32,7 @@ public static class FeaturePausingASponsorSilencesTheirSpotsOnTheVeryNextPick
             var spots = Harness.AdSpotRepo(db);
             var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             await sponsors.SetPausedAsync(sponsorId, paused: true, CancellationToken.None);
-            await SeedReadySpotAsync(spots, sponsorId, mediaId: 100);
+            await Harness.SeedReadySpotAsync(spots, sponsorId, mediaId: 100);
 
             // When the exclusion list is asked for with no anti-repeat pressure at all...
             var excluded = await spots.ListAiringExclusionsAsync([], window: 0, CancellationToken.None);
@@ -72,9 +51,9 @@ public static class FeaturePausingASponsorSilencesTheirSpotsOnTheVeryNextPick
             var spots = Harness.AdSpotRepo(db);
             var pausedSponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             await sponsors.SetPausedAsync(pausedSponsorId, paused: true, CancellationToken.None);
-            await SeedReadySpotAsync(spots, pausedSponsorId, mediaId: 100);
+            await Harness.SeedReadySpotAsync(spots, pausedSponsorId, mediaId: 100);
             var activeSponsorId = await Harness.SeedSponsorAsync(db, "Marsh & Co");
-            await SeedReadySpotAsync(spots, activeSponsorId, mediaId: 200);
+            await Harness.SeedReadySpotAsync(spots, activeSponsorId, mediaId: 200);
 
             // When the exclusion list is asked for...
             var excluded = await spots.ListAiringExclusionsAsync([], window: 0, CancellationToken.None);
@@ -101,10 +80,10 @@ public static class FeaturePausingASponsorSilencesTheirSpotsOnTheVeryNextPick
             await db.ResetAdsAndShowsAsync();
             var spots = Harness.AdSpotRepo(db);
             var sponsorA = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
-            await SeedReadySpotAsync(spots, sponsorA, mediaId: 100);
-            await SeedReadySpotAsync(spots, sponsorA, mediaId: 101);
+            await Harness.SeedReadySpotAsync(spots, sponsorA, mediaId: 100);
+            await Harness.SeedReadySpotAsync(spots, sponsorA, mediaId: 101);
             var sponsorB = await Harness.SeedSponsorAsync(db, "Marsh & Co");
-            await SeedReadySpotAsync(spots, sponsorB, mediaId: 200);
+            await Harness.SeedReadySpotAsync(spots, sponsorB, mediaId: 200);
 
             // When the exclusion list is asked for with A's own media 100 as the sole recent entry,
             // window=1...
@@ -122,11 +101,11 @@ public static class FeaturePausingASponsorSilencesTheirSpotsOnTheVeryNextPick
             await db.ResetAdsAndShowsAsync();
             var spots = Harness.AdSpotRepo(db);
             var sponsorA = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
-            await SeedReadySpotAsync(spots, sponsorA, mediaId: 100);
+            await Harness.SeedReadySpotAsync(spots, sponsorA, mediaId: 100);
             var sponsorB = await Harness.SeedSponsorAsync(db, "Marsh & Co");
-            await SeedReadySpotAsync(spots, sponsorB, mediaId: 200);
+            await Harness.SeedReadySpotAsync(spots, sponsorB, mediaId: 200);
             var sponsorC = await Harness.SeedSponsorAsync(db, "Tallow & Sons");
-            await SeedReadySpotAsync(spots, sponsorC, mediaId: 300);
+            await Harness.SeedReadySpotAsync(spots, sponsorC, mediaId: 300);
 
             // When the exclusion list is asked for with A's and B's media as the two recent entries,
             // window=2...
@@ -143,11 +122,11 @@ public static class FeaturePausingASponsorSilencesTheirSpotsOnTheVeryNextPick
             await db.ResetAdsAndShowsAsync();
             var spots = Harness.AdSpotRepo(db);
             var sponsorA = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
-            await SeedReadySpotAsync(spots, sponsorA, mediaId: 100);
+            await Harness.SeedReadySpotAsync(spots, sponsorA, mediaId: 100);
             var sponsorB = await Harness.SeedSponsorAsync(db, "Marsh & Co");
-            await SeedReadySpotAsync(spots, sponsorB, mediaId: 200);
+            await Harness.SeedReadySpotAsync(spots, sponsorB, mediaId: 200);
             var sponsorC = await Harness.SeedSponsorAsync(db, "Tallow & Sons");
-            await SeedReadySpotAsync(spots, sponsorC, mediaId: 300);
+            await Harness.SeedReadySpotAsync(spots, sponsorC, mediaId: 300);
 
             // When the exclusion list is asked for with BOTH A's and B's media in recentMediaIds, but
             // window=1 — only the FIRST entry falls inside the window...
@@ -178,7 +157,7 @@ public static class FeaturePausingASponsorSilencesTheirSpotsOnTheVeryNextPick
             var spots = Harness.AdSpotRepo(db);
             var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             await sponsors.SetPausedAsync(sponsorId, paused: true, CancellationToken.None);
-            await SeedReadySpotAsync(spots, sponsorId, mediaId: 100);
+            await Harness.SeedReadySpotAsync(spots, sponsorId, mediaId: 100);
             await spots.CreateAsync(
                 new NewAdSpot(sponsorId, "Draft spot", Brief: "A cozy hardware shop", Script: null,
                     AdSource.Llm, PackSlug: null, SpotSeconds: 30, VoicePlan: null, BedMediaId: null,
@@ -210,7 +189,7 @@ public static class FeaturePausingASponsorSilencesTheirSpotsOnTheVeryNextPick
             var spots = Harness.AdSpotRepo(db);
             var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             await sponsors.SetPausedAsync(sponsorId, paused: true, CancellationToken.None);
-            var spotId = await SeedReadySpotAsync(spots, sponsorId, mediaId: 100);
+            var spotId = await Harness.SeedReadySpotAsync(spots, sponsorId, mediaId: 100);
             Assert.Equal(
                 [100], await spots.ListAiringExclusionsAsync([], window: 0, CancellationToken.None));
 

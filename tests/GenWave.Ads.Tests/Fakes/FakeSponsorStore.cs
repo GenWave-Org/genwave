@@ -37,6 +37,13 @@ public sealed class FakeSponsorStore(Func<long, string?> nameLookup) : ISponsorS
         return this;
     }
 
+    /// <summary>The same paused set <see cref="Pause"/> writes and <see cref="GetAsync"/> reflects on
+    /// <see cref="Sponsor.Paused"/> — <see cref="AdSpotWorkerHarness.Build"/> wires this to both
+    /// <see cref="FakeAdBriefStore.ExcludePausedSponsors"/> and
+    /// <see cref="FakeAdSpotLifecycleStore.ExcludePausedSponsors"/> (SPEC F173.2, PLAN T440) so all
+    /// three fakes agree on which sponsor is paused without a scenario seeding pause state twice.</summary>
+    public bool IsPaused(long id) => pausedSponsorIds.Contains(id);
+
     /// <summary>Marks a sponsor pack-owned for a scenario exercising <see cref="AdSpotWorker"/>'s own
     /// IsPackOwned wiring (SPEC F172.5, PLAN T438 ruling) — <see cref="GetAsync"/> reflects it back on
     /// <see cref="Sponsor.PackSlug"/>. A sponsor never marked here stays owner-owned (<see

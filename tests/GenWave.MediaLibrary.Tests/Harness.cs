@@ -71,6 +71,25 @@ static class Harness
         return ok.Sponsor.Id;
     }
 
+    /// <summary>Drives one <see cref="AdSpot"/> from Approved to Ready under
+    /// <paramref name="sponsorId"/>, stamping <paramref name="mediaId"/> — one full
+    /// create/claim/mark-ready cycle per call so <c>ClaimNextApprovedAsync</c>'s own oldest-first claim
+    /// never picks up a DIFFERENT sponsor's still-Approved row (only one Approved row exists at a time,
+    /// this cycle's own). PLAN T440 ruling: shared by every <see cref="AdSpotRepository"/> spec that
+    /// needs one ready spot on the shelf, rather than each spec file keeping its own copy.</summary>
+    public static async Task<long> SeedReadySpotAsync(AdSpotRepository repo, long sponsorId, long mediaId)
+    {
+        await repo.CreateAsync(
+            new NewAdSpot(sponsorId, "Ready spot", Brief: "A cozy hardware shop", Script: null, AdSource.Llm,
+                PackSlug: null, SpotSeconds: 30, VoicePlan: null, BedMediaId: null,
+                InitialState: AdState.Approved, FailReason: null),
+            CancellationToken.None);
+        var claimed = await repo.ClaimNextApprovedAsync(CancellationToken.None);
+        Assert.NotNull(claimed);
+        await repo.MarkReadyAsync(claimed.Id, mediaId, CancellationToken.None);
+        return claimed.Id;
+    }
+
     /// <summary>Builds an <see cref="AdBedPoolRepository"/> over the fixture's own library_svc data
     /// source (SPEC F168.1; STORY-403; PLAN T416) — mirrors <see cref="Repo"/>'s own plain,
     /// non-lazy <see cref="NpgsqlDataSource"/> shape (that repository's own remarks: library_svc,

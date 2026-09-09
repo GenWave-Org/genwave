@@ -20,6 +20,22 @@ internal static class AdSpotWorkerHarness
     public const string StationName = "GWAV Test Station";
     public const string StationVoice = "station_voice";
 
+    /// <summary>A well-formed 30s spot the REAL AdScriptValidator accepts end to end (Story390's own
+    /// proven reply — ANNOUNCER-led, a second voice, a 555 number, comfortably under the 42s ceiling)
+    /// — the one script every scenario that means to generate successfully hands to
+    /// <see cref="ServeSameReplyEveryTime"/>.</summary>
+    public const string WellFormedReply =
+        "ANNOUNCER: Cravin's Diner has a deal so good it's almost illegal.\n" +
+        "VOICE1: Almost. Stop by and taste the difference tonight.\n" +
+        "ANNOUNCER: Call 555-0142 - that's 555-0142 - Cravin's Diner.";
+
+    /// <summary>The one <c>Station:Ads:*</c> key a stock-count scenario most commonly varies, as the
+    /// SAME raw-<see cref="IConfiguration"/> shape <see cref="Build"/>'s own stationSettings takes —
+    /// everything else falls back to <see cref="AdStockSettingsReader"/>'s own SPEC F163.1
+    /// defaults.</summary>
+    public static Dictionary<string, string?> Settings(int targetCount) =>
+        new() { ["Station:Ads:TargetCount"] = targetCount.ToString() };
+
     public sealed record Harness(
         AdSpotWorker Worker,
         AdSpotLifecycleGuardianService Guardian,
@@ -88,6 +104,15 @@ internal static class AdSpotWorkerHarness
             .Where(pair => pair.Value == id)
             .Select(pair => pair.Key)
             .FirstOrDefault());
+        // PLAN T440 (SPEC F173.2, F173.4): briefs is built above, before sponsors — whose nameLookup
+        // closure reads briefs.SponsorIdsByBrand, so briefs's own declaration order can't flip — so it
+        // is wired to the paused-sponsor check post-construction instead of via a constructor
+        // parameter. store carries no such dependency (its own ctor takes no arguments); its wiring
+        // follows the same post-construction call for symmetry with briefs. A scenario calling only
+        // harness.Sponsors.Pause(id) now reaches BOTH the sample and the stock-count/airing-exclusion
+        // reads through this one call.
+        briefs.ExcludePausedSponsors(sponsors.IsPaused);
+        store.ExcludePausedSponsors(sponsors.IsPaused);
         var gate = new FakeOnAirRenderSignal();
         var author = new FakeCastSegmentAuthor();
         var adminLookup = new FakeAdminMediaLookup();

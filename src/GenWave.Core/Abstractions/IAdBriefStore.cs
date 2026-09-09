@@ -60,11 +60,13 @@ public interface IAdBriefStore
         string packSlug, IReadOnlyList<AdBriefUpsertInput> briefs, CancellationToken ct);
 
     /// <summary>
-    /// Picks ONE row at random from every currently <c>enabled</c> brief (SPEC F160.2's own "one
-    /// brief sampled from enabled ad_brief rows"; PLAN T402, <c>AdSpotWorker</c>'s first read of this
-    /// store) — <see langword="null"/> when no brief is enabled, a normal, silent outcome (an empty
-    /// brief universe, or every one disabled) this call's caller treats as "nothing to generate this
-    /// tick", never an error. Random, not oldest/round-robin: unlike <c>ad_spot</c>'s own
+    /// Picks ONE row at random from every currently <c>enabled</c> brief of an UNPAUSED sponsor ONLY
+    /// (SPEC F160.2's own "one brief sampled from enabled ad_brief rows", narrowed by SPEC F173.2's
+    /// own "the worker's refill never drafts from a paused sponsor's briefs"; PLAN T402, T440,
+    /// <c>AdSpotWorker</c>'s first read of this store) — <see langword="null"/> when no unpaused
+    /// sponsor has an enabled brief, a normal, silent outcome (an empty brief universe, every brief
+    /// disabled, or every enabled brief's own sponsor paused) this call's caller treats as "nothing to
+    /// generate this tick", never an error. Random, not oldest/round-robin: unlike <c>ad_spot</c>'s own
     /// oldest-first render claim (a genuine work QUEUE), briefs are a standing catalog with no
     /// per-row "already used" state to rotate through — the SAME "no memory needed" reasoning
     /// <c>LibraryAdSpotSource</c>'s own <c>GetRandomReadyAdSpotAsync</c> already applies one seam

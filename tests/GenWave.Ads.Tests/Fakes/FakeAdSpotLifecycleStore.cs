@@ -21,11 +21,23 @@ public sealed class FakeAdSpotLifecycleStore : IAdSpotStore
 
     public IReadOnlyList<AdSpot> Spots => spots;
 
-    /// <summary>Sponsor ids a spec has marked paused — <see cref="ListAiringExclusionsAsync"/>'s own
-    /// paused-sponsor branch reads this instead of a real <c>ISponsorStore</c> join (PLAN T432): this
-    /// fake carries no store reference, so a spec exercising that branch seeds it directly rather than
-    /// standing up a whole second fake for one flag.</summary>
-    public HashSet<long> PausedSponsorIds { get; } = [];
+    /// <summary>Wired to <see cref="FakeSponsorStore.IsPaused"/> by
+    /// <see cref="AdSpotWorkerHarness.Build"/> (PLAN T440 ruling), the SAME single-source-of-
+    /// pause-truth seam <see cref="FakeAdBriefStore.ExcludePausedSponsors"/> already carries one file
+    /// over — a Story420 scenario that only ever calls <c>harness.Sponsors.Pause(id)</c> reaches this
+    /// fake's own <see cref="CountStockGeneratedAsync"/> and <see cref="ListAiringExclusionsAsync"/>
+    /// through the wiring. Defaults to "nobody paused" so a scenario that never calls
+    /// <see cref="ExcludePausedSponsors"/> keeps this fake's pre-T440 behavior exactly.</summary>
+    Func<long, bool> isPausedSponsor = _ => false;
+
+    /// <summary>Wires this store's own paused-sponsor reads (<see cref="CountStockGeneratedAsync"/>,
+    /// <see cref="ListAiringExclusionsAsync"/>) to a paused-sponsor check — the
+    /// <see cref="FakeAdBriefStore.ExcludePausedSponsors"/> precedent, applied here.</summary>
+    public FakeAdSpotLifecycleStore ExcludePausedSponsors(Func<long, bool> isPaused)
+    {
+        isPausedSponsor = isPaused;
+        return this;
+    }
 
     /// <summary>Sponsor id → current name, read by <see cref="UpdateAsync"/> to mirror
     /// <see cref="GenWave.MediaLibrary.Station.AdSpotRepository.UpdateAsync"/>'s own "refresh
@@ -241,7 +253,12 @@ public sealed class FakeAdSpotLifecycleStore : IAdSpotStore
     public Task<int> CountStockGeneratedAsync(CancellationToken ct) =>
         Task.FromResult(spots.Count(s =>
             (s.State is AdState.Draft or AdState.Approved or AdState.Rendering or AdState.Ready)
-            && (s.Source is AdSource.Llm or AdSource.Pack)));
+            && (s.Source is AdSource.Llm or AdSource.Pack)
+            && !IsPaused(s.SponsorId)));
+
+    /// <summary>The wired paused-sponsor check (a Story420 scenario reaches this through
+    /// <c>harness.Sponsors.Pause(id)</c> alone, PLAN T440 ruling).</summary>
+    bool IsPaused(long sponsorId) => isPausedSponsor(sponsorId);
 
     public Task<IReadOnlyList<AdSpot>> ListReadyOlderThanAsync(TimeSpan age, CancellationToken ct)
     {
@@ -314,7 +331,7 @@ public sealed class FakeAdSpotLifecycleStore : IAdSpotStore
 
     /// <summary>Mirrors <see cref="GenWave.MediaLibrary.Station.AdSpotRepository.ListAiringExclusionsAsync"/>
     /// in plain C# (PLAN T432): a <see cref="AdState.Ready"/> row's <see cref="AdSpot.MediaId"/> is
-    /// withheld when its sponsor is in <see cref="PausedSponsorIds"/>, or when its sponsor also owns
+    /// withheld when <see cref="IsPaused"/> reports its sponsor paused, or when its sponsor also owns
     /// any spot among the first <paramref name="window"/> entries of <paramref name="recentMediaIds"/>.</summary>
     public Task<IReadOnlyList<long>> ListAiringExclusionsAsync(
         IReadOnlyList<long> recentMediaIds, int window, CancellationToken ct)
@@ -329,7 +346,7 @@ public sealed class FakeAdSpotLifecycleStore : IAdSpotStore
         foreach (var spot in spots)
         {
             if (spot.State == AdState.Ready && spot.MediaId is long readyMediaId &&
-                (PausedSponsorIds.Contains(spot.SponsorId) || recentSponsorIds.Contains(spot.SponsorId)))
+                (IsPaused(spot.SponsorId) || recentSponsorIds.Contains(spot.SponsorId)))
             {
                 excluded.Add(readyMediaId);
             }
