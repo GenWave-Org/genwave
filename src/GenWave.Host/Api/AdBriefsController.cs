@@ -129,7 +129,11 @@ public sealed class AdBriefsController(
     /// re-reads it later); 409 <c>duplicate_brief</c> when an owner brief for this SAME sponsor AND
     /// SAME (folded) premise already exists (see the class remarks — a different premise for the same
     /// sponsor is a legal second row, SPEC F171.6). A PAUSED sponsor still accepts the brief — see the
-    /// class remarks.
+    /// class remarks. <b>Accepts ANY <c>sponsorId</c> that resolves, including a PACK sponsor's own
+    /// (<c>Station.AdBriefRepository.UninstallPackAsync</c>'s own remarks cite this precisely) — the
+    /// check below is existence (<see cref="ISponsorStore.GetAsync"/>) plus
+    /// paused-tolerance only, never a pack-vs-owner distinction; an owner brief can therefore land on a
+    /// pack-owned sponsor exactly as freely as on an owner-authored one.</b>
     /// </summary>
     [HttpPost]
     [Consumes("application/json")]

@@ -9,9 +9,10 @@ namespace GenWave.Ads.Tests.Fakes;
 /// (never actually random) so a scenario can assert exactly which brief a generation attempt used,
 /// mirroring <see cref="FakeAdSpotCatalog"/>'s own "deterministic, not random" precedent one file over.
 /// <see cref="UpsertAsync"/>/<see cref="ListAllAsync"/>/<see cref="CreateOwnerAsync"/>/
-/// <see cref="SetEnabledAsync"/> (PLAN T403b's own Briefs-admin widening) and
-/// <see cref="UpsertAllAsync"/> (PLAN T405's own ad-pack install widening) are all unreachable from
-/// <see cref="AdSpotWorker"/> and throw if ever called.
+/// <see cref="SetEnabledAsync"/> (PLAN T403b's own Briefs-admin widening),
+/// <see cref="UpsertAllAsync"/> (PLAN T405's own ad-pack install widening), and
+/// <see cref="UninstallPackAsync"/> (PLAN T437's own ad-pack uninstall widening) are all unreachable
+/// from <see cref="AdSpotWorker"/> and throw if ever called.
 /// </summary>
 public sealed class FakeAdBriefStore : IAdBriefStore
 {
@@ -74,5 +75,8 @@ public sealed class FakeAdBriefStore : IAdBriefStore
 
     public Task<IReadOnlyList<AdBrief>> UpsertAllAsync(
         string packSlug, IReadOnlyList<AdBriefUpsertInput> briefs, CancellationToken ct) =>
+        throw new NotSupportedException("Not used by AdSpotWorker.");
+
+    public Task<AdPackUninstallResult> UninstallPackAsync(string packSlug, CancellationToken ct) =>
         throw new NotSupportedException("Not used by AdSpotWorker.");
 }

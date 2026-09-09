@@ -11,7 +11,9 @@ namespace GenWave.Core.Abstractions;
 /// <see cref="SetEnabledAsync"/> widen the seam additively for T403b's Briefs admin surface (SPEC
 /// F162.1); <see cref="UpsertAllAsync"/> widens it again for T405's ad-pack install (SPEC F162.2);
 /// PLAN T432 retargets every brand-keyed member to sponsor-keyed (SPEC F171 — the sponsors epic),
-/// widening rather than replacing each contract's own PRESERVE-on-conflict/cap semantics.
+/// widening rather than replacing each contract's own PRESERVE-on-conflict/cap semantics; PLAN T437
+/// adds <see cref="UninstallPackAsync"/> (SPEC F172.4, STORY-416), the uninstall
+/// <see cref="UpsertAllAsync"/>'s own pack install never had a counterpart for.
 /// </summary>
 public interface IAdBriefStore
 {
@@ -103,4 +105,36 @@ public interface IAdBriefStore
     /// one return shape richer since a caller here wants the fresh row back, not just a bool).
     /// </summary>
     Task<AdBrief?> SetEnabledAsync(long id, bool enabled, CancellationToken ct);
+
+    /// <summary>
+    /// Uninstalls one ad pack — SPEC F172.4, STORY-416, PLAN T437 — the ad pack's own home store owns
+    /// the WHOLE uninstall in one transaction, exactly the way <see cref="UpsertAllAsync"/> already
+    /// owns the whole install: every <c>station.ad_brief</c> row for <paramref name="packSlug"/> is
+    /// removed, every <c>source = 'pack'</c> <c>station.ad_spot</c> row for this slug that is not
+    /// already <c>retired</c> — and not currently <c>rendering</c>, which (PLAN T437 review round 2)
+    /// stays undiscardable exactly as <see cref="IAdSpotStore"/>'s own retire member already treats it
+    /// — is retired, and every <c>station.sponsor</c> row for this slug is removed too — except one
+    /// still named by a spot (any state, including one THIS call just retired, or one still
+    /// <c>rendering</c>) or by an OWNER-authored <c>station.ad_brief</c> row (this pack sponsor's own
+    /// <c>pack_slug</c>-scoped brief delete above never touches an owner brief), either of which the
+    /// row's own <c>NOT NULL REFERENCES ... ON DELETE RESTRICT</c> FK
+    /// (db/46) will not allow, and which this call therefore deliberately leaves in place — reported
+    /// back via <see cref="AdPackUninstallResult.Deleted.KeptSponsors"/> — rather than attempting and
+    /// failing (<see cref="AdPackUninstallResult.Deleted"/>'s own remarks name why).
+    ///
+    /// <para>
+    /// Refuses first, writes nothing, when at least one OWNER-authored reference to one of this pack's
+    /// sponsors still exists — an owner <c>station.ad_spot</c> row (any state, including
+    /// <c>retired</c>, so long as it is not itself one of the rows THIS call would retire) or a
+    /// <c>station.show</c> row (<see cref="AdPackUninstallResult.InUse"/>, naming up to the first ten
+    /// of each by title, ordered by <c>created_at</c>). A pack's own <c>source = 'pack'</c> spots are
+    /// never themselves a reason to refuse — this call is exactly what retires them.
+    /// </para>
+    ///
+    /// <para>
+    /// <see cref="AdPackUninstallResult.NotFound"/> when neither table held a row for
+    /// <paramref name="packSlug"/> before the call — there was nothing "installed" to uninstall.
+    /// </para>
+    /// </summary>
+    Task<AdPackUninstallResult> UninstallPackAsync(string packSlug, CancellationToken ct);
 }

@@ -16,8 +16,12 @@ namespace GenWave.MediaLibrary.Station;
 sealed class SponsorRepository(Lazy<NpgsqlDataSource> dataSource) : ISponsorStore
 {
     /// <summary>Every column <see cref="Sponsor"/> projects — one shared literal so every read/write
-    /// method can never drift apart on column order.</summary>
-    const string Columns =
+    /// method can never drift apart on column order. <c>internal</c> — <see cref="AdBriefRepository"/>
+    /// reads this SAME literal for its own <c>UninstallPackAsync</c>'s
+    /// <see cref="AdPackUninstallResult.Deleted.KeptSponsors"/> projection (replaces a hand-synced
+    /// private copy that carried no compiler tie back to this one), rather than
+    /// duplicating it.</summary>
+    internal const string Columns =
         "id, name, pack_slug, tagline, about, phone, address, website, tone, paused, paused_at, " +
         "created_at, updated_at, xmin::text as version";
 
@@ -27,7 +31,7 @@ sealed class SponsorRepository(Lazy<NpgsqlDataSource> dataSource) : ISponsorStor
     /// ... HINT: To reference that column, you must use a table-qualified name"). Only
     /// <see cref="ListAsync"/>'s own query joins; every other <see cref="Columns"/> call site is a
     /// single-table statement where the bare names already resolve. DERIVED from
-    /// <see cref="Columns"/> (round-3 finding R4) — every column name in <see cref="Columns"/> is
+    /// <see cref="Columns"/> — every column name in <see cref="Columns"/> is
     /// comma-separated with no other comma-space anywhere in the literal, so prefixing each one with
     /// <c>s.</c> is a single string replace; the two literals can never drift apart on column
     /// order.</summary>
@@ -156,8 +160,8 @@ sealed class SponsorRepository(Lazy<NpgsqlDataSource> dataSource) : ISponsorStor
         }
     }
 
-    /// <summary><see cref="ISponsorStore.UpsertPackSponsorsAsync"/> (SPEC F171.1/F2/F3; round-3 finding
-    /// R1) — ONE round trip computes every input name's fold via <c>unnest</c>; two DIFFERENT names
+    /// <summary><see cref="ISponsorStore.UpsertPackSponsorsAsync"/> (SPEC F171.1/F2/F3) — ONE round
+    /// trip computes every input name's fold via <c>unnest</c>; two DIFFERENT names
     /// sharing a fold refuse the WHOLE batch as <see cref="SponsorPackWriteResult.NamesCollide"/>
     /// before any row is written. Otherwise every non-colliding (<paramref name="packSlug"/>, folded
     /// name) pair is upserted in a SECOND round trip: a single <c>INSERT ... SELECT FROM unnest(...)
@@ -423,7 +427,7 @@ sealed class SponsorRepository(Lazy<NpgsqlDataSource> dataSource) : ISponsorStor
     /// CHECK) back into the field it guards. A constraint name that doesn't fit this shape means db/46
     /// grew a CHECK this parser doesn't know about — that is a real bug to surface, not a caller
     /// error, so it rethrows <paramref name="ex"/> wrapped with the constraint name rather than
-    /// silently reporting an "unknown" field (round-3 finding R4).</summary>
+    /// silently reporting an "unknown" field.</summary>
     static string FieldNameFromCheckConstraint(PostgresException ex)
     {
         const string prefix = "sponsor_";
