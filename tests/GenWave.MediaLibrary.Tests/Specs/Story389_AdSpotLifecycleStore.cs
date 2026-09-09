@@ -317,7 +317,7 @@ public static class FeatureAdSpotLifecycleStore
             await repo.CreateAsync(Draft(sponsorId) with { InitialState = AdState.Approved }, CancellationToken.None);
             var claimed = (await repo.ClaimNextApprovedAsync(CancellationToken.None))!;
             await repo.MarkReadyAsync(claimed.Id, mediaId: 99, CancellationToken.None);
-            var ready = (await repo.ListByStateAsync(AdState.Ready, 10, 0, CancellationToken.None)).Items.Single();
+            var ready = (await repo.ListByStateAsync(AdState.Ready, null, 10, 0, CancellationToken.None)).Items.Single();
             await Task.Delay(TimeSpan.FromMilliseconds(20));
 
             // When it is retired (refresh, or operator)...
@@ -939,7 +939,7 @@ public static class FeatureAdSpotLifecycleStore
             await repo.CreateAsync(Draft(sponsorId) with { InitialState = AdState.Approved }, CancellationToken.None);
 
             // When the page is scoped to Draft...
-            var page = await repo.ListByStateAsync(AdState.Draft, 10, 0, CancellationToken.None);
+            var page = await repo.ListByStateAsync(AdState.Draft, null, 10, 0, CancellationToken.None);
 
             // Then only the draft row comes back.
             Assert.Equal([draft.Id], page.Items.Select(s => s.Id));
@@ -955,7 +955,7 @@ public static class FeatureAdSpotLifecycleStore
             for (var i = 0; i < 3; i++) await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
 
             // When a page of 2 is requested...
-            var page = await repo.ListByStateAsync(AdState.Draft, limit: 2, offset: 0, CancellationToken.None);
+            var page = await repo.ListByStateAsync(AdState.Draft, null, limit: 2, offset: 0, CancellationToken.None);
 
             // Then the total is the exact matching count, not the page's own row count.
             Assert.Equal(2, page.Items.Count);
@@ -973,7 +973,7 @@ public static class FeatureAdSpotLifecycleStore
             await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
 
             // When a page starts past the last row...
-            var page = await repo.ListByStateAsync(AdState.Draft, limit: 10, offset: 50, CancellationToken.None);
+            var page = await repo.ListByStateAsync(AdState.Draft, null, limit: 10, offset: 50, CancellationToken.None);
 
             // Then the page is empty but the total is still exact — never derived from Items' count.
             Assert.Empty(page.Items);
@@ -992,7 +992,7 @@ public static class FeatureAdSpotLifecycleStore
             await repo.RetireAsync(toRetire.Id, toRetire.Version, CancellationToken.None);
 
             // When the list is unscoped (state = null)...
-            var page = await repo.ListByStateAsync(null, 10, 0, CancellationToken.None);
+            var page = await repo.ListByStateAsync(null, null, 10, 0, CancellationToken.None);
 
             // Then both rows come back, any state.
             Assert.Equal(2, page.Total);
@@ -1012,11 +1012,31 @@ public static class FeatureAdSpotLifecycleStore
             var newer = await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
 
             // When the page is read...
-            var page = await repo.ListByStateAsync(AdState.Draft, 10, 0, CancellationToken.None);
+            var page = await repo.ListByStateAsync(AdState.Draft, null, 10, 0, CancellationToken.None);
 
             // Then the newest-transitioned row leads.
             Assert.Equal(newer.Id, page.Items[0].Id);
             Assert.Equal(older.Id, page.Items[1].Id);
+        }
+
+        [Fact]
+        public async Task ASponsorScopedListReturnsOnlyThatSponsorsRowsWithAnExactTotal()
+        {
+            // Given two draft spots under one sponsor and one draft spot under another...
+            await db.ResetAdsAndShowsAsync();
+            var sponsorA = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
+            var sponsorB = await Harness.SeedSponsorAsync(db, "North Side Grocers");
+            var repo = Harness.AdSpotRepo(db);
+            var first = await repo.CreateAsync(Draft(sponsorA), CancellationToken.None);
+            var second = await repo.CreateAsync(Draft(sponsorA), CancellationToken.None);
+            await repo.CreateAsync(Draft(sponsorB), CancellationToken.None);
+
+            // When the page is scoped to sponsor A...
+            var page = await repo.ListByStateAsync(null, sponsorA, 10, 0, CancellationToken.None);
+
+            // Then only sponsor A's two rows come back, and the total excludes sponsor B's row.
+            Assert.Equal(2, page.Total);
+            Assert.Equal([first.Id, second.Id], page.Items.Select(s => s.Id).OrderBy(id => id));
         }
     }
 
@@ -1335,7 +1355,7 @@ public static class FeatureAdSpotLifecycleStore
             await repo.CreateAsync(Draft(sponsorId) with { InitialState = AdState.Approved }, CancellationToken.None);
             var claimed = (await repo.ClaimNextApprovedAsync(CancellationToken.None))!;
             await repo.MarkReadyAsync(claimed.Id, mediaId: 1, CancellationToken.None);
-            var ready = (await repo.ListByStateAsync(AdState.Ready, 10, 0, CancellationToken.None)).Items.Single();
+            var ready = (await repo.ListByStateAsync(AdState.Ready, null, 10, 0, CancellationToken.None)).Items.Single();
 
             // When an edit is attempted against it...
             var outcome = await repo.UpdateAsync(ready.Id, Edit(title: "New Title"), ready.Version, CancellationToken.None);

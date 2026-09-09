@@ -369,23 +369,34 @@ sealed class AdSpotRepository(Lazy<NpgsqlDataSource> dataSource) : IAdSpotStore
 
     /// <summary>
     /// <see cref="IAdSpotStore.ListByStateAsync"/> — bounded, paged, with an exact total computed
-    /// against the SAME state filter as the page, in one round trip (the
+    /// against the SAME filters as the page, in one round trip (the
     /// <c>Garden.RotFindingRepository.ListFlatPageAsync</c> <c>QueryMultipleAsync</c> precedent: a
     /// genuinely separate <c>count(*)</c> statement, never a <c>count(*) over()</c> window, so a page
     /// past the last row still carries the true total). <paramref name="state"/>
-    /// <see langword="null"/> omits the <c>where</c> clause entirely — every row, any state.
+    /// <see langword="null"/> omits the state condition entirely — every row, any state.
+    /// <paramref name="sponsorId"/> <see langword="null"/> omits the sponsor condition entirely —
+    /// every row, any sponsor (PLAN T436, SPEC F171.7's <c>GET /api/ads?sponsorId=</c>).
     /// </summary>
-    public async Task<AdSpotPage> ListByStateAsync(AdState? state, int limit, int offset, CancellationToken ct)
+    public async Task<AdSpotPage> ListByStateAsync(
+        AdState? state, long? sponsorId, int limit, int offset, CancellationToken ct)
     {
         (limit, offset) = ClampPaging(limit, offset);
 
         var parameters = new DynamicParameters();
-        var where = "";
+        var conditions = new List<string>();
         if (state is not null)
         {
-            where = "where state = @state::station.ad_state";
+            conditions.Add("state = @state::station.ad_state");
             parameters.Add("state", AdStateTokens.ToToken(state.Value));
         }
+
+        if (sponsorId is not null)
+        {
+            conditions.Add("sponsor_id = @sponsorId");
+            parameters.Add("sponsorId", sponsorId.Value);
+        }
+
+        var where = conditions.Count > 0 ? "where " + string.Join(" and ", conditions) : "";
 
         parameters.Add("limit", limit);
         parameters.Add("offset", offset);

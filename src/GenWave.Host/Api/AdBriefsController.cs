@@ -160,7 +160,7 @@ public sealed class AdBriefsController(
             "Ad brief created id={Id} source=owner sponsorId={SponsorId} sponsor={Sponsor}",
             created.Id, created.SponsorId, LogSanitize.Strip(sponsor.Name));
 
-        return StatusCode(StatusCodes.Status201Created, ToDto(created, ToSponsorDto(sponsor)));
+        return StatusCode(StatusCodes.Status201Created, ToDto(created, SponsorRefDto.From(sponsor)));
     }
 
     // -----------------------------------------------------------------------
@@ -189,7 +189,7 @@ public sealed class AdBriefsController(
         // can never outlive its sponsor, so this read cannot legitimately come back null; the fallback
         // is defensive only, never expected to fire.
         var sponsor = await sponsorStore.GetAsync(updated.SponsorId, ct);
-        var sponsorDto = sponsor is not null ? ToSponsorDto(sponsor) : FallbackSponsorDto(updated.SponsorId);
+        var sponsorDto = sponsor is not null ? SponsorRefDto.From(sponsor) : FallbackSponsorDto(updated.SponsorId);
 
         return Ok(ToDto(updated, sponsorDto));
     }
@@ -201,9 +201,7 @@ public sealed class AdBriefsController(
     static SponsorRefDto SponsorDtoFor(long sponsorId, IReadOnlyDictionary<long, Sponsor> sponsorsById) =>
         // station.ad_brief.sponsor_id is NOT NULL with ON DELETE RESTRICT (db/46) — every brief's
         // sponsor is always present in a full, unfiltered sponsor list; the fallback is defensive only.
-        sponsorsById.TryGetValue(sponsorId, out var sponsor) ? ToSponsorDto(sponsor) : FallbackSponsorDto(sponsorId);
-
-    static SponsorRefDto ToSponsorDto(Sponsor sponsor) => new(sponsor.Id, sponsor.Name, sponsor.Paused);
+        sponsorsById.TryGetValue(sponsorId, out var sponsor) ? SponsorRefDto.From(sponsor) : FallbackSponsorDto(sponsorId);
 
     static SponsorRefDto FallbackSponsorDto(long sponsorId) => new(sponsorId, string.Empty, false);
 

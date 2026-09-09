@@ -16,6 +16,14 @@
 // controller's own uint.TryParse guard temporarily removed — to confirm it goes red without the guard
 // (never a vacuous pass); the guard stays in AdsController, this is a process note, not a permanent
 // test artifact.
+//
+// T436 RE-TARGET (PLAN T436, SPEC F171.7): every create body below now carries a real `sponsorId` —
+// one POST /api/sponsors per distinct former "brand" placeholder string (the Story411Arc/Story412Arc
+// precedent), never the retired free-text `brand` field. Fact/Scenario/Feature names and the Arc's own
+// property names (e.g. CleanDraftBrand, RoundTripBrand) are UNCHANGED (loop law: never rename an
+// established test identifier) even though several still literally say "Brand" — they still mean
+// exactly what they always meant, "the sponsor's display name"; only the WIRE property each one reads
+// changed, from the old `brand` string field to `sponsorName` (the store's created-at snapshot).
 
 using System.Net;
 using System.Net.Http.Json;
@@ -43,7 +51,7 @@ public static class FeatureAdsApi
         [Fact]
         public void AValidDraftPostsAndReadsBackEveryField()
         {
-            // POST /api/ads {brand,title,script,voices,seconds,bed} → GET returns it verbatim.
+            // POST /api/ads {sponsorId,title,script,voices,seconds,bed} → GET returns it verbatim.
             Assert.Equal(HttpStatusCode.Created, arc.CleanDraftPostStatus);
             Assert.Equal(HttpStatusCode.OK, arc.RoundTripGetStatus);
             Assert.Equal(AdsApiArc.CleanDraftBrand, arc.RoundTripBrand);
@@ -403,10 +411,13 @@ public sealed class AdsApiArc : IAsyncLifetime
         if (login.StatusCode != HttpStatusCode.NoContent)
             throw new InvalidOperationException($"login unexpectedly returned {login.StatusCode}");
 
-        // ── The clean draft: the editor round-trip + verbatim-text facts. ──
+        // ── The clean draft: the editor round-trip + verbatim-text facts. Its sponsor is a real row
+        // (POST /api/sponsors, PLAN T434), named CleanDraftBrand — RoundTripBrand below reads back the
+        // store's own sponsorName SNAPSHOT of that name, not a free-text field on the spot itself. ──
+        var cleanDraftSponsorId = await CreateSponsorAsync(client, CleanDraftBrand);
         var createPayload = new
         {
-            brand = CleanDraftBrand,
+            sponsorId = cleanDraftSponsorId,
             title = CleanDraftTitle,
             script = CleanDraftScript,
             spotSeconds = 30,
@@ -422,7 +433,7 @@ public sealed class AdsApiArc : IAsyncLifetime
         var getResponse = await client.GetAsync($"/api/ads/{CleanDraftId}");
         RoundTripGetStatus = getResponse.StatusCode;
         var round = await JsonDocument.ParseAsync(await getResponse.Content.ReadAsStreamAsync());
-        RoundTripBrand = round.RootElement.GetProperty("brand").GetString() ?? "";
+        RoundTripBrand = round.RootElement.GetProperty("sponsorName").GetString() ?? "";
         RoundTripTitle = round.RootElement.GetProperty("title").GetString() ?? "";
         RoundTripScript = round.RootElement.GetProperty("script").GetString();
         RoundTripSpotSeconds = round.RootElement.GetProperty("spotSeconds").GetInt32();
@@ -436,9 +447,10 @@ public sealed class AdsApiArc : IAsyncLifetime
 
         // ── The verbatim-quirk draft: a SEPARATE script, chosen specifically for formatting a
         // normalizer would plausibly reshape — T403 review finding 7's own distinctness demand. ──
+        var widgetBrosSponsorId = await CreateSponsorAsync(client, "Widget Bros");
         var quirkyCreateResponse = await client.PostAsJsonAsync("/api/ads", new
         {
-            brand = "Widget Bros",
+            sponsorId = widgetBrosSponsorId,
             title = "Widget spot",
             script = VerbatimQuirkyScript,
             spotSeconds = 30,
@@ -464,15 +476,18 @@ public sealed class AdsApiArc : IAsyncLifetime
         var patchedGet = await client.GetAsync($"/api/ads/{CleanDraftId}");
         var patchedRound = await JsonDocument.ParseAsync(await patchedGet.Content.ReadAsStreamAsync());
         PatchedRoundTripTitle = patchedRound.RootElement.GetProperty("title").GetString() ?? "";
-        PatchedRoundTripBrand = patchedRound.RootElement.GetProperty("brand").GetString() ?? "";
+        PatchedRoundTripBrand = patchedRound.RootElement.GetProperty("sponsorName").GetString() ?? "";
         PatchedRoundTripScript = patchedRound.RootElement.GetProperty("script").GetString();
         PatchedRoundTripSpotSeconds = patchedRound.RootElement.GetProperty("spotSeconds").GetInt32();
 
-        // ── The validator guards every save: a blocklisted brand, a malformed voice plan, an unknown
-        // bed, and an out-of-range spotSeconds each refuse whole. ──
+        // ── The validator guards every save: a blocklisted brand mentioned IN THE SCRIPT TEXT (a
+        // wholly separate rule from a spot's own sponsor — AdScriptValidator's own brand_collision
+        // check, unaffected by T436), a malformed voice plan, an unknown bed, and an out-of-range
+        // spotSeconds each refuse whole. ──
+        var fizzyCoSponsorId = await CreateSponsorAsync(client, "Fizzy Co");
         var violatingResponse = await client.PostAsJsonAsync("/api/ads", new
         {
-            brand = "Fizzy Co",
+            sponsorId = fizzyCoSponsorId,
             title = "Bad spot",
             script = InvalidBrandCollisionScript,
             spotSeconds = 30,
@@ -484,9 +499,10 @@ public sealed class AdsApiArc : IAsyncLifetime
         ViolatingPostField = violatingBody.RootElement.TryGetProperty("field", out var fieldProperty)
             ? fieldProperty.GetString() : null;
 
+        var malformedVoicePlanSponsorId = await CreateSponsorAsync(client, "Malformed Voice Plan Brand");
         var malformedVoicePlanResponse = await client.PostAsJsonAsync("/api/ads", new
         {
-            brand = "Malformed Voice Plan Brand",
+            sponsorId = malformedVoicePlanSponsorId,
             title = "Malformed voice plan spot",
             script = OtherwiseValidScript,
             spotSeconds = 30,
@@ -494,9 +510,10 @@ public sealed class AdsApiArc : IAsyncLifetime
         });
         MalformedVoicePlanPostStatus = malformedVoicePlanResponse.StatusCode;
 
+        var unknownBedSponsorId = await CreateSponsorAsync(client, "Unknown Bed Brand");
         var unknownBedResponse = await client.PostAsJsonAsync("/api/ads", new
         {
-            brand = "Unknown Bed Brand",
+            sponsorId = unknownBedSponsorId,
             title = "Unknown bed spot",
             script = OtherwiseValidScript,
             spotSeconds = 30,
@@ -504,9 +521,10 @@ public sealed class AdsApiArc : IAsyncLifetime
         });
         UnknownBedPostStatus = unknownBedResponse.StatusCode;
 
+        var outOfRangeSponsorId = await CreateSponsorAsync(client, "Out Of Range Brand");
         var spotSecondsOutOfRangeResponse = await client.PostAsJsonAsync("/api/ads", new
         {
-            brand = "Out Of Range Brand",
+            sponsorId = outOfRangeSponsorId,
             title = "Out of range spot",
             script = OtherwiseValidScript,
             spotSeconds = 45,
@@ -518,9 +536,10 @@ public sealed class AdsApiArc : IAsyncLifetime
 
         // ── Approve: a second clean draft, created then approved (also proves the new
         // validate-current-script gate lets a valid script through). ──
+        var approveTestSponsorId = await CreateSponsorAsync(client, "Approve Test Brand");
         var approveDraftResponse = await client.PostAsJsonAsync("/api/ads", new
         {
-            brand = "Approve Test Brand",
+            sponsorId = approveTestSponsorId,
             title = "Approve test spot",
             script = OtherwiseValidScript,
             spotSeconds = 30,
@@ -575,9 +594,10 @@ public sealed class AdsApiArc : IAsyncLifetime
         // ── Approve refuses a brief-only draft: no script at all — a null script folds into the
         // SAME format-rule refusal an empty one hits. This draft stays draft (approve never reaches
         // the store), so it counts toward the list-paging fact's own total below. ──
+        var briefOnlySponsorId = await CreateSponsorAsync(client, "Brief Only Brand");
         var briefOnlyResponse = await client.PostAsJsonAsync("/api/ads", new
         {
-            brand = "Brief Only Brand",
+            sponsorId = briefOnlySponsorId,
             title = "Brief only spot",
             brief = "A brief with no script yet.",
             spotSeconds = 30,
@@ -608,9 +628,10 @@ public sealed class AdsApiArc : IAsyncLifetime
 
         // ── The If-Match mutant transcript (T403 review finding 1): absent → 428, malformed → 400,
         // a real success, then the SAME (now stale) token → 409, all against one seeded draft. ──
+        var ifMatchSponsorId = await CreateSponsorAsync(client, "If-Match Test Brand");
         var ifMatchDraftResponse = await client.PostAsJsonAsync("/api/ads", new
         {
-            brand = "If-Match Test Brand",
+            sponsorId = ifMatchSponsorId,
             title = "If-Match test spot",
             script = OtherwiseValidScript,
             spotSeconds = 30,
@@ -644,9 +665,10 @@ public sealed class AdsApiArc : IAsyncLifetime
         // these three make an exact total of 6. ──
         for (var i = 1; i <= 3; i++)
         {
+            var listFixtureSponsorId = await CreateSponsorAsync(client, $"List Fixture Brand {i}");
             await client.PostAsJsonAsync("/api/ads", new
             {
-                brand = $"List Fixture Brand {i}",
+                sponsorId = listFixtureSponsorId,
                 title = $"List fixture spot {i}",
                 brief = "A brief with no script yet.",
                 spotSeconds = 30,
@@ -660,6 +682,20 @@ public sealed class AdsApiArc : IAsyncLifetime
         DraftListItemCount = items.Count;
         DraftListTotal = listBody.RootElement.GetProperty("total").GetInt32();
         DraftListStates = items.Select(item => item.GetProperty("state").GetString() ?? "").ToList();
+    }
+
+    /// <summary>T436 re-target: every /api/ads create body now needs a REAL sponsorId (SPEC F171.7) —
+    /// one POST /api/sponsors (PLAN T434) per distinct former "brand" placeholder string this arc's own
+    /// fixtures used, never the retired free-text <c>brand</c> field. Pure arrange, not a fact under
+    /// test itself — an unexpected status throws loudly (the Story411Arc precedent).</summary>
+    static async Task<long> CreateSponsorAsync(HttpClient client, string name)
+    {
+        var response = await client.PostAsJsonAsync("/api/sponsors", new { name });
+        if (response.StatusCode != HttpStatusCode.Created)
+            throw new InvalidOperationException($"arrange: POST /api/sponsors({name}) unexpectedly returned {response.StatusCode}");
+
+        var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+        return body.RootElement.GetProperty("id").GetInt64();
     }
 
     public Task DisposeAsync() => Task.CompletedTask;

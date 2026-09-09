@@ -190,7 +190,7 @@ public sealed class AdSpotWorker(
         var now = timeProvider.GetUtcNow();
         var window = AdSpotRepairWindow.Compute(adsOptions.CurrentValue);
 
-        var ready = await spotStore.ListByStateAsync(AdState.Ready, int.MaxValue, offset: 0, ct);
+        var ready = await spotStore.ListByStateAsync(AdState.Ready, sponsorId: null, limit: int.MaxValue, offset: 0, ct: ct);
         foreach (var spot in ready.Items)
         {
             var readySince = new DateTimeOffset(spot.StateChangedAt, TimeSpan.Zero);

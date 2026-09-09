@@ -174,13 +174,16 @@ public interface IAdSpotStore
     /// <summary>
     /// State-scoped paged listing with an exact total (the T385 kind-scoped paging precedent, PLAN
     /// T403's own admin list) — <paramref name="state"/> <see langword="null"/> means "any".
-    /// <c>state_changed_at desc, id desc</c> — newest-transitioned-first, so a fresh batch of drafts
-    /// or a just-failed spot needing triage surfaces at the top regardless of when the row was
-    /// originally created. <paramref name="limit"/>/<paramref name="offset"/> are floored by the
-    /// implementation (the <c>RotFindingRepository.ClampPaging</c> precedent) — never trust every
-    /// caller to have already clamped them.
+    /// <paramref name="sponsorId"/> <see langword="null"/> means "any sponsor" — non-null narrows
+    /// both the page and the total to exactly that sponsor's rows (PLAN T436's own admin filter,
+    /// SPEC F171.7's <c>GET /api/ads?sponsorId=</c>). <c>state_changed_at desc, id desc</c> —
+    /// newest-transitioned-first, so a fresh batch of drafts or a just-failed spot needing triage
+    /// surfaces at the top regardless of when the row was originally created.
+    /// <paramref name="limit"/>/<paramref name="offset"/> are floored by the implementation (the
+    /// <c>RotFindingRepository.ClampPaging</c> precedent) — never trust every caller to have already
+    /// clamped them.
     /// </summary>
-    Task<AdSpotPage> ListByStateAsync(AdState? state, int limit, int offset, CancellationToken ct);
+    Task<AdSpotPage> ListByStateAsync(AdState? state, long? sponsorId, int limit, int offset, CancellationToken ct);
 
     /// <summary>
     /// How many generated spots (<see cref="AdSource.Llm"/> or <see cref="AdSource.Pack"/> source) sit

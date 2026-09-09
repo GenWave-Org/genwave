@@ -4,8 +4,8 @@ namespace GenWave.Host.Api;
 /// The wire shape <see cref="SponsorsController"/> projects every <c>GenWave.Core.Domain.Sponsor</c>
 /// row into (SPEC F171.2; STORY-407; PLAN T434) — "Host owns its own wire DTOs" (the
 /// <see cref="AdSpotDto"/>/<see cref="AdBriefDto"/> precedent). No field here is ever named
-/// <c>brand</c> — a sponsor is the canonical customer row itself, not the ads-side <c>brand</c> bridge
-/// <see cref="AdSpotDto"/> still carries (PLAN T432's compile bridge, retired at T436).
+/// <c>brand</c> — a sponsor is the canonical customer row itself, referenced from elsewhere via
+/// <see cref="SponsorRefDto"/>, never duplicated as a free-text <c>brand</c> column.
 /// </summary>
 /// <param name="Id">The row's own surrogate key.</param>
 /// <param name="Name">The sponsor's display name.</param>

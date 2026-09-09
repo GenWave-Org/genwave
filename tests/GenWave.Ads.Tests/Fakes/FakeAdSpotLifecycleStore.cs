@@ -228,9 +228,11 @@ public sealed class FakeAdSpotLifecycleStore : IAdSpotStore
         }));
     }
 
-    public Task<AdSpotPage> ListByStateAsync(AdState? state, int limit, int offset, CancellationToken ct)
+    public Task<AdSpotPage> ListByStateAsync(AdState? state, long? sponsorId, int limit, int offset, CancellationToken ct)
     {
         var filtered = state is null ? spots.AsEnumerable() : spots.Where(s => s.State == state);
+        if (sponsorId is not null)
+            filtered = filtered.Where(s => s.SponsorId == sponsorId.Value);
         var ordered = filtered.OrderByDescending(s => s.StateChangedAt).ThenByDescending(s => s.Id).ToList();
         var page = ordered.Skip(Math.Max(0, offset)).Take(limit <= 0 ? 1 : limit).ToList();
         return Task.FromResult(new AdSpotPage(page, ordered.Count));

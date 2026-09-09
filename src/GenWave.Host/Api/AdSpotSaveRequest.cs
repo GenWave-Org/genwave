@@ -5,14 +5,16 @@ namespace GenWave.Host.Api;
 
 /// <summary>
 /// The request body shape shared by <c>POST /api/ads</c> (create draft) and
-/// <c>PATCH /api/ads/{id}</c> (edit draft/failed) — SPEC F162.1; STORY-390 AC9, STORY-392 AC2; PLAN
-/// T403. One type for both verbs (rather than two near-identical records): the two differ only in
-/// which fields <see cref="AdsController"/> treats as REQUIRED and how a <see langword="null"/> field
-/// is read (POST: "not supplied", refused where required; PATCH: "leave unchanged" — the
-/// <c>AdSpotEdit</c>/<c>MediaPatch</c> sparse-update precedent) — a controller-level distinction, not a
-/// shape one.
+/// <c>PATCH /api/ads/{id}</c> (edit draft/failed) — SPEC F162.1, F171.7; STORY-390 AC9, STORY-392 AC2,
+/// STORY-412; PLAN T403, T436. One type for both verbs (rather than two near-identical records): the
+/// two differ only in which fields <see cref="AdsController"/> treats as REQUIRED and how a
+/// <see langword="null"/> field is read (POST: "not supplied", refused where required; PATCH: "leave
+/// unchanged" — the <c>AdSpotEdit</c>/<c>MediaPatch</c> sparse-update precedent) — a controller-level
+/// distinction, not a shape one.
 /// </summary>
-/// <param name="Brand">The brand this spot advertises.</param>
+/// <param name="SponsorId">The sponsor this spot advertises — required on POST (400
+/// <c>sponsor_required</c> when missing/null); optional on PATCH, where <see langword="null"/> means
+/// "leave unchanged".</param>
 /// <param name="Title">A short operator-facing label — never read aloud.</param>
 /// <param name="Brief">The premise/tone/structure hint this spot's script should be written from —
 /// DESCRIPTIVE ONLY (T403 review RULING): never validated, never airable, never itself a substitute
@@ -31,7 +33,7 @@ namespace GenWave.Host.Api;
 /// real row before it is ever stored, never trusted as a raw id (the
 /// <c>SafeSegmentsController.ResolveBedAsync</c> precedent).</param>
 public sealed record AdSpotSaveRequest(
-    string? Brand,
+    long? SponsorId,
     string? Title,
     string? Brief,
     string? Script,
