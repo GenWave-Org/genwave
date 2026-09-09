@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using GenWave.Core.Abstractions;
@@ -9,22 +8,27 @@ namespace GenWave.Host.Api;
 
 /// <summary>
 /// The Briefs admin surface (SPEC F162.1 — the Briefs tab: list pack + owner briefs with
-/// enable/disable toggles and an add form; F162.2's own upsert key; the ratified one-owner-per-brand
-/// cap, SPEC F159.1 rider; STORY-392 AC5's own API half; PLAN T403b) — <c>GET/POST /api/ad-briefs</c>,
+/// enable/disable toggles and an add form; SPEC F171.6 — briefs belong to a sponsor, no free-text
+/// company name; STORY-392, STORY-411; PLAN T403b, T435) — <c>GET/POST /api/ad-briefs</c>,
 /// <c>PATCH /api/ad-briefs/{id}</c>. <see cref="AdminSurfaceAttribute"/> +
 /// <see cref="AuthorizationPolicies.Curation"/>, the exact <see cref="AdsController"/> precedent one
-/// admin surface over (SPEC F159.1's own briefs live in the SAME "shaping the library" plane an ad
+/// admin surface over (SPEC F171.6's own briefs live in the SAME "shaping the library" plane an ad
 /// spot does).
 ///
 /// <para>
-/// <b>PLAN T432's own compile bridge (brand → sponsor, not this task's redesign):</b> the wire
-/// contract stays exactly what it was — the request/response still say <c>brand</c>, never
-/// <c>sponsorId</c> — because <see cref="AdBrief"/> itself moved to a <see cref="AdBrief.SponsorId"/>
-/// foreign key under T431/T432. This controller resolves that text to (or creates) an OWNER
-/// <see cref="Sponsor"/> through <see cref="ISponsorStore"/> on every call, and reads
-/// <see cref="Sponsor.Name"/> back out to keep serving <c>brand</c> on the wire. The real sponsor-first
-/// contract (<c>sponsorId</c> in, <c>sponsor {…}</c> out, no <c>brand</c> anywhere) is PLAN T435 —
-/// this bridge exists only so the solution compiles and behaves sensibly until T435 lands.
+/// <b>The sponsor-first contract (SPEC F171.6, STORY-411).</b> <c>POST</c> takes <c>sponsorId</c>, not
+/// a free-text company name: a missing/null <c>sponsorId</c> is 400 <c>sponsor_required</c>, an unknown
+/// one is 404 <c>sponsor_not_found</c> — resolved via <see cref="ISponsorStore.GetAsync"/> BEFORE the
+/// insert, so an unknown id never surfaces as a raw <c>23503</c> foreign-key violation turned 500 (see
+/// <see cref="Create"/>'s own remarks). Every response row carries a <see cref="SponsorRefDto"/> under
+/// <c>sponsor</c> — <c>id</c>/<c>name</c>/<c>paused</c> — and no field anywhere on this wire duplicates
+/// that name as a second free-text column; a brief's advertiser IS its sponsor's own <c>name</c>.
+/// Uniqueness moved from the old <c>(pack_slug, free-text name)</c> pairing to
+/// <c>(sponsor_id, folded premise)</c> under T431/T432: several angles per
+/// sponsor are legal (SPEC F171.6), the SAME angle for the SAME sponsor twice is 409
+/// <c>duplicate_brief</c>. A PAUSED sponsor still accepts a new brief — pausing withholds a sponsor's
+/// spots from air (SPEC F171.4), it does not lock its briefs from editing; PLAN T440 is where pause
+/// gates the ad worker's own refill sampling, not here.
 /// </para>
 ///
 /// <para>
@@ -40,20 +44,20 @@ namespace GenWave.Host.Api;
 /// universe ever grows past what a single unpaged read comfortably serves, that is the day this
 /// method grows a <c>limit</c>/<c>offset</c> pair — not before.</item>
 /// <item><b>POST creates OWNER briefs only, and 409s on a duplicate angle rather than silently
-/// updating (SPEC F159.1 rider, SPEC F171.6, PLAN T403b/T432's own ruling).</b>
+/// updating (SPEC F171.6, PLAN T403b/T432's own ruling).</b>
 /// <see cref="IAdBriefStore.UpsertAsync"/> (T398) stays exactly what it always was — an
 /// insert-or-update seam for a future pack-install caller — but this controller never calls it: a
 /// caller-facing POST that silently overwrote an existing owner brief for the same
 /// (sponsor, premise) would violate STORY-392 AC5's own "surfaces as 409, not a silent write" demand.
 /// <see cref="Create"/> calls <see cref="IAdBriefStore.CreateOwnerAsync"/> instead, whose own
 /// <c>ON CONFLICT ... DO NOTHING</c> makes the cap check atomic — no exists-then-insert race. Since
-/// T431/T432 moved the collision key from <c>(pack_slug, brand)</c> to
-/// <c>(sponsor_id, premise_key)</c>, a SECOND owner brief for the SAME brand with a DIFFERENT premise
-/// is now a legal second row (SPEC F171.6 — several angles per sponsor); the 409 fires only when the
+/// T431/T432 moved the collision key from the old <c>(pack_slug, free-text name)</c> pairing to
+/// <c>(sponsor_id, premise_key)</c>, a SECOND owner brief for the SAME sponsor with a DIFFERENT premise
+/// is a legal second row (SPEC F171.6 — several angles per sponsor); the 409 fires only when the
 /// premise (folded, blank treated as no premise) repeats too.</item>
 /// <item><b>PATCH toggles ANY brief, pack or owner (T403b's own reading of F162.1's "enable/disable
 /// toggles").</b> Only CREATE is owner-only; the toggle is the operator's own lever over pack content
-/// too — an installed pack brief the operator wants to silence without deleting it. No brand/pack_slug
+/// too — an installed pack brief the operator wants to silence without deleting it. No pack/owner
 /// distinction is enforced here at all: <see cref="SetEnabled"/> takes only <c>id</c>.</item>
 /// <item><b>No If-Match ceremony on PATCH (T403b's own YAGNI call, deliberately UNLIKE
 /// <see cref="AdsController.Update"/>'s If-Match-guarded sparse edit).</b> A brief's PATCH surface is
@@ -74,28 +78,36 @@ namespace GenWave.Host.Api;
 public sealed class AdBriefsController(
     IAdBriefStore briefStore, ISponsorStore sponsorStore, ILogger<AdBriefsController> logger) : ControllerBase
 {
+    // ProblemDetails.Type tokens (the SponsorsController/JinglePackController precedent) — one per
+    // distinct failure SHAPE a client might branch on.
+    const string SponsorRequiredType = "sponsor_required";
+    const string SponsorNotFoundType = "sponsor_not_found";
+    const string DuplicateBriefType = "duplicate_brief";
+
     // -----------------------------------------------------------------------
     // GET /api/ad-briefs — the full, unpaged list (see the class remarks)
     // -----------------------------------------------------------------------
 
     /// <summary>GET /api/ad-briefs (SPEC F162.1) — every brief, pack and owner alike, newest-created
     /// first. 200 with a bare <c>AdBriefDto[]</c> — see the class remarks for why this list is
-    /// deliberately unpaged.</summary>
+    /// deliberately unpaged. Each row carries its own <c>sponsor {id,name,paused}</c> (SPEC
+    /// F171.6).</summary>
     [HttpGet]
     public async Task<IActionResult> List(CancellationToken ct)
     {
         var briefs = await briefStore.ListAllAsync(ct);
 
-        // TWO extra round trips, not one per row (round-3 finding R4 — corrects this comment's own
-        // former undercount): ISponsorStore.ListAsync is itself two queries, see
-        // SponsorRepository.ListAsync's own remarks. The compile bridge's own "brand" wire field
-        // reads off Sponsor.Name only, so every sponsor's name is fetched once here rather than N+1
-        // GetAsync calls; the per-sponsor brief/show/spot-state counts ListAsync's own second round
-        // trip computes are simply unused by this list, not a correctness gap.
+        // TWO extra round trips (ISponsorStore.ListAsync's own two queries), not one per row —
+        // SponsorRepository.ListAsync's own remarks: "TWO round trips, not N+1 ... the first reads
+        // every matching sponsor plus its brief/show counts via left-joined per-table subqueries; the
+        // second reads every matching sponsor's own ad-spot counts grouped by state". Every sponsor's
+        // id/name/paused is read once here rather than N GetAsync calls, one per brief; the
+        // per-sponsor brief/show/spot-state counts ListAsync's own second round trip computes are
+        // simply unused by this list, not a correctness gap.
         var sponsors = await sponsorStore.ListAsync(q: null, ct);
-        var brandById = sponsors.ToDictionary(row => row.Sponsor.Id, row => row.Sponsor.Name);
+        var sponsorsById = sponsors.ToDictionary(row => row.Sponsor.Id, row => row.Sponsor);
 
-        return Ok(briefs.Select(brief => ToDto(brief, BrandFor(brief.SponsorId, brandById))).ToArray());
+        return Ok(briefs.Select(brief => ToDto(brief, SponsorDtoFor(brief.SponsorId, sponsorsById))).ToArray());
     }
 
     // -----------------------------------------------------------------------
@@ -103,45 +115,52 @@ public sealed class AdBriefsController(
     // -----------------------------------------------------------------------
 
     /// <summary>
-    /// POST /api/ad-briefs (SPEC F162.1's add form, F159.1's ratified cap; STORY-392 AC5; PLAN T432's
-    /// compile bridge) — creates a new owner-authored brief. Requires <c>brand</c>;
-    /// <c>premise</c>/<c>tone</c>/<c>structure</c> are all optional hints. <c>brand</c> resolves to (or
-    /// creates) an owner <see cref="Sponsor"/> — see the class remarks — before the brief itself is
-    /// written. 201 with the created row on success (review finding F2: a bare
-    /// <see cref="StatusCodeResult"/>-and-body, NOT <see cref="ControllerBase.Created(string, object)"/>
-    /// — this surface deliberately ships no <c>GET /api/ad-briefs/{id}</c>, so a <c>Location</c> header
-    /// naming that route would point at a 405; the row is already in hand in the response body, and
-    /// <see cref="List"/> is how a caller re-reads it later); 400 when <c>brand</c> fails the sponsor
-    /// name's own db/46 <c>CHECK</c> (1–120 chars trimmed); 409 when an owner brief for this
-    /// SAME brand AND SAME (folded) premise already exists (see the class remarks — a different
-    /// premise for the same brand is a legal second row, SPEC F171.6).
+    /// POST /api/ad-briefs (SPEC F162.1's add form, F171.6's sponsor-first cap; STORY-411 AC1–AC4) —
+    /// creates a new owner-authored brief. Requires <c>sponsorId</c>; <c>premise</c>/<c>tone</c>/
+    /// <c>structure</c> are all optional hints. 400 <c>sponsor_required</c> when <c>sponsorId</c> is
+    /// missing/null; 404 <c>sponsor_not_found</c> when it names no sponsor — checked via
+    /// <see cref="ISponsorStore.GetAsync"/> BEFORE <see cref="IAdBriefStore.CreateOwnerAsync"/> is ever
+    /// called, so an unknown id surfaces as a clean 404 rather than the FK's own <c>23503</c> violation
+    /// turning into an unhandled 500. 201 with the created row on success (review finding F2, carried
+    /// forward: a bare <see cref="StatusCodeResult"/>-and-body, NOT
+    /// <see cref="ControllerBase.Created(string, object)"/> — this surface deliberately ships no
+    /// <c>GET /api/ad-briefs/{id}</c>, so a <c>Location</c> header naming that route would point at a
+    /// 405; the row is already in hand in the response body, and <see cref="List"/> is how a caller
+    /// re-reads it later); 409 <c>duplicate_brief</c> when an owner brief for this SAME sponsor AND
+    /// SAME (folded) premise already exists (see the class remarks — a different premise for the same
+    /// sponsor is a legal second row, SPEC F171.6). A PAUSED sponsor still accepts the brief — see the
+    /// class remarks.
     /// </summary>
     [HttpPost]
     [Consumes("application/json")]
     public async Task<IActionResult> Create([FromBody] AdBriefCreateRequest request, CancellationToken ct)
     {
-        var brand = request.Brand?.Trim();
-        if (string.IsNullOrEmpty(brand))
-            return BadRequest(RequiredFieldProblem("brand"));
+        if (request.SponsorId is not { } sponsorId)
+            return BadRequest(RequiredFieldProblem("sponsorId", SponsorRequiredType));
+
+        // Resolved BEFORE the insert, not after: IAdBriefStore.CreateOwnerAsync's own INSERT would
+        // otherwise fail an unknown sponsorId as a raw 23503 foreign-key violation, an unhandled
+        // exception turning into a 500 rather than the clean 404 a caller-facing API owes.
+        var sponsor = await sponsorStore.GetAsync(sponsorId, ct);
+        if (sponsor is null)
+            return NotFound(SponsorNotFoundProblem(sponsorId));
 
         var premise = string.IsNullOrWhiteSpace(request.Premise) ? null : request.Premise.Trim();
         var tone = string.IsNullOrWhiteSpace(request.Tone) ? null : request.Tone.Trim();
         var structure = string.IsNullOrWhiteSpace(request.Structure) ? null : request.Structure.Trim();
         var enabled = request.Enabled ?? true;
 
-        var (sponsorId, sponsorName, sponsorError) = await ResolveOwnerSponsorAsync(brand, ct);
-        if (sponsorError is not null)
-            return sponsorError;
-
+        // A PAUSED sponsor still accepts a new brief (see the class remarks) — no Sponsor.Paused check
+        // here at all; pausing is an airing lever, not an editing lock.
         var created = await briefStore.CreateOwnerAsync(sponsorId, premise, tone, structure, enabled, ct);
         if (created is null)
-            return Conflict(DuplicateOwnerBriefProblem(brand));
+            return Conflict(DuplicateBriefProblem(sponsor.Name));
 
         logger.LogInformation(
-            "Ad brief created id={Id} source=owner sponsorId={SponsorId} brand={Brand}",
-            created.Id, created.SponsorId, LogSanitize.Strip(sponsorName));
+            "Ad brief created id={Id} source=owner sponsorId={SponsorId} sponsor={Sponsor}",
+            created.Id, created.SponsorId, LogSanitize.Strip(sponsor.Name));
 
-        return StatusCode(StatusCodes.Status201Created, ToDto(created, sponsorName));
+        return StatusCode(StatusCodes.Status201Created, ToDto(created, ToSponsorDto(sponsor)));
     }
 
     // -----------------------------------------------------------------------
@@ -152,8 +171,8 @@ public sealed class AdBriefsController(
     /// PATCH /api/ad-briefs/{id} (SPEC F162.1's enable/disable toggle) — flips <c>enabled</c> on any
     /// brief, pack or owner alike (see the class remarks). Requires <c>enabled</c> in the body (a
     /// missing value is a 400, never read as "leave unchanged" — see
-    /// <see cref="AdBriefPatchRequest"/>'s own remarks). 200 with the updated row; 404 for an unknown
-    /// id.
+    /// <see cref="AdBriefPatchRequest"/>'s own remarks). 200 with the updated row, its
+    /// <c>sponsor {…}</c> included (SPEC F171.6); 404 for an unknown id.
     /// </summary>
     [HttpPatch("{id:long}")]
     [Consumes("application/json")]
@@ -170,76 +189,55 @@ public sealed class AdBriefsController(
         // can never outlive its sponsor, so this read cannot legitimately come back null; the fallback
         // is defensive only, never expected to fire.
         var sponsor = await sponsorStore.GetAsync(updated.SponsorId, ct);
-        var brand = sponsor?.Name ?? string.Empty;
+        var sponsorDto = sponsor is not null ? ToSponsorDto(sponsor) : FallbackSponsorDto(updated.SponsorId);
 
-        return Ok(ToDto(updated, brand));
+        return Ok(ToDto(updated, sponsorDto));
     }
 
     // -----------------------------------------------------------------------
     // Shared helpers
     // -----------------------------------------------------------------------
 
-    /// <summary>
-    /// PLAN T432 round-3 finding R3: resolves <paramref name="brand"/> text to an owner
-    /// <see cref="Sponsor"/>'s id and name via <see cref="ISponsorStore.FindOrCreateOwnerAsync"/> — the
-    /// store now owns the whole find-or-create/concurrent-insert-race contract this method used to
-    /// hand-roll via <c>CreateOwnerAsync</c> + a <c>ListAsync</c> fallback scan (kept as a second live
-    /// copy of <c>AdsController.ResolveOwnerSponsorAsync</c> rather than extracted — see that method's
-    /// own remarks). Both <see cref="Sponsor.Id"/> and <see cref="Sponsor.Name"/> are returned, unlike
-    /// <c>AdsController</c>'s own id-only copy, since <see cref="Create"/> also needs the name for its
-    /// own log line and response body.
-    ///
-    /// <para>
-    /// Mirrors the SAME <c>(non-nullable values, IActionResult? Error)</c> tuple shape
-    /// <c>AdsController.ResolveIfMatch</c>/<c>ResolveOwnerSponsorAsync</c> use (CONTRIBUTING.md's
-    /// no-null-forgiving-operator rule): the <c>0</c>/<c>""</c> returned alongside a non-null
-    /// <see cref="IActionResult"/> error are never read — every call site returns immediately once
-    /// <c>Error is not null</c>.
-    /// </para>
-    /// </summary>
-    async Task<(long SponsorId, string SponsorName, IActionResult? Error)> ResolveOwnerSponsorAsync(
-        string brand, CancellationToken ct)
-    {
-        var result = await sponsorStore.FindOrCreateOwnerAsync(brand, ct);
-        return result switch
-        {
-            SponsorWriteResult.Ok ok => (ok.Sponsor.Id, ok.Sponsor.Name, null),
-            SponsorWriteResult.InvalidField => (0, "", BadRequest(InvalidBrandProblem())),
-            _ => throw new UnreachableException(
-                $"ISponsorStore.FindOrCreateOwnerAsync returned {result.GetType().Name}, which its own XML doc says never happens."),
-        };
-    }
-
-    static string BrandFor(long sponsorId, IReadOnlyDictionary<long, string> brandById) =>
+    static SponsorRefDto SponsorDtoFor(long sponsorId, IReadOnlyDictionary<long, Sponsor> sponsorsById) =>
         // station.ad_brief.sponsor_id is NOT NULL with ON DELETE RESTRICT (db/46) — every brief's
         // sponsor is always present in a full, unfiltered sponsor list; the fallback is defensive only.
-        brandById.TryGetValue(sponsorId, out var brand) ? brand : string.Empty;
+        sponsorsById.TryGetValue(sponsorId, out var sponsor) ? ToSponsorDto(sponsor) : FallbackSponsorDto(sponsorId);
 
-    static AdBriefDto ToDto(AdBrief brief, string brand) => new(
-        brief.Id, brief.PackSlug, brand, brief.Premise, brief.Tone, brief.Structure, brief.Enabled,
+    static SponsorRefDto ToSponsorDto(Sponsor sponsor) => new(sponsor.Id, sponsor.Name, sponsor.Paused);
+
+    static SponsorRefDto FallbackSponsorDto(long sponsorId) => new(sponsorId, string.Empty, false);
+
+    static AdBriefDto ToDto(AdBrief brief, SponsorRefDto sponsor) => new(
+        brief.Id, brief.PackSlug, sponsor, brief.Premise, brief.Tone, brief.Structure, brief.Enabled,
         brief.CreatedAt);
 
-    static ProblemDetails RequiredFieldProblem(string field) => new()
+    // Folds the plain "{field} is required" 400 (PATCH's `enabled`, no Type — review LOW-3) and the
+    // sponsor_required 400 (POST's `sponsorId`, Type set) into one factory: same Status/Title/Detail/
+    // Extensions shape, `type` is the only axis that ever varied between the two call sites.
+    static ProblemDetails RequiredFieldProblem(string field, string? type = null) => new()
     {
         Status = StatusCodes.Status400BadRequest,
         Title  = "Validation error.",
+        Type   = type,
         Detail = $"{field} is required.",
         Extensions = { ["field"] = field },
     };
 
-    static ProblemDetails InvalidBrandProblem() => new()
+    static ProblemDetails SponsorNotFoundProblem(long sponsorId) => new()
     {
-        Status = StatusCodes.Status400BadRequest,
-        Title  = "Validation error.",
-        Detail = "brand must be between 1 and 120 characters once trimmed.",
-        Extensions = { ["field"] = "brand" },
+        Status = StatusCodes.Status404NotFound,
+        Title  = "Not found.",
+        Type   = SponsorNotFoundType,
+        Detail = $"No sponsor with id {sponsorId} exists.",
+        Extensions = { ["field"] = "sponsorId" },
     };
 
-    static ProblemDetails DuplicateOwnerBriefProblem(string brand) => new()
+    static ProblemDetails DuplicateBriefProblem(string sponsorName) => new()
     {
         Status = StatusCodes.Status409Conflict,
         Title  = "Conflict.",
-        Detail = $"An owner-authored brief for brand \"{brand}\" with this premise already exists — edit it instead of creating a second one.",
-        Extensions = { ["field"] = "brand" },
+        Type   = DuplicateBriefType,
+        Detail = $"An ad brief for {sponsorName} already exists with this premise — edit it instead of creating a second one.",
+        Extensions = { ["field"] = "premise" },
     };
 }
