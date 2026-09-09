@@ -289,9 +289,15 @@ public sealed class AdSpotWorker(
         var writeRequest = new AdScriptWriteRequest(
             sponsor.Name, brief.Premise, brief.Tone, GeneratedSpotSeconds, audiencePosture.Current,
             llmOptions.CurrentValue.MaxCopyChars, adsOptions.CurrentValue.DurationToleranceRatio);
+        // The owner-sponsor skips (SPEC F172.5, PLAN T438 ruling): IsPackOwned answers "does the
+        // SPONSOR belong to a pack" (sponsor.PackSlug) — a DIFFERENT question from "is this a pack
+        // spot" (brief.PackSlug, read separately below for the source-stamping line): an owner brief
+        // can still point at a pack-owned sponsor and must get the pack posture regardless, so this
+        // reads sponsor.PackSlug, never brief.PackSlug.
         var validationRequest = new AdScriptValidationRequest(
             audiencePosture.Current, llmOptions.CurrentValue.MaxCopyChars, GeneratedSpotSeconds,
-            adsOptions.CurrentValue.DurationToleranceRatio);
+            adsOptions.CurrentValue.DurationToleranceRatio,
+            SponsorName: sponsor.Name, SponsorPhone: sponsor.Phone, IsPackOwned: sponsor.PackSlug is not null);
 
         var result = await scriptWriter.WriteAsync(writeRequest, BuildValidateDelegate(validationRequest), ct);
 

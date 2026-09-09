@@ -93,6 +93,48 @@ public static class FeatureASpotBelongsToASponsorAndSnapshotsTheName
             => Assert.Equal(HttpStatusCode.OK, arc.PausedSponsorSpotPatchStatus);
     }
 
+    // PLAN T438 ruling — pins the deployed AdsController.BuildValidationRequest call sites (Create,
+    // Update) against the SAME script, differing only in whether the sponsor it names is owner-owned or
+    // pack-owned (SPEC F172.5).
+    [Collection(Story412Collection.Name)]
+    public sealed class ScenarioOwnerSponsorsOwnNameClearsTheBlocklist(Story412Arc arc)
+    {
+        [Fact]
+        public void AScriptNamingAnOwnerSponsorIs201()
+            => Assert.Equal(HttpStatusCode.Created, arc.OwnerSponsorScriptCreateStatus);
+
+        [Fact]
+        public void TheSameScriptUnderAPackOwnedSponsorIs400BrandCollision()
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, arc.PackSponsorScriptCreateStatus);
+            Assert.Equal("brand_collision", arc.PackSponsorScriptCreateRuleId);
+        }
+
+        [Fact]
+        public void PatchingTheOwnerSpotStillNamingItIs200()
+            => Assert.Equal(HttpStatusCode.OK, arc.OwnerSponsorScriptPatchStatus);
+
+        // PLAN T438 ruling — pins the deployed AdsController.ValidateCurrentScriptThenAsync
+        // call site (the shared re-validation POST /api/ads/{id}/approve and POST /api/ads/{id}/retry
+        // both run through), the third of BuildValidationRequest's three deployed callers alongside
+        // Create and Update above: approving the SAME owner spot, still naming its own owner sponsor,
+        // must clear the blocklist here too.
+        [Fact]
+        public void ApprovingTheOwnerSpotThatNamesItsSponsorIs200()
+            => Assert.Equal(HttpStatusCode.OK, arc.ApproveOwnerSpotStatus);
+    }
+
+    // PLAN T438 ruling — pins the deployed AdsController.BuildValidationRequest Create call site's own
+    // SponsorPhone wiring (SPEC F172.5): a sibling of ScenarioOwnerSponsorsOwnNameClearsTheBlocklist
+    // above, since this Scenario's own name would lie about what it is arranging (a PHONE, not a name).
+    [Collection(Story412Collection.Name)]
+    public sealed class ScenarioOwnerSponsorsOwnPhonePassesThe555Rule(Story412Arc arc)
+    {
+        [Fact]
+        public void AScriptSpeakingTheOwnerSponsorsOwnPhoneIs201()
+            => Assert.Equal(HttpStatusCode.Created, arc.OwnerSponsorPhoneScriptCreateStatus);
+    }
+
     // ---------------------------------------------------------------------
     // SAD PATH (segregated)
     // ---------------------------------------------------------------------
@@ -166,6 +208,22 @@ public sealed class Story412Arc : IAsyncLifetime
     public const string FilterSponsorBName = "Marsh & Pine Outfitters";
     public const string PausedSponsorWithExistingSpotName = "Sleepy Sundries";
 
+    // PLAN T438 ruling — a real BrandBlocklist.txt entry (never a fictional name — no test seam adds
+    // one to that list), named identically by an owner sponsor and a pack-owned sponsor so the SAME
+    // script's outcome depends only on which sponsor it names.
+    public const string BrandCollisionSponsorName = "Universal Pictures";
+    const string PackSponsorPackSlug = "test-pack-t438";
+    const string ScriptNamingTheBrandCollisionSponsor =
+        $"ANNOUNCER: {BrandCollisionSponsorName} has a deal so good it's almost illegal.\n" +
+        "ANNOUNCER: Call 555-0100 today.";
+
+    // PLAN T438 ruling — a non-555 number, real only as the OWNER sponsor's own phone-on-file.
+    const string OwnerPhoneSponsorName = "Thistledown Hardware";
+    const string OwnerSponsorPhone = "(406) 222-0155";
+    const string ScriptSpeakingTheOwnerSponsorsPhone =
+        "ANNOUNCER: Great deals every day, right here in town.\n" +
+        $"ANNOUNCER: Call {OwnerSponsorPhone} today.";
+
     public long SponsorAId { get; private set; }
 
     public HttpStatusCode MissingSponsorIdStatus { get; private set; }
@@ -195,6 +253,13 @@ public sealed class Story412Arc : IAsyncLifetime
     public string? InvalidSponsorIdQueryField { get; private set; }
 
     public HttpStatusCode PausedSponsorSpotPatchStatus { get; private set; }
+
+    public HttpStatusCode OwnerSponsorScriptCreateStatus { get; private set; }
+    public HttpStatusCode PackSponsorScriptCreateStatus { get; private set; }
+    public string? PackSponsorScriptCreateRuleId { get; private set; }
+    public HttpStatusCode OwnerSponsorScriptPatchStatus { get; private set; }
+    public HttpStatusCode ApproveOwnerSpotStatus { get; private set; }
+    public HttpStatusCode OwnerSponsorPhoneScriptCreateStatus { get; private set; }
 
     public IReadOnlyList<long> SponsorAExclusiveSpotIds { get; private set; } = [];
     public IReadOnlyList<long> FilteredSpotIds { get; private set; } = [];
@@ -392,6 +457,88 @@ public sealed class Story412Arc : IAsyncLifetime
             .OrderBy(id => id)
             .ToList();
 
+        // ── PLAN T438 ruling — owner sponsors are real; pack sponsors stay parody (SPEC F172.5), pinned
+        // against the deployed Create/Update call sites (never just the validator directly): the SAME
+        // script names BrandCollisionSponsorName, posted first under a real OWNER sponsor of that exact
+        // name, then under a real PACK-OWNED sponsor of the SAME name — only the sponsor's own pack_slug
+        // differs between the two requests. Every response status is CAPTURED, never thrown on, unlike
+        // this method's other arrange-only steps above: THIS behavior is the thing under test, so a
+        // regression must fail one of this Scenario's own Asserts, never abort InitializeAsync itself. ──
+        var ownerBrandSponsorId = await CreateSponsorAsync(client, BrandCollisionSponsorName);
+        var ownerBrandCreateResponse = await client.PostAsJsonAsync(
+            "/api/ads",
+            new
+            {
+                sponsorId = ownerBrandSponsorId, title = "Owner sponsor names itself", script = ScriptNamingTheBrandCollisionSponsor,
+                spotSeconds = 30,
+            });
+        OwnerSponsorScriptCreateStatus = ownerBrandCreateResponse.StatusCode;
+
+        if (OwnerSponsorScriptCreateStatus == HttpStatusCode.Created)
+        {
+            var ownerBrandCreateBody = await JsonDocument.ParseAsync(await ownerBrandCreateResponse.Content.ReadAsStreamAsync());
+            var ownerBrandSpotId = ownerBrandCreateBody.RootElement.GetProperty("id").GetInt64();
+            var ownerBrandEtag = ownerBrandCreateResponse.Headers.ETag?.Tag ?? "";
+
+            // station.sponsor's own pack_slug has no admin-surface writer (POST /api/sponsors forbids
+            // it, STORY-415's own install flow is the only real writer) — a raw insert against the SAME
+            // table AC3's own ReadAdSpotSponsorNameAsync already reads is this file's honest way to
+            // arrange one.
+            var packBrandSponsorId = await CreatePackSponsorAsync(
+                database.StationConnectionString, BrandCollisionSponsorName, PackSponsorPackSlug);
+            var packBrandCreateResponse = await client.PostAsJsonAsync(
+                "/api/ads",
+                new
+                {
+                    sponsorId = packBrandSponsorId, title = "Pack sponsor names itself", script = ScriptNamingTheBrandCollisionSponsor,
+                    spotSeconds = 30,
+                });
+            PackSponsorScriptCreateStatus = packBrandCreateResponse.StatusCode;
+            var packBrandCreateBody = await JsonDocument.ParseAsync(await packBrandCreateResponse.Content.ReadAsStreamAsync());
+            PackSponsorScriptCreateRuleId = packBrandCreateBody.RootElement.TryGetProperty("ruleId", out var packBrandRuleId)
+                ? packBrandRuleId.GetString() : null;
+
+            // Update's own sponsor lookup (BuildValidationRequest's Update call site, a SEPARATE read
+            // from Create's) gets the same proof: PATCHing the owner spot's script, still naming the
+            // SAME owner sponsor, must clear the blocklist too.
+            var ownerBrandPatchRequest = new HttpRequestMessage(HttpMethod.Patch, $"/api/ads/{ownerBrandSpotId}")
+            {
+                Content = JsonContent.Create(new { script = ScriptNamingTheBrandCollisionSponsor }),
+            };
+            ownerBrandPatchRequest.Headers.TryAddWithoutValidation("If-Match", ownerBrandEtag);
+            var ownerBrandPatchResponse = await client.SendAsync(ownerBrandPatchRequest);
+            OwnerSponsorScriptPatchStatus = ownerBrandPatchResponse.StatusCode;
+
+            // ValidateCurrentScriptThenAsync's own sponsor lookup (BuildValidationRequest's Approve/
+            // Retry call site, the third and last of the three deployed callers) gets the same proof:
+            // approving the SAME owner spot, whose script still names its own owner sponsor, must clear
+            // the blocklist too — driven through the real POST /api/ads/{id}/approve transition, never
+            // the validator directly, with the row's freshest If-Match from the PATCH just above (the
+            // spot is still Draft: PATCH is a content edit only, never a state transition).
+            var ownerBrandApproveEtag = ownerBrandPatchResponse.Headers.ETag?.Tag ?? "";
+            var ownerBrandApproveRequest =
+                new HttpRequestMessage(HttpMethod.Post, $"/api/ads/{ownerBrandSpotId}/approve");
+            ownerBrandApproveRequest.Headers.TryAddWithoutValidation("If-Match", ownerBrandApproveEtag);
+            var ownerBrandApproveResponse = await client.SendAsync(ownerBrandApproveRequest);
+            ApproveOwnerSpotStatus = ownerBrandApproveResponse.StatusCode;
+        }
+
+        // ── PLAN T438 ruling — owner sponsors are real (SPEC F172.5): a real OWNER sponsor's own
+        // phone-on-file, arranged via a real POST /api/sponsors {name, phone}, then a script speaking
+        // that EXACT (non-555) number posted through the SAME AdsController.BuildValidationRequest
+        // Create call site as every fact above. Only THIS response's status is captured, never thrown
+        // on — the sponsor creation itself is plain arrangement, the same "throws on the unexpected"
+        // posture CreateSponsorAsync already holds for every other sponsor in this arc. ──
+        var ownerPhoneSponsorId = await CreateSponsorWithPhoneAsync(client, OwnerPhoneSponsorName, OwnerSponsorPhone);
+        var ownerPhoneCreateResponse = await client.PostAsJsonAsync(
+            "/api/ads",
+            new
+            {
+                sponsorId = ownerPhoneSponsorId, title = "Owner sponsor speaks its own phone",
+                script = ScriptSpeakingTheOwnerSponsorsPhone, spotSeconds = 30,
+            });
+        OwnerSponsorPhoneScriptCreateStatus = ownerPhoneCreateResponse.StatusCode;
+
         // ── AC7 — the contract scan: no property anywhere on the Ads/AdBriefs/Sponsors admin surface
         // is named "brand" (case-insensitive). Pure reflection over the built Host assembly — no HTTP
         // call needed — but captured here, not inline in the Fact (the "Facts read Arc-captured state
@@ -402,6 +549,19 @@ public sealed class Story412Arc : IAsyncLifetime
     static async Task<long> CreateSponsorAsync(HttpClient client, string name)
     {
         var response = await client.PostAsJsonAsync("/api/sponsors", new { name });
+        if (response.StatusCode != HttpStatusCode.Created)
+            throw new InvalidOperationException($"arrange: POST /api/sponsors({name}) unexpectedly returned {response.StatusCode}");
+
+        var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+        return body.RootElement.GetProperty("id").GetInt64();
+    }
+
+    /// <summary>The SAME arrangement as <see cref="CreateSponsorAsync"/>, plus <c>phone</c> — the
+    /// PLAN T438 ruling's own phone-on-file scenario needs a real sponsor whose <c>Sponsor.Phone</c> is
+    /// non-null.</summary>
+    static async Task<long> CreateSponsorWithPhoneAsync(HttpClient client, string name, string phone)
+    {
+        var response = await client.PostAsJsonAsync("/api/sponsors", new { name, phone });
         if (response.StatusCode != HttpStatusCode.Created)
             throw new InvalidOperationException($"arrange: POST /api/sponsors({name}) unexpectedly returned {response.StatusCode}");
 
@@ -428,6 +588,21 @@ public sealed class Story412Arc : IAsyncLifetime
         cmd.CommandText = "select sponsor_name from station.ad_spot where id = @id";
         cmd.Parameters.AddWithValue("id", spotId);
         return (string?)await cmd.ExecuteScalarAsync() ?? "";
+    }
+
+    /// <summary>Inserts a pack-owned <c>station.sponsor</c> row directly (PLAN T438 ruling) — the only
+    /// honest way to arrange one in this suite, since <c>POST /api/sponsors</c> refuses a caller-supplied
+    /// <c>packSlug</c> (STORY-414's own <c>sponsor_pack_slug_forbidden</c> guard) and STORY-415's real
+    /// ad-pack install flow is out of scope here.</summary>
+    static async Task<long> CreatePackSponsorAsync(string stationConnectionString, string name, string packSlug)
+    {
+        await using var conn = new NpgsqlConnection(stationConnectionString);
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "insert into station.sponsor (name, pack_slug) values (@name, @packSlug) returning id";
+        cmd.Parameters.AddWithValue("name", name);
+        cmd.Parameters.AddWithValue("packSlug", packSlug);
+        return (long)(await cmd.ExecuteScalarAsync() ?? throw new InvalidOperationException("insert returned no id"));
     }
 
     /// <summary>AC7's own scan (STORY-412's contract-scan spec, brief's "simplest honest approach"):

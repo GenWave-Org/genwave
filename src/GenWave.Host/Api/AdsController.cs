@@ -85,6 +85,12 @@ namespace GenWave.Host.Api;
 /// RENDER that must never fail outright on stale/corrupted data (T401 review F2's own reasoning). This
 /// editor is the OPPOSITE case: nothing has been persisted yet, so honesty is free — the owner's own
 /// typo is refused here, at save, rather than silently voicing the wrong tag three steps later.</item>
+/// <item><b>Owner sponsors are real; pack sponsors stay parody (SPEC F172.5, PLAN T438).</b>
+/// <see cref="BuildValidationRequest"/> hands <see cref="AdScriptValidator"/> the SCRIPT'S OWN sponsor
+/// — the just-resolved <c>sponsor</c> on <see cref="Create"/>, the edited-to sponsor or (one extra
+/// read) the row's current sponsor on <see cref="Update"/>, the row's current sponsor on
+/// <see cref="ValidateCurrentScriptThenAsync"/> — so an owner sponsor's own name/phone clear the
+/// blocklist and 555 rule while a pack sponsor's script keeps refusing exactly as before.</item>
 /// <item><b>No null-forgiving operator (CONTRIBUTING.md).</b> <see cref="ResolveIfMatch"/> and
 /// <see cref="ResolveBedMediaIdAsync"/> both return the <c>(Value, Error)</c> tuple shape
 /// <c>SafeSegmentsController.ResolveBedAsync</c> already establishes one controller over, and
@@ -259,7 +265,7 @@ public sealed class AdsController(
             return bedError;
 
         if (script is not null &&
-            AdScriptValidator.Validate(script, BuildValidationRequest(spotSeconds), durationEstimator)
+            AdScriptValidator.Validate(script, BuildValidationRequest(spotSeconds, sponsor), durationEstimator)
                 is AdScriptValidationResult.Refused refused)
         {
             return BadRequest(ScriptViolationProblem(refused.Violation));
@@ -369,7 +375,14 @@ public sealed class AdsController(
             // spotSeconds this same call) or the row's current one otherwise. current was already
             // fetched above (the R3 pre-check), never trusting a stale client-side value.
             var effectiveSpotSeconds = spotSeconds ?? current.SpotSeconds;
-            if (AdScriptValidator.Validate(script, BuildValidationRequest(effectiveSpotSeconds), durationEstimator)
+
+            // The owner-sponsor skips (SPEC F172.5, PLAN T438 ruling) need the SPONSOR THE SCRIPT WILL
+            // ACTUALLY BELONG TO once this edit lands: the just-resolved edited-to sponsor when this
+            // same request also changes sponsorId, otherwise the row's current sponsor (one extra read
+            // only on this path — a script edit that leaves sponsorId alone is common, an edit that
+            // moves a spot between sponsors on the same call is not).
+            var validationSponsor = sponsor ?? await sponsorStore.GetAsync(current.SponsorId, ct);
+            if (AdScriptValidator.Validate(script, BuildValidationRequest(effectiveSpotSeconds, validationSponsor), durationEstimator)
                 is AdScriptValidationResult.Refused refused)
             {
                 return BadRequest(ScriptViolationProblem(refused.Violation));
@@ -501,8 +514,14 @@ public sealed class AdsController(
         if (current is null)
             return NotFound();
 
+        // The owner-sponsor skips (SPEC F172.5, PLAN T438 ruling) need the row's CURRENT sponsor — a
+        // null read here (the row's sponsor vanished between GetByIdAsync and this GetAsync;
+        // ON DELETE RESTRICT makes it near-impossible, never truly impossible) falls through to
+        // BuildValidationRequest's own strict default, never a skip on unresolvable data.
+        var sponsor = await sponsorStore.GetAsync(current.SponsorId, ct);
+
         if (AdScriptValidator.Validate(
-                current.Script ?? "", BuildValidationRequest(current.SpotSeconds), durationEstimator)
+                current.Script ?? "", BuildValidationRequest(current.SpotSeconds, sponsor), durationEstimator)
             is AdScriptValidationResult.Refused refused)
         {
             return BadRequest(ScriptViolationProblem(refused.Violation));
@@ -511,8 +530,14 @@ public sealed class AdsController(
         return await MapTransition(await transition(id, expectedVersion, ct), ct);
     }
 
-    AdScriptValidationRequest BuildValidationRequest(int spotSeconds) => new(
-        audiencePosture.Current, copyBounds.MaxCopyChars, spotSeconds, adsOptions.CurrentValue.DurationToleranceRatio);
+    /// <summary>Builds the <see cref="AdScriptValidator"/> request for one script check, carrying the
+    /// owner-sponsor skips (SPEC F172.5) when <paramref name="sponsor"/> is a real, non-pack-owned row:
+    /// a <see langword="null"/> <paramref name="sponsor"/> (the row's sponsor could not be resolved)
+    /// falls through to <see cref="AdScriptValidationRequest"/>'s own fail-closed defaults — no name,
+    /// no phone, <c>IsPackOwned: true</c> — the same strict posture a pack sponsor gets.</summary>
+    AdScriptValidationRequest BuildValidationRequest(int spotSeconds, Sponsor? sponsor) => new(
+        audiencePosture.Current, copyBounds.MaxCopyChars, spotSeconds, adsOptions.CurrentValue.DurationToleranceRatio,
+        SponsorName: sponsor?.Name, SponsorPhone: sponsor?.Phone, IsPackOwned: sponsor is null || sponsor.PackSlug is not null);
 
     /// <summary>
     /// PLAN T403's own save-time ruling (see the class remarks): a malformed entry (blank

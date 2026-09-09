@@ -21,12 +21,35 @@ namespace GenWave.Ads.Tests.Fakes;
 public sealed class FakeSponsorStore(Func<long, string?> nameLookup) : ISponsorStore
 {
     readonly HashSet<long> pausedSponsorIds = [];
+    readonly Dictionary<long, string> packSlugsBySponsorId = new();
+    readonly Dictionary<long, string> phonesBySponsorId = new();
 
     /// <summary>Marks a sponsor paused for a scenario exercising <see cref="AdSpotWorker"/>'s own
     /// paused-sponsor handling — <see cref="GetAsync"/> reflects it back on <see cref="Sponsor.Paused"/>.</summary>
     public FakeSponsorStore Pause(long sponsorId)
     {
         pausedSponsorIds.Add(sponsorId);
+        return this;
+    }
+
+    /// <summary>Marks a sponsor pack-owned for a scenario exercising <see cref="AdSpotWorker"/>'s own
+    /// IsPackOwned wiring (SPEC F172.5, PLAN T438 ruling) — <see cref="GetAsync"/> reflects it back on
+    /// <see cref="Sponsor.PackSlug"/>. A sponsor never marked here stays owner-owned (<see
+    /// langword="null"/> <see cref="Sponsor.PackSlug"/>), unchanged from before this method existed.</summary>
+    public FakeSponsorStore MarkPackOwned(long sponsorId, string packSlug = "test-pack")
+    {
+        packSlugsBySponsorId[sponsorId] = packSlug;
+        return this;
+    }
+
+    /// <summary>Sets a sponsor's own phone number for a scenario exercising
+    /// <see cref="AdSpotWorker"/>'s own SponsorPhone wiring (SPEC F172.5, PLAN T438 ruling) — <see
+    /// cref="GetAsync"/> reflects it back on <see cref="Sponsor.Phone"/>. A sponsor never marked here
+    /// stays phone-less (<see langword="null"/> <see cref="Sponsor.Phone"/>), unchanged from before
+    /// this method existed.</summary>
+    public FakeSponsorStore WithPhone(long sponsorId, string phone)
+    {
+        phonesBySponsorId[sponsorId] = phone;
         return this;
     }
 
@@ -37,9 +60,10 @@ public sealed class FakeSponsorStore(Func<long, string?> nameLookup) : ISponsorS
             return Task.FromResult<Sponsor?>(null);
 
         return Task.FromResult<Sponsor?>(new Sponsor(
-            id, name, PackSlug: null, Tagline: null, About: null, Phone: null, Address: null, Website: null,
-            Tone: null, pausedSponsorIds.Contains(id), PausedAt: null, CreatedAt: DateTime.UtcNow,
-            UpdatedAt: DateTime.UtcNow, Version: "1"));
+            id, name, packSlugsBySponsorId.GetValueOrDefault(id), Tagline: null, About: null,
+            phonesBySponsorId.GetValueOrDefault(id), Address: null, Website: null, Tone: null,
+            pausedSponsorIds.Contains(id), PausedAt: null,
+            CreatedAt: DateTime.UtcNow, UpdatedAt: DateTime.UtcNow, Version: "1"));
     }
 
     public Task<IReadOnlyList<SponsorListRow>> ListAsync(string? q, CancellationToken cancellationToken) =>
