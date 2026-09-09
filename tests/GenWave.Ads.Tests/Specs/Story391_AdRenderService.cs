@@ -221,7 +221,10 @@ public static class FeatureAdRenderService
         public async Task AnUnparseableScriptFailsWithoutEverReachingTheAuthor()
         {
             var (service, author, store, _, _, _) = Build();
-            var spot = MakeSpot(id: 2, script: "not a valid script at all");
+            // A bare sentence is a legal one-line script (SPEC F174.6) — an unparseable fixture here
+            // needs a violation the plain-sentence pre-pass cannot absorb: a tagged script with no
+            // ANNOUNCER line (PLAN T444 ruling).
+            var spot = MakeSpot(id: 2, script: "GUEST: no announcer line at all");
 
             await service.RenderAsync(spot, LiveSettings(), CancellationToken.None);
 
