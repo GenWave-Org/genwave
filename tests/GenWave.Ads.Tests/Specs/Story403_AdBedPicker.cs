@@ -180,7 +180,7 @@ public static class FeatureAdBedPickerStampsABedPerSpot
             var harness = AdSpotWorkerHarness.Build(Now);
             harness.BedPool.Seed(harness.AdsLibraryId, 501, 777);
             harness.Store.AddExisting(new AdSpot(
-                1, "Acme", "Owner spot", Brief: null, Script: "ANNOUNCER: Hi there.",
+                1, SponsorId: 1, SponsorName: "Acme", "Owner spot", Brief: null, Script: "ANNOUNCER: Hi there.",
                 AdSource.Owner, PackSlug: null, SpotSeconds: 30, VoicePlan: null, BedMediaId: 999,
                 AdState.Approved, FailReason: null, MediaId: null, Generation: 1, CreatedAt: DateTime.UtcNow,
                 StateChangedAt: DateTime.UtcNow, RenderedAt: null, RetiredAt: null, Version: "1"));

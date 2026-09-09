@@ -72,6 +72,7 @@ using GenWave.Tts;
 public sealed class AdSpotWorker(
     IAdSpotStore spotStore,
     IAdBriefStore briefStore,
+    ISponsorStore sponsorStore,
     AdScriptWriter scriptWriter,
     AdRenderService renderService,
     IPatterDurationEstimator durationEstimator,
@@ -206,8 +207,8 @@ public sealed class AdSpotWorker(
             if (await catalogWriter.SetEligibleAsync(mediaId, eligible: true, ct))
             {
                 logger.LogInformation(
-                    "Ad spot {Id} ({Brand}) media row {MediaId} was ready but ineligible within the repair window — repaired",
-                    spot.Id, LogSanitize.Strip(spot.Brand), mediaId);
+                    "Ad spot {Id} ({Sponsor}) media row {MediaId} was ready but ineligible within the repair window — repaired",
+                    spot.Id, LogSanitize.Strip(spot.SponsorName), mediaId);
             }
         }
     }
@@ -258,18 +259,35 @@ public sealed class AdSpotWorker(
     }
 
     /// <summary>
-    /// One brief → one script → one stored spot (SPEC F160.1-F160.3, F159.4; STORY-389 AC2/AC3;
-    /// STORY-390). Builds the SAME validate-delegate adapter shape
+    /// One brief → one script → one stored spot (SPEC F160.1-F160.3, F159.4, F171; STORY-389 AC2/AC3;
+    /// STORY-390; PLAN T432). Builds the SAME validate-delegate adapter shape
     /// <c>GenWave.Ads.Tests.Specs.FeatureAdScriptWriterMeetsTheRealValidator</c> already previews (that
     /// file's own remarks name this exact method as the production destination): closes over the REAL
     /// <see cref="AdScriptValidator.Validate"/>, translating its result into the minimal
     /// <see cref="AdScriptValidationOutcome"/> contract <see cref="AdScriptWriter"/> (GenWave.Tts, which
-    /// must never reference this project) accepts.
+    /// must never reference this project) accepts. Resolves <paramref name="brief"/>'s sponsor NAME once
+    /// here, via <see cref="ISponsorStore.GetAsync"/> — <see cref="AdBrief"/> carries only
+    /// <see cref="AdBrief.SponsorId"/>, never a name snapshot of its own (PLAN T432: only
+    /// <see cref="AdSpot.SponsorName"/> is a stamped-at-render snapshot; a brief's own sponsor can be
+    /// renamed freely between ticks with nothing on the brief itself to go stale). A sponsor gone by the
+    /// time this tick runs (deleted between <see cref="IAdBriefStore.SampleEnabledAsync"/>'s own sample
+    /// and this read — <c>ON DELETE RESTRICT</c> makes this vanishingly rare, never impossible under a
+    /// genuine race) skips the tick outright, the SAME "nothing to generate this tick" posture
+    /// <see cref="RefillIfNeededAsync"/>'s own no-enabled-brief branch already takes.
     /// </summary>
     async Task GenerateOneAsync(AdBrief brief, bool autoApprove, CancellationToken ct)
     {
+        var sponsor = await sponsorStore.GetAsync(brief.SponsorId, ct);
+        if (sponsor is null)
+        {
+            logger.LogInformation(
+                "Ad brief {Id} names sponsor {SponsorId}, which no longer exists; skipping this tick",
+                brief.Id, brief.SponsorId);
+            return;
+        }
+
         var writeRequest = new AdScriptWriteRequest(
-            brief.Brand, brief.Premise, brief.Tone, GeneratedSpotSeconds, audiencePosture.Current,
+            sponsor.Name, brief.Premise, brief.Tone, GeneratedSpotSeconds, audiencePosture.Current,
             llmOptions.CurrentValue.MaxCopyChars, adsOptions.CurrentValue.DurationToleranceRatio);
         var validationRequest = new AdScriptValidationRequest(
             audiencePosture.Current, llmOptions.CurrentValue.MaxCopyChars, GeneratedSpotSeconds,
@@ -289,8 +307,8 @@ public sealed class AdSpotWorker(
             case AdScriptWriteResult.Success success:
                 await spotStore.CreateAsync(
                     new NewAdSpot(
-                        brief.Brand, BuildTitle(brief), ComposeBriefSummary(brief), success.Script, source,
-                        brief.PackSlug, GeneratedSpotSeconds, VoicePlan: null, BedMediaId: null,
+                        brief.SponsorId, BuildTitle(sponsor.Name), ComposeBriefSummary(brief), success.Script,
+                        source, brief.PackSlug, GeneratedSpotSeconds, VoicePlan: null, BedMediaId: null,
                         InitialState: autoApprove ? AdState.Approved : AdState.Draft, FailReason: null),
                     ct);
                 break;
@@ -301,8 +319,8 @@ public sealed class AdSpotWorker(
                 // AdScriptWriteResult.Failed never carries the raw rejected text.
                 await spotStore.CreateAsync(
                     new NewAdSpot(
-                        brief.Brand, BuildTitle(brief), ComposeBriefSummary(brief), Script: null, source,
-                        brief.PackSlug, GeneratedSpotSeconds, VoicePlan: null, BedMediaId: null,
+                        brief.SponsorId, BuildTitle(sponsor.Name), ComposeBriefSummary(brief), Script: null,
+                        source, brief.PackSlug, GeneratedSpotSeconds, VoicePlan: null, BedMediaId: null,
                         AdState.Failed, failed.Reason),
                     ct);
                 break;
@@ -315,17 +333,17 @@ public sealed class AdSpotWorker(
                 //
                 // LogSanitize.Strip on BOTH interpolated values (PLAN T402 review F3, the CodeQL
                 // cs/log-forging family, the AdRenderService.TryMarkFailedAsync precedent one file
-                // over): brief.Brand is operator/pack-authored text and failed.Reason is a THIRD-PARTY
+                // over): sponsor.Name is operator/pack-authored text and failed.Reason is a THIRD-PARTY
                 // transport/generation detail (an exception message, a completion fragment) — neither
                 // is bounded upstream the way a validator violation's own EchoForReason already is.
                 logger.LogInformation(
-                    "Ad script generation skipped for brand {Brand}: {Reason}",
-                    LogSanitize.Strip(brief.Brand), LogSanitize.Strip(failed.Reason));
+                    "Ad script generation skipped for sponsor {Sponsor}: {Reason}",
+                    LogSanitize.Strip(sponsor.Name), LogSanitize.Strip(failed.Reason));
                 break;
         }
     }
 
-    static string BuildTitle(AdBrief brief) => $"{brief.Brand} spot";
+    static string BuildTitle(string sponsorName) => $"{sponsorName} spot";
 
     static string? ComposeBriefSummary(AdBrief brief) => (brief.Premise, brief.Tone) switch
     {
@@ -473,13 +491,13 @@ public sealed class AdSpotWorker(
                 break;
             case AdCastOutcome.ThinPool:
                 logger.LogInformation(
-                    "Ad cast pool has only one non-announcer voice for spot {Id} ({Brand}); the same voice reads every part",
-                    spot.Id, LogSanitize.Strip(spot.Brand));
+                    "Ad cast pool has only one non-announcer voice for spot {Id} ({Sponsor}); the same voice reads every part",
+                    spot.Id, LogSanitize.Strip(spot.SponsorName));
                 break;
             case AdCastOutcome.EmptyPool:
                 logger.LogInformation(
-                    "Ad cast pool is empty for spot {Id} ({Brand}); every part uses the station voice",
-                    spot.Id, LogSanitize.Strip(spot.Brand));
+                    "Ad cast pool is empty for spot {Id} ({Sponsor}); every part uses the station voice",
+                    spot.Id, LogSanitize.Strip(spot.SponsorName));
                 break;
         }
     }
@@ -514,8 +532,8 @@ public sealed class AdSpotWorker(
         if (pick is null)
         {
             logger.LogInformation(
-                "No background music is installed; spot {Id} ({Brand}) renders without it",
-                spot.Id, LogSanitize.Strip(spot.Brand));
+                "No background music is installed; spot {Id} ({Sponsor}) renders without it",
+                spot.Id, LogSanitize.Strip(spot.SponsorName));
             return spot;
         }
 

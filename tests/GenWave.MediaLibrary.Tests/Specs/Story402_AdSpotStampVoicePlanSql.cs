@@ -35,9 +35,9 @@ public static class FeatureAdSpotStampVoicePlanSql
         const string FirstPlan = """[{"tag":"ANNOUNCER","voiceId":"af_nova","pace":1.0}]""";
         const string SecondPlan = """[{"tag":"ANNOUNCER","voiceId":"am_onyx","pace":1.0}]""";
 
-        static NewAdSpot Draft(string? voicePlan = null) =>
+        static NewAdSpot Draft(long sponsorId, string? voicePlan = null) =>
             new(
-                "Bramble & Fitch", "Draft spot", Brief: "A cozy hardware shop", Script: null, AdSource.Llm,
+                sponsorId, "Draft spot", Brief: "A cozy hardware shop", Script: null, AdSource.Llm,
                 PackSlug: null, SpotSeconds: 30, voicePlan, BedMediaId: null, InitialState: AdState.Approved,
                 FailReason: null);
 
@@ -61,9 +61,10 @@ public static class FeatureAdSpotStampVoicePlanSql
         public async Task ANullPlanOnARenderingRowIsStamped()
         {
             // Given a spot claimed into Rendering with no voice plan yet...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            await repo.CreateAsync(Draft(), CancellationToken.None);
+            await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
             var claimed = (await repo.ClaimNextApprovedAsync(CancellationToken.None))!;
             Assert.Null(claimed.VoicePlan);
 
@@ -79,9 +80,10 @@ public static class FeatureAdSpotStampVoicePlanSql
         public async Task AnExistingPlanOnARenderingRowIsNeverOverwritten()
         {
             // Given a spot claimed into Rendering that already carries a plan (an owner draft's own)...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            await repo.CreateAsync(Draft(FirstPlan), CancellationToken.None);
+            await repo.CreateAsync(Draft(sponsorId, FirstPlan), CancellationToken.None);
             var claimed = (await repo.ClaimNextApprovedAsync(CancellationToken.None))!;
             Assert.Equal("af_nova", AnnouncerVoiceIdIn(claimed.VoicePlan!));
 
@@ -97,9 +99,10 @@ public static class FeatureAdSpotStampVoicePlanSql
         public async Task ARowNotCurrentlyRenderingIsNeverStamped()
         {
             // Given an approved spot never claimed into Rendering...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            var spot = await repo.CreateAsync(Draft(), CancellationToken.None);
+            var spot = await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
 
             // When a stamp is attempted against it directly...
             var stamped = await repo.StampVoicePlanIfNullAsync(spot.Id, FirstPlan, CancellationToken.None);

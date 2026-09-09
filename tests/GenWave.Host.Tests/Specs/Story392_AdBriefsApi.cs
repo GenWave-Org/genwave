@@ -64,8 +64,9 @@ public static class FeatureAdBriefsApi
         [Fact]
         public void ADuplicateOwnerBrandIs409()
         {
-            // A second POST for the SAME brand — the ratified one-owner-per-brand cap (SPEC F159.1
-            // rider) surfaces as 409, never a silent update.
+            // A second POST for the SAME brand and the SAME premise — the ratified per-sponsor-angle
+            // cap (SPEC F171.6, PLAN T432 — station.ad_brief's own ad_brief_sponsor_id_premise_key)
+            // surfaces as 409, never a silent update.
             Assert.Equal(HttpStatusCode.Conflict, arc.DuplicateOwnerPostStatus);
             Assert.Equal("brand", arc.DuplicateOwnerPostField);
         }
@@ -279,11 +280,14 @@ public sealed class AdBriefsApiArc : IAsyncLifetime
                     ? (string?)null : item.GetProperty("packSlug").GetString()))
             .ToList();
 
-        // ── A duplicate owner create for the SAME brand — refused, 409, never a silent update. ──
+        // ── A duplicate owner create for the SAME brand AND the SAME folded premise — refused, 409,
+        // never a silent update (CreateOwnerAsync's own (sponsor_id, premise_key) cap, SPEC F171.6: a
+        // DIFFERENT premise for the same brand is a legal second angle, not a duplicate — this call
+        // must match CleanOwnerPremise verbatim to actually land on the same key). ──
         var duplicateResponse = await client.PostAsJsonAsync("/api/ad-briefs", new
         {
             brand = CleanOwnerBrand,
-            premise = "A different premise that must never land",
+            premise = CleanOwnerPremise,
         });
         DuplicateOwnerPostStatus = duplicateResponse.StatusCode;
         var duplicateBody = await JsonDocument.ParseAsync(await duplicateResponse.Content.ReadAsStreamAsync());
@@ -435,8 +439,14 @@ public static class AdBriefWireFixtures
         await using var cmd = conn.CreateCommand();
         cmd.CommandText =
             """
-            insert into station.ad_brief (pack_slug, brand, premise, tone, structure, enabled)
-            values (@packSlug, @brand, 'Seeded pack premise', 'dry', null, false)
+            with sponsor as (
+              insert into station.sponsor (name, pack_slug) values (@brand, @packSlug)
+              on conflict on constraint sponsor_pack_slug_name_key do update set name = excluded.name
+              returning id
+            )
+            insert into station.ad_brief (pack_slug, sponsor_id, premise, tone, structure, enabled)
+            select @packSlug, sponsor.id, 'Seeded pack premise', 'dry', null, false
+            from sponsor
             returning id
             """;
         cmd.Parameters.AddWithValue("packSlug", packSlug);

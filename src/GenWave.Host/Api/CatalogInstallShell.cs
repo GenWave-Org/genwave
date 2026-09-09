@@ -127,6 +127,26 @@ internal static partial class CatalogInstallShell
     };
 
     /// <summary>
+    /// Overload for a manifest that parses fine (shape/length caps all clear) but whose CONTENT still
+    /// cannot be installed for a reason <see cref="CatalogAdPackManifestSerializer.Deserialize"/>
+    /// itself has no way to express — e.g. two declared brands that fold to the same sponsor identity
+    /// (round-3 review finding R1). Unlike the two-argument overload above, <paramref name="detail"/>
+    /// here is the CALLER's own fully-composed sentence (mirrors <see cref="PackTooLargeProblem"/>'s
+    /// own "caller composes the whole Detail" precedent), not a reason appended to one fixed template
+    /// — the failure shape varies too much case to case (a brand collision names TWO brands; an
+    /// invalid field names ONE) to fit a single interpolation. A caller folding REMOTE,
+    /// manifest-declared text into <paramref name="detail"/> MUST run it through
+    /// <see cref="LogSafeText.Sanitize"/> first — see <see cref="UndeclaredManifestAssetProblem"/>'s
+    /// own remarks for why.
+    /// </summary>
+    public static ProblemDetails MalformedManifestProblem(CatalogEntryKind kind, string slug, string detail) => new()
+    {
+        Status = StatusCodes.Status400BadRequest,
+        Title  = $"Malformed {NounFor(kind)} pack manifest.",
+        Detail = detail,
+    };
+
+    /// <summary>
     /// <paramref name="file"/> is a manifest-declared filename off an UNTRUSTED, remote origin — passed
     /// through <see cref="LogSafeText.Sanitize"/> (review finding S2) rather than interpolated raw, the
     /// same "never echo a remote string unbounded into a body" discipline every other Problem factory

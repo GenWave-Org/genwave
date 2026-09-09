@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
@@ -19,6 +20,18 @@ namespace GenWave.Host.Api;
 /// exactly the "media, libraries, ratings, re-enrichment" plane <see cref="AuthorizationPolicies"/>'s
 /// own remarks name for <c>Curation</c>, not the "keeping the station on air" plane <c>Operator</c>
 /// names for safe segments/TTS previews/voices).
+///
+/// <para>
+/// <b>PLAN T432's own compile bridge (brand → sponsor, not this task's redesign):</b> the wire
+/// contract stays exactly what it was — <c>brand</c> in, <c>brand</c> out, never <c>sponsorId</c> —
+/// because <see cref="AdSpot"/> itself moved to a <see cref="AdSpot.SponsorId"/> foreign key under
+/// T431/T432. <see cref="Create"/>/<see cref="Update"/> resolve that text to (or create) an OWNER
+/// <see cref="Sponsor"/> through <see cref="ISponsorStore"/> (<see cref="ResolveOwnerSponsorAsync"/>),
+/// and every read serves <c>brand</c> straight off <see cref="AdSpot.SponsorName"/>'s own
+/// created-at/refreshed-on-change snapshot — no extra sponsor lookup needed on the read path. The real
+/// sponsor-first contract (<c>sponsorId</c> in, <c>sponsor {…}</c> out, no <c>brand</c> anywhere) is
+/// PLAN T436 — this bridge exists only so the solution compiles and behaves sensibly until T436 lands.
+/// </para>
 ///
 /// <para>
 /// <b>Rulings this task carries (PLAN T403, documented here since the interface/store XML docs already
@@ -62,11 +75,12 @@ namespace GenWave.Host.Api;
 /// RENDER that must never fail outright on stale/corrupted data (T401 review F2's own reasoning). This
 /// editor is the OPPOSITE case: nothing has been persisted yet, so honesty is free — the owner's own
 /// typo is refused here, at save, rather than silently voicing the wrong tag three steps later.</item>
-/// <item><b>No null-forgiving operator (CONTRIBUTING.md).</b> <see cref="ResolveIfMatch"/> and
-/// <see cref="ResolveBedMediaIdAsync"/> both return the <c>(Value, Error)</c> tuple shape
-/// <c>SafeSegmentsController.ResolveBedAsync</c> already establishes one controller over, and
-/// <see cref="MapTransition"/> pattern-matches <see cref="AdSpotTransitionOutcome"/> directly — every
-/// call site narrows nullability through <c>is not null</c>/property patterns, never <c>!</c>.</item>
+/// <item><b>No null-forgiving operator (CONTRIBUTING.md).</b> <see cref="ResolveIfMatch"/>,
+/// <see cref="ResolveBedMediaIdAsync"/>, and <see cref="ResolveOwnerSponsorAsync"/> all return the
+/// <c>(Value, Error)</c> tuple shape <c>SafeSegmentsController.ResolveBedAsync</c> already establishes
+/// one controller over, and <see cref="MapTransition"/> pattern-matches <see cref="AdSpotTransitionOutcome"/>
+/// directly — every call site narrows nullability through <c>is not null</c>/property patterns, never
+/// <c>!</c>.</item>
 /// </list>
 /// </summary>
 [ApiController]
@@ -75,6 +89,7 @@ namespace GenWave.Host.Api;
 [Authorize(Policy = AuthorizationPolicies.Curation)]
 public sealed class AdsController(
     IAdSpotStore spotStore,
+    ISponsorStore sponsorStore,
     IAdminMediaLookup adminLookup,
     IAudiencePostureProvider audiencePosture,
     ICopyBoundsProvider copyBounds,
@@ -194,16 +209,20 @@ public sealed class AdsController(
             return BadRequest(ScriptViolationProblem(refused.Violation));
         }
 
+        var (sponsorId, sponsorError) = await ResolveOwnerSponsorAsync(brand, ct);
+        if (sponsorError is not null)
+            return sponsorError;
+
         var voicePlanJson = SerializeVoicePlan(request.VoicePlan);
 
         var spot = await spotStore.CreateAsync(
             new NewAdSpot(
-                brand, title, brief, script, AdSource.Owner, PackSlug: null, spotSeconds, voicePlanJson,
+                sponsorId, title, brief, script, AdSource.Owner, PackSlug: null, spotSeconds, voicePlanJson,
                 request.BedMediaId, AdState.Draft, FailReason: null),
             ct);
 
         logger.LogInformation(
-            "Ad spot created id={Id} source=owner brand={Brand}", spot.Id, LogSanitize.Strip(spot.Brand));
+            "Ad spot created id={Id} source=owner brand={Brand}", spot.Id, LogSanitize.Strip(spot.SponsorName));
 
         Response.Headers.ETag = FormatWeakETag(spot.Version);
         return Created($"/api/ads/{spot.Id}", ToDto(spot));
@@ -232,6 +251,19 @@ public sealed class AdsController(
         var (expectedVersion, ifMatchError) = ResolveIfMatch();
         if (ifMatchError is not null)
             return ifMatchError;
+
+        // Round-3 finding R3: fetched HERE, before any sponsor resolution below, so a 404 (no such
+        // spot) or a stale If-Match never leaves behind an orphan sponsor row that this request's own
+        // brand text may otherwise have just created. The real, atomic xmin guard still lives in
+        // spotStore.UpdateAsync at the end of this method — this early read is a pre-check only, to
+        // skip the sponsor write on an obviously-doomed request; a race landing between this read and
+        // that UPDATE is still caught there, exactly as before. Also replaces the narrower fetch the
+        // "if (script is not null)" branch used to do on its own — one read serves both gates now.
+        var current = await spotStore.GetByIdAsync(id, ct);
+        if (current is null)
+            return NotFound();
+        if (current.Version != expectedVersion)
+            return Conflict(ConflictProblem());
 
         var brand = string.IsNullOrWhiteSpace(request.Brand) ? null : request.Brand.Trim();
         var title = string.IsNullOrWhiteSpace(request.Title) ? null : request.Title.Trim();
@@ -266,13 +298,8 @@ public sealed class AdsController(
         if (script is not null)
         {
             // The duration check needs a target length — the request's own (if it is ALSO changing
-            // spotSeconds this same call) or the row's current one otherwise. Fetched here rather
-            // than trusting a stale client-side value, mirroring Retry's own "read the row fresh"
-            // posture just below.
-            var current = await spotStore.GetByIdAsync(id, ct);
-            if (current is null)
-                return NotFound();
-
+            // spotSeconds this same call) or the row's current one otherwise. current was already
+            // fetched above (the R3 orphan-sponsor gate), never trusting a stale client-side value.
             var effectiveSpotSeconds = spotSeconds ?? current.SpotSeconds;
             if (AdScriptValidator.Validate(script, BuildValidationRequest(effectiveSpotSeconds), durationEstimator)
                 is AdScriptValidationResult.Refused refused)
@@ -281,8 +308,19 @@ public sealed class AdsController(
             }
         }
 
+        long? sponsorId = null;
+        if (brand is not null)
+        {
+            var (resolvedSponsorId, sponsorError) = await ResolveOwnerSponsorAsync(brand, ct);
+            if (sponsorError is not null)
+                return sponsorError;
+
+            sponsorId = resolvedSponsorId;
+        }
+
         var edit = new AdSpotEdit(
-            brand, title, brief, script, SerializeVoicePlan(request.VoicePlan), spotSeconds, request.BedMediaId);
+            sponsorId, title, brief, script, SerializeVoicePlan(request.VoicePlan), spotSeconds,
+            request.BedMediaId);
 
         var outcome = await spotStore.UpdateAsync(id, edit, expectedVersion, ct);
         return MapTransition(outcome);
@@ -465,6 +503,38 @@ public sealed class AdsController(
             : (bedMediaId, null);
     }
 
+    /// <summary>
+    /// PLAN T432 round-3 finding R3 (see the class remarks): resolves <paramref name="brand"/> text to
+    /// an owner <see cref="Sponsor"/>'s id via <see cref="ISponsorStore.FindOrCreateOwnerAsync"/> — the
+    /// SAME resolution <c>AdBriefsController.ResolveOwnerSponsorAsync</c> runs one controller over
+    /// (kept as two live copies rather than extracted, the <see cref="StripETagWrapper"/>/
+    /// <see cref="FormatWeakETag"/> precedent just below: each controller's own diff stays inside the
+    /// file it owns). The store now owns the whole find-or-create/concurrent-insert-race contract this
+    /// method used to hand-roll via <c>CreateOwnerAsync</c> + a <c>ListAsync</c> fallback scan — see
+    /// that member's own remarks.
+    ///
+    /// <para>
+    /// Mirrors <see cref="ResolveIfMatch"/>'s own <c>(non-nullable value, IActionResult? Error)</c>
+    /// tuple shape (CONTRIBUTING.md's no-null-forgiving-operator rule): <see cref="Sponsor"/>'s id is
+    /// a plain <see langword="long"/>, not <see langword="long"/>?, and the <c>0</c> returned alongside
+    /// a non-null <see cref="IActionResult"/> error is never read — every call site returns immediately
+    /// once <c>Error is not null</c>, so there is no null (or zero-sentinel) value ever mistaken for a
+    /// real one. The catch-all throw below is the same "outside its own documented contract"
+    /// assertion <see cref="MapTransition"/> makes with its own <c>_ =&gt;</c> arm.
+    /// </para>
+    /// </summary>
+    async Task<(long SponsorId, IActionResult? Error)> ResolveOwnerSponsorAsync(string brand, CancellationToken ct)
+    {
+        var result = await sponsorStore.FindOrCreateOwnerAsync(brand, ct);
+        return result switch
+        {
+            SponsorWriteResult.Ok ok => (ok.Sponsor.Id, null),
+            SponsorWriteResult.InvalidField => (0, BadRequest(InvalidBrandProblem())),
+            _ => throw new UnreachableException(
+                $"ISponsorStore.FindOrCreateOwnerAsync returned {result.GetType().Name}, which its own XML doc says never happens."),
+        };
+    }
+
     static string? SerializeVoicePlan(IReadOnlyList<AdVoicePlanEntry>? plan) =>
         plan is null or { Count: 0 } ? null : AdVoicePlanJson.Serialize(plan);
 
@@ -488,7 +558,7 @@ public sealed class AdsController(
     }
 
     static AdSpotDto ToDto(AdSpot spot) => new(
-        spot.Id, spot.Brand, spot.Title, spot.Brief, spot.Script, AdSourceTokens.ToToken(spot.Source),
+        spot.Id, spot.SponsorName, spot.Title, spot.Brief, spot.Script, AdSourceTokens.ToToken(spot.Source),
         spot.PackSlug, spot.SpotSeconds, DeserializeVoicePlan(spot.VoicePlan), spot.BedMediaId,
         AdStateTokens.ToToken(spot.State), spot.FailReason, spot.MediaId, spot.CreatedAt,
         spot.StateChangedAt, spot.RenderedAt, spot.RetiredAt, spot.Version);
@@ -578,6 +648,14 @@ public sealed class AdsController(
     };
 
     static ProblemDetails RequiredFieldProblem(string field) => FieldProblem(field, "is required.");
+
+    static ProblemDetails InvalidBrandProblem() => new()
+    {
+        Status = StatusCodes.Status400BadRequest,
+        Title  = "Validation error.",
+        Detail = "brand must be between 1 and 120 characters once trimmed.",
+        Extensions = { ["field"] = "brand" },
+    };
 
     static ProblemDetails SpotSecondsProblem() => new()
     {

@@ -26,10 +26,10 @@ public static class FeatureAdCastPickerBuildsAVoicePlan
 
     static AdSpot Spot(long id = 1, string brand = "Acme", string? packSlug = null, AdSource source = AdSource.Llm) =>
         new(
-            id, brand, $"{brand} spot", Brief: null, Script: null, source, packSlug, SpotSeconds: 30,
-            VoicePlan: null, BedMediaId: null, AdState.Rendering, FailReason: null, MediaId: null, Generation: 1,
-            CreatedAt: DateTime.UtcNow, StateChangedAt: DateTime.UtcNow, RenderedAt: null, RetiredAt: null,
-            Version: "1");
+            id, SponsorId: 1, SponsorName: brand, $"{brand} spot", Brief: null, Script: null, source, packSlug,
+            SpotSeconds: 30, VoicePlan: null, BedMediaId: null, AdState.Rendering, FailReason: null, MediaId: null,
+            Generation: 1, CreatedAt: DateTime.UtcNow, StateChangedAt: DateTime.UtcNow, RenderedAt: null,
+            RetiredAt: null, Version: "1");
 
     // PLAN T416 review F3+O3: AdLiveSettings.BedFadeMs no longer defaults (that record's own remarks
     // — AdLiveSettingsReader is the ONE construction site with a real default) — this helper is not
@@ -241,7 +241,8 @@ public static class FeatureAdCastPickerBuildsAVoicePlan
                 """[{"tag":"ANNOUNCER","voiceId":"am_onyx","pace":1},{"tag":"VOICE1","voiceId":"am_onyx","pace":1},{"tag":"VOICE2","voiceId":"am_onyx","pace":1}]""";
             var harness = AdSpotWorkerHarness.Build(Now, StationSettings("af_nova,am_michael,bf_alice"));
             harness.Store.AddExisting(new AdSpot(
-                1, "Acme", "Owner spot", Brief: null, Script: "ANNOUNCER: Hi there.\nVOICE1: Come on by.",
+                1, SponsorId: 1, SponsorName: "Acme", "Owner spot", Brief: null,
+                Script: "ANNOUNCER: Hi there.\nVOICE1: Come on by.",
                 AdSource.Owner, PackSlug: null, SpotSeconds: 30, VoicePlan: explicitPlan, BedMediaId: null,
                 AdState.Approved, FailReason: null, MediaId: null, Generation: 1, CreatedAt: DateTime.UtcNow,
                 StateChangedAt: DateTime.UtcNow, RenderedAt: null, RetiredAt: null, Version: "1"));

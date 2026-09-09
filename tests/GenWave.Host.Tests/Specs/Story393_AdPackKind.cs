@@ -122,7 +122,7 @@ public static class FeatureAdPackKind
         public void InstallingAThreeBriefPackYieldsThreeRows()
         {
             // Given a pack of three briefs, installed once,
-            // Then station.ad_brief holds exactly three rows keyed (pack_slug, brand) (AC2).
+            // Then station.ad_brief holds exactly three rows, one per (pack_slug, sponsor) (AC2).
             Assert.Equal(HttpStatusCode.OK, arc.FirstInstallStatus);
             Assert.Equal(3, arc.BriefRowCountAfterFirstInstall);
         }
@@ -335,6 +335,38 @@ public static class FeatureAdPackKind
             // Then the WHOLE manifest fails — never two-out-of-three admitted.
             Assert.Null(manifest);
         }
+
+        [Fact]
+        public void TwoBriefsRepeatingTheIdenticalBrandFailToParse()
+        {
+            // Given two briefs naming the EXACT SAME brand string (round-4 review blocker — HEAD
+            // admitted this and AdPackController.cs's own dictionary-keyed response projection then
+            // threw ArgumentException after the write already committed),
+            var briefs = string.Join(",", new[] { Brief("Acme"), Brief("Acme") });
+
+            // When the manifest is parsed,
+            var manifest = CatalogAdPackManifestSerializer.Deserialize(ManifestJson($"[{briefs}]"));
+
+            // Then the WHOLE manifest fails to parse — refused BEFORE any write, never partially
+            // admitted.
+            Assert.Null(manifest);
+        }
+
+        [Fact]
+        public void TheSameManifestWithADistinctSecondBrandParsesFine()
+        {
+            // Given the identical two-brief shape as the Fact above, EXCEPT the second brief now names
+            // a genuinely different brand string — the teeth for the check above: it must not be so
+            // broad it rejects an ordinary two-brand manifest.
+            var briefs = string.Join(",", new[] { Brief("Acme"), Brief("Widget World") });
+
+            // When the manifest is parsed,
+            var manifest = CatalogAdPackManifestSerializer.Deserialize(ManifestJson($"[{briefs}]"));
+
+            // Then it parses cleanly, both brands intact.
+            Assert.NotNull(manifest);
+            Assert.Equal(["Acme", "Widget World"], manifest!.Briefs.Select(b => b.Brand));
+        }
     }
 
     [Collection(AdPackKindCollection.Name)]
@@ -369,9 +401,37 @@ public static class FeatureAdPackKind
             Assert.Equal(AdScriptRuleIds.BrandCollision, refused.Violation.RuleId);
         }
     }
+
+    /// <summary>
+    /// Round-4 review blocker — the route-level re-pin: a manifest whose briefs repeat the identical
+    /// brand string must never reach either write (<c>station.sponsor</c>, <c>station.ad_brief</c>)
+    /// through the REAL <c>POST /api/ad-packs/{slug}/install</c> route, not merely at the serializer
+    /// seam <see cref="ScenarioTheManifestSerializerCapsRejectHonestly"/> already pins directly. Reads
+    /// <see cref="AdPackKindArc"/>'s own THIRD install (its own slug, never colliding with the two
+    /// installs AC2/AC3 already exercise) — the Postgres-backed arc idiom this file already runs,
+    /// reused rather than a whole second ephemeral database for one more install.
+    /// </summary>
+    [Collection(AdPackKindCollection.Name)]
+    public sealed class ScenarioDuplicateBrandRefusesTheWholeManifest(AdPackKindArc arc)
+    {
+        [Fact]
+        public void ARepeatedBrandInTheManifestRefusesWithA400()
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, arc.DuplicateBrandInstallStatus);
+        }
+
+        [Fact]
+        public void NothingIsWrittenForThatSlug()
+        {
+            // Then the parse-time refusal happened BEFORE either write — zero rows in either table for
+            // this slug, never a partial commit.
+            Assert.Equal(0, arc.SponsorRowCountForDuplicateBrandPack);
+            Assert.Equal(0, arc.BriefRowCountForDuplicateBrandPack);
+        }
+    }
 }
 
-// ── The install/DB-backed arc — one Postgres, two fresh app instances (one per install), a
+// ── The install/DB-backed arc — one Postgres, three fresh app instances (one per install), a
 // PATCH-disable in between ─────────────────────────────────────────────────────────────────────────
 
 [CollectionDefinition(Name)]
@@ -393,6 +453,15 @@ public sealed class AdPackKindCollection : ICollectionFixture<AdPackKindArc>
 /// PRESERVE-on-reinstall ruling (T405 review F1/F2) survives a real reinstall, not merely a
 /// store-level unit call. Nothing here calls <c>AdBriefRepository</c>/<c>AdPackController</c>
 /// directly; every write happens through the real HTTP route.
+///
+/// <para>
+/// A THIRD install (round-4 review blocker's own route-level re-pin) rides the SAME already-running
+/// Postgres — its own slug (<see cref="AdPackFixtures.DuplicateBrandPackSlug"/>), so it can never
+/// collide with the two installs above, and its own fresh factory (the identical cold-cache
+/// reasoning). A whole SECOND ephemeral database for one more install would be the heavier idiom this
+/// type's own class remarks already reject once; reusing this arc's own Postgres is the cheaper
+/// option that still proves the real route, not merely the serializer seam.
+/// </para>
 /// </summary>
 public sealed class AdPackKindArc : IAsyncLifetime
 {
@@ -404,6 +473,9 @@ public sealed class AdPackKindArc : IAsyncLifetime
     public bool EnabledAfterReinstall { get; private set; }
     public string PremiseAfterReinstall { get; private set; } = "";
     public string InstalledBlocklistedBrand { get; private set; } = "";
+    public HttpStatusCode DuplicateBrandInstallStatus { get; private set; }
+    public int SponsorRowCountForDuplicateBrandPack { get; private set; }
+    public int BriefRowCountForDuplicateBrandPack { get; private set; }
 
     public async Task InitializeAsync()
     {
@@ -446,6 +518,24 @@ public sealed class AdPackKindArc : IAsyncLifetime
 
         (EnabledAfterReinstall, PremiseAfterReinstall) = await ReadEnabledAndPremiseAsync(database.StationConnectionString, disabledBriefId);
         InstalledBlocklistedBrand = await ReadBrandAsync(database.StationConnectionString, AdPackFixtures.PackSlug, "Nike");
+
+        // ── Third install: a manifest whose two briefs repeat the identical brand — its own slug, its
+        // own fresh factory, the SAME already-running database (this type's own class remarks explain
+        // why reusing it rather than a second ephemeral Postgres). ──
+        await using (var factory3 = new AdPackInstallWebFactory(
+                         database,
+                         AdPackFixtures.BuildRoutedHandler(AdPackFixtures.DuplicateBrandPackSlug, AdPackFixtures.DuplicateBrandManifestJson)))
+        {
+            var client3 = await AdPackInstallWebFactory.LoggedInClientAsync(factory3);
+
+            var duplicate = await client3.PostAsync($"/api/ad-packs/{AdPackFixtures.DuplicateBrandPackSlug}/install", null);
+            DuplicateBrandInstallStatus = duplicate.StatusCode;
+        }
+
+        SponsorRowCountForDuplicateBrandPack =
+            await CountSponsorRowsAsync(database.StationConnectionString, AdPackFixtures.DuplicateBrandPackSlug);
+        BriefRowCountForDuplicateBrandPack =
+            await CountBriefRowsAsync(database.StationConnectionString, AdPackFixtures.DuplicateBrandPackSlug);
     }
 
     // Every helper below takes the connection STRING, not the file-local Story405AdPackDatabase
@@ -460,12 +550,24 @@ public sealed class AdPackKindArc : IAsyncLifetime
             "select count(*)::int from station.ad_brief where pack_slug = @packSlug", new { packSlug });
     }
 
+    static async Task<int> CountSponsorRowsAsync(string stationConnectionString, string packSlug)
+    {
+        await using var conn = new NpgsqlConnection(stationConnectionString);
+        await conn.OpenAsync();
+        return await conn.ExecuteScalarAsync<int>(
+            "select count(*)::int from station.sponsor where pack_slug = @packSlug", new { packSlug });
+    }
+
     static async Task<long> ReadBriefIdAsync(string stationConnectionString, string packSlug, string brand)
     {
         await using var conn = new NpgsqlConnection(stationConnectionString);
         await conn.OpenAsync();
         return await conn.QuerySingleAsync<long>(
-            "select id from station.ad_brief where pack_slug = @packSlug and brand = @brand",
+            """
+            select b.id from station.ad_brief b
+            join station.sponsor s on s.id = b.sponsor_id
+            where b.pack_slug = @packSlug and s.name = @brand
+            """,
             new { packSlug, brand });
     }
 
@@ -482,7 +584,11 @@ public sealed class AdPackKindArc : IAsyncLifetime
         await using var conn = new NpgsqlConnection(stationConnectionString);
         await conn.OpenAsync();
         return await conn.QuerySingleAsync<string>(
-            "select brand from station.ad_brief where pack_slug = @packSlug and brand = @brand",
+            """
+            select s.name from station.ad_brief b
+            join station.sponsor s on s.id = b.sponsor_id
+            where b.pack_slug = @packSlug and s.name = @brand
+            """,
             new { packSlug, brand });
     }
 
@@ -533,8 +639,8 @@ file sealed class AdPackCatalogWebFactory(FakeHttpMessageHandler handler) : WebA
 /// (<paramref name="database"/>) with every hosted service removed (no background reach into
 /// <c>station.ad_brief</c> racing this arc's own installs — the <c>Story392AdBriefsWebFactory</c>
 /// idiom one controller over) and <c>Community:CatalogIndexUrl</c> pointed at the fake catalog
-/// origin. <see cref="AdPackKindArc"/> constructs TWO of these, one per install (that type's own
-/// class remarks explain why) — both against the SAME <paramref name="database"/>, each with its own
+/// origin. <see cref="AdPackKindArc"/> constructs THREE of these, one per install (that type's own
+/// class remarks explain why) — all against the SAME <paramref name="database"/>, each with its own
 /// fresh, cold <c>CatalogProxyService</c> cache.
 /// </summary>
 file sealed class AdPackInstallWebFactory(Story405AdPackDatabase database, FakeHttpMessageHandler handler)
@@ -599,6 +705,9 @@ file sealed class Story405AdPackDatabase : EphemeralStationDatabase
 /// re-pin. No <c>assets[]</c> at all (SPEC F162.2 — an ad-pack carries no binary assets).
 /// <see cref="ThreeBriefManifestJsonV1"/>/<see cref="ThreeBriefManifestJsonV2"/> (T405 review F2)
 /// are the SAME three brands with ONE premise refreshed — the reinstall content-change fixture pair.
+/// <see cref="DuplicateBrandPackSlug"/>/<see cref="DuplicateBrandManifestJson"/> (round-4 review
+/// blocker) are a SECOND, independent pack whose two briefs repeat the identical brand — its own slug
+/// so <see cref="AdPackKindArc"/>'s third install can never collide with the two installs above.
 /// </summary>
 file static class AdPackFixtures
 {
@@ -606,6 +715,11 @@ file static class AdPackFixtures
     const string DirectoryUrl = "https://catalog.test/repo/";
 
     public const string PackSlug = "widget-world";
+
+    /// <summary>Round-4 review blocker's own route-level fixture — a SECOND pack, entirely disjoint
+    /// from <see cref="PackSlug"/>, so <see cref="AdPackKindArc"/>'s third install proves ZERO rows
+    /// land for THIS slug without disturbing the row counts the first two installs already pin.</summary>
+    public const string DuplicateBrandPackSlug = "duplicate-brand-pack";
 
     /// <summary>The one brand F2's reinstall facts disable and change the premise of.</summary>
     public const string DisabledBrand = "Bramble & Fitch";
@@ -638,31 +752,52 @@ file static class AdPackFixtures
           ] }
         """;
 
+    /// <summary>Round-4 review blocker's own route-level fixture — two briefs, the SAME brand string
+    /// repeated verbatim; <c>CatalogAdPackManifestSerializer.Deserialize</c> must refuse this whole
+    /// manifest before <see cref="AdPackController.Install"/> ever writes a row.</summary>
+    public const string DuplicateBrandManifestJson = """
+        { "packName": "Duplicate Brand Pack",
+          "briefs": [
+            { "brand": "Acme", "premise": "First angle" },
+            { "brand": "Acme", "premise": "Second angle" }
+          ] }
+        """;
+
     static string Sha256Hex(string text) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
 
     const string MetaJson = """
         {"author":"Test Fixture","description":"An ad-pack for the install endpoint specs.","audience":"everyone","added":"2026-09-02"}
         """;
 
-    static string IndexJson(string manifestJson) => $$"""
+    static string IndexJson(string slug, string manifestJson) => $$"""
         { "generatedAt": "2026-09-02", "entries": [
-          { "slug": "{{PackSlug}}", "kind": "ad-pack", "audience": "everyone",
-            "manifest": { "path": "entries/ad-packs/{{PackSlug}}/{{PackSlug}}.ad-pack.json", "sha256": "{{Sha256Hex(manifestJson)}}" },
-            "meta": { "path": "entries/ad-packs/{{PackSlug}}/{{PackSlug}}.meta.json", "sha256": "{{Sha256Hex(MetaJson)}}" } } ] }
+          { "slug": "{{slug}}", "kind": "ad-pack", "audience": "everyone",
+            "manifest": { "path": "entries/ad-packs/{{slug}}/{{slug}}.ad-pack.json", "sha256": "{{Sha256Hex(manifestJson)}}" },
+            "meta": { "path": "entries/ad-packs/{{slug}}/{{slug}}.meta.json", "sha256": "{{Sha256Hex(MetaJson)}}" } } ] }
         """;
 
     /// <summary>Serves every fixture document at its own resolved URL, 404 for anything else —
-    /// mirrors <c>IconPackInstallFixtures.BuildRoutedHandler</c>'s own idiom. <paramref name="manifestJson"/>
-    /// is fixed per handler instance (never mutated after construction) — <see cref="AdPackKindArc"/>
-    /// gets its "content changed between installs" behavior from constructing a SECOND handler (and a
-    /// SECOND app instance) with a SECOND manifest, never from mutating this one mid-test.</summary>
-    public static FakeHttpMessageHandler BuildRoutedHandler(string manifestJson)
+    /// mirrors <c>IconPackInstallFixtures.BuildRoutedHandler</c>'s own idiom. Installs under
+    /// <see cref="PackSlug"/> (T405's own AC2/AC3 fixture) — see the <paramref name="slug"/> overload
+    /// below for a differently-slugged pack (round-4 review blocker's own duplicate-brand fixture).
+    /// <paramref name="manifestJson"/> is fixed per handler instance (never mutated after
+    /// construction) — <see cref="AdPackKindArc"/> gets its "content changed between installs"
+    /// behavior from constructing a SECOND handler (and a SECOND app instance) with a SECOND manifest,
+    /// never from mutating this one mid-test.</summary>
+    public static FakeHttpMessageHandler BuildRoutedHandler(string manifestJson) =>
+        BuildRoutedHandler(PackSlug, manifestJson);
+
+    /// <summary>See the single-argument overload's own remarks — this overload additionally takes the
+    /// SLUG the fixture serves under, so a second, disjoint pack (round-4 review blocker's own
+    /// <see cref="DuplicateBrandPackSlug"/>) can be routed without colliding with <see cref="PackSlug"/>'s
+    /// own document URLs.</summary>
+    public static FakeHttpMessageHandler BuildRoutedHandler(string slug, string manifestJson)
     {
         var routes = new Dictionary<string, string>
         {
-            [IndexUrl] = IndexJson(manifestJson),
-            [DirectoryUrl + "entries/ad-packs/" + PackSlug + "/" + PackSlug + ".ad-pack.json"] = manifestJson,
-            [DirectoryUrl + "entries/ad-packs/" + PackSlug + "/" + PackSlug + ".meta.json"] = MetaJson,
+            [IndexUrl] = IndexJson(slug, manifestJson),
+            [DirectoryUrl + "entries/ad-packs/" + slug + "/" + slug + ".ad-pack.json"] = manifestJson,
+            [DirectoryUrl + "entries/ad-packs/" + slug + "/" + slug + ".meta.json"] = MetaJson,
         };
 
         return new((request, _) =>

@@ -24,9 +24,9 @@ public static class FeatureAdRenderService
         long? bedMediaId = null,
         string title = "Big Sale Spot") =>
         new(
-            Id: id, Brand: "Acme", Title: title, Brief: null, Script: script, Source: AdSource.Llm,
-            PackSlug: null, SpotSeconds: spotSeconds, VoicePlan: voicePlan, BedMediaId: bedMediaId,
-            State: AdState.Rendering, FailReason: null, MediaId: null, Generation: 1,
+            Id: id, SponsorId: 1, SponsorName: "Acme", Title: title, Brief: null, Script: script,
+            Source: AdSource.Llm, PackSlug: null, SpotSeconds: spotSeconds, VoicePlan: voicePlan,
+            BedMediaId: bedMediaId, State: AdState.Rendering, FailReason: null, MediaId: null, Generation: 1,
             CreatedAt: DateTime.UtcNow, StateChangedAt: DateTime.UtcNow, RenderedAt: null,
             RetiredAt: null, Version: "1");
 

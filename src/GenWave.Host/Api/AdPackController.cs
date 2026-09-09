@@ -72,13 +72,15 @@ namespace GenWave.Host.Api;
 ///
 /// <para>
 /// <b>AN OWNER BRIEF AND A PACK BRIEF FOR THE SAME BRAND COEXIST, SILENTLY — no note in this
-/// response (T405's own "keep simple" ruling).</b> <c>station.ad_brief</c>'s own
-/// <c>UNIQUE NULLS NOT DISTINCT (pack_slug, brand)</c> key (db/42) makes <c>(null, "Acme")</c> and
-/// <c>("this-pack", "Acme")</c> two DISTINCT rows by construction (T403b's own
-/// <c>AnOwnerBriefAndAPackBriefForTheSameBrandAreTwoSeparateRows</c> fact pins this at the
-/// constraint level) — installing a pack whose own brief names a brand an operator already
-/// owner-authored is therefore never a conflict of any kind, and this response carries nothing
-/// further to say about it.
+/// response (T405's own "keep simple" ruling, still true under PLAN T432's sponsor split).</b>
+/// <c>station.sponsor</c>'s own <c>UNIQUE NULLS NOT DISTINCT (pack_slug, name_key)</c> key (db/46)
+/// makes an owner sponsor named "Acme" (<c>pack_slug</c> <see langword="null"/>) and this pack's own
+/// "Acme" sponsor (<c>pack_slug</c> = <paramref name="slug"/>) two DISTINCT <c>station.sponsor</c>
+/// rows by construction — <see cref="ISponsorStore.UpsertPackSponsorsAsync"/> never resolves to an
+/// owner-authored sponsor no matter how closely the brand text matches one. Every brief this pack
+/// installs therefore names ITS OWN pack-owned sponsor, never an operator's owner-authored one, so
+/// installing a pack whose own brief names a brand an operator already owner-authored is never a
+/// conflict of any kind, and this response carries nothing further to say about it.
 /// </para>
 ///
 /// <para>
@@ -100,6 +102,7 @@ public sealed class AdPackController(
     CatalogProxyService catalogProxyService,
     CommunityCatalogAccessor catalogAccessor,
     IAdBriefStore briefStore,
+    ISponsorStore sponsorStore,
     ILogger<AdPackController> logger) : ControllerBase
 {
     /// <summary>
@@ -133,10 +136,35 @@ public sealed class AdPackController(
         if (manifest is null)
             return BadRequest(CatalogInstallShell.MalformedManifestProblem(CatalogEntryKind.AdPack, slug));
 
+        // Every manifest brand resolves to (or creates) a PACK-OWNED sponsor in ONE batch call
+        // (round-3 finding R1 — replaces this route's own former per-DISTINCT-brand loop, one
+        // UpsertPackSponsorAsync round trip per unique brand). UpsertPackSponsorsAsync now owns brand
+        // identity itself (fold-collision detection across the WHOLE declared list, one write), so
+        // this passes the brands array through unfiltered — no .Distinct() here, the store already
+        // folds repeats of the identical brand text onto the same sponsor row, and refuses the WHOLE
+        // install if two DIFFERENT brand strings would collide onto one sponsor identity.
+        var brands = manifest.Briefs.Select(brief => brief.Brand).ToArray();
+        var sponsorResult = await sponsorStore.UpsertPackSponsorsAsync(slug, brands, ct);
+        // Early-return gate, matching this method's own "if (...error) return ...;" idiom above —
+        // NOT a switch expression assigning `sponsors`, since two of the three outcomes need to
+        // return straight out of this action rather than produce a value to keep computing with.
+        if (sponsorResult is SponsorPackWriteResult.NamesCollide collide)
+            return BadRequest(CatalogInstallShell.MalformedManifestProblem(CatalogEntryKind.AdPack, slug,
+                $"\"{slug}\"'s manifest declares two brands, \"{LogSafeText.Sanitize(collide.First)}\" " +
+                $"and \"{LogSafeText.Sanitize(collide.Second)}\", that resolve to the same sponsor."));
+        if (sponsorResult is SponsorPackWriteResult.InvalidField invalid)
+            return BadRequest(CatalogInstallShell.MalformedManifestProblem(CatalogEntryKind.AdPack, slug,
+                $"\"{slug}\"'s manifest names a brand whose {invalid.FieldName} is invalid."));
+        if (sponsorResult is not SponsorPackWriteResult.Ok { Sponsors: var sponsors })
+            throw new UnreachableException(
+                $"ISponsorStore.UpsertPackSponsorsAsync returned {sponsorResult.GetType().Name}, which its own XML doc says never happens.");
+
         // ONE transaction, the whole declared brief list — see this class's own Gate order/ENABLED IS
         // PRESERVE-on-reinstall remarks for the full contract IAdBriefStore.UpsertAllAsync carries.
+        // sponsors is the SAME length, SAME order as brands/manifest.Briefs (UpsertPackSponsorsAsync's
+        // own contract) — a straight positional zip, no per-brand dictionary lookup needed.
         var briefs = manifest.Briefs
-            .Select(brief => new AdBriefUpsertInput(brief.Brand, brief.Premise, brief.Tone, brief.Structure))
+            .Zip(sponsors, (brief, sponsor) => new AdBriefUpsertInput(sponsor.Id, brief.Premise, brief.Tone, brief.Structure))
             .ToArray();
         var upserted = await briefStore.UpsertAllAsync(slug, briefs, ct);
 
@@ -144,6 +172,13 @@ public sealed class AdPackController(
             "Ad pack installed slug={Slug} briefCount={BriefCount}",
             LogSafeText.Sanitize(slug), upserted.Count);
 
-        return Ok(new AdPackInstallResponse(slug, manifest.PackName, upserted.Select(b => b.Brand).ToArray()));
+        // POSITIONAL, never a Dictionary keyed on Sponsor.Id (round-4 review blocker fix): sponsors is
+        // guaranteed the SAME length/order as manifest.Briefs (UpsertPackSponsorsAsync's own contract,
+        // this method's own "briefs" local above already relies on the identical guarantee), so its
+        // own Name at each index IS the brand just upserted for that index — no key collision is even
+        // possible this way, whereas ToDictionary(s => s.Id, ...) throws the moment CatalogAdPackManifestSerializer
+        // ever again admitted two briefs resolving to the same sponsor id.
+        return Ok(new AdPackInstallResponse(
+            slug, manifest.PackName, sponsors.Select(s => s.Name).ToArray()));
     }
 }

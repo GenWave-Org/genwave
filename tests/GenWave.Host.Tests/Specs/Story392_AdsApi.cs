@@ -779,8 +779,14 @@ public static class AdsWireFixtures
         await using var cmd = conn.CreateCommand();
         cmd.CommandText =
             """
-            insert into station.ad_spot (brand, title, script, source, spot_seconds, state, fail_reason)
-            values (@brand, @brand || ' spot', @script, 'llm'::station.ad_source, 30, 'failed'::station.ad_state, 'tts_timeout')
+            with sponsor as (
+              insert into station.sponsor (name) values (@brand)
+              on conflict on constraint sponsor_pack_slug_name_key do update set name = excluded.name
+              returning id
+            )
+            insert into station.ad_spot (sponsor_id, sponsor_name, title, script, source, spot_seconds, state, fail_reason)
+            select sponsor.id, @brand, @brand || ' spot', @script, 'llm'::station.ad_source, 30, 'failed'::station.ad_state, 'tts_timeout'
+            from sponsor
             returning id, xmin::text as version
             """;
         cmd.Parameters.AddWithValue("brand", brand);
@@ -798,8 +804,14 @@ public static class AdsWireFixtures
         await using var cmd = conn.CreateCommand();
         cmd.CommandText =
             """
-            insert into station.ad_spot (brand, title, script, source, spot_seconds, state, media_id)
-            values (@brand, @brand || ' spot', 'ANNOUNCER: Ready to air.', 'llm'::station.ad_source, 30, 'ready'::station.ad_state, @mediaId)
+            with sponsor as (
+              insert into station.sponsor (name) values (@brand)
+              on conflict on constraint sponsor_pack_slug_name_key do update set name = excluded.name
+              returning id
+            )
+            insert into station.ad_spot (sponsor_id, sponsor_name, title, script, source, spot_seconds, state, media_id)
+            select sponsor.id, @brand, @brand || ' spot', 'ANNOUNCER: Ready to air.', 'llm'::station.ad_source, 30, 'ready'::station.ad_state, @mediaId
+            from sponsor
             returning id, xmin::text as version
             """;
         cmd.Parameters.AddWithValue("brand", brand);

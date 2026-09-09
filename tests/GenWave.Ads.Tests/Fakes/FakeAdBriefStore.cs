@@ -16,9 +16,17 @@ namespace GenWave.Ads.Tests.Fakes;
 public sealed class FakeAdBriefStore : IAdBriefStore
 {
     readonly List<AdBrief> briefs = [];
+    readonly Dictionary<string, long> sponsorIdsByBrand = new(StringComparer.Ordinal);
     long nextId = 1;
+    long nextSponsorId = 1;
 
     public int SampleCallCount { get; private set; }
+
+    /// <summary>Every brand this fake has ever seen, mapped to a synthetic sponsor id it fabricates on
+    /// first use (PLAN T432) — specs still seed by brand STRING (the pre-sponsors call shape, unchanged
+    /// so <c>Story389_AdStockKeeping</c>'s own 8 call sites stay untouched), so this is where that
+    /// string resolves to the <see cref="AdBrief.SponsorId"/> the domain type now actually carries.</summary>
+    public IReadOnlyDictionary<string, long> SponsorIdsByBrand => sponsorIdsByBrand;
 
     public FakeAdBriefStore AddEnabled(string brand, string? packSlug = null, string? premise = null, string? tone = null) =>
         Add(brand, packSlug, premise, tone, enabled: true);
@@ -28,8 +36,19 @@ public sealed class FakeAdBriefStore : IAdBriefStore
 
     FakeAdBriefStore Add(string brand, string? packSlug, string? premise, string? tone, bool enabled)
     {
-        briefs.Add(new AdBrief(nextId++, packSlug, brand, premise, tone, Structure: null, enabled, DateTime.UtcNow));
+        var sponsorId = SponsorIdFor(brand);
+        briefs.Add(new AdBrief(nextId++, packSlug, sponsorId, premise, tone, Structure: null, enabled, DateTime.UtcNow));
         return this;
+    }
+
+    long SponsorIdFor(string brand)
+    {
+        if (!sponsorIdsByBrand.TryGetValue(brand, out var sponsorId))
+        {
+            sponsorId = nextSponsorId++;
+            sponsorIdsByBrand[brand] = sponsorId;
+        }
+        return sponsorId;
     }
 
     public Task<AdBrief?> SampleEnabledAsync(CancellationToken ct)
@@ -39,7 +58,7 @@ public sealed class FakeAdBriefStore : IAdBriefStore
     }
 
     public Task<AdBrief> UpsertAsync(
-        string? packSlug, string brand, string? premise, string? tone, string? structure, bool enabled,
+        string? packSlug, long sponsorId, string? premise, string? tone, string? structure, bool enabled,
         CancellationToken ct) =>
         throw new NotSupportedException("Not used by AdSpotWorker.");
 
@@ -47,7 +66,7 @@ public sealed class FakeAdBriefStore : IAdBriefStore
         throw new NotSupportedException("Not used by AdSpotWorker.");
 
     public Task<AdBrief?> CreateOwnerAsync(
-        string brand, string? premise, string? tone, string? structure, bool enabled, CancellationToken ct) =>
+        long sponsorId, string? premise, string? tone, string? structure, bool enabled, CancellationToken ct) =>
         throw new NotSupportedException("Not used by AdSpotWorker.");
 
     public Task<AdBrief?> SetEnabledAsync(long id, bool enabled, CancellationToken ct) =>

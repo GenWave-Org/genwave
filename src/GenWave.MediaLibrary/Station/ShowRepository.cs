@@ -59,6 +59,7 @@ sealed class ShowRepository(Lazy<NpgsqlDataSource> dataSource, ILogger<ShowRepos
         public DateTime CreatedAt { get; init; }
         public DateTime UpdatedAt { get; init; }
         public string? RotationJson { get; init; }
+        public long? SponsorId { get; init; }
     }
 
     // id is `serial` (int4) at rest — mirrors PersonaRepository's own SelectColumns comment: every id
@@ -67,13 +68,13 @@ sealed class ShowRepository(Lazy<NpgsqlDataSource> dataSource, ILogger<ShowRepos
     // F152.3) — the ONLY envelope key this repository ever selects.
     const string SelectColumns =
         "select id::bigint as id, name, slug, tagline, flavor, imported_from, imported_at, " +
-        "created_at, updated_at, envelope ->> 'rotation' as rotation_json from station.show";
+        "created_at, updated_at, envelope ->> 'rotation' as rotation_json, sponsor_id from station.show";
 
     // Every write below RETURNs this identical column set (SelectColumns' own list, minus the FROM
     // clause) so ToShow has one shape to map from regardless of which statement produced the row.
     const string ReturningColumns =
         "returning id::bigint as id, name, slug, tagline, flavor, imported_from, imported_at, " +
-        "created_at, updated_at, envelope ->> 'rotation' as rotation_json";
+        "created_at, updated_at, envelope ->> 'rotation' as rotation_json, sponsor_id";
 
     public async Task<IReadOnlyList<Show>> GetAllAsync(CancellationToken ct)
     {
@@ -343,10 +344,13 @@ sealed class ShowRepository(Lazy<NpgsqlDataSource> dataSource, ILogger<ShowRepos
     /// <summary>Maps one <see cref="ShowRow"/> into the domain <see cref="Show"/>, parsing
     /// <see cref="ShowRow.RotationJson"/> via <see cref="RotationEnvelopeCodec.Parse"/> — the one
     /// mapping step every read/write method above shares, so a malformed row WARNs identically
-    /// regardless of which statement produced it.</summary>
+    /// regardless of which statement produced it. <see cref="ShowRow.SponsorId"/> passes straight
+    /// through (SPEC F175.1, PLAN T432) — read-only here, no write path lands it until T449's own
+    /// PATCH (see <see cref="Show.SponsorId"/>'s own remarks).</summary>
     Show ToShow(ShowRow row) => new(
         row.Id, row.Name, row.Slug, row.Tagline, row.Flavor, row.ImportedFrom, row.ImportedAt,
-        row.CreatedAt, row.UpdatedAt, RotationEnvelopeCodec.Parse(row.RotationJson, row.Name, logger));
+        row.CreatedAt, row.UpdatedAt, RotationEnvelopeCodec.Parse(row.RotationJson, row.Name, logger),
+        row.SponsorId);
 
     /// <summary>
     /// SPEC F115.1's name-shape guard — pure C#, evaluated before either write method ever opens a

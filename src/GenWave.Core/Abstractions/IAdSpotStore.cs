@@ -235,4 +235,63 @@ public interface IAdSpotStore
     /// is built to tolerate.
     /// </summary>
     Task<bool> ReArmAsync(long id, CancellationToken ct);
+
+    /// <summary>
+    /// Media ids to withhold from airing right now, for one of two reasons (SPEC F171, F174; PLAN
+    /// T432): the spot's own sponsor is currently <see cref="Domain.Sponsor.Paused"/>, OR the spot's
+    /// sponsor is one of the sponsors already carried by the first <paramref name="window"/> entries
+    /// of <paramref name="recentMediaIds"/> (most-recent-first — the crosstalk/repeat-sponsor guard,
+    /// looked up through <see cref="AdSpot.MediaId"/>, not a separate rotation table). Only
+    /// <see cref="AdState.Ready"/> spots are ever candidates — nothing else is airable in the first
+    /// place. <paramref name="window"/> of zero excludes only paused-sponsor spots; an empty
+    /// <paramref name="recentMediaIds"/> has the same effect regardless of <paramref name="window"/>.
+    /// One query — the "counts via one round trip, no N+1" posture <see cref="ISponsorStore.ListAsync"/>
+    /// already keeps one seam over.
+    /// </summary>
+    Task<IReadOnlyList<long>> ListAiringExclusionsAsync(
+        IReadOnlyList<long> recentMediaIds, int window, CancellationToken ct);
+
+    /// <summary>
+    /// Claims a row for a background job by stamping <c>job_kind</c>/<c>job_started_at</c> and
+    /// clearing any prior <c>job_error</c> (SPEC F174, F175; PLAN T432 — the preview/write job seam
+    /// PLAN T439–T445 build against). Guarded on <c>job_kind IS NULL</c>: a row already claimed by
+    /// another job reports <see cref="AdSpotJobStampResult.Busy"/> rather than stealing or queuing
+    /// behind it — the caller's own signal to skip this tick, the <see cref="ClaimNextApprovedAsync"/>
+    /// "SKIP LOCKED, never block" posture applied per-row instead of via a locking read.
+    /// </summary>
+    Task<AdSpotJobStampOutcome> StampJobAsync(long id, string kind, CancellationToken ct);
+
+    /// <summary>
+    /// Releases a job claim — clears <c>job_kind</c>/<c>job_started_at</c> and sets <c>job_error</c>
+    /// to <paramref name="error"/> (<see langword="null"/> on a clean finish, the failure message
+    /// otherwise) — SPEC F174, F175; PLAN T432. Total: an id with no current claim (already cleared,
+    /// or never claimed) still reports <see langword="true"/> — clearing an already-clear job is a
+    /// harmless no-op, not a conflict, the <see cref="MarkReadyAsync"/>/<see cref="MarkFailedAsync"/>
+    /// "guarded WHERE, total" shape narrowed to "row exists" rather than "row in a specific state".
+    /// Reports <see langword="false"/> only when no row exists with the given id.
+    /// </summary>
+    Task<bool> ClearJobAsync(long id, string? error, CancellationToken ct);
+
+    /// <summary>
+    /// Stamps a rendered preview clip's own <paramref name="path"/>/<paramref name="key"/> and
+    /// <c>preview_at = now()</c> (SPEC F174; PLAN T432) — unconditional by id, mirrors
+    /// <see cref="MarkReadyAsync"/>'s own total posture: a preview may be re-rendered any number of
+    /// times regardless of the spot's current <see cref="AdState"/>, so there is no state guard here
+    /// to conflict with. Reports <see langword="false"/> only when no row exists with the given id.
+    /// </summary>
+    Task<bool> StampPreviewAsync(long id, string path, string key, CancellationToken ct);
+
+    /// <summary>
+    /// <see cref="AdState.Approved"/> to <see cref="AdState.Rendering"/> for exactly the row named by
+    /// <paramref name="id"/>, xmin-guarded (SPEC F174.5; PLAN T432) — the operator-driven counterpart
+    /// to <see cref="ClaimNextApprovedAsync"/>'s own oldest-first, version-less worker claim: a caller
+    /// here already holds a specific row's own prior <see cref="AdSpot.Version"/> (an owner previewing
+    /// ONE spot on demand, not the stock worker's tick) and wants exactly that row promoted, not
+    /// whichever is oldest. Returns the claimed row, or <see langword="null"/> when it is not currently
+    /// <see cref="AdState.Approved"/> or <paramref name="expectedVersion"/> is stale — both collapse to
+    /// one outcome, the same "re-read before trying again" contract
+    /// <see cref="AdSpotTransitionOutcome.Result"/>'s own <see cref="AdSpotWriteResult.Conflict"/>
+    /// gives one seam over, simplified here since no caller needs to tell the two apart.
+    /// </summary>
+    Task<AdSpot?> ClaimForPromotionAsync(long id, string expectedVersion, CancellationToken ct);
 }

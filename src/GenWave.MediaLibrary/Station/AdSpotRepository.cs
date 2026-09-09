@@ -34,9 +34,10 @@ sealed class AdSpotRepository(Lazy<NpgsqlDataSource> dataSource) : IAdSpotStore
     /// own remarks describe.
     /// </summary>
     const string Columns =
-        "id, brand, title, brief, script, source::text as source, pack_slug, spot_seconds, " +
-        "voice_plan::text as voice_plan, bed_media_id, state::text as state, fail_reason, media_id, " +
-        "generation, created_at, state_changed_at, rendered_at, retired_at, xmin::text as version";
+        "id, sponsor_id, sponsor_name, title, brief, script, source::text as source, pack_slug, " +
+        "spot_seconds, voice_plan::text as voice_plan, bed_media_id, state::text as state, fail_reason, " +
+        "media_id, generation, created_at, state_changed_at, rendered_at, retired_at, xmin::text as version, " +
+        "preview_path, preview_at, preview_key, job_kind, job_started_at, job_error";
 
     static readonly string SelectColumns = $"select {Columns} from station.ad_spot";
 
@@ -45,7 +46,13 @@ sealed class AdSpotRepository(Lazy<NpgsqlDataSource> dataSource) : IAdSpotStore
     /// Failed" and "<c>fail_reason</c> iff Failed" invariants (see <see cref="NewAdSpot"/>'s own
     /// remarks and <see cref="IAdSpotStore"/>'s own remarks on <see cref="CreateAsync"/>); db/43's
     /// own <c>CHECK</c> constraints are the DB-level backstop for the SAME two invariants, reachable
-    /// only if a future caller bypasses this method entirely.
+    /// only if a future caller bypasses this method entirely. <c>sponsor_name</c> is snapshotted here,
+    /// in the SAME statement, via a correlated subquery against <c>station.sponsor.name</c> (SPEC
+    /// F171.7, PLAN T432) — <see cref="NewAdSpot"/> carries only <see cref="NewAdSpot.SponsorId"/>, no
+    /// name, so the INSERT itself is the one place this snapshot is taken; a
+    /// <paramref name="spot"/>.<see cref="NewAdSpot.SponsorId"/> naming no row fails the FK/NOT NULL
+    /// pair at the DB (an unhandled exception — every caller of this store resolves a real sponsor id
+    /// first, the compile-bridge's own find-or-create discipline).
     /// </summary>
     public async Task<AdSpot> CreateAsync(NewAdSpot spot, CancellationToken ct)
     {
@@ -64,16 +71,17 @@ sealed class AdSpotRepository(Lazy<NpgsqlDataSource> dataSource) : IAdSpotStore
         var row = await conn.QuerySingleAsync<AdSpotRow>(new CommandDefinition(
             $"""
             insert into station.ad_spot
-                (brand, title, brief, script, source, pack_slug, spot_seconds, voice_plan, bed_media_id,
-                 state, fail_reason)
+                (sponsor_id, sponsor_name, title, brief, script, source, pack_slug, spot_seconds,
+                 voice_plan, bed_media_id, state, fail_reason)
             values
-                (@brand, @title, @brief, @script, @source::station.ad_source, @packSlug, @spotSeconds,
-                 @voicePlan::jsonb, @bedMediaId, @state::station.ad_state, @failReason)
+                (@sponsorId, (select name from station.sponsor where id = @sponsorId), @title, @brief,
+                 @script, @source::station.ad_source, @packSlug, @spotSeconds, @voicePlan::jsonb,
+                 @bedMediaId, @state::station.ad_state, @failReason)
             returning {Columns}
             """,
             new
             {
-                brand = spot.Brand,
+                sponsorId = spot.SponsorId,
                 title = spot.Title,
                 brief = spot.Brief,
                 script = spot.Script,
@@ -159,12 +167,19 @@ sealed class AdSpotRepository(Lazy<NpgsqlDataSource> dataSource) : IAdSpotStore
     /// <c>Catalog.MediaRepository.UpdateCoreAsync</c> precedent) rather than <c>COALESCE</c> — the
     /// same reason that method gives: a dynamic clause list never emits a redundant self-assignment
     /// for a column the caller left untouched. Never changes <c>state</c>/<c>state_changed_at</c>
-    /// itself (this is a content edit, not a transition).</summary>
+    /// itself (this is a content edit, not a transition). A non-null <see cref="AdSpotEdit.SponsorId"/>
+    /// ALWAYS adds a SECOND clause alongside <c>sponsor_id</c> — refreshing <c>sponsor_name</c> from
+    /// <c>station.sponsor.name</c> in the SAME statement (SPEC F171.7, PLAN T432) — so a re-sponsored
+    /// spot's snapshot never goes stale relative to the row it now points at.</summary>
     public Task<AdSpotTransitionOutcome> UpdateAsync(
         long id, AdSpotEdit edit, string expectedVersion, CancellationToken ct)
     {
         var setClauses = new List<string>();
-        if (edit.Brand is not null) setClauses.Add("brand = @brand");
+        if (edit.SponsorId is not null)
+        {
+            setClauses.Add("sponsor_id = @sponsorId");
+            setClauses.Add("sponsor_name = (select name from station.sponsor where id = @sponsorId)");
+        }
         if (edit.Title is not null) setClauses.Add("title = @title");
         if (edit.Brief is not null) setClauses.Add("brief = @brief");
         if (edit.Script is not null) setClauses.Add("script = @script");
@@ -197,7 +212,7 @@ sealed class AdSpotRepository(Lazy<NpgsqlDataSource> dataSource) : IAdSpotStore
             new
             {
                 id, expectedVersion,
-                brand = edit.Brand, title = edit.Title, brief = edit.Brief, script = edit.Script,
+                sponsorId = edit.SponsorId, title = edit.Title, brief = edit.Brief, script = edit.Script,
                 voicePlan = edit.VoicePlan, spotSeconds = edit.SpotSeconds, bedMediaId = edit.BedMediaId,
             },
             id, ct);
@@ -465,6 +480,132 @@ sealed class AdSpotRepository(Lazy<NpgsqlDataSource> dataSource) : IAdSpotStore
     }
 
     /// <summary>
+    /// <see cref="IAdSpotStore.ListAiringExclusionsAsync"/> (SPEC F171, F174; PLAN T432) — ONE query,
+    /// no N+1 (the <see cref="ISponsorStore"/>-side "counts via one round trip" posture applied here):
+    /// a <see cref="Domain.AdState.Ready"/> spot's <c>media_id</c> is withheld when its OWN sponsor is
+    /// currently paused, or when its sponsor also owns any spot among the first
+    /// <paramref name="window"/> entries of <paramref name="recentMediaIds"/> (the crosstalk/repeat-
+    /// sponsor guard — looked up by joining <paramref name="recentMediaIds"/> back through
+    /// <c>ad_spot.media_id</c>, never a separate rotation table). <c>IEnumerable.Take</c> on a
+    /// non-positive <paramref name="window"/> yields an empty slice (documented .NET behavior, no
+    /// separate clamp needed) — <c>window = 0</c> therefore excludes only paused-sponsor spots, and an
+    /// empty <paramref name="recentMediaIds"/> has that same effect regardless of
+    /// <paramref name="window"/>, exactly the interface's own remarks.
+    /// </summary>
+    public async Task<IReadOnlyList<long>> ListAiringExclusionsAsync(
+        IReadOnlyList<long> recentMediaIds, int window, CancellationToken ct)
+    {
+        var recentWindow = recentMediaIds.Take(window).ToArray();
+
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var ids = await conn.QueryAsync<long>(new CommandDefinition(
+            """
+            select a.media_id
+            from station.ad_spot a
+            join station.sponsor s on s.id = a.sponsor_id
+            where a.state = 'ready'::station.ad_state
+              and a.media_id is not null
+              and (
+                s.paused
+                or a.sponsor_id in (
+                  select a2.sponsor_id
+                  from station.ad_spot a2
+                  where a2.media_id = any(@recentWindow)
+                )
+              )
+            """,
+            new { recentWindow }, cancellationToken: ct));
+        return ids.AsList();
+    }
+
+    /// <summary>
+    /// <see cref="IAdSpotStore.StampJobAsync"/> (SPEC F174, F175; PLAN T432) — the
+    /// <see cref="RunGuardedTransitionAsync"/> "guarded UPDATE, then existence check disambiguates the
+    /// zero-row result" shape, narrowed to a job claim rather than a state transition: guarded on
+    /// <c>job_kind is null</c> rather than on <c>state</c>/<c>xmin</c>, and reporting
+    /// <see cref="AdSpotJobStampResult.Busy"/> (row exists, already claimed) instead of
+    /// <see cref="AdSpotWriteResult.Conflict"/> for the same "row exists but the guard didn't match"
+    /// case. Clears <c>job_error</c> in the SAME statement — a fresh claim never inherits a previous
+    /// attempt's failure text.
+    /// </summary>
+    public async Task<AdSpotJobStampOutcome> StampJobAsync(long id, string kind, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var row = await conn.QuerySingleOrDefaultAsync<AdSpotRow>(new CommandDefinition(
+            $"""
+            update station.ad_spot
+            set job_kind = @kind, job_started_at = now(), job_error = null
+            where id = @id and job_kind is null
+            returning {Columns}
+            """,
+            new { id, kind }, cancellationToken: ct));
+        if (row is not null) return new AdSpotJobStampOutcome(AdSpotJobStampResult.Stamped, ToAdSpot(row));
+
+        var exists = await conn.ExecuteScalarAsync<bool>(new CommandDefinition(
+            "select exists(select 1 from station.ad_spot where id = @id)", new { id }, cancellationToken: ct));
+        return new AdSpotJobStampOutcome(
+            exists ? AdSpotJobStampResult.Busy : AdSpotJobStampResult.NotFound, null);
+    }
+
+    /// <summary><see cref="IAdSpotStore.ClearJobAsync"/> (SPEC F174, F175; PLAN T432) — total by id,
+    /// unconditional on the current <c>job_kind</c> (the interface's own "clearing an already-clear job
+    /// is a harmless no-op" contract): the <c>WHERE</c> only tests <c>id = @id</c>, so a row with no
+    /// claim in place is affected too, harmlessly re-writing the SAME null <c>job_kind</c>/
+    /// <c>job_started_at</c> it already carried. Mirrors <see cref="MarkReadyAsync"/>/
+    /// <see cref="MarkFailedAsync"/>'s own total posture.</summary>
+    public async Task<bool> ClearJobAsync(long id, string? error, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var affected = await conn.ExecuteAsync(new CommandDefinition(
+            """
+            update station.ad_spot
+            set job_kind = null, job_started_at = null, job_error = @error
+            where id = @id
+            """,
+            new { id, error }, cancellationToken: ct));
+        return affected == 1;
+    }
+
+    /// <summary><see cref="IAdSpotStore.StampPreviewAsync"/> (SPEC F174; PLAN T432) — unconditional by
+    /// id, no state guard (the interface's own remarks: a preview may be re-rendered regardless of the
+    /// spot's current <see cref="Domain.AdState"/>). Mirrors <see cref="ClearJobAsync"/>'s own total
+    /// shape.</summary>
+    public async Task<bool> StampPreviewAsync(long id, string path, string key, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var affected = await conn.ExecuteAsync(new CommandDefinition(
+            """
+            update station.ad_spot
+            set preview_path = @path, preview_key = @key, preview_at = now()
+            where id = @id
+            """,
+            new { id, path, key }, cancellationToken: ct));
+        return affected == 1;
+    }
+
+    /// <summary>
+    /// <see cref="IAdSpotStore.ClaimForPromotionAsync"/> (SPEC F174.5; PLAN T432) — a guarded
+    /// <c>UPDATE ... RETURNING</c>, the SAME shape <see cref="ApproveAsync"/> uses one transition over,
+    /// but WITHOUT <see cref="RunGuardedTransitionAsync"/>'s own existence-check disambiguation: the
+    /// interface's own remarks collapse "not <see cref="Domain.AdState.Approved"/>" and "stale
+    /// <paramref name="expectedVersion"/>" into one outcome on purpose (no caller needs to tell the two
+    /// apart), so a zero-row result here is simply <see langword="null"/>, no second round trip.
+    /// </summary>
+    public async Task<AdSpot?> ClaimForPromotionAsync(long id, string expectedVersion, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var row = await conn.QuerySingleOrDefaultAsync<AdSpotRow>(new CommandDefinition(
+            $"""
+            update station.ad_spot
+            set state = 'rendering'::station.ad_state, state_changed_at = now()
+            where id = @id and state = 'approved'::station.ad_state and xmin = @expectedVersion::xid
+            returning {Columns}
+            """,
+            new { id, expectedVersion }, cancellationToken: ct));
+        return row is null ? null : ToAdSpot(row);
+    }
+
+    /// <summary>
     /// The one ceiling every unbounded-by-caller read in this file shares — <see cref="ClampPaging"/>'s
     /// own cap and <see cref="ListReadyOlderThanAsync"/>'s own <c>limit</c> both read this constant
     /// rather than repeating the literal, so the two can never drift apart.
@@ -483,10 +624,11 @@ sealed class AdSpotRepository(Lazy<NpgsqlDataSource> dataSource) : IAdSpotStore
         (limit <= 0 ? 1 : Math.Min(limit, MaxUnpagedRows), Math.Max(0, offset));
 
     static AdSpot ToAdSpot(AdSpotRow row) => new(
-        row.Id, row.Brand, row.Title, row.Brief, row.Script, ParseSource(row.Source), row.PackSlug,
-        row.SpotSeconds, row.VoicePlan, row.BedMediaId, ParseState(row.State), row.FailReason,
+        row.Id, row.SponsorId, row.SponsorName, row.Title, row.Brief, row.Script, ParseSource(row.Source),
+        row.PackSlug, row.SpotSeconds, row.VoicePlan, row.BedMediaId, ParseState(row.State), row.FailReason,
         row.MediaId, row.Generation, row.CreatedAt, row.StateChangedAt, row.RenderedAt, row.RetiredAt,
-        row.Version);
+        row.Version, row.PreviewPath, row.PreviewAt, row.PreviewKey, row.JobKind, row.JobStartedAt,
+        row.JobError);
 
     /// <summary>A row read back from <c>station.ad_state</c> whose text does not round-trip through
     /// <see cref="AdStateTokens"/> is a data-integrity bug, not a caller error — the same throwing

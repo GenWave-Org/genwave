@@ -31,9 +31,9 @@ public static class FeatureAdSpotStampBedSql
         const long FirstBedMediaId = 501;
         const long SecondBedMediaId = 777;
 
-        static NewAdSpot Draft(long? bedMediaId = null) =>
+        static NewAdSpot Draft(long sponsorId, long? bedMediaId = null) =>
             new(
-                "Bramble & Fitch", "Draft spot", Brief: "A cozy hardware shop", Script: null, AdSource.Llm,
+                sponsorId, "Draft spot", Brief: "A cozy hardware shop", Script: null, AdSource.Llm,
                 PackSlug: null, SpotSeconds: 30, VoicePlan: null, bedMediaId, InitialState: AdState.Approved,
                 FailReason: null);
 
@@ -41,9 +41,10 @@ public static class FeatureAdSpotStampBedSql
         public async Task ANullBedOnARenderingRowIsStamped()
         {
             // Given a spot claimed into Rendering with no bed yet...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            await repo.CreateAsync(Draft(), CancellationToken.None);
+            await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
             var claimed = (await repo.ClaimNextApprovedAsync(CancellationToken.None))!;
             Assert.Null(claimed.BedMediaId);
 
@@ -60,9 +61,10 @@ public static class FeatureAdSpotStampBedSql
         {
             // Given a spot claimed into Rendering that already carries a bed (an owner's own explicit
             // pick)...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            await repo.CreateAsync(Draft(FirstBedMediaId), CancellationToken.None);
+            await repo.CreateAsync(Draft(sponsorId, FirstBedMediaId), CancellationToken.None);
             var claimed = (await repo.ClaimNextApprovedAsync(CancellationToken.None))!;
             Assert.Equal(FirstBedMediaId, claimed.BedMediaId);
 
@@ -78,9 +80,10 @@ public static class FeatureAdSpotStampBedSql
         public async Task ARowNotCurrentlyRenderingIsNeverStamped()
         {
             // Given an approved spot never claimed into Rendering...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            var spot = await repo.CreateAsync(Draft(), CancellationToken.None);
+            var spot = await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
 
             // When a stamp is attempted against it directly...
             var stamped = await repo.StampBedIfNullAsync(spot.Id, FirstBedMediaId, CancellationToken.None);

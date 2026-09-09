@@ -27,11 +27,36 @@ using System.Text.Json;
 /// left open because nothing upstream enforces it: <see cref="MaxBriefsPerPack"/> (100 — an
 /// operator-curated brand universe is dozens, not thousands, the SAME order of magnitude
 /// <c>AdBriefRepository.MaxUnpagedRows</c>'s own remarks assume for the whole station);
-/// <see cref="MaxBrandLength"/> (200 — a brand name, never a sentence); <see cref="MaxHintLength"/>
+/// <see cref="MaxBrandLength"/> (120 — round-3 review finding R2: a manifest brand becomes a
+/// <c>station.sponsor.name</c> row via <c>ISponsorStore.UpsertPackSponsorsAsync</c>, so this parser's
+/// own cap MUST match db/46's <c>sponsor_name_check</c> CHECK
+/// (<c>char_length(trim(name)) between 1 and 120</c>) — a longer value here would parse clean and
+/// then fail at the DB with an opaque 23514, rather than a clear 400 naming the field at the trust
+/// boundary where it belongs); <see cref="MaxHintLength"/>
 /// (500 — a generous one-paragraph prompt hint, shared by <see cref="CatalogAdPackBrief.Premise"/>/
 /// <see cref="CatalogAdPackBrief.Tone"/>/<see cref="CatalogAdPackBrief.Structure"/>, which are all
 /// the SAME free-text-hint shape at the wire — no reason to keep three independently-drifting
 /// numbers for one field class).
+/// </para>
+///
+/// <para>
+/// <b>NO REPEATED BRAND, ORDINAL (round-4 review blocker — a same-manifest regression HEAD never
+/// caught).</b> Two briefs whose <see cref="CatalogAdPackBrief.Brand"/> compare ordinal-equal fail the
+/// WHOLE manifest, the same all-or-nothing posture as every cap above — because
+/// <c>ISponsorStore.UpsertPackSponsorsAsync</c> folds an exact-duplicate brand string onto ONE sponsor
+/// row, yet <see cref="Api.AdPackController.Install"/> would still hand
+/// <c>IAdBriefStore.UpsertAllAsync</c> TWO separate brief writes for that one sponsor id — the second
+/// silently overwriting the first's own premise under <c>station.ad_brief</c>'s own
+/// <c>(pack_slug, sponsor_id)</c> conflict target, and the install response's own brand-per-sponsor
+/// projection would carry that sponsor id twice. Deliberately ORDINAL, narrower than a FOLDED
+/// comparison: two DIFFERENT brand spellings that merely fold onto the same sponsor identity (casing,
+/// whitespace) are NOT this parser's job to refuse — that is
+/// <c>SponsorPackWriteResult.NamesCollide</c>'s own arm one seam under here, resolved at WRITE time
+/// against the fold, never the literal text this parser sees. This is the SAME rule the catalog side
+/// already enforces before a pack ever ships (<c>ad-pack-duplicate-brand</c>, <c>genwave-catalog</c>'s
+/// own <c>validate.py</c> KindSpec, PLAN T407/catalog#74) — this parser is simply the app's own
+/// re-assertion of that twin rule at the ACTUAL trust boundary, since nothing upstream of this method
+/// is guaranteed to have enforced it.
 /// </para>
 ///
 /// <para>
@@ -47,8 +72,9 @@ public static class CatalogAdPackManifestSerializer
     /// <summary>See this type's own class remarks for why this cap exists and how its magnitude was chosen.</summary>
     public const int MaxBriefsPerPack = 100;
 
-    /// <summary>See this type's own class remarks — a brand name, never a sentence.</summary>
-    public const int MaxBrandLength = 200;
+    /// <summary>See this type's own class remarks — matches db/46's <c>sponsor_name_check</c> CHECK,
+    /// since a manifest brand becomes a <c>station.sponsor.name</c> row.</summary>
+    public const int MaxBrandLength = 120;
 
     /// <summary>See this type's own class remarks — shared by every optional prompt-hint field
     /// (<see cref="CatalogAdPackBrief.Premise"/>/<see cref="CatalogAdPackBrief.Tone"/>/
@@ -92,9 +118,15 @@ public static class CatalogAdPackManifestSerializer
             return null;
 
         var briefs = new List<CatalogAdPackBrief>(rawBriefs.Count);
+        // Ordinal — see this type's own "NO REPEATED BRAND, ORDINAL" class remarks for why exact
+        // duplicates fail the whole manifest here while a merely FOLD-equal pair does not.
+        var seenBrands = new HashSet<string>(rawBriefs.Count, StringComparer.Ordinal);
         foreach (var rawBrief in rawBriefs)
         {
             if (TryParseBrief(rawBrief) is not { } brief)
+                return null;
+
+            if (!seenBrands.Add(brief.Brand))
                 return null;
 
             briefs.Add(brief);

@@ -6,19 +6,19 @@ using GenWave.Core.Domain;
 namespace GenWave.MediaLibrary.Station;
 
 /// <summary>
-/// <see cref="IAdBriefStore"/>'s one implementation (SPEC F159.1, F162.1, F162.2; STORY-389,
-/// STORY-392; PLAN T398, T403b) over <c>station.ad_brief</c> — connection-per-call, mirrors
-/// <see cref="AdSpotRepository"/>'s own <see cref="Lazy{T}"/> data-source discipline one table over.
-/// No column here needs a raw-text/enum split the way <see cref="AdSpotRow"/> does, so
-/// <see cref="AdBrief"/> (the Core-level record itself) is Dapper's own projection target — no
-/// separate internal row type.
+/// <see cref="IAdBriefStore"/>'s one implementation (SPEC F159.1, F162.1, F162.2, F171.6; STORY-389,
+/// STORY-392, STORY-406; PLAN T398, T403b, T432) over <c>station.ad_brief</c> —
+/// connection-per-call, mirrors <see cref="AdSpotRepository"/>'s own <see cref="Lazy{T}"/>
+/// data-source discipline one table over. No column here needs a raw-text/enum split the way
+/// <see cref="AdSpotRow"/> does, so <see cref="AdBrief"/> (the Core-level record itself) is
+/// Dapper's own projection target — no separate internal row type.
 /// </summary>
 sealed class AdBriefRepository(Lazy<NpgsqlDataSource> dataSource) : IAdBriefStore
 {
     /// <summary>Every column <see cref="AdBrief"/> projects — one shared literal so
     /// <see cref="ListAllAsync"/>/<see cref="CreateOwnerAsync"/>/<see cref="SetEnabledAsync"/> can
     /// never drift from <see cref="UpsertAsync"/>'s own column list.</summary>
-    const string Columns = "id, pack_slug, brand, premise, tone, structure, enabled, created_at";
+    const string Columns = "id, pack_slug, sponsor_id, premise, tone, structure, enabled, created_at";
 
     /// <summary>Defensive ceiling on <see cref="ListAllAsync"/>'s otherwise-unpaged read — the SAME
     /// <c>AdSpotRepository.MaxUnpagedRows</c> value, one table over: the Briefs tab is an
@@ -28,59 +28,84 @@ sealed class AdBriefRepository(Lazy<NpgsqlDataSource> dataSource) : IAdBriefStor
     const int MaxUnpagedRows = 1000;
 
     /// <summary>
-    /// The <c>on conflict</c> update clause EVERY upsert path on this class shares — deliberately
-    /// omits <c>enabled</c> (T405 review RULING, corrects the T398-shipped shape): <c>enabled</c> is
-    /// set ONLY by the INSERT half's own values list (a brand-new row), never touched again by an
-    /// UPDATE — see <see cref="IAdBriefStore.UpsertAsync"/>'s own remarks for the full PRESERVE-on-
-    /// conflict contract this enforces. One shared literal so <see cref="UpsertAsync"/> and
-    /// <see cref="UpsertAllAsync"/> can never drift apart on this rule.
+    /// The <c>on conflict</c> update clause <see cref="UpsertAsync"/>'s own <c>ON CONFLICT (sponsor_id,
+    /// premise_key)</c> upsert uses — deliberately omits <c>enabled</c> (T405 review RULING, corrects
+    /// the T398-shipped shape): <c>enabled</c> is set ONLY by the INSERT half's own values list (a
+    /// brand-new row), never touched again by an UPDATE — see <see cref="IAdBriefStore.UpsertAsync"/>'s
+    /// own remarks for the full PRESERVE-on-conflict contract this enforces. <see cref="UpsertAllAsync"/>
+    /// carries the SAME never-touch-<c>enabled</c>-on-update rule but can't share this literal —
+    /// premise/tone/structure there are updated by plain <c>@parameter</c>, not Postgres' own
+    /// <c>excluded.</c> pseudo-table, since that method's own existing-row match (see its remarks) is
+    /// never an <c>ON CONFLICT</c> in the first place.
     /// </summary>
     const string ConflictUpdateSet = "premise = excluded.premise, tone = excluded.tone, structure = excluded.structure";
 
     /// <summary>
     /// <see cref="IAdBriefStore.UpsertAsync"/> — one round trip IS the check (the
     /// <c>Catalog.ArtworkTokenRepository</c>/<c>AnnouncementRepository.InsertAsync</c> lazy-upsert
-    /// precedent): <c>on conflict (pack_slug, brand)</c> infers <c>station.ad_brief</c>'s own
-    /// <c>ad_brief_pack_slug_brand_key</c> constraint (<c>UNIQUE NULLS NOT DISTINCT</c> — inference
-    /// works the same regardless of that modifier), so a second call for the SAME
-    /// <c>(pack_slug, brand)</c> pair — including two owner-authored calls for the same brand, both
-    /// carrying a NULL <c>pack_slug</c> — updates the existing row in place rather than raising
-    /// 23505 or forking a duplicate. <c>created_at</c> is never in the <c>SET</c> list, so the update
-    /// half leaves it untouched — and, as of the T405 review ruling, neither is <c>enabled</c> (see
+    /// precedent): <c>on conflict (sponsor_id, premise_key)</c> infers <c>station.ad_brief</c>'s own
+    /// <c>ad_brief_sponsor_id_premise_key</c> constraint (db/46 step 9; PLAN T432 retargets this from
+    /// the pre-sponsors <c>(pack_slug, brand)</c> key) — <c>premise_key</c> is the STORED fold of
+    /// <c>premise</c> (db/06), so two calls whose premise folds identical for the SAME
+    /// <paramref name="sponsorId"/> collapse to one row. That constraint is a PLAIN <c>UNIQUE</c>, not
+    /// <c>NULLS NOT DISTINCT</c> (db/06's own remarks on <c>ad_brief_sponsor_id_premise_key</c>): a
+    /// <see langword="null"/>/blank <paramref name="premise"/> folds to a <see langword="null"/>
+    /// <c>premise_key</c>, and Postgres never treats two <see langword="null"/>s as conflicting, so a
+    /// SECOND angle-less call always inserts a NEW row rather than updating — SPEC F171.6's own "a
+    /// NULL premise is no angle" carve-out, enforced at the constraint, not by this method.
+    /// <c>created_at</c> is never in the <c>SET</c> list, so the update half leaves it untouched —
+    /// and, as of the T405 review ruling, neither is <c>enabled</c> (see
     /// <see cref="ConflictUpdateSet"/>'s own remarks): <paramref name="enabled"/> only ever lands on
     /// the INSERT half's own values list, so a second call's <paramref name="enabled"/> argument is
     /// silently irrelevant to an EXISTING row — the interface's own remarks name why.
     /// </summary>
     public async Task<AdBrief> UpsertAsync(
-        string? packSlug, string brand, string? premise, string? tone, string? structure, bool enabled,
+        string? packSlug, long sponsorId, string? premise, string? tone, string? structure, bool enabled,
         CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
         return await conn.QuerySingleAsync<AdBrief>(new CommandDefinition(
             $"""
-            insert into station.ad_brief (pack_slug, brand, premise, tone, structure, enabled)
-            values (@packSlug, @brand, @premise, @tone, @structure, @enabled)
-            on conflict (pack_slug, brand) do update
+            insert into station.ad_brief (pack_slug, sponsor_id, premise, tone, structure, enabled)
+            values (@packSlug, @sponsorId, @premise, @tone, @structure, @enabled)
+            on conflict (sponsor_id, premise_key) do update
             set {ConflictUpdateSet}
             returning {Columns}
             """,
-            new { packSlug, brand, premise, tone, structure, enabled },
+            new { packSlug, sponsorId, premise, tone, structure, enabled },
             cancellationToken: ct));
     }
 
     /// <summary>
     /// <see cref="IAdBriefStore.UpsertAllAsync"/> — ONE connection, ONE <see cref="NpgsqlTransaction"/>
-    /// wrapping one upsert round trip per declared brief (the <see cref="AvatarPackRepository.UpsertAsync"/>/
-    /// <see cref="FontPackRepository.UpsertAsync"/> "single-transaction multi-write install" precedent,
-    /// applied here per-row rather than delete-then-reinsert — a brief's own <c>enabled</c> flag is
-    /// exactly the per-row state a blanket delete-then-reinsert would destroy, the reason this method
-    /// upserts each brief individually inside the shared transaction instead). A failure on ANY brief
-    /// (the connection never reaches <see cref="NpgsqlTransaction.CommitAsync"/>) rolls back every
-    /// row this call would otherwise have written — never a partially-installed pack. Every INSERT
-    /// half hardcodes <c>enabled = true</c> (a brand-new pack brief is always born live, SPEC
-    /// F162.2) — never a per-brief parameter, since <see cref="AdBriefUpsertInput"/> deliberately
-    /// carries none (that record's own remarks); the SAME <see cref="ConflictUpdateSet"/>
-    /// <see cref="UpsertAsync"/> shares keeps an EXISTING row's own <c>enabled</c> untouched.
+    /// wrapping one <c>ON CONFLICT DO UPDATE</c> round trip per declared brief (round-3 finding R1 —
+    /// replaces this method's own former read-then-write <c>existing</c> CTE, now that db/46 step 9b
+    /// carries a real <c>(pack_slug, sponsor_id) WHERE pack_slug IS NOT NULL</c> partial unique index
+    /// for the conflict target to name). Applied per-row rather than delete-then-reinsert — a brief's
+    /// own <c>enabled</c> flag is exactly the per-row state a blanket delete-then-reinsert would
+    /// destroy, the reason this method upserts each brief individually inside the shared transaction
+    /// instead (the <see cref="AvatarPackRepository.UpsertAsync"/>/<see cref="FontPackRepository.UpsertAsync"/>
+    /// "single-transaction multi-write install" precedent). A failure on ANY brief (the connection
+    /// never reaches <see cref="NpgsqlTransaction.CommitAsync"/>) rolls back every row this call would
+    /// otherwise have written — never a partially-installed pack.
+    ///
+    /// <para>
+    /// Matches an EXISTING row on <c>(pack_slug, sponsor_id)</c> — deliberately NOT
+    /// <see cref="UpsertAsync"/>'s own <c>ON CONFLICT (sponsor_id, premise_key)</c>: a pack's declared
+    /// brief for one brand is ONE slot across reinstalls (T405 review F2 — "content refreshes,
+    /// operator state persists" on the SAME row), and <c>premise_key</c> is <paramref name="premise"/>
+    /// text folded, so keying the match on it would make an ordinary premise-copy edit look like a
+    /// BRAND-NEW brief and duplicate the row instead of refreshing it — <c>ad_brief_pack_slug_sponsor_id_key</c>
+    /// is what enforces this identity now, a partial index rather than a plain constraint SPECIFICALLY
+    /// because an owner-authored brief (<c>pack_slug is null</c>) legitimately keeps several premises
+    /// per sponsor (that's what <c>ad_brief_sponsor_id_premise_key</c> scopes), while a PACK brief caps
+    /// at one row per sponsor. Every INSERT half hardcodes <c>enabled = true</c> (a brand-new pack
+    /// brief is always born live, SPEC F162.2) — never a per-brief parameter, since
+    /// <see cref="AdBriefUpsertInput"/> deliberately carries none (that record's own remarks); the
+    /// UPDATE half never touches <c>enabled</c> at all, the SAME PRESERVE-on-conflict rule
+    /// <see cref="ConflictUpdateSet"/>'s own remarks document one method over — reused verbatim here,
+    /// since both methods' UPDATE half sets the identical three columns.
+    /// </para>
     /// </summary>
     public async Task<IReadOnlyList<AdBrief>> UpsertAllAsync(
         string packSlug, IReadOnlyList<AdBriefUpsertInput> briefs, CancellationToken ct)
@@ -93,13 +118,13 @@ sealed class AdBriefRepository(Lazy<NpgsqlDataSource> dataSource) : IAdBriefStor
         {
             var row = await conn.QuerySingleAsync<AdBrief>(new CommandDefinition(
                 $"""
-                insert into station.ad_brief (pack_slug, brand, premise, tone, structure, enabled)
-                values (@packSlug, @brand, @premise, @tone, @structure, true)
-                on conflict (pack_slug, brand) do update
+                insert into station.ad_brief (pack_slug, sponsor_id, premise, tone, structure, enabled)
+                values (@packSlug, @sponsorId, @premise, @tone, @structure, true)
+                on conflict (pack_slug, sponsor_id) where pack_slug is not null do update
                 set {ConflictUpdateSet}
                 returning {Columns}
                 """,
-                new { packSlug, brief.Brand, brief.Premise, brief.Tone, brief.Structure },
+                new { packSlug, sponsorId = brief.SponsorId, brief.Premise, brief.Tone, brief.Structure },
                 transaction: tx,
                 cancellationToken: ct));
             results.Add(row);
@@ -153,28 +178,30 @@ sealed class AdBriefRepository(Lazy<NpgsqlDataSource> dataSource) : IAdBriefStor
     /// INSERT itself (never trusting a caller-supplied value the way <see cref="UpsertAsync"/> does —
     /// this member exists exactly BECAUSE a caller must never be able to silently update an existing
     /// owner brief the way <see cref="UpsertAsync"/> would), <c>on conflict ... do nothing</c> against
-    /// the SAME <c>ad_brief_pack_slug_brand_key</c> index <see cref="UpsertAsync"/> targets — since
-    /// every row this method ever inserts carries a NULL <c>pack_slug</c>, the NULLS-NOT-DISTINCT
-    /// unique index can only ever collide with an EXISTING owner brief for the same
-    /// <paramref name="brand"/> (a pack brief's own non-null, distinct <c>pack_slug</c> never
-    /// collides) — exactly the cap PLAN T403b/SPEC F159.1's rider ratifies, and exactly the
-    /// coexistence <c>Story389_AdSpotLifecycleStore.AnOwnerBriefAndAPackBriefForTheSameBrandAreTwoSeparateRows</c>
-    /// already pins at the constraint level. <c>DO NOTHING</c> + <c>QuerySingleOrDefaultAsync</c> is
-    /// the one-round-trip conflict check: a <see langword="null"/> result means the INSERT hit the
-    /// conflict branch and inserted nothing, which the caller reads as "cap already holds".
+    /// the SAME <c>ad_brief_sponsor_id_premise_key</c> index <see cref="UpsertAsync"/> targets — a
+    /// second call for the SAME <paramref name="sponsorId"/>/folded <paramref name="premise"/> pair
+    /// (pack-owned or owner-authored — <c>pack_slug</c> plays no part in this constraint, PLAN T432)
+    /// collides and inserts nothing; the SAME <see langword="null"/>-premise carve-out
+    /// <see cref="UpsertAsync"/>'s own remarks document applies here too (an angle-less create never
+    /// collides with an earlier angle-less one). <c>DO NOTHING</c> + <c>QuerySingleOrDefaultAsync</c>
+    /// is the one-round-trip conflict check: a <see langword="null"/> result means the INSERT hit the
+    /// conflict branch and inserted nothing, which the caller reads as "the key already holds" —
+    /// <see cref="IAdBriefStore.CreateOwnerAsync"/>'s own words for this exact outcome (round-3 finding
+    /// R4 — corrects this method's former "cap already holds" phrasing, which named the wrong concept:
+    /// nothing here is a numeric ceiling, it's a duplicate-angle conflict).
     /// </summary>
     public async Task<AdBrief?> CreateOwnerAsync(
-        string brand, string? premise, string? tone, string? structure, bool enabled, CancellationToken ct)
+        long sponsorId, string? premise, string? tone, string? structure, bool enabled, CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
         return await conn.QuerySingleOrDefaultAsync<AdBrief?>(new CommandDefinition(
             $"""
-            insert into station.ad_brief (pack_slug, brand, premise, tone, structure, enabled)
-            values (null, @brand, @premise, @tone, @structure, @enabled)
-            on conflict (pack_slug, brand) do nothing
+            insert into station.ad_brief (pack_slug, sponsor_id, premise, tone, structure, enabled)
+            values (null, @sponsorId, @premise, @tone, @structure, @enabled)
+            on conflict (sponsor_id, premise_key) do nothing
             returning {Columns}
             """,
-            new { brand, premise, tone, structure, enabled },
+            new { sponsorId, premise, tone, structure, enabled },
             cancellationToken: ct));
     }
 

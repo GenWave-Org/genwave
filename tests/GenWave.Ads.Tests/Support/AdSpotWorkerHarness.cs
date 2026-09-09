@@ -25,6 +25,7 @@ internal static class AdSpotWorkerHarness
         AdSpotLifecycleGuardianService Guardian,
         FakeAdSpotLifecycleStore Store,
         FakeAdBriefStore Briefs,
+        FakeSponsorStore Sponsors,
         FakeOnAirRenderSignal Gate,
         FakeCastSegmentAuthor Author,
         FakeTimeProvider TimeProvider,
@@ -83,6 +84,10 @@ internal static class AdSpotWorkerHarness
         var timeProvider = new FakeTimeProvider(now);
         var store = new FakeAdSpotLifecycleStore();
         var briefs = new FakeAdBriefStore();
+        var sponsors = new FakeSponsorStore(id => briefs.SponsorIdsByBrand
+            .Where(pair => pair.Value == id)
+            .Select(pair => pair.Key)
+            .FirstOrDefault());
         var gate = new FakeOnAirRenderSignal();
         var author = new FakeCastSegmentAuthor();
         var adminLookup = new FakeAdminMediaLookup();
@@ -126,7 +131,7 @@ internal static class AdSpotWorkerHarness
             new NoOpLogger<AdScriptWriter>(), timeProvider);
 
         var worker = new AdSpotWorker(
-            store, briefs, scriptWriter, renderService, durationEstimator, audiencePosture, catalogWriter,
+            store, briefs, sponsors, scriptWriter, renderService, durationEstimator, audiencePosture, catalogWriter,
             adminLookup, bedPool, libraries, gate, stationIdentity, adsOptions, llmOptions, configuration,
             timeProvider, workerLogger ?? new NoOpLogger<AdSpotWorker>());
 
@@ -134,7 +139,7 @@ internal static class AdSpotWorkerHarness
             store, adsOptions, timeProvider, new NoOpLogger<AdSpotLifecycleGuardianService>());
 
         return new Harness(
-            worker, guardian, store, briefs, gate, author, timeProvider, adsOptions, catalogWriter, adminLookup,
-            bedPool, handler, adsLibraryId);
+            worker, guardian, store, briefs, sponsors, gate, author, timeProvider, adsOptions, catalogWriter,
+            adminLookup, bedPool, handler, adsLibraryId);
     }
 }
