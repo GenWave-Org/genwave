@@ -1,8 +1,7 @@
-// STORY-431 — Settings, options, laws, and the release (SPEC F176.1–F176.4 · PLAN T433)
+// STORY-431 — Settings, options, laws, and the release (SPEC F176.1–F176.4 · PLAN T433/T453)
 //
-// BDD specification — xUnit. This file carries T433's own five ACs (AC1–AC4, AC7); AC5 (L10) and
-// AC6 (Abstractions package diff) are T443/T453's — ScenarioAbstractionsUnchanged stays a pending
-// stub here on purpose.
+// BDD specification — xUnit. This file carries T433's own five ACs (AC1–AC4, AC7); AC5 (L10) is
+// T443's, over in GenWave.Architecture.Tests. AC6 is T453's, implemented below.
 //
 // AC1's key-list parity is Story151_SeededDefaults.cs's own FeatureSettingsHelpKeysParity fact's
 // job; this file's own facts instead pin the three things only THIS task's wording edit can break:
@@ -12,7 +11,10 @@
 // prove production wiring, not a hand-built options chain. AC4 drives the real SettingsController
 // the Story043 FeatureStationSettingsApi shape drives, in-process with fakes (no HTTP/DB needed:
 // a non-allowlisted key is rejected before either the store or the DB is ever touched). AC7 reads
-// DEPLOYMENT.md from the repo root the Story174_PublicTopologyDocs way.
+// DEPLOYMENT.md from the repo root the Story174_PublicTopologyDocs way. AC6 diffs the live-built
+// GenWave.Abstractions assembly's public surface (GenWave.Host.Tests.Support.PublicSurface.Of)
+// against the committed 5.7.0 baseline — proving a release that never touched
+// src/GenWave.Abstractions shipped a byte-identical package surface.
 
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Hosting;
@@ -27,9 +29,11 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using GenWave.Ads;
+using GenWave.Core.Abstractions;
 using GenWave.Host.Api;
 using GenWave.Host.Configuration;
 using GenWave.Host.Tests.Fakes;
+using GenWave.Host.Tests.Support;
 
 namespace GenWave.Host.Tests.Specs;
 
@@ -206,9 +210,76 @@ public static class FeatureSponsorSettingsOptionsLawsAndTheRelease
 
     public sealed class ScenarioAbstractionsUnchanged
     {
+        static string BaselinePath() =>
+            Path.Combine(AppContext.BaseDirectory, "Fixtures", "abstractions-5.7.0-surface.txt");
+
+        /// <summary>
+        /// The committed baseline's own lines, minus its first-line provenance comment (see
+        /// <c>Fixtures/abstractions-5.7.0-surface.txt</c>'s own header).
+        /// </summary>
+        static IReadOnlyList<string> BaselineLines()
+        {
+            var path = BaselinePath();
+            Assert.True(File.Exists(path), $"missing baseline fixture at {path} — is it CopyToOutputDirectory in the csproj?");
+            return File.ReadAllLines(path).Skip(1).ToList();
+        }
+
+        // AC6 (SPEC F176.4): a release that never touched src/GenWave.Abstractions must ship a
+        // byte-identical package public surface. PublicSurface.Of enumerates the LIVE-built
+        // Abstractions assembly (any exported type reaches the same assembly, so IAdSpotSource is
+        // just a convenient anchor) the same way the baseline was generated from the published
+        // 5.7.0 nupkg's own dll — a real Abstractions edit changes what this Fact reads, not a
+        // hand-maintained expectation. PLAN T453 ruling: a legitimate Abstractions bump regenerates
+        // Fixtures/abstractions-5.7.0-surface.txt from the newly published package in the same PR
+        // that makes the bump, rather than this Fact ever being hand-edited to tolerate a diff.
         [Fact]
         public void ThePackageSurfaceDiffVs570IsEmpty()
-            => Assert.Fail("pending: T433 T453 package diff — AC6");
+        {
+            var baseline = BaselineLines();
+            Assert.True(baseline.Count > 20, $"the baseline fixture has only {baseline.Count} lines — too small to be a real enumeration.");
+
+            var current = PublicSurface.Of(typeof(IAdSpotSource).Assembly);
+
+            var added = ExcessOf(current, baseline);
+            var removed = ExcessOf(baseline, current);
+
+            if (added.Count == 0 && removed.Count == 0)
+                return;
+
+            var message = string.Join(
+                Environment.NewLine,
+                new[] { "GenWave.Abstractions public surface differs from the 5.7.0 baseline:" }
+                    .Concat(added.Select(l => $"+ {l}"))
+                    .Concat(removed.Select(l => $"- {l}")));
+            Assert.Fail(message);
+        }
+
+        /// <summary>
+        /// The lines present in <paramref name="from"/> more times than in
+        /// <paramref name="than"/> — a count-aware (multiset) difference, not a set difference, so
+        /// a change in how many times an identical line occurs (e.g. an overload that would
+        /// otherwise render the same line twice) can never be masked by de-duplication. Ordinally
+        /// sorted, one entry per excess occurrence.
+        /// </summary>
+        static List<string> ExcessOf(IReadOnlyList<string> from, IReadOnlyList<string> than)
+        {
+            var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (var line in than)
+                counts[line] = counts.GetValueOrDefault(line) + 1;
+
+            var excess = new List<string>();
+            foreach (var line in from)
+            {
+                var remaining = counts.GetValueOrDefault(line);
+                if (remaining > 0)
+                    counts[line] = remaining - 1;
+                else
+                    excess.Add(line);
+            }
+
+            excess.Sort(StringComparer.Ordinal);
+            return excess;
+        }
     }
 
     // ---------------------------------------------------------------------
