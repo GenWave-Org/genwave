@@ -9,4 +9,9 @@ namespace GenWave.Host.Api;
 /// <see cref="PersonaRequest"/>'s own all-nullable shape, so the controller produces a typed 400 for a
 /// blank/missing name instead of an ASP.NET model-binder 400.
 /// </summary>
-public sealed record ShowRequest(string? Name, string? Tagline, string? Flavor);
+/// <param name="SponsorId">SPEC F175.1 (STORY-430, PLAN T449) — a full replace, the same posture as
+/// <see cref="Tagline"/>/<see cref="Flavor"/>: omitted or explicit <c>null</c> both clear any sponsor the
+/// show currently carries. A non-null value that names no sponsor is 404 <c>sponsor_not_found</c>
+/// (<see cref="ShowsController.Create"/>/<see cref="ShowsController.Update"/>), checked before either
+/// write so a dangling id never surfaces as an unhandled foreign-key violation.</param>
+public sealed record ShowRequest(string? Name, string? Tagline, string? Flavor, long? SponsorId = null);

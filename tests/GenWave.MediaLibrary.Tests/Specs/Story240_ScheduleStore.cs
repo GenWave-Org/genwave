@@ -32,18 +32,22 @@ public static class FeatureScheduleStore
     /// <c>station.segment_schedule</c> and rebuild it via db/27 ALONE (predates <c>show_id</c>
     /// entirely — see that file's own header, which already documents this exact hazard for
     /// Story304_AiredKindStamp.cs and names db/33 as the guard); Story305_ShowRepository.cs's own
-    /// in-place scenario drops <c>station.show</c>'s db/35 columns (no <c>tagline</c>/<c>flavor</c>).
-    /// Running BOTH idempotent migration scripts here, in order — db/33 first (restores
+    /// in-place scenario drops <c>station.show</c>'s db/35 columns (no <c>tagline</c>/<c>flavor</c>);
+    /// Story304_AiredKindStamp.cs's own in-place scenario drops <c>station.show</c> outright, which
+    /// also strips db/46's <c>sponsor_id</c> column the moment db/33 rebuilds a bare table (PLAN T449).
+    /// Running THREE idempotent migration scripts here, in order — db/33 first (restores
     /// <c>segment_schedule.show_id</c> and a bare <c>station.show</c> if either is missing), db/35
-    /// second (widens <c>station.show</c> to its full identity shape) — right before the repository's
-    /// own connection is even built, makes every fact in this file self-sufficient regardless of
-    /// xUnit's class scheduling, mirroring Story304's own "(re)running db/33 in its own Arrange before
-    /// every assertion" guard and Story305_ShowRepository.cs's own db/35 guard, combined.
+    /// second (widens <c>station.show</c> to its full identity shape), db/46 third (adds
+    /// <c>station.show.sponsor_id</c>, SPEC F175.1) — right before the repository's own connection is
+    /// even built, makes every fact in this file self-sufficient regardless of xUnit's class
+    /// scheduling, mirroring Story304's own "(re)running db/33 in its own Arrange before every
+    /// assertion" guard and Story305_ShowRepository.cs's own db/35 guard, combined.
     /// </summary>
     static ScheduleRepository Repo(DatabaseFixture db)
     {
         db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "33-show-and-segment-kind-migration.sh"));
         db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "35-show-identity-migration.sh"));
+        db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "46-sponsor-migration.sh"));
         return new ScheduleRepository(
             new Lazy<NpgsqlDataSource>(() => db.StationDataSource), NullLogger<ScheduleRepository>.Instance);
     }
@@ -308,6 +312,52 @@ public static class FeatureScheduleStore
 
             // Then the block's own Show is null — the LEFT JOIN finds no matching station.show row
             Assert.Null(Assert.Single(snapshot.Segments).Show);
+        }
+
+        [Fact]
+        public async Task ASponsoredShowLoadsWithItsPlainNameOnTheSchedule()
+        {
+            // SPEC F175.2 (STORY-430, PLAN T449): the on-air read this file's own ScheduleRepository
+            // owns is the one place a sponsor's name could leak into a show's on-air identity — proven
+            // here through the REAL Show -> sponsor_id -> ScheduleRepository projection chain, not a
+            // hand-built ShowSummary. Given a sponsor, and a show naming it (created through the real
+            // SponsorRepository/ShowRepository write paths — a nullable sponsor_id, unlike the block
+            // persona column ScheduleRepository itself has no writer for), referenced by one block.
+            await db.ResetShowAsync();
+            await db.ResetScheduleAsync();
+
+            var sponsorRepo = new SponsorRepository(new Lazy<NpgsqlDataSource>(() => db.StationDataSource));
+            var sponsorResult = await sponsorRepo.CreateOwnerAsync(
+                new NewSponsor(
+                    "Cascade Outfitters", Tagline: null, About: null, Phone: null, Address: null,
+                    Website: null, Tone: null),
+                CancellationToken.None);
+            var sponsor = Assert.IsType<SponsorWriteResult.Ok>(sponsorResult).Sponsor;
+
+            var showRepo = new ShowRepository(
+                new Lazy<NpgsqlDataSource>(() => db.StationDataSource), NullLogger<ShowRepository>.Instance);
+            var showResult = await showRepo.CreateAsync(
+                new ShowDraft("Cascade Morning Drive", SponsorId: sponsor.Id), CancellationToken.None);
+            var show = Assert.IsType<ShowWriteResult.Created>(showResult).Show;
+
+            await using (var conn = await db.StationDataSource.OpenConnectionAsync())
+                await conn.ExecuteAsync(
+                    """
+                    insert into station.segment_schedule (day_of_week, start_minute, end_minute, show_id)
+                    values (1, 540, 720, @showId)
+                    """,
+                    new { showId = show.Id });
+
+            var repo = Repo(db);
+
+            // When the week is loaded through the real repository (no fixture, no hand-built ShowSummary)
+            var snapshot = await repo.LoadWeekAsync(CancellationToken.None);
+
+            // Then the loaded show identity carries the show's plain name — ShowSummary has no sponsor
+            // member for a sponsor's name to have leaked through even if the projection tried.
+            var block = Assert.Single(snapshot.Segments);
+            Assert.NotNull(block.Show);
+            Assert.Equal("Cascade Morning Drive", block.Show.Name);
         }
     }
 

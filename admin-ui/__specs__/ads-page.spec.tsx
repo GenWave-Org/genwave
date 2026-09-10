@@ -877,6 +877,19 @@ describe("Feature: The Ads page", () => {
       await waitFor(() => expect(mockedRefresh).toHaveBeenCalled());
     });
 
+    it("leaves the add-brief sponsor picker's placeholder disabled and reading 'Choose a sponsor…', never a selectable 'No sponsor' (PLAN T449 ruling)", () => {
+      render(
+        <ConfirmDialogProvider>
+          <BriefsSection briefs={[]} sponsorId={null} sponsors={SPONSOR_REFS} />
+        </ConfirmDialogProvider>
+      );
+
+      const picker = screen.getByLabelText("Sponsor");
+      const placeholder = within(picker).getByText("Choose a sponsor…");
+      expect(placeholder).toBeDisabled();
+      expect(within(picker).queryByText("No sponsor")).not.toBeInTheDocument();
+    });
+
     it("remounts the add form fresh on a sponsor change, via the caller's own key (PLAN T447 ruling)", () => {
       const threeSponsors: readonly SponsorRefDto[] = [
         SPONSOR_ACME,

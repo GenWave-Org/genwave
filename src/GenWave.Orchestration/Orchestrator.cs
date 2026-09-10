@@ -1466,7 +1466,7 @@ public sealed class Orchestrator(
                     // needed. currentShow null (no show on the air) falls straight through to the
                     // ORIGINAL plain ident — byte-identical to F110.2, the required outside-show
                     // posture.
-                    Kick(currentShow is { } show ? stationIdReq with { ShowName = show.Name } : stationIdReq);
+                    Kick(ShowIdentRequest.For(stationIdReq, currentShow));
                     break;
                 }
 
@@ -1702,11 +1702,10 @@ public sealed class Orchestrator(
     /// </para>
     ///
     /// <para>
-    /// SPEC F117.2 (STORY-309, PLAN T250) — the StationId drain arm layers
-    /// <c>with { ShowName = show.Name }</c> onto this SAME shape for the templated show-line floor,
-    /// never a second request-builder: <see cref="SegmentRequest.ShowName"/> is additive and
-    /// <see langword="null"/> here, so every call site that does NOT layer it keeps producing the
-    /// original plain-ident request unchanged.
+    /// SPEC F117.2 (STORY-309, PLAN T250) — the StationId drain arm passes this SAME shape through
+    /// <see cref="ShowIdentRequest.For"/> for the templated show-line floor, never a second
+    /// request-builder: <see cref="SegmentRequest.ShowName"/> is additive and <see langword="null"/>
+    /// here, so a null on-air show keeps producing the original plain-ident request unchanged.
     /// </para>
     /// </summary>
     SegmentRequest BuildStationIdRequest(StationIdentity identity) =>

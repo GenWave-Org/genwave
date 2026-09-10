@@ -117,6 +117,9 @@ sealed class ShowRepository(Lazy<NpgsqlDataSource> dataSource, ILogger<ShowRepos
     /// "null when the show carries none" contract instead of a stray <c>''</c>. <c>envelope</c> is
     /// left untouched (stays whatever it already was — NULL for a brand-new row), the same "this
     /// statement never overwrites the whole document" discipline <see cref="SetRotationAsync"/> keeps.
+    /// <c>sponsor_id</c> binds straight from <see cref="ShowDraft.SponsorId"/> (SPEC F175.1, PLAN
+    /// T449) — <see langword="null"/> on a create simply means "no sponsor yet", never a distinct
+    /// state from an edit that clears one.
     /// </summary>
     public async Task<ShowWriteResult> CreateAsync(ShowDraft draft, CancellationToken ct)
     {
@@ -129,11 +132,15 @@ sealed class ShowRepository(Lazy<NpgsqlDataSource> dataSource, ILogger<ShowRepos
             await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
             var row = await conn.QuerySingleAsync<ShowRow>(new CommandDefinition(
                 $"""
-                insert into station.show (name, slug, tagline, flavor)
-                values (@Name, @Slug, @Tagline, @Flavor)
+                insert into station.show (name, slug, tagline, flavor, sponsor_id)
+                values (@Name, @Slug, @Tagline, @Flavor, @SponsorId)
                 {ReturningColumns}
                 """,
-                new { draft.Name, Slug = slug, Tagline = NullIfBlank(draft.Tagline), Flavor = NullIfBlank(draft.Flavor) },
+                new
+                {
+                    draft.Name, Slug = slug, Tagline = NullIfBlank(draft.Tagline), Flavor = NullIfBlank(draft.Flavor),
+                    draft.SponsorId,
+                },
                 cancellationToken: ct));
             return new ShowWriteResult.Created(ToShow(row));
         }
@@ -154,7 +161,13 @@ sealed class ShowRepository(Lazy<NpgsqlDataSource> dataSource, ILogger<ShowRepos
     /// <see cref="CreateAsync"/>, binds <c>tagline</c>/<c>flavor</c> through <see cref="NullIfBlank"/>
     /// so clearing either field to <c>""</c> in an edit persists <c>NULL</c>, not an empty string.
     /// Never touches <c>envelope</c> either — an authored name/tagline/flavor edit leaves a show's own
-    /// rotation rule (if any) exactly as <see cref="SetRotationAsync"/> last left it.
+    /// rotation rule (if any) exactly as <see cref="SetRotationAsync"/> last left it. <c>sponsor_id</c>
+    /// is a full replace too (SPEC F175.1, PLAN T449 ruling): a caller that omits it, or sends it
+    /// explicitly <see langword="null"/>, clears any sponsor the show currently carries — the same
+    /// "full-body replace" posture <c>ShowsController.Update</c>'s own class remarks already document
+    /// for this whole request. A dangling id never reaches this statement — <c>ShowsController</c>
+    /// resolves it against <c>ISponsorStore.GetAsync</c> first, so the FK here only ever fires on a
+    /// genuine race, not an ordinary caller mistake.
     /// </summary>
     public async Task<ShowWriteResult> UpdateAsync(long id, ShowDraft draft, CancellationToken ct)
     {
@@ -168,11 +181,16 @@ sealed class ShowRepository(Lazy<NpgsqlDataSource> dataSource, ILogger<ShowRepos
             var row = await conn.QuerySingleOrDefaultAsync<ShowRow>(new CommandDefinition(
                 $"""
                 update station.show
-                set name = @Name, slug = @Slug, tagline = @Tagline, flavor = @Flavor, updated_at = now()
+                set name = @Name, slug = @Slug, tagline = @Tagline, flavor = @Flavor,
+                    sponsor_id = @SponsorId, updated_at = now()
                 where id = @Id
                 {ReturningColumns}
                 """,
-                new { draft.Name, Slug = slug, Tagline = NullIfBlank(draft.Tagline), Flavor = NullIfBlank(draft.Flavor), Id = id },
+                new
+                {
+                    draft.Name, Slug = slug, Tagline = NullIfBlank(draft.Tagline), Flavor = NullIfBlank(draft.Flavor),
+                    draft.SponsorId, Id = id,
+                },
                 cancellationToken: ct));
             if (row is null) return new ShowWriteResult.NotFound();
 

@@ -3,8 +3,11 @@
 // 7 it.todo entries; every Scenario/it below is one of them made real).
 //
 // Drives ShowsClient via @testing-library/react with a fetch mock dispatched BY URL+METHOD (mirrors
-// personas-page.spec.tsx's own harness) — no VoiceControl-shaped mount fetch here (ShowsClient issues
-// no request on mount, unlike PersonasClient's VoiceControl), so no DEFAULT_ROUTES map is needed.
+// personas-page.spec.tsx's own harness). ShowsClient issues exactly one mount-time request of its
+// own (PLAN T449: `GET /api/sponsors`, the `useVoiceList` fetch-on-mount idiom, `lib/use-voice-list.ts`)
+// to feed its sponsor picker — every test still gets a harmless default `{ status: 200, body: {} }`
+// for it (a non-array body the component's own guard rejects, leaving the picker's sponsor list
+// empty) unless a Scenario below maps the route itself, so no DEFAULT_ROUTES map is needed.
 // useConfirm()/toast need their providers, so every render wraps in ConfirmDialogProvider and mounts
 // Toaster (mirrors wardrobe-uninstall-pack.spec.tsx's harness).
 //
@@ -16,6 +19,7 @@ import { render, screen, fireEvent, act, waitFor, within } from "@testing-librar
 import "@testing-library/jest-dom/jest-globals";
 import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "@/components/ui/toast";
+import type { SponsorRefDto } from "@/lib/sponsors-api";
 import { ShowsClient } from "../app/(authed)/shows/ShowsClient";
 import type { ShowsClientProps } from "../app/(authed)/shows/ShowsClient";
 import type { ShowDto } from "../app/(authed)/shows/types";
@@ -33,6 +37,7 @@ const NIGHT_MOVES: ShowDto = {
   importedFrom: null,
   importedAt: null,
   rotation: null,
+  sponsor: null,
 };
 
 const SUNDAY_STATIC: ShowDto = {
@@ -44,6 +49,7 @@ const SUNDAY_STATIC: ShowDto = {
   importedFrom: null,
   importedAt: null,
   rotation: null,
+  sponsor: null,
 };
 
 const RETRO_NIGHTS: ShowDto = {
@@ -55,7 +61,12 @@ const RETRO_NIGHTS: ShowDto = {
   importedFrom: "midnight-drive-catalog-entry",
   importedAt: "2026-07-21T09:05:00Z",
   rotation: null,
+  sponsor: null,
 };
+
+// PLAN T449 — two sponsors, distinct ids/names (mirrors ads-page.spec.tsx's own ACME fixtures).
+const SPONSOR_ACME: SponsorRefDto = { id: 11, name: "Acme", paused: false };
+const SPONSOR_ACME_RADIO: SponsorRefDto = { id: 12, name: "Acme Radio", paused: false };
 
 // ---------------------------------------------------------------------------
 // Fetch mock — dispatched by "METHOD url", relative wire calls only (matches how ShowsClient
@@ -173,6 +184,7 @@ describe("Feature: The Shows page", () => {
         importedFrom: null,
         importedAt: null,
         rotation: null,
+        sponsor: null,
       };
       const mockFetch = makeDispatchFetchMock({ "POST /api/shows": { status: 201, body: created } });
       await renderClient({ initialShows: [] });
@@ -208,6 +220,7 @@ describe("Feature: The Shows page", () => {
         name: "Morning Static",
         tagline: "First light, low volume",
         flavor: "bright, brief, upbeat",
+        sponsorId: null,
       });
     });
 
@@ -339,6 +352,125 @@ describe("Feature: The Shows page", () => {
       expect(within(cardFor("Night Moves")).getByLabelText("Rotation rule")).toBeInTheDocument();
       // And the OTHER show's card is still untouched — expanding one never fans out to every card.
       expect(findCall(mockFetch, "GET", "/api/shows/2/rotation-pool")).toBeUndefined();
+    });
+  });
+
+  describe("Scenario: a show can name a sponsor (STORY-430)", () => {
+    it("lists every fetched sponsor in the picker, defaulting to No sponsor", async () => {
+      makeDispatchFetchMock({
+        "GET /api/sponsors": { status: 200, body: [SPONSOR_ACME, SPONSOR_ACME_RADIO] },
+      });
+      await renderClient({ initialShows: [] });
+
+      const picker = (await screen.findByLabelText("Sponsor")) as HTMLSelectElement;
+      await waitFor(() => {
+        expect(within(picker).getByText("Acme")).toBeInTheDocument();
+      });
+      expect(within(picker).getByText("Acme Radio")).toBeInTheDocument();
+      expect(within(picker).getByText("No sponsor")).toBeInTheDocument();
+      // "No sponsor" is a real, selectable option here (unlike the Ads forms' disabled
+      // placeholder) — nothing has been chosen yet, so it is the one selected.
+      expect(picker.value).toBe("");
+    });
+
+    it("sends the chosen sponsorId in the POST body when creating a show", async () => {
+      const created: ShowDto = {
+        id: 5,
+        name: "Drive Time",
+        slug: "drive-time",
+        tagline: "",
+        flavor: "",
+        importedFrom: null,
+        importedAt: null,
+        rotation: null,
+        sponsor: SPONSOR_ACME,
+      };
+      const mockFetch = makeDispatchFetchMock({
+        "GET /api/sponsors": { status: 200, body: [SPONSOR_ACME, SPONSOR_ACME_RADIO] },
+        "POST /api/shows": { status: 201, body: created },
+      });
+      await renderClient({ initialShows: [] });
+
+      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Drive Time" } });
+      const picker = (await screen.findByLabelText("Sponsor")) as HTMLSelectElement;
+      await waitFor(() => {
+        expect(within(picker).getByText("Acme")).toBeInTheDocument();
+      });
+      fireEvent.change(picker, { target: { value: String(SPONSOR_ACME.id) } });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Create show" }));
+        await Promise.resolve();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("show-name-Drive Time")).toBeInTheDocument();
+      });
+
+      const call = findCall(mockFetch, "POST", "/api/shows");
+      expect(call).toBeDefined();
+      const [, init] = call as [string, RequestInit];
+      const body = JSON.parse(init.body as string) as Record<string, unknown>;
+      expect(body.sponsorId).toBe(SPONSOR_ACME.id);
+    });
+
+    it("sends sponsorId: null in the POST body when No sponsor stays chosen", async () => {
+      const created: ShowDto = {
+        id: 6,
+        name: "Quiet Hours",
+        slug: "quiet-hours",
+        tagline: "",
+        flavor: "",
+        importedFrom: null,
+        importedAt: null,
+        rotation: null,
+        sponsor: null,
+      };
+      const mockFetch = makeDispatchFetchMock({
+        "GET /api/sponsors": { status: 200, body: [SPONSOR_ACME] },
+        "POST /api/shows": { status: 201, body: created },
+      });
+      await renderClient({ initialShows: [] });
+
+      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Quiet Hours" } });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Create show" }));
+        await Promise.resolve();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("show-name-Quiet Hours")).toBeInTheDocument();
+      });
+
+      const call = findCall(mockFetch, "POST", "/api/shows");
+      expect(call).toBeDefined();
+      const [, init] = call as [string, RequestInit];
+      const body = JSON.parse(init.body as string) as Record<string, unknown>;
+      expect(body.sponsorId).toBeNull();
+    });
+
+    it("pre-fills the edit form with the show's linked sponsor", async () => {
+      const sponsored: ShowDto = { ...NIGHT_MOVES, sponsor: SPONSOR_ACME };
+      makeDispatchFetchMock({
+        "GET /api/sponsors": { status: 200, body: [SPONSOR_ACME, SPONSOR_ACME_RADIO] },
+      });
+      await renderClient({ initialShows: [sponsored, SUNDAY_STATIC] });
+
+      fireEvent.click(within(cardFor("Night Moves")).getByRole("button", { name: "Edit Night Moves" }));
+
+      const picker = (await screen.findByLabelText("Sponsor")) as HTMLSelectElement;
+      await waitFor(() => {
+        expect(picker.value).toBe(String(SPONSOR_ACME.id));
+      });
+    });
+
+    it("shows the linked sponsor's name on the show's row", async () => {
+      const sponsored: ShowDto = { ...SUNDAY_STATIC, sponsor: SPONSOR_ACME_RADIO };
+      makeDispatchFetchMock({});
+      await renderClient({ initialShows: [NIGHT_MOVES, sponsored] });
+
+      expect(within(cardFor("Sunday Static")).getByText("Acme Radio")).toBeInTheDocument();
+      expect(within(cardFor("Night Moves")).queryByText("Acme Radio")).not.toBeInTheDocument();
     });
   });
 });
