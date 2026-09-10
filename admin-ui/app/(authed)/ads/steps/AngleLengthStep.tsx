@@ -3,29 +3,14 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { createAdBrief, createAdSpot, listAdBriefs, type AdBriefDto, type AdSpotDto } from "@/lib/ads-api";
+import type { SponsorRefDto } from "@/lib/sponsors-api";
 import { FieldRow, FIELD_INPUT_CLASSES, FIELD_LABEL_CLASSES } from "../FieldRow";
 
 const SPOT_SECONDS_OPTIONS = [15, 30, 60] as const;
 const DEFAULT_SPOT_SECONDS = 30;
 
-/** No server-side cap exists on `station.ad_spot.title` (it is a plain `text` column,
- * `AdsController.Create` only rejects an EMPTY title) — this mirrors the 120-character clip
- * `db/46-sponsor-migration.sh`'s own brand-to-name backfill already uses for the same "short
- * operator-facing label" shape (`AdSpot.Title`'s own doc), rather than inventing an unrelated
- * number (PLAN T448 ruling). */
-const TITLE_CAP = 120;
-
-function firstSentence(text: string): string {
-  const match = /^[^.!?]*[.!?]?/.exec(text.trim());
-  return (match?.[0] ?? text).trim();
-}
-
-function clipToTitle(text: string): string {
-  return text.length <= TITLE_CAP ? text : `${text.slice(0, TITLE_CAP - 1).trimEnd()}…`;
-}
-
 interface AngleLengthStepProps {
-  sponsorId: number;
+  sponsor: SponsorRefDto;
   onSpotCreated: (spot: AdSpotDto) => void;
   onError: (detail: string) => void;
 }
@@ -34,12 +19,15 @@ interface AngleLengthStepProps {
  * The Angle & length step (SPEC F171.6, F174.2; PLAN T448) — an existing brief's premise, or a
  * freshly typed angle, plus the spot's own length; "Next" is this step's own `POST /api/ads`,
  * which is what actually brings the spot into existence (every later step edits that same row).
- * A typed angle can also be kept as a brief for next time (`saveAngleAsBrief`, default on) — a
- * second, best-effort `POST /api/ad-briefs` right after the spot's own create; a 409 there just
- * means today's angle already matches an existing brief for this sponsor, which is fine (nothing
- * left undone), so it is never surfaced as a step failure.
+ * The created spot's title is always `` `${sponsor.name} spot` `` (PLAN T451 ruling, SPEC F171.7)
+ * — the same shape `AdSpotWorker.BuildTitle` gives every station-generated spot, so the booth log
+ * names the sponsor no matter who made the spot; the angle itself rides in `brief`, never the
+ * title. A typed angle can also be kept as a brief for next time (`saveAngleAsBrief`, default on)
+ * — a second, best-effort `POST /api/ad-briefs` right after the spot's own create; a 409 there
+ * just means today's angle already matches an existing brief for this sponsor, which is fine
+ * (nothing left undone), so it is never surfaced as a step failure.
  */
-export function AngleLengthStep({ sponsorId, onSpotCreated, onError }: AngleLengthStepProps): ReactNode {
+export function AngleLengthStep({ sponsor, onSpotCreated, onError }: AngleLengthStepProps): ReactNode {
   const [briefs, setBriefs] = useState<AdBriefDto[] | null>(null);
   const [selectedBriefId, setSelectedBriefId] = useState<number | null>(null);
   const [typedAngle, setTypedAngle] = useState("");
@@ -57,7 +45,7 @@ export function AngleLengthStep({ sponsorId, onSpotCreated, onError }: AngleLeng
         setBriefs([]);
         return;
       }
-      setBriefs(outcome.briefs.filter((brief) => brief.sponsor.id === sponsorId && brief.enabled && brief.premise !== null));
+      setBriefs(outcome.briefs.filter((brief) => brief.sponsor.id === sponsor.id && brief.enabled && brief.premise !== null));
     })();
     return () => {
       cancelled = true;
@@ -79,8 +67,8 @@ export function AngleLengthStep({ sponsorId, onSpotCreated, onError }: AngleLeng
 
     setPending(true);
     const outcome = await createAdSpot({
-      sponsorId,
-      title: clipToTitle(firstSentence(angleText)),
+      sponsorId: sponsor.id,
+      title: `${sponsor.name} spot`,
       brief: angleText,
       script: null,
       voicePlan: null,
@@ -95,7 +83,7 @@ export function AngleLengthStep({ sponsorId, onSpotCreated, onError }: AngleLeng
 
     if (brief === null && saveAngleAsBrief) {
       // 409 (a duplicate premise for this sponsor already exists) is fine — nothing left undone.
-      await createAdBrief({ sponsorId, premise: angleText, tone: null, structure: null });
+      await createAdBrief({ sponsorId: sponsor.id, premise: angleText, tone: null, structure: null });
     }
 
     setPending(false);

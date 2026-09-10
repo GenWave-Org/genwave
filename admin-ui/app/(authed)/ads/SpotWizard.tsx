@@ -53,6 +53,11 @@ export function SpotWizard({ sponsors, initialSponsorId, onClose }: SpotWizardPr
   const [error, setError] = useState<string | null>(null);
 
   const currentStep = WIZARD_STEPS[stepIndex];
+  // The Angle & length step's own sponsor object (its title needs `sponsor.name`, PLAN T451
+  // ruling) — resolved from `localSponsors` rather than carried as a second piece of state, so a
+  // sponsor created inline mid-wizard (`onSponsorCreated` below) is found the same way as one
+  // chosen from the original list.
+  const sponsor = sponsorId === null ? undefined : localSponsors.find((s) => s.id === sponsorId);
 
   // `WIZARD_STEPS.findIndex` keeps every "advance" call site keyed on the step it is LEAVING
   // (a `WizardStepId`) rather than a hardcoded next-index literal that would silently drift the
@@ -160,9 +165,9 @@ export function SpotWizard({ sponsors, initialSponsorId, onClose }: SpotWizardPr
               />
             )}
 
-            {currentStep.id === "angle" && sponsorId !== null && (
+            {currentStep.id === "angle" && sponsor !== undefined && (
               <AngleLengthStep
-                sponsorId={sponsorId}
+                sponsor={sponsor}
                 onSpotCreated={(created) => {
                   applySpot(created);
                   goToNext("angle");

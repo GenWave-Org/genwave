@@ -553,7 +553,7 @@ describe("Feature: New spot is a five-step wizard", () => {
       installFetchMock([{ method: "GET", match: (u) => u.pathname === "/api/ad-briefs", respond: () => ({ status: 200, body: [] }) }]);
 
       await act(async () => {
-        render(<AngleLengthStep sponsorId={1} onSpotCreated={jest.fn()} onError={jest.fn()} />);
+        render(<AngleLengthStep sponsor={SPONSOR_ACME} onSpotCreated={jest.fn()} onError={jest.fn()} />);
         await Promise.resolve();
       });
 
@@ -567,7 +567,7 @@ describe("Feature: New spot is a five-step wizard", () => {
 
       const onSpotCreated = jest.fn<(spot: AdSpotDto) => void>();
       await act(async () => {
-        render(<AngleLengthStep sponsorId={1} onSpotCreated={onSpotCreated} onError={jest.fn()} />);
+        render(<AngleLengthStep sponsor={SPONSOR_ACME} onSpotCreated={onSpotCreated} onError={jest.fn()} />);
         await Promise.resolve();
       });
 
@@ -589,6 +589,35 @@ describe("Feature: New spot is a five-step wizard", () => {
         return method === "POST" && new URL(String(call[0]), "http://localhost").pathname === "/api/ad-briefs";
       });
       expect(briefPost).toBeDefined();
+    });
+
+    it("the created spot is titled 'Acme spot' — PLAN T451 ruling (SPEC F171.7)", async () => {
+      const angleText = "Fresh roast before six. Warm pastries all morning.";
+      const mockFetch = installFetchMock([
+        { method: "GET", match: (u) => u.pathname === "/api/ad-briefs", respond: () => ({ status: 200, body: [] }) },
+        {
+          method: "POST",
+          match: (u) => u.pathname === "/api/ads",
+          respond: () => ({ status: 201, body: adSpot({ id: 71, script: null, title: "Acme spot", brief: angleText }) }),
+        },
+      ]);
+
+      render(<SpotWizard sponsors={[SPONSOR_ACME]} initialSponsorId={SPONSOR_ACME.id} onClose={jest.fn()} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Next" })); // Sponsor -> Angle
+      await screen.findByText(WIZARD_STEPS[1]?.purpose ?? "");
+
+      fireEvent.change(screen.getByLabelText("Angle"), { target: { value: angleText } });
+      fireEvent.click(screen.getByLabelText("Keep this angle for later")); // skip the extra brief POST — leaves POST /api/ads the one mutation to inspect
+      fireEvent.click(screen.getByRole("button", { name: "Next" })); // Angle -> Script (POST /api/ads)
+
+      await screen.findByText(WIZARD_STEPS[2]?.purpose ?? "");
+
+      const adsPostIndex = mockFetch.mock.calls.findIndex((call) => {
+        const method = (call[1] as RequestInit | undefined)?.method;
+        return method === "POST" && new URL(String(call[0]), "http://localhost").pathname === "/api/ads";
+      });
+      expect(requestBody(mockFetch, adsPostIndex)).toMatchObject({ title: "Acme spot", brief: angleText });
     });
   });
 
