@@ -318,6 +318,12 @@ prints the exact command plan without touching anything — `./launch.sh --pinne
 or, for just the migration step, `./migrate.sh --dry-run` (`--keep-going` applies the rest
 after one script fails; `--help` for the flags).
 
+db/46 (the sponsors migration, v5.8.0) is the first migration here to drop or rename an
+existing column — it runs inside one transaction, and drops `ad_brief.brand` while renaming
+`ad_spot.brand` to `sponsor_name` after backfilling `sponsor_id` from it; `migrate.sh` applies
+it on the way up like every other migration, so back up the database first, as with any
+upgrade that rewrites existing data.
+
 Since gh-#19, `launch.sh` **preflights before touching the stack** (Docker running,
 compose plugin, `.env` secrets present and non-placeholder) and every failure exit says
 how to proceed. On the pinned flow a failed pull or migration explicitly leaves the
@@ -719,7 +725,7 @@ booth-log row per plugin at boot.
 
 ---
 
-## 📻 Ads (v5.6.0, SPEC F158–F163, gh-#380)
+## 📻 Ads (v5.6.0 → v5.8.0, SPEC F158–F163 + F171–F176, gh-#380 / gh-#714)
 
 The station authors and airs its own ad spots — a `GenWave.Ads.AdsOptions` env/compose-only
 knob set (`Ads__*`, boot-validated via `ValidateDataAnnotations()`) plus eight `Station:Ads:*`
@@ -751,6 +757,14 @@ is what keeps it silent on every existing station until an operator opts in. The
 Ads page (`/ads`) is where spots are drafted, approved, retried, retired, and previewed; a
 first-party ad pack installs like any other catalog pack (the `ad-pack` kind) and seeds
 `station.ad_brief` rows the worker drafts scripts from.
+
+Sponsors are the customer behind every ad (v5.8.0): every brief and spot belongs to a
+`station.sponsor` row, pausing a sponsor silences their spots on the next pick, and the
+anti-repeat window above now counts sponsors rather than rendered files. The guided "New
+spot…" path renders previews one at a time through a job queue: the preview retention knob
+above bounds how long a rendered preview is kept, and the job-queue capacity knob above
+bounds how many render requests may wait behind the one currently running — both
+env/compose-only, boot-validated, and refused on the live settings PUT.
 
 ---
 
