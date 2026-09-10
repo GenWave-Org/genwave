@@ -6,10 +6,17 @@ import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/chip";
 import { toast } from "@/components/ui/toast";
 import { createAdBrief, setAdBriefEnabled, type AdBriefDto } from "@/lib/ads-api";
+import type { SponsorRefDto } from "@/lib/sponsors-api";
 import { FieldRow, FIELD_INPUT_CLASSES } from "./FieldRow";
+import { SponsorPicker } from "./SponsorPicker";
 
 interface BriefsSectionProps {
   briefs: AdBriefDto[];
+  /** The rail's current selection (PLAN T447) — preselected in the add form's Sponsor picker;
+   * `null` means "All sponsors" and the form opens with no sponsor chosen. */
+  sponsorId: number | null;
+  /** Every sponsor the add form's picker offers (PLAN T447) — id/name/paused only. */
+  sponsors: readonly SponsorRefDto[];
 }
 
 type FormStatus = { kind: "idle" } | { kind: "pending" } | { kind: "error"; detail: string };
@@ -24,15 +31,20 @@ type FormStatus = { kind: "idle" } | { kind: "pending" } | { kind: "error"; deta
  * owner brief (`packSlug === null`) reads "Owner". The toggle PATCHes ANY brief, pack or owner
  * alike (`AdBriefsController.SetEnabled`'s own reading of F162.1's "enable/disable toggles" — an
  * operator may silence an installed pack brief without uninstalling the pack). The add form creates
- * OWNER briefs only (`POST /api/ad-briefs` never takes a `packSlug`); a duplicate brand 409s with
- * the server's own message shown verbatim (AC5's own "surfaces as 409, not a silent write" demand)
- * — never a second, client-authored wording of the same rule.
+ * OWNER briefs only (`POST /api/ad-briefs` never takes a `packSlug`); a duplicate (sponsor, premise)
+ * pair 409s with the server's own message shown verbatim (AC5's own "surfaces as 409, not a silent
+ * write" demand) — never a second, client-authored wording of the same rule.
+ *
+ * The add form's own local `formSponsorId` is seeded from `sponsorId` once, on mount, then owned
+ * by the form — the rail's selection is URL state, not component state, so `page.tsx` remounts
+ * this component with `key={sponsorId ?? "all"}` on a sponsor change (PLAN T447 ruling) rather
+ * than this component watching its own `sponsorId` prop for changes after mount.
  */
-export function BriefsSection({ briefs }: BriefsSectionProps): ReactNode {
+export function BriefsSection({ briefs, sponsorId, sponsors }: BriefsSectionProps): ReactNode {
   const router = useRouter();
   const onChanged = (): void => router.refresh();
 
-  const [brand, setBrand] = useState("");
+  const [formSponsorId, setFormSponsorId] = useState<number | null>(sponsorId);
   const [premise, setPremise] = useState("");
   const [tone, setTone] = useState("");
   const [structure, setStructure] = useState("");
@@ -55,15 +67,16 @@ export function BriefsSection({ briefs }: BriefsSectionProps): ReactNode {
   async function handleAdd(e: FormEvent<HTMLFormElement>): Promise<void> {
     e.preventDefault();
 
-    const trimmedBrand = brand.trim();
-    if (trimmedBrand === "") {
-      setStatus({ kind: "error", detail: "Brand is required." });
+    if (formSponsorId === null) {
+      // PLAN T447 ruling: plain wording rather than the server's literal "sponsorId is required."
+      // (gh-#707: no wire-level field names in user-visible text).
+      setStatus({ kind: "error", detail: "Sponsor is required." });
       return;
     }
 
     setStatus({ kind: "pending" });
     const outcome = await createAdBrief({
-      brand: trimmedBrand,
+      sponsorId: formSponsorId,
       premise: premise.trim() === "" ? null : premise.trim(),
       tone: tone.trim() === "" ? null : tone.trim(),
       structure: structure.trim() === "" ? null : structure.trim(),
@@ -75,7 +88,7 @@ export function BriefsSection({ briefs }: BriefsSectionProps): ReactNode {
     }
 
     setStatus({ kind: "idle" });
-    setBrand("");
+    setFormSponsorId(sponsorId);
     setPremise("");
     setTone("");
     setStructure("");
@@ -100,15 +113,13 @@ export function BriefsSection({ briefs }: BriefsSectionProps): ReactNode {
           }}
           className="mt-4 flex flex-col gap-4"
         >
-          <FieldRow label="Brand" htmlFor="brief-brand">
-            <input
-              id="brief-brand"
-              value={brand}
-              onChange={(e) => setBrand(e.currentTarget.value)}
-              disabled={isPending}
-              className={FIELD_INPUT_CLASSES}
-            />
-          </FieldRow>
+          <SponsorPicker
+            id="brief-sponsor"
+            value={formSponsorId}
+            sponsors={sponsors}
+            disabled={isPending}
+            onChange={setFormSponsorId}
+          />
 
           <FieldRow label="Premise" htmlFor="brief-premise">
             <textarea
@@ -159,7 +170,7 @@ export function BriefsSection({ briefs }: BriefsSectionProps): ReactNode {
               <div key={brief.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <p className="truncate text-[0.9rem] text-ink">{brief.brand}</p>
+                    <p className="truncate text-[0.9rem] text-ink">{brief.sponsor.name}</p>
                     <Chip title={brief.packSlug ?? undefined}>
                       {brief.packSlug !== null ? `Pack: ${brief.packSlug}` : "Owner"}
                     </Chip>
@@ -171,7 +182,7 @@ export function BriefsSection({ briefs }: BriefsSectionProps): ReactNode {
                   <input
                     type="checkbox"
                     checked={brief.enabled}
-                    aria-label={`Enabled: ${brief.brand}`}
+                    aria-label={`Enabled: ${brief.sponsor.name}`}
                     disabled={pendingToggleId === brief.id}
                     onChange={() => {
                       void handleToggle(brief);

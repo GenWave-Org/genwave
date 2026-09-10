@@ -6,6 +6,8 @@ import { ADS_TAB_ORDER, buildAdsHref, type AdsPageSize, type AdsTabId } from "./
 interface AdsTabsProps {
   activeTab: AdsTabId;
   limit: AdsPageSize;
+  /** The rail's current selection, threaded through so switching tabs keeps it (PLAN T447). */
+  sponsorId: number | null;
 }
 
 const ADS_TAB_LABELS: Record<AdsTabId, string> = { ...AD_STATE_LABELS, briefs: "Briefs" };
@@ -25,11 +27,11 @@ const ADS_TAB_LABELS: Record<AdsTabId, string> = { ...AD_STATE_LABELS, briefs: "
  * block ever ships, this is the one place to wire it in (the Gardener `GardenerTabs` precedent for
  * how that would look).
  */
-export function AdsTabs({ activeTab, limit }: AdsTabsProps): ReactNode {
+export function AdsTabs({ activeTab, limit, sponsorId }: AdsTabsProps): ReactNode {
   const tabs: TabStripTab<AdsTabId>[] = ADS_TAB_ORDER.map((tab) => ({
     id: tab,
     label: ADS_TAB_LABELS[tab],
-    href: buildAdsHref(tab, limit),
+    href: buildAdsHref(tab, limit, sponsorId),
   }));
 
   return <TabStrip tabs={tabs} activeTab={activeTab} ariaLabel="Ads sections" />;

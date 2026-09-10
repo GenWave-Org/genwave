@@ -11,6 +11,7 @@
 // directly, mirroring `buildGardenerFindingsPath`.
 
 import { readProblemDetails } from "@/lib/problem-details";
+import type { SponsorRefDto } from "@/lib/sponsors-api";
 
 /** The six-state `station.ad_spot` machine (SPEC F159.2, `GenWave.Core.Domain.AdStateTokens`) —
  * lowercase machine tokens, verbatim off the wire, never re-cased. */
@@ -65,12 +66,17 @@ export const AD_SOURCE_LABELS: Record<AdSource, string> = {
   pack: "Pack",
 };
 
-/** `AdSpotDto`'s exact wire shape (`GenWave.Host.Api.AdSpotDto`, SPEC F162.1; STORY-392; PLAN
- * T403). `version` is the bare xmin token — the same `If-Match: W/"<version>"` convention
- * `lib/use-row-patch.ts` already holds for `/api/media/{id}`, applied here for every Ads verb. */
+/** `AdSpotDto`'s exact wire shape (`GenWave.Host.Api.AdSpotDto`, SPEC F162.1, F171.7; STORY-392,
+ * STORY-412; PLAN T403, T436, T447). `version` is the bare xmin token — the same
+ * `If-Match: W/"<version>"` convention `lib/use-row-patch.ts` already holds for `/api/media/{id}`,
+ * applied here for every Ads verb. `sponsorName` is the created-at/refreshed-on-change snapshot the
+ * wire already carries; `sponsor` is the live {@link SponsorRefDto} cross-reference — a spot
+ * references its sponsor by id/name/paused, never a free-text customer label. */
 export interface AdSpotDto {
   id: number;
-  brand: string;
+  sponsorId: number;
+  sponsorName: string;
+  sponsor: SponsorRefDto;
   title: string;
   brief: string | null;
   script: string | null;
@@ -96,22 +102,27 @@ export interface AdsListResponse {
   total: number;
 }
 
-/** `GET /api/ads?state=&limit=&offset=` (SPEC F162.1) — always state-scoped (the page never lists
- * "any state" — each tab is exactly one). Mirrors `buildGardenerFindingsPath`. */
-export function buildAdsListPath(state: AdState, limit: number, offset: number): string {
+/** `GET /api/ads?state=&sponsorId=&limit=&offset=` (SPEC F162.1, F171.7) — always state-scoped
+ * (the page never lists "any state" — each tab is exactly one). `sponsorId` narrows to that one
+ * sponsor's spots (SPEC F171.8's own rail selection); `null` omits the filter entirely ("All
+ * sponsors"). Mirrors `buildGardenerFindingsPath`. */
+export function buildAdsListPath(state: AdState, limit: number, offset: number, sponsorId: number | null): string {
   const query = new URLSearchParams();
   query.set("state", state);
   query.set("limit", String(limit));
   query.set("offset", String(offset));
+  if (sponsorId !== null) query.set("sponsorId", String(sponsorId));
   return `/api/ads?${query.toString()}`;
 }
 
-/** `AdBriefDto`'s exact wire shape (`GenWave.Host.Api.AdBriefDto`, SPEC F162.1/F162.2; PLAN
- * T403b). `packSlug` null means an owner-authored brief. */
+/** `AdBriefDto`'s exact wire shape (`GenWave.Host.Api.AdBriefDto`, SPEC F162.1/F162.2, F171.6;
+ * PLAN T403b, T435, T447). `packSlug` null means an owner-authored brief. `sponsor` is the brief's
+ * own {@link SponsorRefDto} cross-reference — there is no top-level free-text company-name field
+ * anywhere on this shape; a brief's sponsor IS its `sponsor.name`. */
 export interface AdBriefDto {
   id: number;
   packSlug: string | null;
-  brand: string;
+  sponsor: SponsorRefDto;
   premise: string | null;
   tone: string | null;
   structure: string | null;
@@ -145,9 +156,11 @@ export function describeAdMutationFailure(failure: AdMutationFailure): string {
 
 /** The sparse `AdSpotSaveRequest` wire body shared by create and edit (`AdsController.Create`/
  * `.Update`) — every field always present, `null` standing in for "not supplied"/"unchanged" (the
- * same explicit-null convention `MediaPatch` callers already use), never an omitted key. */
+ * same explicit-null convention `MediaPatch` callers already use), never an omitted key.
+ * `sponsorId` is required on POST (400 `sponsor_required` when null) and optional on PATCH, where
+ * `null` means "leave unchanged" — never a free-text customer label. */
 export interface AdSpotSaveBody {
-  brand: string | null;
+  sponsorId: number | null;
   title: string | null;
   brief: string | null;
   script: string | null;
@@ -259,15 +272,16 @@ async function readAdBriefOutcome(response: Response): Promise<AdBriefMutationOu
 }
 
 export interface AdBriefCreateBody {
-  brand: string;
+  sponsorId: number;
   premise: string | null;
   tone: string | null;
   structure: string | null;
 }
 
-/** `POST /api/ad-briefs` (SPEC F162.1's add form) — owner briefs only; 409 on a duplicate brand
- * (surfaced verbatim via {@link AdBriefMutationFailure.detail} — the server's own message, never a
- * second client-side wording of the same rule). */
+/** `POST /api/ad-briefs` (SPEC F162.1's add form, F171.6's sponsor-first cap) — owner briefs only;
+ * 409 on a duplicate (sponsor, premise) pair (surfaced verbatim via
+ * {@link AdBriefMutationFailure.detail} — the server's own message, never a second client-side
+ * wording of the same rule). */
 export async function createAdBrief(body: AdBriefCreateBody): Promise<AdBriefMutationOutcome> {
   let response: Response;
   try {

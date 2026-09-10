@@ -11,9 +11,11 @@ import {
   type AdSpotSaveBody,
   type AdVoicePlanEntry,
 } from "@/lib/ads-api";
+import type { SponsorRefDto } from "@/lib/sponsors-api";
 import { BedPicker, type BedCandidate } from "../safe-content/BedPicker";
 import { VoiceControl } from "../safe-content/VoiceControl";
 import { FieldRow, FIELD_INPUT_CLASSES, FIELD_LABEL_CLASSES } from "./FieldRow";
+import { SponsorPicker } from "./SponsorPicker";
 
 const SPOT_SECONDS_OPTIONS = [15, 30, 60] as const;
 const DEFAULT_SPOT_SECONDS = 30;
@@ -22,6 +24,13 @@ export interface AdSpotEditorProps {
   /** The spot being edited, or `null` to create a new owner draft (SPEC F162.1's "create/edit
    * drafts"). */
   initial: AdSpotDto | null;
+  /** Every sponsor the "Sponsor" picker offers (PLAN T447) — id/name/paused only. */
+  sponsors: readonly SponsorRefDto[];
+  /** The rail's current selection, preselected in the picker when creating a new spot (PLAN T447
+   * ruling: only `initial === null` ever reads this — editing an existing spot always keeps that
+   * spot's own sponsor regardless of which rail row is selected). `null`/absent leaves the picker
+   * with nothing chosen. */
+  initialSponsorId?: number | null;
   onSaved: (spot: AdSpotDto) => void;
   onCancel: () => void;
 }
@@ -83,7 +92,7 @@ type SaveStatus =
   | { kind: "error"; detail: string; field?: string; ruleId?: string };
 
 /**
- * Create/edit modal for one ad spot (SPEC F162.1; STORY-392 AC2; PLAN T404) — brand, title, brief,
+ * Create/edit modal for one ad spot (SPEC F162.1; STORY-392 AC2; PLAN T404) — sponsor, title, brief,
  * script, a per-tag voice cast parsed from the script, spot length, and an optional bed via
  * `BedPicker`. Bespoke Radix `Dialog` markup, mirroring `gardener/FileActionDialog.tsx`'s own
  * reasoning: this content (six fields plus a variable-length voice cast) is wider than a yes/no
@@ -123,10 +132,16 @@ type SaveStatus =
  * the control.</item>
  * </list>
  */
-export function AdSpotEditor({ initial, onSaved, onCancel }: AdSpotEditorProps): ReactNode {
+export function AdSpotEditor({
+  initial,
+  sponsors,
+  initialSponsorId = null,
+  onSaved,
+  onCancel,
+}: AdSpotEditorProps): ReactNode {
   const restoreFocus = useRestoreFocus("on-mount");
 
-  const [brand, setBrand] = useState(initial?.brand ?? "");
+  const [sponsorId, setSponsorId] = useState<number | null>(initial?.sponsorId ?? initialSponsorId ?? null);
   const [title, setTitle] = useState(initial?.title ?? "");
   const [brief, setBrief] = useState(initial?.brief ?? "");
   const [script, setScript] = useState(initial?.script ?? "");
@@ -166,10 +181,17 @@ export function AdSpotEditor({ initial, onSaved, onCancel }: AdSpotEditorProps):
   async function handleSubmit(e: FormEvent<HTMLFormElement>): Promise<void> {
     e.preventDefault();
 
-    const trimmedBrand = brand.trim();
     const trimmedTitle = title.trim();
-    if (trimmedBrand === "" || trimmedTitle === "") {
-      setStatus({ kind: "error", detail: "Brand and title are both required." });
+    // PLAN T447 ruling: the sponsor check runs before the title check (mirrors
+    // `AdsController.Create`'s own order — sponsorId first, then title) — plain wording rather
+    // than the server's literal "sponsorId is required." (gh-#707: no wire-level field names in
+    // user-visible text).
+    if (sponsorId === null) {
+      setStatus({ kind: "error", detail: "Sponsor is required." });
+      return;
+    }
+    if (trimmedTitle === "") {
+      setStatus({ kind: "error", detail: "Title is required." });
       return;
     }
 
@@ -207,7 +229,7 @@ export function AdSpotEditor({ initial, onSaved, onCancel }: AdSpotEditorProps):
     });
 
     const body: AdSpotSaveBody = {
-      brand: trimmedBrand,
+      sponsorId,
       title: trimmedTitle,
       brief: brief.trim() === "" ? null : brief.trim(),
       script: script.trim() === "" ? null : script,
@@ -258,15 +280,7 @@ export function AdSpotEditor({ initial, onSaved, onCancel }: AdSpotEditorProps):
             }}
             className="mt-4 flex flex-col gap-4"
           >
-            <FieldRow label="Brand" htmlFor="ad-brand">
-              <input
-                id="ad-brand"
-                value={brand}
-                onChange={(e) => setBrand(e.currentTarget.value)}
-                disabled={isPending}
-                className={FIELD_INPUT_CLASSES}
-              />
-            </FieldRow>
+            <SponsorPicker id="ad-sponsor" value={sponsorId} sponsors={sponsors} disabled={isPending} onChange={setSponsorId} />
 
             <FieldRow label="Title" htmlFor="ad-title">
               <input

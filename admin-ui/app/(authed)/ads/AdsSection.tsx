@@ -4,6 +4,7 @@ import { useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { AD_STATE_EMPTY_LABELS, AD_STATE_LABELS, type AdSpotDto, type AdState } from "@/lib/ads-api";
+import type { SponsorRefDto } from "@/lib/sponsors-api";
 import { AdSpotEditor } from "./AdSpotEditor";
 import { AdSpotRow } from "./AdSpotRow";
 
@@ -13,6 +14,11 @@ interface AdsSectionProps {
   /** The tab's own EXACT total (SPEC F162.1's "the active tab's total in the pager line" — see
    * `AdsTabs`' own remarks for why every OTHER tab stays unbadged instead). */
   total: number;
+  /** The rail's current selection (PLAN T447) — preselected in a freshly-opened "New spot" editor;
+   * `null` means "All sponsors" and the editor opens with no sponsor chosen. */
+  sponsorId: number | null;
+  /** Every sponsor the editor's own picker offers (PLAN T447) — id/name/paused only. */
+  sponsors: readonly SponsorRefDto[];
 }
 
 /** `null` = editor closed, `"new"` = create mode, an `AdSpotDto` = editing that row. */
@@ -31,7 +37,7 @@ type EditorTarget = "new" | AdSpotDto | null;
  * reachable from any filtered view); it simply won't appear in the CURRENT list until the operator
  * switches to the Draft tab (or a `router.refresh()` on that tab picks it up).
  */
-export function AdsSection({ tab, items, total }: AdsSectionProps): ReactNode {
+export function AdsSection({ tab, items, total, sponsorId, sponsors }: AdsSectionProps): ReactNode {
   const router = useRouter();
   const onChanged = (): void => router.refresh();
 
@@ -64,6 +70,8 @@ export function AdsSection({ tab, items, total }: AdsSectionProps): ReactNode {
       {editing !== null && (
         <AdSpotEditor
           initial={editing === "new" ? null : editing}
+          initialSponsorId={sponsorId}
+          sponsors={sponsors}
           onCancel={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
