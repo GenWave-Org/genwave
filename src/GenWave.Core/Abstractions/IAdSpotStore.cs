@@ -300,4 +300,27 @@ public interface IAdSpotStore
     /// gives one seam over, simplified here since no caller needs to tell the two apart.
     /// </summary>
     Task<AdSpot?> ClaimForPromotionAsync(long id, string expectedVersion, CancellationToken ct);
+
+    /// <summary>
+    /// The guardian's own preview-cleanup candidate read (SPEC F176.2; STORY-429; PLAN T442) — every
+    /// row that currently carries a rendered preview (<c>preview_path IS NOT NULL</c>) AND either has
+    /// left the editable draft/approved lifecycle (<see cref="AdState.Ready"/> or
+    /// <see cref="AdState.Retired"/> — a preview of a spot no longer being worked on has nothing left
+    /// to preview) OR has simply outlived <paramref name="retention"/> since it was rendered
+    /// (<c>preview_at</c> older than <paramref name="now"/> minus <paramref name="retention"/>). The
+    /// caller (<see cref="AdSpotLifecycleGuardianService"/>, a plain-text reference: GenWave.Core never
+    /// references GenWave.Ads, L10) deletes each returned row's own file, then clears its stamp via
+    /// <see cref="ClearPreviewAsync"/>.
+    /// </summary>
+    Task<IReadOnlyList<AdSpot>> ListPreviewsToSweepAsync(TimeSpan retention, DateTimeOffset now, CancellationToken ct);
+
+    /// <summary>
+    /// Clears a preview stamp — nulls <c>preview_path</c>/<c>preview_at</c>/<c>preview_key</c>
+    /// together (SPEC F176.2; STORY-429; PLAN T442), total by id (the <see cref="ClearJobAsync"/>
+    /// posture: an id with no preview stamped, or no row at all, still reports whatever this store's
+    /// own "no matching row" case reports — see the implementation's own remarks for the exact
+    /// boundary). Never touches <c>job_kind</c>/<c>job_started_at</c>/<c>job_error</c> — a preview
+    /// sweep and a queued job are two independent claims on the SAME row.
+    /// </summary>
+    Task<bool> ClearPreviewAsync(long id, CancellationToken ct);
 }

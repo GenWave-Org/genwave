@@ -9,7 +9,9 @@ namespace GenWave.Ads.Tests.Specs;
 
 using GenWave.Ads.Tests.Fakes;
 using GenWave.Ads.Tests.Support;
+using GenWave.Core.Domain;
 using GenWave.Tts;
+using Microsoft.Extensions.Configuration;
 
 public static class FeatureTheConsumerLoopSurvivesAJobThatFailsInsideItsOwnHandler
 {
@@ -39,9 +41,22 @@ public static class FeatureTheConsumerLoopSurvivesAJobThatFailsInsideItsOwnHandl
             var gate = new FakeOnAirRenderSignal { InFlight = false };
             var logger = new GatedStartLogger(spotId);
 
+            // renderService/stamper/configuration only reach RunPreviewAsync (PLAN T442) — this
+            // scenario only ever enqueues "write" jobs, so these stay wired but unreached.
+            var stationIdentity = new FakeStationIdentityProvider(new StationIdentity("station-1", "Test Station", "station_voice"));
+            var libraries = new FakeAdsLibraryStore();
+            var locatorRoots = new AdSpotLocatorRoots("/media", "/authored");
+            var renderService = new AdRenderService(
+                new FakeCastSegmentAuthor(), store, new FakeAdminMediaLookup(), libraries, stationIdentity, adsOptions,
+                locatorRoots, new NoOpLogger<AdRenderService>());
+            var stamper = new AdSpotStamper(
+                store, new FakeAdBedPool(), libraries, stationIdentity, adsOptions, new NoOpLogger<AdSpotStamper>());
+            var configuration = new ConfigurationBuilder().Build();
+
             var service = new AdSpotJobService(
-                store, sponsors, scriptWriter, new FakePatterDurationEstimator(), new FakeAudiencePostureProvider(),
-                gate, adsOptions, llmOptions, TimeProvider.System, logger);
+                store, sponsors, scriptWriter, renderService, stamper, new FakePatterDurationEstimator(),
+                new FakeAudiencePostureProvider(), gate, adsOptions, llmOptions, configuration, TimeProvider.System,
+                logger);
 
             await service.StartAsync(CancellationToken.None);
             try
@@ -114,9 +129,22 @@ public static class FeatureTheConsumerLoopSurvivesAJobThatFailsInsideItsOwnHandl
             var gate = new FakeOnAirRenderSignal { InFlight = false };
             var logger = new ThrowOnceStartLogger();
 
+            // renderService/stamper/configuration only reach RunPreviewAsync (PLAN T442) — this
+            // scenario only ever enqueues "write" jobs, so these stay wired but unreached.
+            var stationIdentity = new FakeStationIdentityProvider(new StationIdentity("station-1", "Test Station", "station_voice"));
+            var libraries = new FakeAdsLibraryStore();
+            var locatorRoots = new AdSpotLocatorRoots("/media", "/authored");
+            var renderService = new AdRenderService(
+                new FakeCastSegmentAuthor(), store, new FakeAdminMediaLookup(), libraries, stationIdentity, adsOptions,
+                locatorRoots, new NoOpLogger<AdRenderService>());
+            var stamper = new AdSpotStamper(
+                store, new FakeAdBedPool(), libraries, stationIdentity, adsOptions, new NoOpLogger<AdSpotStamper>());
+            var configuration = new ConfigurationBuilder().Build();
+
             var service = new AdSpotJobService(
-                store, sponsors, scriptWriter, new FakePatterDurationEstimator(), new FakeAudiencePostureProvider(),
-                gate, adsOptions, llmOptions, TimeProvider.System, logger);
+                store, sponsors, scriptWriter, renderService, stamper, new FakePatterDurationEstimator(),
+                new FakeAudiencePostureProvider(), gate, adsOptions, llmOptions, configuration, TimeProvider.System,
+                logger);
 
             await service.StartAsync(CancellationToken.None);
             try

@@ -179,6 +179,10 @@ public sealed class CastSegmentAuthor(
         return CastSegmentAuthorResult.Success(mediaId);
     }
 
+    /// <summary>Renders and returns the file; lands nothing — SPEC F174.4 preview mode (PLAN T442).</summary>
+    public Task<CrosstalkAssemblyResult> AssembleOnlyAsync(CastAssemblyRequest request, CancellationToken ct) =>
+        assembler.AssembleCastAsync(request, ct);
+
     static void DeleteIfExists(string path)
     {
         try

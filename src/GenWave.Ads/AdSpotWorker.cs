@@ -78,10 +78,8 @@ public sealed class AdSpotWorker(
     IAudiencePostureProvider audiencePosture,
     IAuthoredCatalogWriter catalogWriter,
     IAdminMediaLookup adminLookup,
-    IAdBedPool bedPool,
-    ILibraryRepository libraryRepository,
+    AdSpotStamper stamper,
     IOnAirRenderSignal onAirRenderSignal,
-    IStationIdentityProvider stationIdentity,
     IOptionsMonitor<AdsOptions> adsOptions,
     IOptionsMonitor<LlmOptions> llmOptions,
     IConfiguration configuration,
@@ -386,19 +384,20 @@ public sealed class AdSpotWorker(
     /// so the very next tick — no operator required — resumes it (STORY-391 AC4's own third fact).
     ///
     /// <para>
-    /// <b>Cast pick happens here (SPEC F167; STORY-402; PLAN T415 review R1)</b> — between the claim
-    /// and the render call, on the just-claimed row, via <see cref="StampCastIfNeededAsync"/>. Every
-    /// path that reaches <see cref="AdState.Approved"/> (owner draft, pack spot, LLM spot) is claimed by
-    /// the SAME call above and so takes the SAME single cast-pick step — there is no separate branch
-    /// for "who wrote this spot".
+    /// <b>Cast pick happens here (SPEC F167; STORY-402; PLAN T415)</b> — between the claim
+    /// and the render call, on the just-claimed row, via
+    /// <see cref="AdSpotStamper.StampCastIfNeededAsync"/> (hoisted PLAN T442 ruling, the preview job's
+    /// own render pass calls the SAME helper). Every path that reaches <see cref="AdState.Approved"/>
+    /// (owner draft, pack spot, LLM spot) is claimed by the SAME call above and so takes the SAME
+    /// single cast-pick step — there is no separate branch for "who wrote this spot".
     /// </para>
     ///
     /// <para>
     /// <b>Bed pick happens here too (SPEC F168; STORY-403; PLAN T416)</b> — right after the cast stamp,
-    /// via <see cref="StampBedIfNeededAsync"/>, the SAME "stamp the just-claimed row, once, before the
-    /// render call" shape as the cast pick immediately above: no separate branch for "who wrote this
-    /// spot", and an owner's own explicit <see cref="AdSpot.BedMediaId"/> is never second-guessed
-    /// (SPEC F168.5).
+    /// via <see cref="AdSpotStamper.StampBedIfNeededAsync"/>, the SAME "stamp the just-claimed row, once,
+    /// before the render call" shape as the cast pick immediately above: no separate branch for "who
+    /// wrote this spot", and an owner's own explicit <see cref="AdSpot.BedMediaId"/> is never
+    /// second-guessed (SPEC F168.5).
     /// </para>
     /// </summary>
     async Task RenderOneIfDueAsync(AdLiveSettings liveSettings, CancellationToken stoppingToken)
@@ -409,8 +408,8 @@ public sealed class AdSpotWorker(
         if (await spotStore.ClaimNextApprovedAsync(stoppingToken) is not { } claimed)
             return;
 
-        var castStamped = await StampCastIfNeededAsync(claimed, liveSettings, stoppingToken);
-        var spot = await StampBedIfNeededAsync(castStamped, stoppingToken);
+        var castStamped = await stamper.StampCastIfNeededAsync(claimed, liveSettings, stoppingToken);
+        var spot = await stamper.StampBedIfNeededAsync(castStamped, stoppingToken);
 
         using var budgetCts = new CancellationTokenSource(
             TimeSpan.FromSeconds(adsOptions.CurrentValue.RenderBudgetSeconds), timeProvider);
@@ -455,93 +454,8 @@ public sealed class AdSpotWorker(
     }
 
     /// <summary>
-    /// SPEC F167; STORY-402; PLAN T415 review R1/R2/R5 — casts <see cref="AdCastPicker"/> exactly once,
-    /// ONLY when <paramref name="spot"/> does not already carry a plan (an owner draft's own explicit
-    /// <see cref="AdSpot.VoicePlan"/>, or a plan a previous stamp already wrote, is never re-cast; the
-    /// C# check here is doubled by <see cref="IAdSpotStore.StampVoicePlanIfNullAsync"/>'s own SQL
-    /// <c>coalesce</c> — belt-and-suspenders, not redundant, since the SQL guard is what closes a race
-    /// this C# check alone cannot). Returns the row <see cref="RenderOneIfDueAsync"/> should actually
-    /// render: the freshly stamped row when the store returned one, or the ORIGINAL claimed row when it
-    /// returned <see langword="null"/> — a benign race (the row left <see cref="AdState.Rendering"/>
-    /// between claim and stamp) that must never abort a render; <see cref="AdRenderService"/>'s own
-    /// <c>ResolveCast</c> already degrades gracefully from a null <see cref="AdSpot.VoicePlan"/>.
-    /// </summary>
-    async Task<AdSpot> StampCastIfNeededAsync(AdSpot spot, AdLiveSettings liveSettings, CancellationToken ct)
-    {
-        if (spot.VoicePlan is not null)
-            return spot;
-
-        var pick = AdCastPicker.Pick(spot, liveSettings, stationIdentity.Current.Voice);
-        LogCastOutcome(spot, pick.Outcome);
-
-        var stamped = await spotStore.StampVoicePlanIfNullAsync(spot.Id, AdVoicePlanJson.Serialize(pick.Entries), ct);
-        return stamped ?? spot;
-    }
-
-    /// <summary>PLAN T415 review R8: one INFO line for a degraded pick, never for the happy path — and
-    /// never more than once per tick BY CONSTRUCTION, since <see cref="RenderOneIfDueAsync"/> claims and
-    /// renders at most one spot per tick, so no rate-limit state is kept here (YAGNI).</summary>
-    void LogCastOutcome(AdSpot spot, AdCastOutcome outcome)
-    {
-        switch (outcome)
-        {
-            case AdCastOutcome.Cast:
-                break;
-            case AdCastOutcome.ThinPool:
-                logger.LogInformation(
-                    "Ad cast pool has only one non-announcer voice for spot {Id} ({Sponsor}); the same voice reads every part",
-                    spot.Id, LogSanitize.Strip(spot.SponsorName));
-                break;
-            case AdCastOutcome.EmptyPool:
-                logger.LogInformation(
-                    "Ad cast pool is empty for spot {Id} ({Sponsor}); every part uses the station voice",
-                    spot.Id, LogSanitize.Strip(spot.SponsorName));
-                break;
-        }
-    }
-
-    /// <summary>
-    /// SPEC F168.1, F168.2, F168.5; STORY-403; PLAN T416 — picks <see cref="AdBedPicker"/> exactly
-    /// once, ONLY when <paramref name="spot"/> does not already carry a bed (an owner's own explicit
-    /// <see cref="AdSpot.BedMediaId"/>, or a pick a previous stamp already wrote, is never re-picked —
-    /// the SAME never-overwrite posture <see cref="StampCastIfNeededAsync"/> already keeps for a voice
-    /// plan, doubled by <see cref="IAdSpotStore.StampBedIfNullAsync"/>'s own SQL <c>coalesce</c>).
-    /// Resolves the ads library id itself (<see cref="AdRenderService"/> resolves it again later for
-    /// the render call proper — the two owners never share a request-scoped cache, so no shared state
-    /// crosses this method boundary): when the library does not exist yet, this method has nothing to
-    /// pick against and returns <paramref name="spot"/> unchanged — <see cref="AdRenderService"/>'s own
-    /// <c>ResolveLibraryIdAsync</c> reaches the SAME "the ads library does not exist yet" failure a
-    /// moment later and fails the render with the honest reason, so nothing is lost by staying silent
-    /// here. An empty pool degrades to an unbedded render with one INFO line (SPEC F168.2's own honest
-    /// fallback) rather than a failure — the SAME "render dry, don't refuse" posture an empty cast pool
-    /// already gets.
-    /// </summary>
-    async Task<AdSpot> StampBedIfNeededAsync(AdSpot spot, CancellationToken ct)
-    {
-        if (spot.BedMediaId is not null)
-            return spot;
-
-        var library = await libraryRepository.GetByNameAsync(adsOptions.CurrentValue.LibraryName, ct);
-        if (library is null)
-            return spot;
-
-        var pool = await bedPool.ListReadyBedIdsAsync(library.Id, ct);
-        var pick = AdBedPicker.Pick(spot.Id, pool);
-        if (pick is null)
-        {
-            logger.LogInformation(
-                "No background music is installed; spot {Id} ({Sponsor}) renders without it",
-                spot.Id, LogSanitize.Strip(spot.SponsorName));
-            return spot;
-        }
-
-        var stamped = await spotStore.StampBedIfNullAsync(spot.Id, pick.Value, ct);
-        return stamped ?? spot;
-    }
-
-    /// <summary>
     /// Best-effort recovery after <see cref="RenderOneIfDueAsync"/>'s own <c>renderCts</c> fired
-    /// (PLAN T402 review block 1/2) — uses <see cref="CancellationToken.None"/> deliberately: the
+    /// (PLAN T402) — uses <see cref="CancellationToken.None"/> deliberately: the
     /// token that carried this render is already dead, and this bookkeeping write must still land even
     /// if <paramref name="spotId"/>'s own render was cancelled by the very budget/host-shutdown signal
     /// that would otherwise cancel this cleanup too.

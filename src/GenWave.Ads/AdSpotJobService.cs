@@ -2,6 +2,7 @@ namespace GenWave.Ads;
 
 using System.Collections.Concurrent;
 using System.Threading.Channels;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -68,11 +69,14 @@ public sealed class AdSpotJobService : BackgroundService
     readonly IAdSpotStore spotStore;
     readonly ISponsorStore sponsorStore;
     readonly AdScriptWriter scriptWriter;
+    readonly AdRenderService renderService;
+    readonly AdSpotStamper stamper;
     readonly IPatterDurationEstimator durationEstimator;
     readonly IAudiencePostureProvider audiencePosture;
     readonly IOnAirRenderSignal onAirRenderSignal;
     readonly IOptionsMonitor<AdsOptions> adsOptions;
     readonly IOptionsMonitor<LlmOptions> llmOptions;
+    readonly IConfiguration configuration;
     readonly TimeProvider timeProvider;
     readonly ILogger<AdSpotJobService> logger;
 
@@ -96,22 +100,28 @@ public sealed class AdSpotJobService : BackgroundService
         IAdSpotStore spotStore,
         ISponsorStore sponsorStore,
         AdScriptWriter scriptWriter,
+        AdRenderService renderService,
+        AdSpotStamper stamper,
         IPatterDurationEstimator durationEstimator,
         IAudiencePostureProvider audiencePosture,
         IOnAirRenderSignal onAirRenderSignal,
         IOptionsMonitor<AdsOptions> adsOptions,
         IOptionsMonitor<LlmOptions> llmOptions,
+        IConfiguration configuration,
         TimeProvider timeProvider,
         ILogger<AdSpotJobService> logger)
     {
         this.spotStore = spotStore;
         this.sponsorStore = sponsorStore;
         this.scriptWriter = scriptWriter;
+        this.renderService = renderService;
+        this.stamper = stamper;
         this.durationEstimator = durationEstimator;
         this.audiencePosture = audiencePosture;
         this.onAirRenderSignal = onAirRenderSignal;
         this.adsOptions = adsOptions;
         this.llmOptions = llmOptions;
+        this.configuration = configuration;
         this.timeProvider = timeProvider;
         this.logger = logger;
 
@@ -282,9 +292,12 @@ public sealed class AdSpotJobService : BackgroundService
                 case "write":
                     await RunWriteAsync(request.SpotId, jobCt);
                     break;
+                case "preview":
+                    await RunPreviewAsync(request.SpotId, jobCt);
+                    break;
                 default:
-                    // T442 adds "preview" — this default is a defensive floor for any other value
-                    // reaching the queue, since AdsController today only ever enqueues "write".
+                    // A defensive floor for any other value reaching the queue — AdsController only
+                    // ever enqueues "write" or "preview" (SPEC F174.2, F174.4).
                     await spotStore.ClearJobAsync(request.SpotId, "unknown job kind", CancellationToken.None);
                     break;
             }
@@ -382,6 +395,49 @@ public sealed class AdSpotJobService : BackgroundService
                 // Every Reason this writer can produce is already newline-free — the validator-refusal path via
                 // AdScriptWriter.BoundReason, the rest by construction — so this Strip re-asserts that at the row
                 // boundary and no fixture can vary it through the writer.
+                await spotStore.ClearJobAsync(spotId, LogSanitize.Strip(failed.Reason), CancellationToken.None);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// SPEC F174.4; STORY-424; PLAN T442 — the SAME shape as <see cref="RunWriteAsync"/> (row lookup,
+    /// sponsor lookup, always through <see cref="IAdSpotStore.ClearJobAsync"/> regardless of outcome),
+    /// with the cast/bed stamp (<see cref="AdSpotStamper"/>, the SAME stamping pair
+    /// <c>AdSpotWorker</c>'s own render pass uses) run first: <see cref="AdRenderService.RenderPreviewAsync"/>
+    /// and <see cref="AdPreviewKey.Compute"/> both need a fully-stamped row (an ungenerated cast/bed
+    /// would render a DIFFERENT file than the one an operator ends up seeing once the row's own eventual
+    /// write-render stamps it) — the staleness key this job stores is therefore computed from the
+    /// STAMPED row, not the one this method first read.
+    /// </summary>
+    async Task RunPreviewAsync(long spotId, CancellationToken ct)
+    {
+        var spot = await spotStore.GetByIdAsync(spotId, ct);
+        if (spot is null)
+        {
+            await spotStore.ClearJobAsync(spotId, null, CancellationToken.None);
+            return;
+        }
+
+        var sponsor = await sponsorStore.GetAsync(spot.SponsorId, ct);
+        if (sponsor is null)
+        {
+            await spotStore.ClearJobAsync(spotId, "the sponsor no longer exists", CancellationToken.None);
+            return;
+        }
+
+        var liveSettings = AdLiveSettingsReader.Read(configuration);
+        var castStamped = await stamper.StampCastIfNeededAsync(spot, liveSettings, ct);
+        var stamped = await stamper.StampBedIfNeededAsync(castStamped, ct);
+
+        var outcome = await renderService.RenderPreviewAsync(stamped, sponsor, liveSettings, ct);
+        switch (outcome)
+        {
+            case AdPreviewOutcome.Rendered rendered:
+                await spotStore.StampPreviewAsync(spotId, rendered.Path, rendered.Key, CancellationToken.None);
+                await spotStore.ClearJobAsync(spotId, null, CancellationToken.None);
+                break;
+            case AdPreviewOutcome.Failed failed:
                 await spotStore.ClearJobAsync(spotId, LogSanitize.Strip(failed.Reason), CancellationToken.None);
                 break;
         }

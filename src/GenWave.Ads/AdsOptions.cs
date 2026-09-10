@@ -93,8 +93,10 @@ public sealed class AdsOptions
     /// <summary>
     /// How many days a rendered sponsor preview is kept before the retention sweep removes it
     /// (SPEC F176.2, gh-#714, STORY-431). Default 7. Range 1-90 (SPEC F176.2's own explicit
-    /// bounds): T442's <c>AdSpotLifecycleGuardianService</c> reads this when it deletes previews
-    /// of ready/retired spots and those older than the window (<c>{Ads:LibraryRoot}/preview/</c>).
+    /// bounds): <c>AdSpotLifecycleGuardianService</c> reads this when it deletes previews of
+    /// ready/retired spots and those older than the window. SPEC F174.4's <c>{Ads:LibraryRoot}</c>
+    /// is <see cref="AdSpotLocatorRoots.AuthoredRoot"/> in code (PLAN T442 ruling) — the preview
+    /// directory is <c>{AuthoredRoot}/preview/</c>.
     /// </summary>
     [Range(1, 90)]
     public int PreviewRetentionDays { get; set; } = 7;

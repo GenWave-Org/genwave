@@ -17,4 +17,11 @@ public interface ICastSegmentAuthor
         Func<CrosstalkAssemblyResult.Assembled, AuthoredMediaInsert> buildInsert,
         Func<long, CancellationToken, Task<bool>> confirmAsync,
         CancellationToken ct);
+
+    /// <summary>
+    /// Renders and returns the file; lands nothing — SPEC F174.4 preview mode (PLAN T442). Unlike
+    /// <see cref="AuthorAsync"/>, no catalog row is inserted and no confirmation delegate is called;
+    /// the caller owns the resulting artifact's path entirely.
+    /// </summary>
+    Task<CrosstalkAssemblyResult> AssembleOnlyAsync(CastAssemblyRequest request, CancellationToken ct);
 }

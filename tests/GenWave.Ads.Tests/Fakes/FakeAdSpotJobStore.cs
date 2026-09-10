@@ -159,4 +159,10 @@ public sealed class FakeAdSpotJobStore : IAdSpotStore
 
     public Task<AdSpot?> ClaimForPromotionAsync(long id, string expectedVersion, CancellationToken ct) =>
         throw new NotSupportedException("Not used by AdSpotJobService.");
+
+    public Task<IReadOnlyList<AdSpot>> ListPreviewsToSweepAsync(TimeSpan retention, DateTimeOffset now, CancellationToken ct) =>
+        throw new NotSupportedException("Not used by AdSpotJobService.");
+
+    public Task<bool> ClearPreviewAsync(long id, CancellationToken ct) =>
+        throw new NotSupportedException("Not used by AdSpotJobService.");
 }

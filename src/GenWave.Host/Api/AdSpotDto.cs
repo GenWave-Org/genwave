@@ -18,7 +18,9 @@ namespace GenWave.Host.Api;
 /// <see cref="AdBriefDto.Sponsor"/> precedent one seam over) — a sponsor is always referenced by its
 /// own id/name/paused, never by a free-text customer label field. <see cref="Job"/> (PLAN T441) is
 /// <see langword="null"/> exactly when the row carries neither a job stamp nor a job error — see
-/// <see cref="AdSpotJobDto"/>'s own remarks for the shape when it is not.
+/// <see cref="AdSpotJobDto"/>'s own remarks for the shape when it is not. <see cref="Preview"/> (SPEC
+/// F174.4; PLAN T442) is <see langword="null"/> exactly when no preview has ever been rendered for
+/// this row — see <see cref="AdSpotPreviewDto"/>'s own remarks for the shape when it is not.
 /// </summary>
 public sealed record AdSpotDto(
     long Id,
@@ -41,4 +43,5 @@ public sealed record AdSpotDto(
     DateTime? RenderedAt,
     DateTime? RetiredAt,
     string Version,
-    AdSpotJobDto? Job);
+    AdSpotJobDto? Job,
+    AdSpotPreviewDto? Preview);

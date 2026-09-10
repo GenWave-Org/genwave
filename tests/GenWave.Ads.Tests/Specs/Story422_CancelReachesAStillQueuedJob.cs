@@ -11,7 +11,9 @@ using System.Text;
 using System.Text.Json;
 using GenWave.Ads.Tests.Fakes;
 using GenWave.Ads.Tests.Support;
+using GenWave.Core.Domain;
 using GenWave.Tts;
+using Microsoft.Extensions.Configuration;
 
 public static class FeatureCancelReachesAStillQueuedJob
 {
@@ -77,9 +79,22 @@ public static class FeatureCancelReachesAStillQueuedJob
             var adsOptions = new FakeOptionsMonitor<AdsOptions>(new AdsOptions());
             var gate = new FakeOnAirRenderSignal { InFlight = true };
 
+            // renderService/stamper/configuration only reach RunPreviewAsync (PLAN T442) — this
+            // scenario only ever enqueues "write" jobs, so these stay wired but unreached.
+            var stationIdentity = new FakeStationIdentityProvider(new StationIdentity("station-1", "Test Station", "station_voice"));
+            var libraries = new FakeAdsLibraryStore();
+            var locatorRoots = new AdSpotLocatorRoots("/media", "/authored");
+            var renderService = new AdRenderService(
+                new FakeCastSegmentAuthor(), store, new FakeAdminMediaLookup(), libraries, stationIdentity, adsOptions,
+                locatorRoots, new NoOpLogger<AdRenderService>());
+            var stamper = new AdSpotStamper(
+                store, new FakeAdBedPool(), libraries, stationIdentity, adsOptions, new NoOpLogger<AdSpotStamper>());
+            var configuration = new ConfigurationBuilder().Build();
+
             var service = new AdSpotJobService(
-                store, sponsors, scriptWriter, new FakePatterDurationEstimator(), new FakeAudiencePostureProvider(),
-                gate, adsOptions, llmOptions, TimeProvider.System, new NoOpLogger<AdSpotJobService>());
+                store, sponsors, scriptWriter, renderService, stamper, new FakePatterDurationEstimator(),
+                new FakeAudiencePostureProvider(), gate, adsOptions, llmOptions, configuration, TimeProvider.System,
+                new NoOpLogger<AdSpotJobService>());
 
             await service.StartAsync(CancellationToken.None);
             try

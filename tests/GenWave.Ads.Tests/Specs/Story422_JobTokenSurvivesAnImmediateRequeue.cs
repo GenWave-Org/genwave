@@ -12,7 +12,9 @@ namespace GenWave.Ads.Tests.Specs;
 
 using GenWave.Ads.Tests.Fakes;
 using GenWave.Ads.Tests.Support;
+using GenWave.Core.Domain;
 using GenWave.Tts;
+using Microsoft.Extensions.Configuration;
 
 public static class FeatureTheSkipPathIsKeyedByInstanceNotBySpotIdAlone
 {
@@ -39,9 +41,22 @@ public static class FeatureTheSkipPathIsKeyedByInstanceNotBySpotIdAlone
             var adsOptions = new FakeOptionsMonitor<AdsOptions>(new AdsOptions());
             var gate = new FakeOnAirRenderSignal { InFlight = false };
 
+            // renderService/stamper/configuration only reach RunPreviewAsync (PLAN T442) — this
+            // scenario only ever enqueues "write" jobs, so these stay wired but unreached.
+            var stationIdentity = new FakeStationIdentityProvider(new StationIdentity("station-1", "Test Station", "station_voice"));
+            var libraries = new FakeAdsLibraryStore();
+            var locatorRoots = new AdSpotLocatorRoots("/media", "/authored");
+            var renderService = new AdRenderService(
+                new FakeCastSegmentAuthor(), store, new FakeAdminMediaLookup(), libraries, stationIdentity, adsOptions,
+                locatorRoots, new NoOpLogger<AdRenderService>());
+            var stamper = new AdSpotStamper(
+                store, new FakeAdBedPool(), libraries, stationIdentity, adsOptions, new NoOpLogger<AdSpotStamper>());
+            var configuration = new ConfigurationBuilder().Build();
+
             var service = new AdSpotJobService(
-                store, sponsors, scriptWriter, new FakePatterDurationEstimator(), new FakeAudiencePostureProvider(),
-                gate, adsOptions, llmOptions, TimeProvider.System, new NoOpLogger<AdSpotJobService>());
+                store, sponsors, scriptWriter, renderService, stamper, new FakePatterDurationEstimator(),
+                new FakeAudiencePostureProvider(), gate, adsOptions, llmOptions, configuration, TimeProvider.System,
+                new NoOpLogger<AdSpotJobService>());
 
             // The race itself: the ORIGINAL job's own ClearJobAsync call re-enters TryEnqueueAsync for
             // the same spot id — a second job's token now lands in the service's own dictionary while

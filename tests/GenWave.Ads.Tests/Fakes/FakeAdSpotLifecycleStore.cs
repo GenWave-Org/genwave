@@ -416,4 +416,34 @@ public sealed class FakeAdSpotLifecycleStore : IAdSpotStore
         var updated = Replace(id, s => s with { State = AdState.Rendering, StateChangedAt = DateTime.UtcNow, Version = NextVersion() });
         return Task.FromResult<AdSpot?>(updated);
     }
+
+    /// <summary>Mirrors <see cref="GenWave.MediaLibrary.Station.AdSpotRepository.ListPreviewsToSweepAsync"/>
+    /// in plain C# (PLAN T442): the interface's own predicate verbatim — a stamped preview
+    /// (<see cref="AdSpot.PreviewPath"/> not <see langword="null"/>) whose spot has left the editable
+    /// lifecycle (<see cref="AdState.Ready"/> or <see cref="AdState.Retired"/>), or has simply aged past
+    /// <paramref name="retention"/> since <see cref="AdSpot.PreviewAt"/>.</summary>
+    public Task<IReadOnlyList<AdSpot>> ListPreviewsToSweepAsync(TimeSpan retention, DateTimeOffset now, CancellationToken ct)
+    {
+        var cutoff = now - retention;
+        IReadOnlyList<AdSpot> candidates = spots
+            .Where(s => s.PreviewPath is not null &&
+                (s.State is AdState.Ready or AdState.Retired ||
+                 (s.PreviewAt is DateTime previewAt && new DateTimeOffset(previewAt, TimeSpan.Zero) < cutoff)))
+            .OrderBy(s => s.PreviewAt ?? DateTime.MaxValue).ThenBy(s => s.Id)
+            .ToList();
+        return Task.FromResult(candidates);
+    }
+
+    /// <summary>Mirrors <see cref="GenWave.MediaLibrary.Station.AdSpotRepository.ClearPreviewAsync"/> in
+    /// plain C# (PLAN T442): total by id — nulls the preview trio together, harmless on a row with no
+    /// preview stamped; reports <see langword="false"/> only when no row exists.</summary>
+    public Task<bool> ClearPreviewAsync(long id, CancellationToken ct)
+    {
+        var index = spots.FindIndex(s => s.Id == id);
+        if (index < 0)
+            return Task.FromResult(false);
+
+        Replace(id, s => s with { PreviewPath = null, PreviewAt = null, PreviewKey = null });
+        return Task.FromResult(true);
+    }
 }

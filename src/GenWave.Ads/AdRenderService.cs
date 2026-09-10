@@ -37,6 +37,15 @@ using GenWave.Tts;
 /// (a bad script, an unreachable Kokoro, a Postgres blip) must never take the whole tick loop down.
 /// Every failure path here reports through <see cref="IAdSpotStore.MarkFailedAsync"/> instead.
 /// </para>
+///
+/// <para>
+/// <b>The preview render (SPEC F174.4; STORY-424; PLAN T442) is a second, narrower entry point,
+/// <see cref="RenderPreviewAsync"/></b> — it shares <see cref="RenderAsync"/>'s own
+/// parse/bed/cast/tags assembly (see <c>BuildAssemblyRequestAsync</c>'s own remarks) but writes to a
+/// standalone file under the preview root via <see cref="ICastSegmentAuthor.AssembleOnlyAsync"/>
+/// rather than <see cref="ICastSegmentAuthor.AuthorAsync"/> — no <c>library.media</c> row, no
+/// <see cref="AdState"/> transition either way; the caller's own preview job owns stamping the result.
+/// </para>
 /// </summary>
 public sealed class AdRenderService(
     ICastSegmentAuthor author,
@@ -77,6 +86,101 @@ public sealed class AdRenderService(
 
     async Task<AdRenderOutcome> RenderCoreAsync(AdSpot spot, AdLiveSettings liveSettings, CancellationToken ct)
     {
+        var outputDirectory = Path.Combine(locatorRoots.AuthoredRoot, "ads");
+        var (request, failure) = await BuildAssemblyRequestAsync(spot, liveSettings, outputDirectory, ct);
+        if (request is null)
+            return await FailAsync(spot.Id, failure ?? "render: assembly request build failed", ct);
+
+        var libraryId = await ResolveLibraryIdAsync(ct);
+        if (libraryId is null)
+            return await FailAsync(spot.Id, "render: the ads library does not exist yet", ct);
+
+        var result = await author.AuthorAsync(
+            request,
+            buildInsert: assembled => BuildInsert(libraryId.Value, request.Tags, assembled),
+            confirmAsync: (mediaId, confirmCt) => spotStore.MarkReadyAsync(spot.Id, mediaId, confirmCt),
+            ct);
+
+        if (!result.Succeeded)
+            return await FailAsync(spot.Id, $"render: {result.FailureReason} — {result.FailureDetail}", ct);
+
+        return AdRenderOutcome.Rendered;
+    }
+
+    /// <summary>
+    /// Renders <paramref name="spot"/> to a standalone preview WAV — never a catalog write (SPEC
+    /// F174.4; STORY-424; PLAN T442): unlike <see cref="RenderAsync"/>, nothing on this path ever
+    /// calls <see cref="IAdSpotStore.MarkFailedAsync"/> or <see cref="IAdSpotStore.MarkReadyAsync"/> —
+    /// the spot's own <see cref="AdState"/> is untouched either way. The caller's own preview job
+    /// stamps success (<c>preview_path</c>/<c>preview_at</c>/<c>preview_key</c>) or records failure
+    /// (<c>job_error</c>) itself; a preview render failure is never a reason to fail the spot.
+    /// </summary>
+    /// <param name="sponsor">The spot's own sponsor, already resolved by the caller (this service has
+    /// no <c>ISponsorStore</c> dependency of its own) — <see cref="AdPreviewKey.Compute"/> needs the
+    /// full sponsor record, not merely the id every other render path carries.</param>
+    internal async Task<AdPreviewOutcome> RenderPreviewAsync(
+        AdSpot spot, Sponsor sponsor, AdLiveSettings live, CancellationToken ct)
+    {
+        try
+        {
+            return await RenderPreviewCoreAsync(spot, sponsor, live, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Ad spot {Id} preview render failed unexpectedly", spot.Id);
+            return new AdPreviewOutcome.Failed($"preview: unexpected {ex.GetType().Name}");
+        }
+    }
+
+    async Task<AdPreviewOutcome> RenderPreviewCoreAsync(
+        AdSpot spot, Sponsor sponsor, AdLiveSettings live, CancellationToken ct)
+    {
+        var previewRoot = AdPreviewRoot.Resolve(locatorRoots);
+        var (request, failure) = await BuildAssemblyRequestAsync(spot, live, previewRoot, ct);
+        if (request is null)
+            return new AdPreviewOutcome.Failed(failure ?? "preview: assembly request build failed");
+
+        Directory.CreateDirectory(previewRoot);
+        var assembled = await author.AssembleOnlyAsync(request, ct);
+        if (assembled is not CrosstalkAssemblyResult.Assembled result)
+        {
+            var reason = assembled is CrosstalkAssemblyResult.Discarded discarded ? discarded.Reason : "assembly failed";
+            return new AdPreviewOutcome.Failed($"preview: {reason}");
+        }
+
+        // The assembler encodes pcm_s16le into a .{Tts:Format} container (CastSegmentAuthor's own
+        // ffmpeg invocation) — so only genuine wav bytes are ever labelled .wav below; a station
+        // configured for a different Tts:Format hands back a differently-extensioned file here, and
+        // renaming those bytes onto a ".wav" path would serve mislabeled audio rather than fail loudly.
+        var assembledExtension = Path.GetExtension(result.Path).TrimStart('.');
+        if (!string.Equals(assembledExtension, "wav", StringComparison.OrdinalIgnoreCase))
+        {
+            return new AdPreviewOutcome.Failed(
+                $"preview needs Tts:Format=wav; the station renders {(assembledExtension.Length > 0 ? assembledExtension : "an unlabeled format")}");
+        }
+
+        var key = AdPreviewKey.Compute(spot, sponsor, live, adsOptions.CurrentValue.BedDuckDb);
+        var finalPath = Path.Combine(previewRoot, $"{spot.Id}-{key}.wav");
+        File.Move(result.Path, finalPath, overwrite: true);
+        return new AdPreviewOutcome.Rendered(finalPath, key);
+    }
+
+    /// <summary>
+    /// Builds the request both <see cref="RenderCoreAsync"/> and <see cref="RenderPreviewCoreAsync"/>
+    /// hand to <see cref="ICastSegmentAuthor"/> — the SAME parse/bed/cast/tags/ceiling assembly either
+    /// render needs, differing only in <paramref name="outputDirectory"/> and, on the write path, the
+    /// ads library id <see cref="RenderCoreAsync"/> separately resolves once this call returns (PLAN
+    /// T442 ruling: extracted so the preview render shares this shape exactly rather than
+    /// re-diverging it by hand). A <see langword="null"/> <c>Request</c> means <c>Failure</c> carries
+    /// the reason the caller's own failure path should report.
+    /// </summary>
+    async Task<(CastAssemblyRequest? Request, string? Failure)> BuildAssemblyRequestAsync(
+        AdSpot spot, AdLiveSettings liveSettings, string outputDirectory, CancellationToken ct)
+    {
         // A structural re-parse only (int.MaxValue as the per-line ceiling — the length rule was
         // already enforced at write time; re-checking it here would be re-validation, not rendering).
         var parsed = AdScriptParser.Parse(spot.Script ?? "", int.MaxValue);
@@ -85,24 +189,19 @@ public sealed class AdRenderService(
             var reason = parsed is AdScriptValidationResult.Refused refused
                 ? refused.Violation.Reason
                 : "unparseable script";
-            return await FailAsync(spot.Id, $"render: stored script no longer parses ({reason})", ct);
+            return (null, $"render: stored script no longer parses ({reason})");
         }
 
         var (bed, bedFailure) = await ResolveBedAsync(spot.BedMediaId, ct);
         if (bedFailure is not null)
-            return await FailAsync(spot.Id, bedFailure, ct);
-
-        var libraryId = await ResolveLibraryIdAsync(ct);
-        if (libraryId is null)
-            return await FailAsync(spot.Id, "render: the ads library does not exist yet", ct);
+            return (null, bedFailure);
 
         var cast = ResolveCast(spot, script);
         var lines = script.Lines.Select(line => new CastLine(line.Tag, line.Text)).ToList();
         var tags = new AudioTags(stationIdentity.Current.Name, spot.Title);
         var ceilingSeconds = spot.SpotSeconds * (1 + adsOptions.CurrentValue.DurationToleranceRatio);
-        var outputDirectory = Path.Combine(locatorRoots.AuthoredRoot, "ads");
 
-        // SPEC F168.4; STORY-403; PLAN T416 review F3+O3 — Station:Ads:BedFadeMs is a Live setting,
+        // SPEC F168.4; STORY-403; PLAN T416 — Station:Ads:BedFadeMs is a Live setting,
         // handed in as liveSettings.BedFadeMs (the SAME AdLiveSettingsReader.Read result
         // AdSpotWorker's own cast-pick call already read once, earlier in the SAME tick — this class
         // no longer carries its own IConfiguration to re-read it a second time), stored in
@@ -116,17 +215,7 @@ public sealed class AdRenderService(
         var request = new CastAssemblyRequest(
             lines, cast, ceilingSeconds, tags, outputDirectory, bed, adsOptions.CurrentValue.BedDuckDb,
             BedFadeSeconds: bedFadeSeconds);
-
-        var result = await author.AuthorAsync(
-            request,
-            buildInsert: assembled => BuildInsert(libraryId.Value, tags, assembled),
-            confirmAsync: (mediaId, confirmCt) => spotStore.MarkReadyAsync(spot.Id, mediaId, confirmCt),
-            ct);
-
-        if (!result.Succeeded)
-            return await FailAsync(spot.Id, $"render: {result.FailureReason} — {result.FailureDetail}", ct);
-
-        return AdRenderOutcome.Rendered;
+        return (request, null);
     }
 
     /// <summary>

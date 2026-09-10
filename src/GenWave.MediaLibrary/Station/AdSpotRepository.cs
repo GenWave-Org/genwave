@@ -273,16 +273,25 @@ sealed class AdSpotRepository(Lazy<NpgsqlDataSource> dataSource) : IAdSpotStore
     /// <summary>
     /// <see cref="IAdSpotStore.StampVoicePlanIfNullAsync"/>'s SQL, exposed so
     /// <c>tests/GenWave.MediaLibrary.Tests/Specs/Story402_AdSpotStampVoicePlanSql.cs</c> can assert the
-    /// never-overwrite <c>coalesce</c> and the <c>rendering</c>-only guard directly (the
+    /// never-overwrite <c>coalesce</c> and the state guard directly (the
     /// <see cref="VoicePackRepository.DeleteGuardSql"/> precedent). <c>internal</c> —
     /// <c>InternalsVisibleTo</c> already grants <c>GenWave.MediaLibrary.Tests</c> (see this project's
     /// own .csproj). <c>static readonly</c>, not <c>const</c> — a raw-string interpolating
     /// <see cref="Columns"/> cannot itself be a compile-time constant.
     /// </summary>
+    /// <remarks>PLAN T442 ruling — widened from <c>rendering</c>-only (PLAN T415's original guard) to
+    /// also cover <c>draft</c>/<c>approved</c>: a preview render (STORY-424) stamps the SAME cast pick
+    /// as a write render, but on a row this class's own <see cref="ClaimNextApprovedAsync"/> never
+    /// claims into <c>rendering</c> — preview leaves the row's own state exactly as it found it (draft
+    /// or approved), by STORY-424 AC5's own contract, so the guard must legally admit both without a
+    /// state transition either side of the stamp. A row in <c>ready</c>/<c>failed</c>/<c>retired</c>
+    /// stays refused, exactly as before (no legitimate caller ever stamps a spot that far along).
+    /// </remarks>
     internal static readonly string StampVoicePlanSql = $"""
         update station.ad_spot
         set voice_plan = coalesce(voice_plan, @voicePlan::jsonb)
-        where id = @id and state = 'rendering'::station.ad_state
+        where id = @id
+          and state in ('draft'::station.ad_state, 'approved'::station.ad_state, 'rendering'::station.ad_state)
         returning {Columns}
         """;
 
@@ -305,16 +314,20 @@ sealed class AdSpotRepository(Lazy<NpgsqlDataSource> dataSource) : IAdSpotStore
     /// <summary>
     /// <see cref="IAdSpotStore.StampBedIfNullAsync"/>'s SQL, exposed so
     /// <c>tests/GenWave.MediaLibrary.Tests/Specs/Story403_AdSpotStampBedSql.cs</c> can assert the
-    /// never-overwrite <c>coalesce</c> and the <c>rendering</c>-only guard directly — the
+    /// never-overwrite <c>coalesce</c> and the state guard directly — the
     /// <see cref="StampVoicePlanSql"/> precedent, one column over. <c>internal</c> —
     /// <c>InternalsVisibleTo</c> already grants <c>GenWave.MediaLibrary.Tests</c> (see this project's
     /// own .csproj). <c>static readonly</c>, not <c>const</c> — a raw-string interpolating
     /// <see cref="Columns"/> cannot itself be a compile-time constant.
     /// </summary>
+    /// <remarks>PLAN T442 ruling — the SAME widened guard as <see cref="StampVoicePlanSql"/>, for the
+    /// SAME reason (a preview render's own bed pick, STORY-424, stamps a row that stays draft/approved
+    /// throughout, never claimed into <c>rendering</c>). See that field's own remarks.</remarks>
     internal static readonly string StampBedSql = $"""
         update station.ad_spot
         set bed_media_id = coalesce(bed_media_id, @bedMediaId)
-        where id = @id and state = 'rendering'::station.ad_state
+        where id = @id
+          and state in ('draft'::station.ad_state, 'approved'::station.ad_state, 'rendering'::station.ad_state)
         returning {Columns}
         """;
 
@@ -620,6 +633,45 @@ sealed class AdSpotRepository(Lazy<NpgsqlDataSource> dataSource) : IAdSpotStore
             """,
             new { id, expectedVersion }, cancellationToken: ct));
         return row is null ? null : ToAdSpot(row);
+    }
+
+    /// <summary><see cref="IAdSpotStore.ListPreviewsToSweepAsync"/> (SPEC F176.2; STORY-429; PLAN
+    /// T442) — the interface's own predicate verbatim: a stamped preview whose spot has left the
+    /// editable lifecycle, or has simply aged past <paramref name="retention"/>. Bounded at
+    /// <see cref="MaxUnpagedRows"/>, the SAME ceiling every other unpaged guardian/worker read in this
+    /// file already applies.</summary>
+    public async Task<IReadOnlyList<AdSpot>> ListPreviewsToSweepAsync(
+        TimeSpan retention, DateTimeOffset now, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var rows = await conn.QueryAsync<AdSpotRow>(new CommandDefinition(
+            $"""
+            {SelectColumns}
+            where preview_path is not null
+              and (state in ('ready'::station.ad_state, 'retired'::station.ad_state) or preview_at < @cutoff)
+            order by preview_at asc nulls last, id asc
+            limit @limit
+            """,
+            new { cutoff = now - retention, limit = MaxUnpagedRows }, cancellationToken: ct));
+        return rows.Select(ToAdSpot).ToList();
+    }
+
+    /// <summary><see cref="IAdSpotStore.ClearPreviewAsync"/> (SPEC F176.2; STORY-429; PLAN T442) — the
+    /// SAME total-by-id shape <see cref="ClearJobAsync"/> already gives the job stamp trio, applied to
+    /// the preview trio instead: the <c>WHERE</c> only tests <c>id = @id</c>, so a row with no preview
+    /// currently stamped is affected too, harmlessly re-writing the SAME three nulls it already
+    /// carried.</summary>
+    public async Task<bool> ClearPreviewAsync(long id, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var affected = await conn.ExecuteAsync(new CommandDefinition(
+            """
+            update station.ad_spot
+            set preview_path = null, preview_at = null, preview_key = null
+            where id = @id
+            """,
+            new { id }, cancellationToken: ct));
+        return affected == 1;
     }
 
     /// <summary>

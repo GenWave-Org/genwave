@@ -88,14 +88,20 @@ internal static class AdSpotWorkerHarness
     /// handler that throws if ever invoked (a scenario that never means to generate should never
     /// reach it silently); a scenario that DOES mean to generate passes
     /// <see cref="ServeSameReplyEveryTime"/> or its own custom handler.</param>
-    /// <param name="workerLogger">Defaults to <see cref="NoOpLogger{T}"/> — a scenario asserting on a
-    /// specific log line (PLAN T415, STORY-402 AC7's own INFO-per-tick fact) passes its own
+    /// <param name="workerLogger">Defaults to <see cref="NoOpLogger{T}"/> — a scenario asserting on an
+    /// <see cref="AdSpotWorker"/>-own log line passes its own
     /// <see cref="GenWave.Ads.Tests.Fakes.CapturingLogger{T}"/> and keeps the reference to read back
     /// after the tick.</param>
+    /// <param name="stamperLogger">Defaults to <see cref="NoOpLogger{T}"/> — a scenario asserting on
+    /// the cast/bed pick's own degraded-pool INFO line (PLAN T415/T416, STORY-402/STORY-403 AC7's own
+    /// INFO-per-tick facts) passes its own <see cref="GenWave.Ads.Tests.Fakes.CapturingLogger{T}"/>
+    /// here instead — that logging moved to <see cref="AdSpotStamper"/> when PLAN T442 hoisted the
+    /// stamping pair out of this worker, so it no longer reaches <paramref name="workerLogger"/>.
+    /// </param>
     public static Harness Build(
         DateTimeOffset now, IReadOnlyDictionary<string, string?>? stationSettings = null,
         int renderBudgetSeconds = 300, double durationToleranceRatio = 0.4, FakeHttpMessageHandler? llmHandler = null,
-        ILogger<AdSpotWorker>? workerLogger = null)
+        ILogger<AdSpotWorker>? workerLogger = null, ILogger<AdSpotStamper>? stamperLogger = null)
     {
         var timeProvider = new FakeTimeProvider(now);
         var store = new FakeAdSpotLifecycleStore();
@@ -147,6 +153,9 @@ internal static class AdSpotWorkerHarness
             author, store, adminLookup, libraries, stationIdentity, adsOptions, locatorRoots,
             new NoOpLogger<AdRenderService>());
 
+        var stamper = new AdSpotStamper(
+            store, bedPool, libraries, stationIdentity, adsOptions, stamperLogger ?? new NoOpLogger<AdSpotStamper>());
+
         var handler = llmHandler ?? new FakeHttpMessageHandler((_, _) =>
             throw new InvalidOperationException(
                 "No LLM handler wired for this scenario — pass one via AdSpotWorkerHarness.Build's own llmHandler parameter."));
@@ -157,11 +166,11 @@ internal static class AdSpotWorkerHarness
 
         var worker = new AdSpotWorker(
             store, briefs, sponsors, scriptWriter, renderService, durationEstimator, audiencePosture, catalogWriter,
-            adminLookup, bedPool, libraries, gate, stationIdentity, adsOptions, llmOptions, configuration,
+            adminLookup, stamper, gate, adsOptions, llmOptions, configuration,
             timeProvider, workerLogger ?? new NoOpLogger<AdSpotWorker>());
 
         var guardian = new AdSpotLifecycleGuardianService(
-            store, adsOptions, timeProvider, new NoOpLogger<AdSpotLifecycleGuardianService>());
+            store, adsOptions, locatorRoots, timeProvider, new NoOpLogger<AdSpotLifecycleGuardianService>());
 
         return new Harness(
             worker, guardian, store, briefs, sponsors, gate, author, timeProvider, adsOptions, catalogWriter,

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using GenWave.Ads;
 using GenWave.Core.Abstractions;
@@ -112,6 +113,25 @@ namespace GenWave.Host.Api;
 /// own contract). <b>A process restart orphans a stamped row</b> (<see cref="AdSpotJobService"/>'s own
 /// remarks state this in full) — this task leaves that gap to an operator's own <c>DELETE …/job</c>.
 /// </para>
+///
+/// <para>
+/// <b>The preview render (SPEC F174.4; STORY-424, STORY-429; PLAN T442).</b>
+/// <c>POST /api/ads/{id}/preview</c> shares the SAME <see cref="AdSpotJobService.TryEnqueueAsync"/>/
+/// <see cref="MapEnqueueResultAsync"/> plumbing as <c>/write</c> above, under its own two checks: an
+/// empty/whitespace <see cref="AdSpot.Script"/> is 400 <c>script_required</c> (a preview has nothing to
+/// render without one — an owner draft with only a <c>brief</c> has not been written yet), and a row
+/// outside <see cref="AdState.Draft"/>/<see cref="AdState.Approved"/> is 409
+/// <c>ad_preview_not_editable</c> — the same two states <c>/write</c>'s own draft-only gate is a
+/// subset of, since a preview stays useful one step further (an approved row an operator wants one
+/// more listen to before it renders for real). The rendered file never becomes a
+/// <c>library.media</c> row (<see cref="GenWave.Tts.ICastSegmentAuthor.AssembleOnlyAsync"/>'s own contract) —
+/// <c>GET /api/ads/{id}/preview.wav</c> streams it straight off disk instead, 404 when the spot is
+/// unknown, no preview has ever been stamped, the stamped <c>preview_key</c> no longer matches a fresh
+/// <see cref="AdPreviewKey.Compute"/> over the row's CURRENT inputs (STALE — an edit since the last
+/// preview render), or the file itself is simply gone. <see cref="AdSpotDto.Preview"/> carries the
+/// SAME staleness verdict on every read (<c>GetById</c>/<c>List</c>/every write-verb response) so a
+/// caller never has to probe the <c>.wav</c> route just to know whether re-rendering makes sense.
+/// </para>
 /// </summary>
 [ApiController]
 [Route("api/ads")]
@@ -126,6 +146,8 @@ public sealed class AdsController(
     IPatterDurationEstimator durationEstimator,
     IOptionsMonitor<AdsOptions> adsOptions,
     AdSpotJobService jobService,
+    AdSpotLocatorRoots locatorRoots,
+    IConfiguration configuration,
     ILogger<AdsController> logger) : ControllerBase
 {
     const int DefaultLimit = 50;
@@ -137,6 +159,8 @@ public sealed class AdsController(
     const string SponsorNotFoundType = "sponsor_not_found";
     const string SponsorPausedType = "sponsor_paused";
     const string WriteNotDraftType = "ad_write_not_draft";
+    const string ScriptRequiredType = "script_required";
+    const string PreviewNotEditableType = "ad_preview_not_editable";
     const string JobBusyType = "ad_job_busy";
     const string JobQueueFullType = "ad_job_queue_full";
 
@@ -199,9 +223,18 @@ public sealed class AdsController(
         var sponsors = await sponsorStore.ListAsync(q: null, ct);
         var sponsorsById = sponsors.ToDictionary(row => row.Sponsor.Id, row => row.Sponsor);
 
+        // Read ONCE for the whole page (PLAN T442 ruling), not once per row inside the Select below —
+        // ToPreviewDto's own staleness recompute still costs one SHA256 PER ROW (db/46's own ruling:
+        // no stored flag, so that part of the cost is intentional), but the Live settings themselves
+        // never change mid-request, so re-reading IConfiguration N times for the SAME values was pure
+        // waste this hoist removes.
+        var liveSettings = AdLiveSettingsReader.Read(configuration);
+
         return Ok(new
         {
-            items = page.Items.Select(spot => ToDto(spot, SponsorDtoFor(spot.SponsorId, sponsorsById))).ToList(),
+            items = page.Items
+                .Select(spot => ToDto(spot, sponsorsById.GetValueOrDefault(spot.SponsorId), liveSettings))
+                .ToList(),
             total = page.Total,
         });
     }
@@ -223,9 +256,9 @@ public sealed class AdsController(
         if (spot is null)
             return NotFound();
 
-        var sponsor = await ResolveSponsorRefAsync(spot.SponsorId, ct);
+        var sponsor = await sponsorStore.GetAsync(spot.SponsorId, ct);
         Response.Headers.ETag = WeakETag.Format(spot.Version);
-        return Ok(ToDto(spot, sponsor));
+        return Ok(ToDto(spot, sponsor, AdLiveSettingsReader.Read(configuration)));
     }
 
     // -----------------------------------------------------------------------
@@ -303,7 +336,7 @@ public sealed class AdsController(
             spot.Id, spot.SponsorId, LogSanitize.Strip(spot.SponsorName));
 
         Response.Headers.ETag = WeakETag.Format(spot.Version);
-        return Created($"/api/ads/{spot.Id}", ToDto(spot, SponsorRefDto.From(sponsor)));
+        return Created($"/api/ads/{spot.Id}", ToDto(spot, sponsor, AdLiveSettingsReader.Read(configuration)));
     }
 
     // -----------------------------------------------------------------------
@@ -503,25 +536,7 @@ public sealed class AdsController(
             return Conflict(WriteNotDraftProblem());
 
         var enqueueResult = await jobService.TryEnqueueAsync(id, "write", ct);
-        switch (enqueueResult)
-        {
-            case AdSpotJobEnqueueResult.Busy:
-                return Conflict(JobBusyProblem());
-            case AdSpotJobEnqueueResult.QueueFull:
-                return StatusCode(StatusCodes.Status429TooManyRequests, JobQueueFullProblem());
-            case AdSpotJobEnqueueResult.NotFound:
-                return NotFound();
-            case AdSpotJobEnqueueResult.Accepted:
-                var fresh = await spotStore.GetByIdAsync(id, ct);
-                if (fresh is null)
-                    return NotFound();
-
-                var sponsor = await ResolveSponsorRefAsync(fresh.SponsorId, ct);
-                Response.Headers.ETag = WeakETag.Format(fresh.Version);
-                return Accepted(ToDto(fresh, sponsor));
-            default:
-                return StatusCode(StatusCodes.Status500InternalServerError);
-        }
+        return await MapEnqueueResultAsync(id, enqueueResult, ct);
     }
 
     // -----------------------------------------------------------------------
@@ -547,8 +562,131 @@ public sealed class AdsController(
     }
 
     // -----------------------------------------------------------------------
+    // POST /api/ads/{id}/preview — queue a preview render (draft/approved only)
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// POST /api/ads/{id}/preview (SPEC F174.4; STORY-424 AC1-AC5; PLAN T442) — queues a preview render
+    /// of the row's CURRENT script/cast/bed against the live Ads render knobs, via the SAME
+    /// <see cref="AdSpotJobService.TryEnqueueAsync"/>/<see cref="MapEnqueueResultAsync"/> plumbing
+    /// <see cref="Write"/> uses (see the class remarks). An unknown id is 404. An empty/whitespace
+    /// <see cref="AdSpot.Script"/> is 400 <c>script_required</c> (<c>field: script</c>) — a preview has
+    /// nothing to render without one. A row outside <see cref="AdState.Draft"/>/<see cref="AdState.Approved"/>
+    /// is 409 <c>ad_preview_not_editable</c>. Beyond that, enqueue answers exactly as <see cref="Write"/>'s
+    /// own does: 409 <c>ad_job_busy</c> for an already-claimed row, 429 <c>ad_job_queue_full</c> for a
+    /// full station-wide queue, 202 with the row's fresh state on a successful enqueue.
+    /// </summary>
+    [HttpPost("{id:long}/preview")]
+    public async Task<IActionResult> Preview(long id, CancellationToken ct)
+    {
+        var spot = await spotStore.GetByIdAsync(id, ct);
+        if (spot is null)
+            return NotFound();
+        if (string.IsNullOrWhiteSpace(spot.Script))
+            return BadRequest(RequiredFieldProblem("script", ScriptRequiredType));
+        if (spot.State is not (AdState.Draft or AdState.Approved))
+            return Conflict(PreviewNotEditableProblem());
+
+        var enqueueResult = await jobService.TryEnqueueAsync(id, "preview", ct);
+        return await MapEnqueueResultAsync(id, enqueueResult, ct);
+    }
+
+    // -----------------------------------------------------------------------
+    // GET /api/ads/{id}/preview.wav — stream a rendered preview's own bytes
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// GET /api/ads/{id}/preview.wav (SPEC F174.4; STORY-424 AC4; PLAN T442) — streams the row's most
+    /// recently rendered preview clip. 404 covers every "nothing valid to serve" case alike, never
+    /// distinguished in the response (the <see cref="MediaController.GetAudio"/> dead-file precedent
+    /// one controller over): the id is unknown, no preview has ever been stamped
+    /// (<see cref="AdSpot.PreviewPath"/> is <see langword="null"/>), the stamped
+    /// <see cref="AdSpot.PreviewKey"/> no longer matches a fresh <see cref="AdPreviewKey.Compute"/>
+    /// over the row's CURRENT inputs (stale — an edit since the last render), or the file itself is
+    /// gone from disk.
+    ///
+    /// <para>
+    /// <b>Path re-asserted under the canonical preview root, in THIS method (the CodeQL
+    /// path-injection guard's own "strong guard" shape, <see cref="AdPreviewRoot.IsUnder"/>'s own
+    /// remarks — the one construction/check site <see cref="AdRenderService"/> and the guardian share,
+    /// PLAN T442 ruling).</b> Even though <c>preview_path</c> only ever reaches this row via
+    /// <c>AdRenderService.RenderPreviewAsync</c>'s own write, a stored path is untrusted the instant it
+    /// crosses a storage boundary; an escaped row answers 404 (never served) plus one Warning line
+    /// naming only the spot id, never the raw path.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>The unresolvable-sponsor 404 arm below is defensive-only, not reachable through this API.</b>
+    /// <c>station.ad_spot.sponsor_id</c> carries <c>ON DELETE RESTRICT</c> (SPEC F171's own foreign
+    /// key), so a sponsor can never be deleted while a spot still references it — the same guarantee
+    /// <see cref="ToPreviewDto"/>'s own remarks lean on. A live spot's <c>sponsor</c> read can only come
+    /// back <see langword="null"/> here if that database invariant itself were ever violated.
+    /// </para>
+    /// </summary>
+    [HttpGet("{id:long}/preview.wav")]
+    public async Task<IActionResult> PreviewWav(long id, CancellationToken ct)
+    {
+        var spot = await spotStore.GetByIdAsync(id, ct);
+        if (spot is not { PreviewPath: { } previewPath, PreviewKey: { } storedKey })
+            return NotFound();
+
+        var sponsor = await sponsorStore.GetAsync(spot.SponsorId, ct);
+        if (sponsor is null)
+            return NotFound();
+
+        var liveSettings = AdLiveSettingsReader.Read(configuration);
+        var expectedKey = AdPreviewKey.Compute(spot, sponsor, liveSettings, adsOptions.CurrentValue.BedDuckDb);
+        if (storedKey != expectedKey)
+            return NotFound();
+
+        var previewRoot = AdPreviewRoot.Resolve(locatorRoots);
+        var target = Path.GetFullPath(previewPath);
+        if (!AdPreviewRoot.IsUnder(previewRoot, target))
+        {
+            logger.LogWarning("Ad spot preview read found a preview path outside the preview root for spot {Id}", id);
+            return NotFound();
+        }
+
+        if (!System.IO.File.Exists(target))
+            return NotFound();
+
+        return PhysicalFile(target, "audio/wav");
+    }
+
+    // -----------------------------------------------------------------------
     // Shared helpers
     // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Maps an <see cref="AdSpotJobEnqueueResult"/> to its response — the ONE switch both
+    /// <see cref="Write"/> and <see cref="Preview"/> call (PLAN T442 ruling: two job kinds, one
+    /// enqueue-outcome mapping, never a second hand-kept copy): <c>Busy</c> → 409
+    /// <c>ad_job_busy</c>, <c>QueueFull</c> → 429 <c>ad_job_queue_full</c>, <c>NotFound</c> → 404,
+    /// <c>Accepted</c> → 202 with a fresh read of the row (<see cref="AdSpotJobService.TryEnqueueAsync"/>
+    /// already stamped it by the time this reads it back).
+    /// </summary>
+    async Task<IActionResult> MapEnqueueResultAsync(long id, AdSpotJobEnqueueResult enqueueResult, CancellationToken ct)
+    {
+        switch (enqueueResult)
+        {
+            case AdSpotJobEnqueueResult.Busy:
+                return Conflict(JobBusyProblem());
+            case AdSpotJobEnqueueResult.QueueFull:
+                return StatusCode(StatusCodes.Status429TooManyRequests, JobQueueFullProblem());
+            case AdSpotJobEnqueueResult.NotFound:
+                return NotFound();
+            case AdSpotJobEnqueueResult.Accepted:
+                var fresh = await spotStore.GetByIdAsync(id, ct);
+                if (fresh is null)
+                    return NotFound();
+
+                var sponsor = await sponsorStore.GetAsync(fresh.SponsorId, ct);
+                Response.Headers.ETag = WeakETag.Format(fresh.Version);
+                return Accepted(ToDto(fresh, sponsor, AdLiveSettingsReader.Read(configuration)));
+            default:
+                return StatusCode(StatusCodes.Status500InternalServerError);
+        }
+    }
 
     /// <summary>
     /// Maps an xmin-guarded transition's outcome to a response, deliberately (PLAN T403 carry-forward
@@ -573,9 +711,9 @@ public sealed class AdsController(
 
     async Task<IActionResult> Success(AdSpot spot, CancellationToken ct)
     {
-        var sponsor = await ResolveSponsorRefAsync(spot.SponsorId, ct);
+        var sponsor = await sponsorStore.GetAsync(spot.SponsorId, ct);
         Response.Headers.ETag = WeakETag.Format(spot.Version);
-        return Ok(ToDto(spot, sponsor));
+        return Ok(ToDto(spot, sponsor, AdLiveSettingsReader.Read(configuration)));
     }
 
     /// <summary>
@@ -674,29 +812,8 @@ public sealed class AdsController(
             : (bedMediaId, null);
     }
 
-    /// <summary>
-    /// Resolves a single spot's own <see cref="AdSpot.SponsorId"/> to the live <see cref="SponsorRefDto"/>
-    /// for a single-row response (<see cref="GetById"/>, <see cref="Success"/>) — one
-    /// <see cref="ISponsorStore.GetAsync"/> call, unlike <see cref="List"/>'s own page-wide
-    /// <see cref="SponsorDtoFor"/>, which reads every sponsor on the page in ONE round trip instead. A
-    /// missing sponsor row is defensive-only (SPEC F171's own <c>ON DELETE RESTRICT</c> foreign key on
-    /// <c>station.ad_spot.sponsor_id</c> means a spot can never outlive its sponsor) — <see cref="FallbackSponsorDto"/>
-    /// degrades to an empty name rather than ever 500ing a GET over an otherwise-healthy row.
-    /// </summary>
-    async Task<SponsorRefDto> ResolveSponsorRefAsync(long sponsorId, CancellationToken ct)
-    {
-        var sponsor = await sponsorStore.GetAsync(sponsorId, ct);
-        return sponsor is not null ? SponsorRefDto.From(sponsor) : FallbackSponsorDto(sponsorId);
-    }
-
-    /// <summary>The <see cref="List"/> precedent: looks a row's sponsor up in the page-wide dictionary
-    /// <see cref="List"/> already built with its own single <see cref="ISponsorStore.ListAsync"/> round
-    /// trip, rather than a per-row <see cref="ISponsorStore.GetAsync"/>. Falls back the same defensive
-    /// way <see cref="ResolveSponsorRefAsync"/> does.</summary>
-    static SponsorRefDto SponsorDtoFor(long sponsorId, IReadOnlyDictionary<long, Sponsor> sponsorsById) =>
-        sponsorsById.TryGetValue(sponsorId, out var sponsor) ? SponsorRefDto.From(sponsor) : FallbackSponsorDto(sponsorId);
-
-    static SponsorRefDto FallbackSponsorDto(long sponsorId) => new(sponsorId, string.Empty, false);
+    static SponsorRefDto SponsorRefFor(long sponsorId, Sponsor? sponsor) =>
+        sponsor is not null ? SponsorRefDto.From(sponsor) : new SponsorRefDto(sponsorId, string.Empty, false);
 
     static string? SerializeVoicePlan(IReadOnlyList<AdVoicePlanEntry>? plan) =>
         plan is null or { Count: 0 } ? null : AdVoicePlanJson.Serialize(plan);
@@ -725,25 +842,60 @@ public sealed class AdsController(
     /// needs <see cref="jobService"/>'s own in-memory <see cref="AdSpotJobService.IsWaitingForStation"/>
     /// read (PLAN T441 ruling: <c>job: null</c> exactly when the row carries neither
     /// <see cref="AdSpot.JobKind"/> nor <see cref="AdSpot.JobError"/>, otherwise the object — so a
-    /// failed job's error stays visible with <c>kind</c> null).</summary>
-    AdSpotDto ToDto(AdSpot spot, SponsorRefDto sponsor) => new(
-        spot.Id, spot.SponsorId, spot.SponsorName, sponsor, spot.Title, spot.Brief, spot.Script,
-        AdSourceTokens.ToToken(spot.Source), spot.PackSlug, spot.SpotSeconds, DeserializeVoicePlan(spot.VoicePlan),
-        spot.BedMediaId, AdStateTokens.ToToken(spot.State), spot.FailReason, spot.MediaId, spot.CreatedAt,
-        spot.StateChangedAt, spot.RenderedAt, spot.RetiredAt, spot.Version, ToJobDto(spot));
+    /// failed job's error stays visible with <c>kind</c> null). <paramref name="sponsor"/> is the FULL
+    /// row (a single <see cref="ISponsorStore.GetAsync"/> call at every single-row call site, or
+    /// <see cref="List"/>'s own page-wide dictionary), not merely its wire cross-reference —
+    /// <see cref="ToPreviewDto"/> needs it to recompute the staleness key. <paramref name="liveSettings"/>
+    /// is read ONCE by the caller (PLAN T442 ruling) — never re-read here per row; see
+    /// <see cref="List"/>'s own remarks for why that hoist matters.</summary>
+    AdSpotDto ToDto(AdSpot spot, Sponsor? sponsor, AdLiveSettings liveSettings) => new(
+        spot.Id, spot.SponsorId, spot.SponsorName, SponsorRefFor(spot.SponsorId, sponsor), spot.Title, spot.Brief,
+        spot.Script, AdSourceTokens.ToToken(spot.Source), spot.PackSlug, spot.SpotSeconds,
+        DeserializeVoicePlan(spot.VoicePlan), spot.BedMediaId, AdStateTokens.ToToken(spot.State), spot.FailReason,
+        spot.MediaId, spot.CreatedAt, spot.StateChangedAt, spot.RenderedAt, spot.RetiredAt, spot.Version,
+        ToJobDto(spot), ToPreviewDto(spot, sponsor, liveSettings));
 
     AdSpotJobDto? ToJobDto(AdSpot spot) => spot is { JobKind: null, JobError: null }
         ? null
         : new AdSpotJobDto(spot.JobKind, spot.JobStartedAt, jobService.IsWaitingForStation(spot.Id), spot.JobError);
 
     /// <summary>
-    /// PLAN T403 carry-forward (b), now via the shared <see cref="WeakETag.TryParseVersion"/> (T434
-    /// round-2 review finding F3): validates the <c>If-Match</c> token BEFORE it ever reaches
+    /// Projects a spot's own preview stamp to its wire shape (SPEC F174.4; STORY-424 AC4; PLAN T442) —
+    /// <see langword="null"/> exactly when <see cref="AdSpot.PreviewPath"/> is <see langword="null"/>
+    /// (no preview has ever been rendered for this row). "Stale" is never a stored flag (PLAN T442
+    /// ruling): it is the live comparison of the stored <see cref="AdSpot.PreviewKey"/> against a
+    /// freshly recomputed <see cref="AdPreviewKey.Compute"/> over the row's CURRENT inputs, so an edit
+    /// to the script/cast/bed, or an operator changing a Live Ads setting, makes an existing preview
+    /// read stale on the very next GET — no background job ever has to notice and flip anything.
+    /// <paramref name="liveSettings"/> is <see cref="ToDto"/>'s own caller-supplied read, never a fresh
+    /// <see cref="AdLiveSettingsReader.Read"/> per row here — <see cref="List"/> builds one page of N
+    /// DTOs from a SINGLE Live-settings read; the SHA256 digest in <see cref="AdPreviewKey.Compute"/>
+    /// below still runs once PER ROW regardless (db/46's own ruling: staleness is derived, never a
+    /// stored flag, so that part of the per-row cost is intentional, not this method's own waste). A
+    /// missing <paramref name="sponsor"/> (the defensive-only <c>ON DELETE RESTRICT</c> gap —
+    /// <see cref="PreviewWav"/>'s own remarks) has nothing to recompute the key against, so it reads as
+    /// stale rather than trusting a key nothing can verify.
+    /// </summary>
+    AdSpotPreviewDto? ToPreviewDto(AdSpot spot, Sponsor? sponsor, AdLiveSettings liveSettings)
+    {
+        if (spot is not { PreviewPath: not null, PreviewAt: { } at, PreviewKey: { } key })
+            return null;
+
+        if (sponsor is null)
+            return new AdSpotPreviewDto(at, key, Stale: true);
+
+        var expectedKey = AdPreviewKey.Compute(spot, sponsor, liveSettings, adsOptions.CurrentValue.BedDuckDb);
+        return new AdSpotPreviewDto(at, key, Stale: key != expectedKey);
+    }
+
+    /// <summary>
+    /// PLAN T403 carry-forward (b), now via the shared <see cref="WeakETag.TryParseVersion"/>:
+    /// validates the <c>If-Match</c> token BEFORE it ever reaches
     /// <c>@expectedVersion::xid</c> — absent → 428 (<c>MediaController.Patch</c>'s own precedent);
     /// present but not a well-formed <c>xid</c> (Postgres's own 32-bit unsigned domain) → 400, never a
     /// raw <see cref="Npgsql.PostgresException"/> 22P02 the way an unvalidated token reaching the SQL
-    /// cast would produce. The <c>(T?, IActionResult?)</c> tuple shape (T403 review finding 2,
-    /// CONTRIBUTING.md's no-null-forgiving-operator rule) mirrors <c>ResolveBedMediaIdAsync</c> one
+    /// cast would produce. The <c>(T?, IActionResult?)</c> tuple shape (CONTRIBUTING.md's
+    /// no-null-forgiving-operator rule) mirrors <c>ResolveBedMediaIdAsync</c> one
     /// method up — but here the tuple's own <c>ExpectedVersion</c> element is deliberately declared
     /// NON-nullable <c>string</c> rather than <c>string?</c>: every downstream
     /// store call (<c>ApproveAsync</c>/<c>RetryAsync</c>/<c>RetireAsync</c>/<c>UpdateAsync</c>) takes a
@@ -891,6 +1043,14 @@ public sealed class AdsController(
         Title  = "Conflict.",
         Type   = WriteNotDraftType,
         Detail = "Only a draft spot can be written. Re-fetch and retry if this spot has since moved on.",
+    };
+
+    static ProblemDetails PreviewNotEditableProblem() => new()
+    {
+        Status = StatusCodes.Status409Conflict,
+        Title  = "Conflict.",
+        Type   = PreviewNotEditableType,
+        Detail = "Only a draft or approved spot can be previewed. Re-fetch and retry if this spot has since moved on.",
     };
 
     static ProblemDetails JobBusyProblem() => new()

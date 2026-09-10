@@ -224,8 +224,8 @@ public static class FeatureAdBedPickerStampsABedPerSpot
         public async Task OneInfoLogPerTickNamesTheEmptyPool()
         {
             // Given an approved spot and no installed pack, with a logger that captures every entry...
-            var logger = new CapturingLogger<AdSpotWorker>();
-            var harness = AdSpotWorkerHarness.Build(Now, workerLogger: logger);
+            var logger = new CapturingLogger<AdSpotStamper>();
+            var harness = AdSpotWorkerHarness.Build(Now, stamperLogger: logger);
             harness.Store.AddSpot(1, AdState.Approved);
 
             // When the worker ticks...

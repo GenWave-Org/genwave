@@ -52,6 +52,25 @@ public sealed class FakeCastSegmentAuthor : ICastSegmentAuthor
     /// <summary>What this fake returns from <see cref="AuthorAsync"/> — success by default.</summary>
     public CastSegmentAuthorResult Result { get; set; } = CastSegmentAuthorResult.Success(4200);
 
+    /// <summary>The request <see cref="AssembleOnlyAsync"/> was most recently called with (PLAN T442
+    /// preview mode) — a spec asserting <c>AdRenderService.RenderPreviewAsync</c>'s own build never
+    /// reads <see cref="LastRequest"/> for this, since a preview render never calls
+    /// <see cref="AuthorAsync"/> at all.</summary>
+    public CastAssemblyRequest? LastAssembleOnlyRequest { get; private set; }
+
+    /// <summary>Overrides what <see cref="AssembleOnlyAsync"/> returns — a real, on-disk
+    /// <see cref="CrosstalkAssemblyResult.Assembled"/> by default (see that method's own remarks); set
+    /// to a <see cref="CrosstalkAssemblyResult.Discarded"/> to simulate a preview that never produces a
+    /// file at all.</summary>
+    public CrosstalkAssemblyResult? AssembleOnlyResult { get; set; }
+
+    /// <summary>The extension <see cref="AssembleOnlyAsync"/> writes its default, on-disk
+    /// <see cref="CrosstalkAssemblyResult.Assembled"/> with — <c>"wav"</c> by default. Set to
+    /// <c>"mp3"</c> (PLAN T442 ruling) to simulate a station whose <c>Tts:Format</c> is
+    /// not <c>wav</c>, so a spec can prove <see cref="AdRenderService"/>'s own preview path fails
+    /// closed instead of silently renaming the wrong container.</summary>
+    public string AssembleOnlyExtension { get; set; } = "wav";
+
     public async Task<CastSegmentAuthorResult> AuthorAsync(
         CastAssemblyRequest assemblyRequest,
         Func<CrosstalkAssemblyResult.Assembled, AuthoredMediaInsert> buildInsert,
@@ -100,5 +119,29 @@ public sealed class FakeCastSegmentAuthor : ICastSegmentAuthor
         }
 
         return Result;
+    }
+
+    /// <summary>
+    /// Writes a REAL file to disk, INTO <paramref name="request"/>'s own
+    /// <see cref="CastAssemblyRequest.OutputDirectory"/> (PLAN T442 ruling — never
+    /// <c>Path.GetTempPath()</c>: the real <see cref="AdRenderService.RenderPreviewCoreAsync"/> creates
+    /// that exact directory before calling this method, and a preview render that assembled outside its
+    /// own preview root would defeat the whole point of a caller writing there in the first place) so a
+    /// caller's own <c>File.Move</c> off the returned path succeeds — <see cref="AdRenderService"/>'s
+    /// preview path never stats or reads this file beyond moving it, but a stale/missing path would
+    /// throw exactly like the real assembler's own output would.
+    /// </summary>
+    public Task<CrosstalkAssemblyResult> AssembleOnlyAsync(CastAssemblyRequest request, CancellationToken ct)
+    {
+        LastAssembleOnlyRequest = request;
+
+        if (AssembleOnlyResult is not null)
+            return Task.FromResult(AssembleOnlyResult);
+
+        var path = Path.Combine(request.OutputDirectory, $"{Guid.NewGuid():N}.{AssembleOnlyExtension}");
+        File.WriteAllBytes(path, [1, 2, 3, 4]);
+        CrosstalkAssemblyResult assembled = new CrosstalkAssemblyResult.Assembled(
+            path, new GenWave.Core.Domain.Loudness(-16.0, -1.0, true), Cue: null, DurationMs: 1000);
+        return Task.FromResult(assembled);
     }
 }

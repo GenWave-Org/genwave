@@ -76,6 +76,12 @@ public static class AdsServiceCollectionExtensions
         // claimed.
         services.AddSingleton<AdRenderService>();
 
+        // The cast/bed stamping pair (SPEC F167, F168; STORY-402, STORY-403; PLAN T415, T416) — a
+        // plain singleton, hoisted out of AdSpotWorker (PLAN T442 ruling) so the write worker AND the
+        // preview job (below) share ONE stamping implementation rather than the worker's own copy
+        // diverging from a second, hand-kept-in-sync one.
+        services.AddSingleton<AdSpotStamper>();
+
         // The off-air-clock tick loop + its stuck-rendering guardian (SPEC F159.3, F159.4, F161.1;
         // STORY-389, STORY-391; PLAN T402) — both live in THIS project (unlike CrosstalkStockWorker/
         // AnnouncementLifecycleGuardianService, which are GenWave.Host types registered from a
