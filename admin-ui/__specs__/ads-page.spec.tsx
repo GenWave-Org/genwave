@@ -49,6 +49,7 @@ import type { AdsSection as AdsSectionComponent } from "../app/(authed)/ads/AdsS
 import type { AdSpotEditor as AdSpotEditorComponent } from "../app/(authed)/ads/AdSpotEditor";
 import type { BriefsSection as BriefsSectionComponent } from "../app/(authed)/ads/BriefsSection";
 import type { AdsTabs as AdsTabsComponent } from "../app/(authed)/ads/AdsTabs";
+import { installFetchMock } from "./fetch-route-harness";
 
 const mockedUseRouter = jest
   .requireMock<{ useRouter: typeof useRouter }>("next/navigation")
@@ -131,6 +132,8 @@ function adSpot(overrides: Partial<AdSpotDto> = {}): AdSpotDto {
     renderedAt: null,
     retiredAt: null,
     version: "100",
+    job: null,
+    preview: null,
     ...overrides,
   };
 }
@@ -150,47 +153,12 @@ function adBrief(overrides: Partial<AdBriefDto> = {}): AdBriefDto {
 }
 
 // ---------------------------------------------------------------------------
-// Fetch mock — a small route table (method + pathname predicate → response), generalizing
-// gardener-tabs.spec.tsx's own inline if-chain since this page's surface spans many more distinct
-// routes (create/edit/approve/retry/retire, voices, two briefs endpoints).
+// Fetch mock — `./fetch-route-harness`'s route table (method + pathname predicate → response),
+// generalizing gardener-tabs.spec.tsx's own inline if-chain since this page's surface spans many
+// more distinct routes (create/edit/approve/retry/retire, voices, two briefs endpoints). Hoisted
+// there (PLAN T448) once `spot-wizard.spec.tsx` needed the identical table for its own smaller
+// route surface — both files import the one implementation instead of a second copy.
 // ---------------------------------------------------------------------------
-
-interface RouteResponseSpec {
-  status: number;
-  body?: unknown;
-}
-
-interface RouteHandler {
-  method: string;
-  match: (url: URL) => boolean;
-  respond: (url: URL, init: RequestInit | undefined) => RouteResponseSpec;
-}
-
-function toResponse(spec: RouteResponseSpec): Response {
-  return {
-    ok: spec.status >= 200 && spec.status < 300,
-    status: spec.status,
-    json: jest.fn<() => Promise<unknown>>().mockResolvedValue(spec.body ?? {}),
-    headers: new Headers({ "content-type": "application/json" }),
-  } as unknown as Response;
-}
-
-/** `apiGet` (page.tsx's own reads) always hands an absolute BACKEND_URL-prefixed request; every
- * browser-side ads-api.ts fetcher hands a bare relative path instead — a base origin lets `URL()`
- * parse both the same way real `fetch()` resolution would (the gardener-tabs.spec.tsx precedent). */
-function installFetchMock(handlers: RouteHandler[]): jest.MockedFunction<typeof fetch> {
-  const fn = jest.fn<typeof fetch>().mockImplementation(async (input, init) => {
-    const method = init?.method ?? "GET";
-    const url = new URL(String(input), "http://localhost");
-    const handler = handlers.find((h) => h.method === method && h.match(url));
-    if (handler === undefined) {
-      throw new Error(`unexpected fetch call: ${method} ${url.pathname}${url.search}`);
-    }
-    return toResponse(handler.respond(url, init));
-  });
-  global.fetch = fn as unknown as typeof fetch;
-  return fn;
-}
 
 function requestBody(mockFetch: jest.MockedFunction<typeof fetch>, callIndex: number): unknown {
   const call = mockFetch.mock.calls[callIndex] as unknown as [string, RequestInit];
@@ -428,7 +396,20 @@ describe("Feature: The Ads page", () => {
 
   describe("Scenario: the editor round-trips", () => {
     it("saves a valid draft and re-opens it with every field intact", async () => {
-      const createdDto = adSpot({
+      const draftSpot = adSpot({
+        id: 42,
+        sponsorId: 1,
+        sponsorName: "Acme",
+        sponsor: SPONSOR_ACME,
+        title: "Draft title",
+        brief: "A first-pass brief",
+        script: "A first-pass line.",
+        spotSeconds: 30,
+        bedMediaId: null,
+        voicePlan: null,
+        version: "199",
+      });
+      const updatedDto = adSpot({
         id: 42,
         sponsorId: 2,
         sponsorName: "Acme Radio",
@@ -443,13 +424,13 @@ describe("Feature: The Ads page", () => {
       });
 
       const mockFetch = installFetchMock([
-        { method: "POST", match: (u) => u.pathname === "/api/ads", respond: () => ({ status: 201, body: createdDto }) },
+        { method: "PATCH", match: (u) => u.pathname === "/api/ads/42", respond: () => ({ status: 200, body: updatedDto }) },
       ]);
 
       const onSaved = jest.fn<(spot: AdSpotDto) => void>();
-      render(<AdSpotEditor initial={null} sponsors={SPONSOR_REFS} onSaved={onSaved} onCancel={jest.fn()} />);
+      render(<AdSpotEditor initial={draftSpot} sponsors={SPONSOR_REFS} onSaved={onSaved} onCancel={jest.fn()} />);
 
-      expect(screen.getByLabelText("Sponsor")).toHaveValue("");
+      expect(screen.getByLabelText("Sponsor")).toHaveValue("1");
 
       fireEvent.change(screen.getByLabelText("Sponsor"), { target: { value: "2" } });
       fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Acme Radio Spot" } });
@@ -462,9 +443,9 @@ describe("Feature: The Ads page", () => {
         await Promise.resolve();
       });
 
-      await waitFor(() => expect(onSaved).toHaveBeenCalledWith(createdDto));
+      await waitFor(() => expect(onSaved).toHaveBeenCalledWith(updatedDto));
 
-      // PLAN T447 ruling: the POST body carries the chosen sponsor by id, on the wire's own
+      // PLAN T447 ruling: the PATCH body carries the chosen sponsor by id, on the wire's own
       // `sponsorId` field — never a free-text company name (gh-#707's own reading extends to the
       // wire shape, not just the rendered page: no "brand" key survives the old free-text field).
       const postedBody = requestBody(mockFetch, 0) as Record<string, unknown>;
@@ -475,7 +456,7 @@ describe("Feature: The Ads page", () => {
       // round-trip. `cleanup()` first: Radix portals its Dialog.Content into `document.body`, not
       // into the RTL container, so the first dialog can't be scoped away with `within()`.
       cleanup();
-      render(<AdSpotEditor initial={createdDto} sponsors={SPONSOR_REFS} onSaved={jest.fn()} onCancel={jest.fn()} />);
+      render(<AdSpotEditor initial={updatedDto} sponsors={SPONSOR_REFS} onSaved={jest.fn()} onCancel={jest.fn()} />);
 
       expect(screen.getByLabelText("Sponsor")).toHaveValue("2");
       expect(screen.getByLabelText("Title")).toHaveValue("Acme Radio Spot");
@@ -490,7 +471,8 @@ describe("Feature: The Ads page", () => {
         { method: "GET", match: (u) => u.pathname === "/api/voices", respond: () => ({ status: 200, body: ["voice-a", "voice-b"] }) },
       ]);
 
-      render(<AdSpotEditor initial={null} sponsors={SPONSOR_REFS} onSaved={jest.fn()} onCancel={jest.fn()} />);
+      const draftSpot = adSpot({ id: 20, script: null });
+      render(<AdSpotEditor initial={draftSpot} sponsors={SPONSOR_REFS} onSaved={jest.fn()} onCancel={jest.fn()} />);
 
       fireEvent.change(screen.getByLabelText("Script"), { target: { value: "ANNOUNCER: Hello there." } });
 
@@ -508,7 +490,8 @@ describe("Feature: The Ads page", () => {
         { method: "GET", match: (u) => u.pathname === "/api/voices", respond: () => ({ status: 200, body: ["voice-a"] }) },
       ]);
 
-      render(<AdSpotEditor initial={null} sponsors={SPONSOR_REFS} onSaved={jest.fn()} onCancel={jest.fn()} />);
+      const draftSpot = adSpot({ id: 21, script: null });
+      render(<AdSpotEditor initial={draftSpot} sponsors={SPONSOR_REFS} onSaved={jest.fn()} onCancel={jest.fn()} />);
 
       // A space before the colon — AdScriptParser.ParseLine splits at the FIRST ':' then trims
       // both sides, so the server accepts this tag exactly like "ANNOUNCER:" with no space. The
@@ -524,8 +507,9 @@ describe("Feature: The Ads page", () => {
         SPONSOR_ACME,
         { id: 3, name: "Riverside Diner", paused: true },
       ];
+      const draftSpot = adSpot({ id: 22 });
 
-      render(<AdSpotEditor initial={null} sponsors={sponsorsWithPaused} onSaved={jest.fn()} onCancel={jest.fn()} />);
+      render(<AdSpotEditor initial={draftSpot} sponsors={sponsorsWithPaused} onSaved={jest.fn()} onCancel={jest.fn()} />);
 
       const sponsorSelect = screen.getByLabelText("Sponsor");
       expect(within(sponsorSelect).getByRole("option", { name: "Riverside Diner (paused)" })).toBeInTheDocument();
@@ -607,23 +591,7 @@ describe("Feature: The Ads page", () => {
       expect(screen.queryByRole("button", { name: "Clear" })).not.toBeInTheDocument();
     });
 
-    it("still shows Clear for a bed picked fresh during create (no committed row to silently fail to clear)", async () => {
-      installFetchMock([
-        {
-          method: "GET",
-          match: (u) => u.pathname === "/api/media",
-          respond: () => ({ status: 200, body: [{ mediaId: "9", title: "Jingle", artist: null }] }),
-        },
-      ]);
-
-      render(<AdSpotEditor initial={null} sponsors={SPONSOR_REFS} onSaved={jest.fn()} onCancel={jest.fn()} />);
-
-      fireEvent.change(screen.getByLabelText("Bed (optional)"), { target: { value: "jingle" } });
-      fireEvent.click(screen.getByRole("button", { name: "Search" }));
-      fireEvent.click(await screen.findByRole("button", { name: "Select" }));
-
-      expect(screen.getByRole("button", { name: "Clear" })).toBeInTheDocument();
-    });
+    // Fresh-bed-during-create has no subject since PLAN T448 removed the editor's create path; the wizard commits a pick by PATCH at once (HearStep).
 
     it("refuses to submit a previously-set script emptied to blank, naming the limitation", async () => {
       // No route ever expected — the client-side guard must block the request entirely.
@@ -662,23 +630,7 @@ describe("Feature: The Ads page", () => {
       expect(onSaved).not.toHaveBeenCalled();
     });
 
-    it("refuses to submit with no sponsor chosen, in plain wording, without ever calling the api", async () => {
-      const mockFetch = installFetchMock([]);
-
-      const onSaved = jest.fn<(spot: AdSpotDto) => void>();
-      render(<AdSpotEditor initial={null} sponsors={SPONSOR_REFS} onSaved={onSaved} onCancel={jest.fn()} />);
-
-      fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Untitled" } });
-
-      await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: "Save" }));
-        await Promise.resolve();
-      });
-
-      expect(await screen.findByRole("alert")).toHaveTextContent("Sponsor is required.");
-      expect(onSaved).not.toHaveBeenCalled();
-      expect(mockFetch).not.toHaveBeenCalled();
-    });
+    // "refuses to submit with no sponsor chosen..." moved to spot-wizard.spec.tsx's SponsorStep coverage — an editor session always starts from an already-sponsored row (PLAN T448 ruling), so "no sponsor chosen" is the wizard's own fact now, not the editor's.
 
     it("pins an already-cast tag's voice — reverting to Station default doesn't stick", async () => {
       installFetchMock([
@@ -954,10 +906,11 @@ describe("Feature: The Ads page", () => {
 
   describe("Scenario: rejecting invalid input", () => {
     it("surfaces the validator's 400 rule id on the offending field", async () => {
+      const draftSpot = adSpot({ id: 23, title: "Acme Spot", script: null });
       installFetchMock([
         {
-          method: "POST",
-          match: (u) => u.pathname === "/api/ads",
+          method: "PATCH",
+          match: (u) => u.pathname === "/api/ads/23",
           respond: () => ({
             status: 400,
             body: { detail: "script the estimated read time exceeds the spot's 30s length.", field: "script", ruleId: "duration" },
@@ -966,10 +919,8 @@ describe("Feature: The Ads page", () => {
       ]);
 
       const onSaved = jest.fn<(spot: AdSpotDto) => void>();
-      render(<AdSpotEditor initial={null} sponsors={SPONSOR_REFS} onSaved={onSaved} onCancel={jest.fn()} />);
+      render(<AdSpotEditor initial={draftSpot} sponsors={SPONSOR_REFS} onSaved={onSaved} onCancel={jest.fn()} />);
 
-      fireEvent.change(screen.getByLabelText("Sponsor"), { target: { value: "1" } });
-      fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Acme Spot" } });
       fireEvent.change(screen.getByLabelText("Script"), { target: { value: "way too long a script to fit" } });
 
       await act(async () => {

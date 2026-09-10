@@ -48,3 +48,25 @@ export interface SponsorRefDto {
   name: string;
   paused: boolean;
 }
+
+/** `SponsorDto`'s exact wire shape (`GenWave.Host.Api.SponsorDto`) — the full row `POST
+ * /api/sponsors` hands back (PLAN T448: the SpotWizard's Sponsor step reads this to select the
+ * newly created sponsor). Living here rather than `ads-api.ts` (which owns the `createSponsor`
+ * fetcher itself, per PLAN T448's own instruction) keeps this module's one job — every Sponsors
+ * wire SHAPE — undivided; `ads-api.ts` already imports `SponsorRefDto` from here, so importing
+ * this one too costs it nothing new. */
+export interface SponsorDto {
+  id: number;
+  name: string;
+  packSlug: string | null;
+  paused: boolean;
+  pausedAt: string | null;
+  tagline: string | null;
+  about: string | null;
+  phone: string | null;
+  address: string | null;
+  website: string | null;
+  tone: string | null;
+  createdAt: string;
+  updatedAt: string;
+}

@@ -2,13 +2,15 @@ import type { ReactNode } from "react";
 import type { SponsorRefDto } from "@/lib/sponsors-api";
 import { FieldRow, FIELD_INPUT_CLASSES } from "./FieldRow";
 
-// The "Sponsor" picker shared across feature folders (SPEC F171.8, F175.1; PLAN T447, T449
-// ruling) — `AdSpotEditor` and `BriefsSection`'s own add-brief form (this folder), plus the Shows
-// editor (`../shows/ShowsClient.tsx`), render the ONE `<select>` below (a paused sponsor's label
-// suffixed " (paused)", the same "" ↔ `null` coercion) rather than a copy each. Left living in
-// this folder rather than moved to `../_components/` (PLAN T449's own call) — it stays a leaf over
+// The "Sponsor" picker shared across feature folders (SPEC F171.8, F174.1, F175.1; PLAN T447,
+// T448, T449 ruling) — `AdSpotEditor`, `BriefsSection`'s own add-brief form, and the wizard's own
+// `steps/SponsorStep.tsx` (all three in this folder), plus the Shows editor
+// (`../shows/ShowsClient.tsx`), render the ONE `<select>` below (a paused sponsor's label suffixed
+// " (paused)", the same "" ↔ `null` coercion) rather than a copy each. Left living in this folder
+// rather than moved to `../_components/` (PLAN T449's own call) — it stays a leaf over
 // `FieldRow.tsx`, which is itself Ads-scoped, so importing across the one extra folder costs less
-// than relocating both; the ads two call sites are unchanged by T449 (both omit `allowNone`).
+// than relocating both; the ads three call sites are unchanged by T449 (all three omit
+// `allowNone`).
 
 interface SponsorPickerProps {
   /** The `<select>`'s own id — each call site supplies its own, so `getByLabelText("Sponsor")`
@@ -19,9 +21,9 @@ interface SponsorPickerProps {
   disabled: boolean;
   onChange: (sponsorId: number | null) => void;
   /** PLAN T449 ruling: an ad spot/brief always names a sponsor, so the placeholder option stays
-   * disabled there (both ads call sites omit this prop, defaulting to `false`) — a show does not
-   * (SPEC F175.1, `sponsorId` is nullable), so the Shows editor passes `true` and the placeholder
-   * becomes a real, selectable "No sponsor" choice instead. */
+   * disabled there (all three ads call sites omit this prop, defaulting to `false`) — a show does
+   * not (SPEC F175.1, `sponsorId` is nullable), so the Shows editor passes `true` and the
+   * placeholder becomes a real, selectable "No sponsor" choice instead. */
   allowNone?: boolean;
 }
 
