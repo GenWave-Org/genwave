@@ -97,6 +97,21 @@ namespace GenWave.Host.Api;
 /// <see cref="MapTransition"/> pattern-matches <see cref="AdSpotTransitionOutcome"/> directly — every
 /// call site narrows nullability through <c>is not null</c>/property patterns, never <c>!</c>.</item>
 /// </list>
+///
+/// <para>
+/// <b>The write job (SPEC F174.2, F174.3; STORY-422, STORY-423; PLAN T441).</b>
+/// <c>POST /api/ads/{id}/write</c> requires the row to be <see cref="AdState.Draft"/> — checked HERE,
+/// not by <see cref="AdSpotJobService.TryEnqueueAsync"/> itself, which stamps a job for a row in ANY
+/// state (its own guard is only "no job already claims this row") — an unknown id is 404, a non-draft
+/// row is 409 <c>ad_write_not_draft</c>, an already-claimed row is 409 <c>ad_job_busy</c>, and a
+/// station-wide queue already at <see cref="AdsOptions.JobQueueCapacity"/> is 429
+/// <c>ad_job_queue_full</c>. A successful enqueue answers 202 with the row's fresh <c>job</c> object —
+/// the write itself lands asynchronously; a caller polls <c>GET /api/ads/{id}</c> to see it finish.
+/// <c>DELETE /api/ads/{id}/job</c> cancels whatever is queued or running for that id and clears the
+/// stamp, idempotently — a row with no active job still answers 204 (<see cref="AdSpotJobService.CancelAsync"/>'s
+/// own contract). <b>A process restart orphans a stamped row</b> (<see cref="AdSpotJobService"/>'s own
+/// remarks state this in full) — this task leaves that gap to an operator's own <c>DELETE …/job</c>.
+/// </para>
 /// </summary>
 [ApiController]
 [Route("api/ads")]
@@ -110,6 +125,7 @@ public sealed class AdsController(
     ICopyBoundsProvider copyBounds,
     IPatterDurationEstimator durationEstimator,
     IOptionsMonitor<AdsOptions> adsOptions,
+    AdSpotJobService jobService,
     ILogger<AdsController> logger) : ControllerBase
 {
     const int DefaultLimit = 50;
@@ -120,6 +136,9 @@ public sealed class AdsController(
     const string SponsorRequiredType = "sponsor_required";
     const string SponsorNotFoundType = "sponsor_not_found";
     const string SponsorPausedType = "sponsor_paused";
+    const string WriteNotDraftType = "ad_write_not_draft";
+    const string JobBusyType = "ad_job_busy";
+    const string JobQueueFullType = "ad_job_queue_full";
 
     static readonly IReadOnlyList<int> AllowedSpotSeconds = [15, 30, 60];
 
@@ -460,6 +479,74 @@ public sealed class AdsController(
     }
 
     // -----------------------------------------------------------------------
+    // POST /api/ads/{id}/write — queue a write job (draft only)
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// POST /api/ads/{id}/write (SPEC F174.2, F174.3; STORY-422 AC1-AC3/AC7, STORY-423 AC1/AC3; PLAN
+    /// T441) — queues an <see cref="AdScriptWriter"/> pass against the row's current
+    /// <see cref="AdSpot.Brief"/> and sponsor. Legal only against <see cref="AdState.Draft"/> (409
+    /// <c>ad_write_not_draft</c> otherwise — this controller's own check, see the class remarks: the
+    /// store's own <see cref="AdSpotJobService.TryEnqueueAsync"/> guard is state-agnostic). An unknown
+    /// id is 404; an already-claimed row is 409 <c>ad_job_busy</c>; a full station-wide queue is 429
+    /// <c>ad_job_queue_full</c>. A successful enqueue answers 202 with the row's fresh state (a fresh
+    /// read, since <see cref="AdSpotJobService.TryEnqueueAsync"/> already stamped it) — the write itself
+    /// lands asynchronously.
+    /// </summary>
+    [HttpPost("{id:long}/write")]
+    public async Task<IActionResult> Write(long id, CancellationToken ct)
+    {
+        var spot = await spotStore.GetByIdAsync(id, ct);
+        if (spot is null)
+            return NotFound();
+        if (spot.State != AdState.Draft)
+            return Conflict(WriteNotDraftProblem());
+
+        var enqueueResult = await jobService.TryEnqueueAsync(id, "write", ct);
+        switch (enqueueResult)
+        {
+            case AdSpotJobEnqueueResult.Busy:
+                return Conflict(JobBusyProblem());
+            case AdSpotJobEnqueueResult.QueueFull:
+                return StatusCode(StatusCodes.Status429TooManyRequests, JobQueueFullProblem());
+            case AdSpotJobEnqueueResult.NotFound:
+                return NotFound();
+            case AdSpotJobEnqueueResult.Accepted:
+                var fresh = await spotStore.GetByIdAsync(id, ct);
+                if (fresh is null)
+                    return NotFound();
+
+                var sponsor = await ResolveSponsorRefAsync(fresh.SponsorId, ct);
+                Response.Headers.ETag = WeakETag.Format(fresh.Version);
+                return Accepted(ToDto(fresh, sponsor));
+            default:
+                return StatusCode(StatusCodes.Status500InternalServerError);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // DELETE /api/ads/{id}/job — cancel whatever is queued or running
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// DELETE /api/ads/{id}/job (SPEC F174.2; STORY-422 AC6; PLAN T441) — cancels the id's own queued or
+    /// running job (whichever it is) and clears its stamp, via
+    /// <see cref="AdSpotJobService.CancelAsync"/>. Idempotent (PLAN T441 ruling): a row with no active
+    /// job still answers 204, the same "clearing an already-clear job is a harmless no-op" posture
+    /// <see cref="IAdSpotStore.ClearJobAsync"/> already holds. An unknown id is 404.
+    /// </summary>
+    [HttpDelete("{id:long}/job")]
+    public async Task<IActionResult> DeleteJob(long id, CancellationToken ct)
+    {
+        var spot = await spotStore.GetByIdAsync(id, ct);
+        if (spot is null)
+            return NotFound();
+
+        await jobService.CancelAsync(id, ct);
+        return NoContent();
+    }
+
+    // -----------------------------------------------------------------------
     // Shared helpers
     // -----------------------------------------------------------------------
 
@@ -633,11 +720,21 @@ public sealed class AdsController(
         }
     }
 
-    static AdSpotDto ToDto(AdSpot spot, SponsorRefDto sponsor) => new(
+    /// <summary>Projects one row to its wire shape — an INSTANCE method (PLAN T441), not
+    /// <see langword="static"/> like every other pure helper below it, because <see cref="AdSpotJobDto"/>
+    /// needs <see cref="jobService"/>'s own in-memory <see cref="AdSpotJobService.IsWaitingForStation"/>
+    /// read (PLAN T441 ruling: <c>job: null</c> exactly when the row carries neither
+    /// <see cref="AdSpot.JobKind"/> nor <see cref="AdSpot.JobError"/>, otherwise the object — so a
+    /// failed job's error stays visible with <c>kind</c> null).</summary>
+    AdSpotDto ToDto(AdSpot spot, SponsorRefDto sponsor) => new(
         spot.Id, spot.SponsorId, spot.SponsorName, sponsor, spot.Title, spot.Brief, spot.Script,
         AdSourceTokens.ToToken(spot.Source), spot.PackSlug, spot.SpotSeconds, DeserializeVoicePlan(spot.VoicePlan),
         spot.BedMediaId, AdStateTokens.ToToken(spot.State), spot.FailReason, spot.MediaId, spot.CreatedAt,
-        spot.StateChangedAt, spot.RenderedAt, spot.RetiredAt, spot.Version);
+        spot.StateChangedAt, spot.RenderedAt, spot.RetiredAt, spot.Version, ToJobDto(spot));
+
+    AdSpotJobDto? ToJobDto(AdSpot spot) => spot is { JobKind: null, JobError: null }
+        ? null
+        : new AdSpotJobDto(spot.JobKind, spot.JobStartedAt, jobService.IsWaitingForStation(spot.Id), spot.JobError);
 
     /// <summary>
     /// PLAN T403 carry-forward (b), now via the shared <see cref="WeakETag.TryParseVersion"/> (T434
@@ -786,5 +883,29 @@ public sealed class AdsController(
         Status = StatusCodes.Status400BadRequest,
         Title  = "Validation error.",
         Detail = $"{field} must be one of: {string.Join(", ", allowed)}.",
+    };
+
+    static ProblemDetails WriteNotDraftProblem() => new()
+    {
+        Status = StatusCodes.Status409Conflict,
+        Title  = "Conflict.",
+        Type   = WriteNotDraftType,
+        Detail = "Only a draft spot can be written. Re-fetch and retry if this spot has since moved on.",
+    };
+
+    static ProblemDetails JobBusyProblem() => new()
+    {
+        Status = StatusCodes.Status409Conflict,
+        Title  = "Conflict.",
+        Type   = JobBusyType,
+        Detail = "A job is already queued or running for this spot.",
+    };
+
+    static ProblemDetails JobQueueFullProblem() => new()
+    {
+        Status = StatusCodes.Status429TooManyRequests,
+        Title  = "Too many requests.",
+        Type   = JobQueueFullType,
+        Detail = "The station-wide job queue is full. Try again shortly.",
     };
 }

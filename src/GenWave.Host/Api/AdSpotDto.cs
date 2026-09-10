@@ -16,7 +16,9 @@ namespace GenWave.Host.Api;
 /// created-at/refreshed-on-change snapshot <c>station.ad_spot.sponsor_name</c> already carries (SPEC
 /// F171.7); <see cref="Sponsor"/> is the live <see cref="SponsorRefDto"/> cross-reference (the
 /// <see cref="AdBriefDto.Sponsor"/> precedent one seam over) — a sponsor is always referenced by its
-/// own id/name/paused, never by a free-text customer label field.
+/// own id/name/paused, never by a free-text customer label field. <see cref="Job"/> (PLAN T441) is
+/// <see langword="null"/> exactly when the row carries neither a job stamp nor a job error — see
+/// <see cref="AdSpotJobDto"/>'s own remarks for the shape when it is not.
 /// </summary>
 public sealed record AdSpotDto(
     long Id,
@@ -38,4 +40,5 @@ public sealed record AdSpotDto(
     DateTime StateChangedAt,
     DateTime? RenderedAt,
     DateTime? RetiredAt,
-    string Version);
+    string Version,
+    AdSpotJobDto? Job);

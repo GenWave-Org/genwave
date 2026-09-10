@@ -1,6 +1,5 @@
 namespace GenWave.Ads;
 
-using System.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -268,9 +267,9 @@ public sealed class AdSpotWorker(
 
     /// <summary>
     /// One brief → one script → one stored spot (SPEC F160.1-F160.3, F159.4, F171; STORY-389 AC2/AC3;
-    /// STORY-390; PLAN T432). Builds the SAME validate-delegate adapter shape
-    /// <c>GenWave.Ads.Tests.Specs.FeatureAdScriptWriterMeetsTheRealValidator</c> already previews (that
-    /// file's own remarks name this exact method as the production destination): closes over the REAL
+    /// STORY-390; PLAN T432). Builds the write/validation request pair through
+    /// <see cref="AdScriptRequests.Build"/> (PLAN T441 hoist, shared verbatim with
+    /// <see cref="AdSpotJobService"/>'s own write job) — that helper closes over the REAL
     /// <see cref="AdScriptValidator.Validate"/>, translating its result into the minimal
     /// <see cref="AdScriptValidationOutcome"/> contract <see cref="AdScriptWriter"/> (GenWave.Tts, which
     /// must never reference this project) accepts. Resolves <paramref name="brief"/>'s sponsor NAME once
@@ -294,22 +293,16 @@ public sealed class AdSpotWorker(
             return;
         }
 
-        var writeRequest = new AdScriptWriteRequest(
-            sponsor.Name, brief.Premise, brief.Tone, GeneratedSpotSeconds, audiencePosture.Current,
-            llmOptions.CurrentValue.MaxCopyChars, adsOptions.CurrentValue.DurationToleranceRatio,
-            Tagline: sponsor.Tagline, About: sponsor.About, Phone: sponsor.Phone, Address: sponsor.Address,
-            Website: sponsor.Website, HouseTone: sponsor.Tone);
-        // The owner-sponsor skips (SPEC F172.5, PLAN T438 ruling): IsPackOwned answers "does the
-        // SPONSOR belong to a pack" (sponsor.PackSlug) — a DIFFERENT question from "is this a pack
-        // spot" (brief.PackSlug, read separately below for the source-stamping line): an owner brief
-        // can still point at a pack-owned sponsor and must get the pack posture regardless, so this
-        // reads sponsor.PackSlug, never brief.PackSlug.
-        var validationRequest = new AdScriptValidationRequest(
-            audiencePosture.Current, llmOptions.CurrentValue.MaxCopyChars, GeneratedSpotSeconds,
-            adsOptions.CurrentValue.DurationToleranceRatio,
-            SponsorName: sponsor.Name, SponsorPhone: sponsor.Phone, IsPackOwned: sponsor.PackSlug is not null);
+        // Hoisted (PLAN T441): AdScriptRequests.Build is the SAME request-pair adapter
+        // AdSpotJobService's own write job calls — sponsor.PackSlug (never brief.PackSlug) is what
+        // decides IsPackOwned, a DIFFERENT question from "is this a pack spot" (read separately below
+        // for the source-stamping line): an owner brief can still point at a pack-owned sponsor and
+        // must get the pack posture regardless.
+        var (writeRequest, validate) = AdScriptRequests.Build(
+            sponsor, brief.Premise, brief.Tone, GeneratedSpotSeconds, audiencePosture.Current,
+            llmOptions.CurrentValue.MaxCopyChars, adsOptions.CurrentValue.DurationToleranceRatio, durationEstimator);
 
-        var result = await scriptWriter.WriteAsync(writeRequest, BuildValidateDelegate(validationRequest), ct);
+        var result = await scriptWriter.WriteAsync(writeRequest, validate, ct);
 
         // SPEC F159.1: a pack-installed brief's own spot is source=pack (T402's own reading of
         // "decide + document" — the ONLY signal this worker has for which of the two applies is
@@ -368,17 +361,6 @@ public sealed class AdSpotWorker(
         (null, { } tone) => tone,
         ({ } premise, { } tone) => $"{premise} ({tone})",
     };
-
-    /// <summary>The exact adapter <c>GenWave.Ads.Tests.Specs.FeatureAdScriptWriterMeetsTheRealValidator</c>
-    /// (T400) previews — see this file's own class remarks.</summary>
-    Func<string, AdScriptValidationOutcome> BuildValidateDelegate(AdScriptValidationRequest validationRequest) =>
-        rawScript => AdScriptValidator.Validate(rawScript, validationRequest, durationEstimator) switch
-        {
-            AdScriptValidationResult.Accepted => new AdScriptValidationOutcome.Accepted(),
-            AdScriptValidationResult.Refused refused =>
-                new AdScriptValidationOutcome.Refused(refused.Violation.RuleId, refused.Violation.Reason),
-            _ => throw new UnreachableException($"Unhandled {nameof(AdScriptValidationResult)} case."),
-        };
 
     /// <summary>
     /// SPEC F161.1, STORY-391 AC4/AC6: claims and renders AT MOST one <see cref="AdState.Approved"/>

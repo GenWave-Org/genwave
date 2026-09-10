@@ -86,6 +86,15 @@ public static class AdsServiceCollectionExtensions
         services.AddHostedService<AdSpotWorker>();
         services.AddHostedService<AdSpotLifecycleGuardianService>();
 
+        // The station-wide preview/write job runner (SPEC F174.2, F174.3; STORY-422, STORY-423; PLAN
+        // T441) — registered as a concrete singleton FIRST, then exposed as a hosted service resolving
+        // that SAME instance (the IAdSpotVend idiom just below, applied to a concrete type instead of
+        // an interface): AdsController (GenWave.Host) needs to inject AdSpotJobService directly to call
+        // TryEnqueueAsync/CancelAsync/IsWaitingForStation, which a bare AddHostedService<T>() call alone
+        // does not make resolvable as a plain constructor dependency.
+        services.AddSingleton<AdSpotJobService>();
+        services.AddHostedService(sp => sp.GetRequiredService<AdSpotJobService>());
+
         // PLAN T397 — the drain seam: overrides AddGenWaveOrchestration's own
         // TryAddSingleton<IAdSpotVend>(NoOpAdSpotVend.Instance) default (the override-after-the-
         // default idiom IStationImagingSettingsProvider's own registration already establishes one
