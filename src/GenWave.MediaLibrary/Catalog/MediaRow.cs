@@ -118,6 +118,22 @@ class MediaRow
     public DateTimeOffset? LastAiredAt { get; set; }
 
     /// <summary>
+    /// The installing jingle pack's display name (SPEC F165.2, PLAN T446) — projected by the admin
+    /// browse as <c>case when pack_slug is not null then artist end as pack</c> (the install's own
+    /// insert already stamps <c>artist</c> to the pack name for a pack row, SPEC F165.2). Null for
+    /// every row that did not arrive through a jingle-pack install; only populated by projections
+    /// that select it, mirroring <see cref="ImagingKind"/>'s own pattern.
+    /// </summary>
+    public string? Pack { get; set; }
+
+    /// <summary>
+    /// <c>library.media.jingle_role</c> — the jingle asset's stored role
+    /// (<c>bed</c>/<c>sting</c>/<c>station_id</c>, db/45's CHECK); null for every non-jingle-pack
+    /// row. Only populated by projections that select it, mirroring <see cref="Pack"/>'s pattern.
+    /// </summary>
+    public string? JingleRole { get; set; }
+
+    /// <summary>
     /// Postgres system column <c>xmin</c> — the transaction id that last wrote this row.
     /// Exposed as a string for use as an optimistic-concurrency token (ETag) on the admin write path.
     /// Dapper maps this because <c>MatchNamesWithUnderscores</c> is enabled globally and the column is
@@ -216,5 +232,7 @@ class MediaRow
         ShowId: ShowId,
         Plays: Plays,
         FirstAiredAt: FirstAiredAt,
-        LastAiredAt: LastAiredAt);
+        LastAiredAt: LastAiredAt,
+        Pack: Pack,
+        JingleRole: JingleRole);
 }

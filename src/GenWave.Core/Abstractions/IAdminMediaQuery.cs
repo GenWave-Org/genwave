@@ -42,4 +42,37 @@ public interface IAdminMediaQuery
     /// </summary>
     Task<int> CountUnavailableAsync(LibraryScope scope, MediaQuery query, CancellationToken ct) =>
         Task.FromResult(0);
+
+    /// <summary>
+    /// <see cref="ListAdminAsync(LibraryScope,MediaQuery,CancellationToken)"/>, additionally
+    /// narrowed by <paramref name="imaging"/> (SPEC F174.7, STORY-427 AC1, PLAN T446) — the wizard
+    /// music picker's own browse (<c>GET /api/media?imagingKind=&amp;jingleRole=</c>).
+    /// <see cref="ImagingBrowseFilter"/> could not land on <see cref="MediaQuery"/> itself: SPEC
+    /// F176.4 pins the <c>GenWave.Abstractions</c> package (where <see cref="MediaQuery"/> lives)
+    /// unchanged for this release, so this filter rides a second overload on this Core-only seam
+    /// instead.
+    ///
+    /// PLAN T446 ruling: default-implemented to throw <see cref="NotSupportedException"/> rather
+    /// than requiring every existing test double to grow a new member — a double that was never
+    /// given an imaging-filtered row set has no honest filtered answer to return, so silently
+    /// falling back to the unfiltered <see cref="ListAdminAsync(LibraryScope,MediaQuery,CancellationToken)"/>
+    /// behavior here would let a caller believe a filter applied when it did not. The one production
+    /// implementation (<c>MediaRepository</c>) overrides this with the real, filtered query; the
+    /// controller calls this overload only when a caller actually named <c>imagingKind</c> on the
+    /// wire, so no double exercised by an existing spec ever reaches this default.
+    /// </summary>
+    Task<PagedResult<AdminMediaDto>> ListAdminAsync(
+        LibraryScope scope, MediaQuery query, ImagingBrowseFilter imaging, CancellationToken ct) =>
+        throw new NotSupportedException("this query does not filter by imaging kind");
+
+    /// <summary>
+    /// <see cref="CountUnavailableAsync(LibraryScope,MediaQuery,CancellationToken)"/>, additionally
+    /// narrowed by <paramref name="imaging"/> — keeps the "N unavailable tracks hidden" count
+    /// honest against the SAME row set an imaging-filtered
+    /// <see cref="ListAdminAsync(LibraryScope,MediaQuery,ImagingBrowseFilter,CancellationToken)"/>
+    /// page draws from, mirroring that overload's own default-throw rationale (PLAN T446 ruling).
+    /// </summary>
+    Task<int> CountUnavailableAsync(
+        LibraryScope scope, MediaQuery query, ImagingBrowseFilter imaging, CancellationToken ct) =>
+        throw new NotSupportedException("this query does not filter by imaging kind");
 }

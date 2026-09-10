@@ -45,6 +45,13 @@ namespace GenWave.Core.Domain;
 /// pre-T360 <c>new Show(...)</c>/<c>with</c> call site across this repo passes exactly nine
 /// arguments, so this stays additive rather than forcing every call site to update.
 /// </param>
+/// <param name="SponsorId">
+/// The optional <c>station.sponsor</c> this show is sponsored by (SPEC F171, F176; PLAN T432, T449) —
+/// <c>null</c> for an unsponsored show, the default. A SECOND trailing, DEFAULTED positional
+/// parameter, the SAME <see cref="Rotation"/> precedent one field over — no pre-T432 <c>new
+/// Show(...)</c> call site needs to change. <c>ShowRepository</c> reads it (T432); no write path is
+/// added until T449's own PATCH.
+/// </param>
 public sealed record Show(
     long Id,
     string Name,
@@ -55,4 +62,5 @@ public sealed record Show(
     DateTime? ImportedAt,
     DateTime CreatedAt,
     DateTime UpdatedAt,
-    RotationPredicate? Rotation = null);
+    RotationPredicate? Rotation = null,
+    long? SponsorId = null);

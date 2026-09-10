@@ -9,7 +9,10 @@
 // SQL-planner fact and lives in GenWave.MediaLibrary.Tests/Specs/Story387_ImagingNeverAirsAsMusic.cs
 // instead (Category=Integration, live Postgres) — this file only proves LibraryAdSpotSource's OWN
 // logic (library-name resolution, the ring, the SegmentKind stamp) against a fake IMediaCatalog, per
-// F158.5's own "the feeder precedent" ring shape.
+// F158.5's own "the feeder precedent" ring shape. PLAN T439 adds the IAdSpotStore/ILogger ctor
+// params: every fact here builds against a FakeAiringExclusionsStore that reports nothing (no
+// sponsor ever seeded paused or recent), so the ring facts below hold byte-for-byte — F173's own
+// exclusion/relaxation behavior gets its own file, Story419_AntiRepeatBySponsor.cs.
 
 using GenWave.Ads.Tests.Fakes;
 using GenWave.Core.Domain;
@@ -35,7 +38,9 @@ public static class FeatureLibraryAdSpotSource
         var antiRepeat = new FakeOptionsMonitor<AdSpotAntiRepeatOptions>(
             new AdSpotAntiRepeatOptions { AntiRepeatWindow = antiRepeatWindow });
 
-        var source = new LibraryAdSpotSource(catalog, libraries, adsOptions, antiRepeat);
+        var source = new LibraryAdSpotSource(
+            catalog, libraries, adsOptions, antiRepeat,
+            new FakeAiringExclusionsStore(), new NoOpLogger<LibraryAdSpotSource>());
         return (source, catalog, libraries, antiRepeat);
     }
 
@@ -115,7 +120,9 @@ public static class FeatureLibraryAdSpotSource
             var libraryId = libraries.AddExisting("house-ads");
             var adsOptions = new FakeOptionsMonitor<AdsOptions>(new AdsOptions { LibraryName = "house-ads" });
             var antiRepeat = new FakeOptionsMonitor<AdSpotAntiRepeatOptions>(new AdSpotAntiRepeatOptions());
-            var source = new LibraryAdSpotSource(catalog, libraries, adsOptions, antiRepeat);
+            var source = new LibraryAdSpotSource(
+                catalog, libraries, adsOptions, antiRepeat,
+                new FakeAiringExclusionsStore(), new NoOpLogger<LibraryAdSpotSource>());
 
             var spot = await source.GetNextSpotAsync(CancellationToken.None);
 
@@ -141,7 +148,9 @@ public static class FeatureLibraryAdSpotSource
             var libraries = new FakeAdsLibraryStore(); // No library named "ads" exists.
             var adsOptions = new FakeOptionsMonitor<AdsOptions>(new AdsOptions());
             var antiRepeat = new FakeOptionsMonitor<AdSpotAntiRepeatOptions>(new AdSpotAntiRepeatOptions());
-            var source = new LibraryAdSpotSource(catalog, libraries, adsOptions, antiRepeat);
+            var source = new LibraryAdSpotSource(
+                catalog, libraries, adsOptions, antiRepeat,
+                new FakeAiringExclusionsStore(), new NoOpLogger<LibraryAdSpotSource>());
 
             var spot = await source.GetNextSpotAsync(CancellationToken.None);
 

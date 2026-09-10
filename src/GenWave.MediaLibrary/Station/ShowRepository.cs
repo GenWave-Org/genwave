@@ -59,6 +59,7 @@ sealed class ShowRepository(Lazy<NpgsqlDataSource> dataSource, ILogger<ShowRepos
         public DateTime CreatedAt { get; init; }
         public DateTime UpdatedAt { get; init; }
         public string? RotationJson { get; init; }
+        public long? SponsorId { get; init; }
     }
 
     // id is `serial` (int4) at rest — mirrors PersonaRepository's own SelectColumns comment: every id
@@ -67,13 +68,13 @@ sealed class ShowRepository(Lazy<NpgsqlDataSource> dataSource, ILogger<ShowRepos
     // F152.3) — the ONLY envelope key this repository ever selects.
     const string SelectColumns =
         "select id::bigint as id, name, slug, tagline, flavor, imported_from, imported_at, " +
-        "created_at, updated_at, envelope ->> 'rotation' as rotation_json from station.show";
+        "created_at, updated_at, envelope ->> 'rotation' as rotation_json, sponsor_id from station.show";
 
     // Every write below RETURNs this identical column set (SelectColumns' own list, minus the FROM
     // clause) so ToShow has one shape to map from regardless of which statement produced the row.
     const string ReturningColumns =
         "returning id::bigint as id, name, slug, tagline, flavor, imported_from, imported_at, " +
-        "created_at, updated_at, envelope ->> 'rotation' as rotation_json";
+        "created_at, updated_at, envelope ->> 'rotation' as rotation_json, sponsor_id";
 
     public async Task<IReadOnlyList<Show>> GetAllAsync(CancellationToken ct)
     {
@@ -116,6 +117,9 @@ sealed class ShowRepository(Lazy<NpgsqlDataSource> dataSource, ILogger<ShowRepos
     /// "null when the show carries none" contract instead of a stray <c>''</c>. <c>envelope</c> is
     /// left untouched (stays whatever it already was — NULL for a brand-new row), the same "this
     /// statement never overwrites the whole document" discipline <see cref="SetRotationAsync"/> keeps.
+    /// <c>sponsor_id</c> binds straight from <see cref="ShowDraft.SponsorId"/> (SPEC F175.1, PLAN
+    /// T449) — <see langword="null"/> on a create simply means "no sponsor yet", never a distinct
+    /// state from an edit that clears one.
     /// </summary>
     public async Task<ShowWriteResult> CreateAsync(ShowDraft draft, CancellationToken ct)
     {
@@ -128,11 +132,15 @@ sealed class ShowRepository(Lazy<NpgsqlDataSource> dataSource, ILogger<ShowRepos
             await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
             var row = await conn.QuerySingleAsync<ShowRow>(new CommandDefinition(
                 $"""
-                insert into station.show (name, slug, tagline, flavor)
-                values (@Name, @Slug, @Tagline, @Flavor)
+                insert into station.show (name, slug, tagline, flavor, sponsor_id)
+                values (@Name, @Slug, @Tagline, @Flavor, @SponsorId)
                 {ReturningColumns}
                 """,
-                new { draft.Name, Slug = slug, Tagline = NullIfBlank(draft.Tagline), Flavor = NullIfBlank(draft.Flavor) },
+                new
+                {
+                    draft.Name, Slug = slug, Tagline = NullIfBlank(draft.Tagline), Flavor = NullIfBlank(draft.Flavor),
+                    draft.SponsorId,
+                },
                 cancellationToken: ct));
             return new ShowWriteResult.Created(ToShow(row));
         }
@@ -153,7 +161,13 @@ sealed class ShowRepository(Lazy<NpgsqlDataSource> dataSource, ILogger<ShowRepos
     /// <see cref="CreateAsync"/>, binds <c>tagline</c>/<c>flavor</c> through <see cref="NullIfBlank"/>
     /// so clearing either field to <c>""</c> in an edit persists <c>NULL</c>, not an empty string.
     /// Never touches <c>envelope</c> either — an authored name/tagline/flavor edit leaves a show's own
-    /// rotation rule (if any) exactly as <see cref="SetRotationAsync"/> last left it.
+    /// rotation rule (if any) exactly as <see cref="SetRotationAsync"/> last left it. <c>sponsor_id</c>
+    /// is a full replace too (SPEC F175.1, PLAN T449 ruling): a caller that omits it, or sends it
+    /// explicitly <see langword="null"/>, clears any sponsor the show currently carries — the same
+    /// "full-body replace" posture <c>ShowsController.Update</c>'s own class remarks already document
+    /// for this whole request. A dangling id never reaches this statement — <c>ShowsController</c>
+    /// resolves it against <c>ISponsorStore.GetAsync</c> first, so the FK here only ever fires on a
+    /// genuine race, not an ordinary caller mistake.
     /// </summary>
     public async Task<ShowWriteResult> UpdateAsync(long id, ShowDraft draft, CancellationToken ct)
     {
@@ -167,11 +181,16 @@ sealed class ShowRepository(Lazy<NpgsqlDataSource> dataSource, ILogger<ShowRepos
             var row = await conn.QuerySingleOrDefaultAsync<ShowRow>(new CommandDefinition(
                 $"""
                 update station.show
-                set name = @Name, slug = @Slug, tagline = @Tagline, flavor = @Flavor, updated_at = now()
+                set name = @Name, slug = @Slug, tagline = @Tagline, flavor = @Flavor,
+                    sponsor_id = @SponsorId, updated_at = now()
                 where id = @Id
                 {ReturningColumns}
                 """,
-                new { draft.Name, Slug = slug, Tagline = NullIfBlank(draft.Tagline), Flavor = NullIfBlank(draft.Flavor), Id = id },
+                new
+                {
+                    draft.Name, Slug = slug, Tagline = NullIfBlank(draft.Tagline), Flavor = NullIfBlank(draft.Flavor),
+                    draft.SponsorId, Id = id,
+                },
                 cancellationToken: ct));
             if (row is null) return new ShowWriteResult.NotFound();
 
@@ -343,10 +362,13 @@ sealed class ShowRepository(Lazy<NpgsqlDataSource> dataSource, ILogger<ShowRepos
     /// <summary>Maps one <see cref="ShowRow"/> into the domain <see cref="Show"/>, parsing
     /// <see cref="ShowRow.RotationJson"/> via <see cref="RotationEnvelopeCodec.Parse"/> — the one
     /// mapping step every read/write method above shares, so a malformed row WARNs identically
-    /// regardless of which statement produced it.</summary>
+    /// regardless of which statement produced it. <see cref="ShowRow.SponsorId"/> passes straight
+    /// through (SPEC F175.1, PLAN T432) — read-only here, no write path lands it until T449's own
+    /// PATCH (see <see cref="Show.SponsorId"/>'s own remarks).</summary>
     Show ToShow(ShowRow row) => new(
         row.Id, row.Name, row.Slug, row.Tagline, row.Flavor, row.ImportedFrom, row.ImportedAt,
-        row.CreatedAt, row.UpdatedAt, RotationEnvelopeCodec.Parse(row.RotationJson, row.Name, logger));
+        row.CreatedAt, row.UpdatedAt, RotationEnvelopeCodec.Parse(row.RotationJson, row.Name, logger),
+        row.SponsorId);
 
     /// <summary>
     /// SPEC F115.1's name-shape guard — pure C#, evaluated before either write method ever opens a

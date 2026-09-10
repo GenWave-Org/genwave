@@ -544,7 +544,7 @@ public static class StationSettingsAllowlist
         new("Station:Ads:TargetCount",                        SettingApplyMode.Live,          SettingKind.Number,     "spots"),
         new("Station:Ads:RefreshDays",                        SettingApplyMode.Live,          SettingKind.Number,     "days"),
         new("Station:Ads:AutoApprove",                        SettingApplyMode.Live,          SettingKind.Boolean,    ""),
-        new("Station:Ads:AntiRepeatWindow",                   SettingApplyMode.Live,          SettingKind.Number,     "spots"),
+        new("Station:Ads:AntiRepeatWindow",                   SettingApplyMode.Live,          SettingKind.Number,     "sponsors"),
 
         // The ads cast/bed settings split (SPEC F170.1, STORY-405, PLAN T417): three MORE
         // Station:Ads:* Live knobs, alongside the five above — the jingle/voice-pack ROOTS and byte

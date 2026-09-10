@@ -207,6 +207,17 @@ static class StationSettingsHostingExtensions
         builder.Services.AddAdSpotStore(stationConnStr);
         builder.Services.AddAdBriefStore(stationConnStr);
 
+        // The sponsor store (SPEC F171; STORY-406; PLAN T432) — same station_svc connection string as
+        // every registration above; station.sponsor lives in the same schema. NOT dark at registration
+        // (round-3 finding R4 — corrects this comment's own former "no Host consumer yet" claim, which
+        // was already untrue by the time round 3 landed): AdsController and AdBriefsController both
+        // resolve an owner sponsor via ISponsorStore.FindOrCreateOwnerAsync on their own Create/Update
+        // routes, and AdPackController resolves every manifest brand via
+        // ISponsorStore.UpsertPackSponsorsAsync on install — three real Host call sites, live in THIS
+        // same task. PLAN T434's SponsorsController (list/detail/pause/delete) is still owed, but is a
+        // FOURTH consumer, not the first.
+        builder.Services.AddSponsorStore(stationConnStr);
+
         // Voice pack store (SPEC F164.5/F164.6/F166.4; STORY-395/396/398/401; PLAN T413) — same
         // station_svc connection string as every registration above; station.voice_pack(+_voice)
         // lives in the same schema. VoicePackRepository shipped dark up to this point (no consumer

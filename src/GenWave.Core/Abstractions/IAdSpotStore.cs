@@ -174,24 +174,30 @@ public interface IAdSpotStore
     /// <summary>
     /// State-scoped paged listing with an exact total (the T385 kind-scoped paging precedent, PLAN
     /// T403's own admin list) — <paramref name="state"/> <see langword="null"/> means "any".
-    /// <c>state_changed_at desc, id desc</c> — newest-transitioned-first, so a fresh batch of drafts
-    /// or a just-failed spot needing triage surfaces at the top regardless of when the row was
-    /// originally created. <paramref name="limit"/>/<paramref name="offset"/> are floored by the
-    /// implementation (the <c>RotFindingRepository.ClampPaging</c> precedent) — never trust every
-    /// caller to have already clamped them.
+    /// <paramref name="sponsorId"/> <see langword="null"/> means "any sponsor" — non-null narrows
+    /// both the page and the total to exactly that sponsor's rows (PLAN T436's own admin filter,
+    /// SPEC F171.7's <c>GET /api/ads?sponsorId=</c>). <c>state_changed_at desc, id desc</c> —
+    /// newest-transitioned-first, so a fresh batch of drafts or a just-failed spot needing triage
+    /// surfaces at the top regardless of when the row was originally created.
+    /// <paramref name="limit"/>/<paramref name="offset"/> are floored by the implementation (the
+    /// <c>RotFindingRepository.ClampPaging</c> precedent) — never trust every caller to have already
+    /// clamped them.
     /// </summary>
-    Task<AdSpotPage> ListByStateAsync(AdState? state, int limit, int offset, CancellationToken ct);
+    Task<AdSpotPage> ListByStateAsync(AdState? state, long? sponsorId, int limit, int offset, CancellationToken ct);
 
     /// <summary>
-    /// How many generated spots (<see cref="AdSource.Llm"/> or <see cref="AdSource.Pack"/> source) sit
-    /// anywhere in the stock pipeline — <see cref="AdState.Draft"/>, <see cref="AdState.Approved"/>,
-    /// <see cref="AdState.Rendering"/>, or <see cref="AdState.Ready"/> (SPEC F159.3's own
-    /// <c>Station:Ads:TargetCount</c> stock count, as-built rider gh-#689). A draft waiting for the
-    /// owner's eye under <c>AutoApprove=false</c> IS stock on its way — counting only the ready shelf
-    /// left that pile unbounded (one new draft per tick, forever). <see cref="AdState.Failed"/> never
-    /// counts (it waits for an operator retry or discard and must never block refill),
-    /// <see cref="AdState.Retired"/> is terminal, and <see cref="AdSource.Owner"/> spots never count
-    /// toward the target the stock pass refills.
+    /// How many generated spots (<see cref="AdSource.Llm"/> or <see cref="AdSource.Pack"/> source) of
+    /// an UNPAUSED sponsor sit anywhere in the stock pipeline — <see cref="AdState.Draft"/>,
+    /// <see cref="AdState.Approved"/>, <see cref="AdState.Rendering"/>, or <see cref="AdState.Ready"/>
+    /// (SPEC F159.3's own <c>Station:Ads:TargetCount</c> stock count, as-built rider gh-#689; narrowed
+    /// by SPEC F173.4's own "stock keeping counts only spots of unpaused sponsors", PLAN T440). A
+    /// draft waiting for the owner's eye under <c>AutoApprove=false</c> IS stock on its way — counting
+    /// only the ready shelf left that pile unbounded (one new draft per tick, forever).
+    /// <see cref="AdState.Failed"/> never counts (it waits for an operator retry or discard and must
+    /// never block refill), <see cref="AdState.Retired"/> is terminal, <see cref="AdSource.Owner"/>
+    /// spots never count toward the target the stock pass refills, and NEITHER does a spot whose own
+    /// sponsor is currently paused — <c>TargetCount</c> refills from the other sponsors' briefs while
+    /// one is paused, rather than reading the station as already "full" on spots that will never air.
     /// </summary>
     Task<int> CountStockGeneratedAsync(CancellationToken ct);
 
@@ -235,4 +241,86 @@ public interface IAdSpotStore
     /// is built to tolerate.
     /// </summary>
     Task<bool> ReArmAsync(long id, CancellationToken ct);
+
+    /// <summary>
+    /// Media ids to withhold from airing right now, for one of two reasons (SPEC F171, F174; PLAN
+    /// T432): the spot's own sponsor is currently <see cref="Domain.Sponsor.Paused"/>, OR the spot's
+    /// sponsor is one of the sponsors already carried by the first <paramref name="window"/> entries
+    /// of <paramref name="recentMediaIds"/> (most-recent-first — the crosstalk/repeat-sponsor guard,
+    /// looked up through <see cref="AdSpot.MediaId"/>, not a separate rotation table). Only
+    /// <see cref="AdState.Ready"/> spots are ever candidates — nothing else is airable in the first
+    /// place. <paramref name="window"/> of zero excludes only paused-sponsor spots; an empty
+    /// <paramref name="recentMediaIds"/> has the same effect regardless of <paramref name="window"/>.
+    /// One query — the "counts via one round trip, no N+1" posture <see cref="ISponsorStore.ListAsync"/>
+    /// already keeps one seam over.
+    /// </summary>
+    Task<IReadOnlyList<long>> ListAiringExclusionsAsync(
+        IReadOnlyList<long> recentMediaIds, int window, CancellationToken ct);
+
+    /// <summary>
+    /// Claims a row for a background job by stamping <c>job_kind</c>/<c>job_started_at</c> and
+    /// clearing any prior <c>job_error</c> (SPEC F174, F175; PLAN T432 — the preview/write job seam
+    /// PLAN T439–T445 build against). Guarded on <c>job_kind IS NULL</c>: a row already claimed by
+    /// another job reports <see cref="AdSpotJobStampResult.Busy"/> rather than stealing or queuing
+    /// behind it — the caller's own signal to skip this tick, the <see cref="ClaimNextApprovedAsync"/>
+    /// "SKIP LOCKED, never block" posture applied per-row instead of via a locking read.
+    /// </summary>
+    Task<AdSpotJobStampOutcome> StampJobAsync(long id, string kind, CancellationToken ct);
+
+    /// <summary>
+    /// Releases a job claim — clears <c>job_kind</c>/<c>job_started_at</c> and sets <c>job_error</c>
+    /// to <paramref name="error"/> (<see langword="null"/> on a clean finish, the failure message
+    /// otherwise) — SPEC F174, F175; PLAN T432. Total: an id with no current claim (already cleared,
+    /// or never claimed) still reports <see langword="true"/> — clearing an already-clear job is a
+    /// harmless no-op, not a conflict, the <see cref="MarkReadyAsync"/>/<see cref="MarkFailedAsync"/>
+    /// "guarded WHERE, total" shape narrowed to "row exists" rather than "row in a specific state".
+    /// Reports <see langword="false"/> only when no row exists with the given id.
+    /// </summary>
+    Task<bool> ClearJobAsync(long id, string? error, CancellationToken ct);
+
+    /// <summary>
+    /// Stamps a rendered preview clip's own <paramref name="path"/>/<paramref name="key"/> and
+    /// <c>preview_at = now()</c> (SPEC F174; PLAN T432) — unconditional by id, mirrors
+    /// <see cref="MarkReadyAsync"/>'s own total posture: a preview may be re-rendered any number of
+    /// times regardless of the spot's current <see cref="AdState"/>, so there is no state guard here
+    /// to conflict with. Reports <see langword="false"/> only when no row exists with the given id.
+    /// </summary>
+    Task<bool> StampPreviewAsync(long id, string path, string key, CancellationToken ct);
+
+    /// <summary>
+    /// <see cref="AdState.Approved"/> to <see cref="AdState.Rendering"/> for exactly the row named by
+    /// <paramref name="id"/>, xmin-guarded (SPEC F174.5; PLAN T432) — the operator-driven counterpart
+    /// to <see cref="ClaimNextApprovedAsync"/>'s own oldest-first, version-less worker claim: a caller
+    /// here already holds a specific row's own prior <see cref="AdSpot.Version"/> (an owner previewing
+    /// ONE spot on demand, not the stock worker's tick) and wants exactly that row promoted, not
+    /// whichever is oldest. Returns the claimed row, or <see langword="null"/> when it is not currently
+    /// <see cref="AdState.Approved"/> or <paramref name="expectedVersion"/> is stale — both collapse to
+    /// one outcome, the same "re-read before trying again" contract
+    /// <see cref="AdSpotTransitionOutcome.Result"/>'s own <see cref="AdSpotWriteResult.Conflict"/>
+    /// gives one seam over, simplified here since no caller needs to tell the two apart.
+    /// </summary>
+    Task<AdSpot?> ClaimForPromotionAsync(long id, string expectedVersion, CancellationToken ct);
+
+    /// <summary>
+    /// The guardian's own preview-cleanup candidate read (SPEC F176.2; STORY-429; PLAN T442) — every
+    /// row that currently carries a rendered preview (<c>preview_path IS NOT NULL</c>) AND either has
+    /// left the editable draft/approved lifecycle (<see cref="AdState.Ready"/> or
+    /// <see cref="AdState.Retired"/> — a preview of a spot no longer being worked on has nothing left
+    /// to preview) OR has simply outlived <paramref name="retention"/> since it was rendered
+    /// (<c>preview_at</c> older than <paramref name="now"/> minus <paramref name="retention"/>). The
+    /// caller (<see cref="AdSpotLifecycleGuardianService"/>, a plain-text reference: GenWave.Core never
+    /// references GenWave.Ads, L10) deletes each returned row's own file, then clears its stamp via
+    /// <see cref="ClearPreviewAsync"/>.
+    /// </summary>
+    Task<IReadOnlyList<AdSpot>> ListPreviewsToSweepAsync(TimeSpan retention, DateTimeOffset now, CancellationToken ct);
+
+    /// <summary>
+    /// Clears a preview stamp — nulls <c>preview_path</c>/<c>preview_at</c>/<c>preview_key</c>
+    /// together (SPEC F176.2; STORY-429; PLAN T442), total by id (the <see cref="ClearJobAsync"/>
+    /// posture: an id with no preview stamped, or no row at all, still reports whatever this store's
+    /// own "no matching row" case reports — see the implementation's own remarks for the exact
+    /// boundary). Never touches <c>job_kind</c>/<c>job_started_at</c>/<c>job_error</c> — a preview
+    /// sweep and a queued job are two independent claims on the SAME row.
+    /// </summary>
+    Task<bool> ClearPreviewAsync(long id, CancellationToken ct);
 }

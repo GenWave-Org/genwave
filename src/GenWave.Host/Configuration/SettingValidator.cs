@@ -1216,7 +1216,7 @@ public sealed partial class SettingValidator
         var k when k.Equals("Station:Ads:AutoApprove", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be a boolean (true/false).",
         var k when k.Equals("Station:Ads:AntiRepeatWindow", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {AdsAntiRepeatWindowMin} and {AdsAntiRepeatWindowMax} (spots).",
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {AdsAntiRepeatWindowMin} and {AdsAntiRepeatWindowMax} (sponsors).",
         var k when k.Equals("Station:Ads:AnnouncerVoice", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be empty (use the station's own " +
                "voice), or a single Kokoro voice id (lowercase letters, digits, underscores, " +

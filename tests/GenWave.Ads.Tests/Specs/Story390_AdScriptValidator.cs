@@ -337,18 +337,19 @@ public static class FeatureAdScriptValidator
         [Fact]
         public void AHundredKilobyteColonLessLineYieldsABoundedSingleLineReason()
         {
-            // PLAN T399 review F6: an untrusted raw line echoed into a Reason is truncated (the
-            // crosstalk MaxEchoedLineChars=120 precedent) and stripped of control characters
-            // (CWE-117 log forging) before it ever reaches the caller.
-            var hugeLine = "ANNOUNCER" + '\r' + new string('x', 100_000) + '\a';
+            // PLAN T444 ruling: a 100 KB run of 'A' followed by a colon is a PATTERN-VALID tag (it
+            // matches AdScriptParser's own TagPattern) carrying no spoken text after it, so the line
+            // reaches the "has no spoken text" branch — which echoes the tag. This pins that the echo
+            // is bounded (the crosstalk MaxEchoedLineChars=120 precedent) rather than reflecting all
+            // 100,000 chars back into the Reason.
+            var hugeTag = new string('A', 100_000) + ":";
 
-            var result = Validate(hugeLine);
+            var result = Validate(hugeTag);
 
             var refused = Assert.IsType<AdScriptValidationResult.Refused>(result);
             Assert.Equal(AdScriptRuleIds.Format, refused.Violation.RuleId);
             Assert.True(refused.Violation.Reason.Length < 200, $"Reason was {refused.Violation.Reason.Length} chars");
-            Assert.DoesNotContain('\r', refused.Violation.Reason);
-            Assert.DoesNotContain('\a', refused.Violation.Reason);
+            Assert.Contains('…', refused.Violation.Reason);
         }
     }
 

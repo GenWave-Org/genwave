@@ -1,14 +1,17 @@
 // STORY-392 — I manage the Ads library (the Briefs half · F162.1 · F162.2 · PLAN T403b)
+// Re-targeted at the sponsor-first wire contract (SPEC F171.6, STORY-411, PLAN T435): every brief now
+// belongs to a sponsor id, never a free-text brand — see the Arc's own remarks below for what changed.
 // The Briefs tab's page half (AC5 in a browser) lives outside this repo's server-side specs.
 //
 // BDD specification — xUnit through the deployed entry point (WebApplicationFactory<Program> against
 // a real ephemeral Postgres — the Story374/Story382/Story392(T403) arc idiom): every fact drives
-// GET/POST/PATCH /api/ad-briefs* over HTTP with an authed admin session, never AdBriefRepository/
-// AdBriefsController directly. One arc (AdBriefsApiArc) arranges everything every HAPPY-PATH/sad-path
-// Scenario below reads (the SAME "arrange once, many read-only Scenarios" idiom Story392's own
-// AdsApiArc already establishes one controller over); the admin-surface posture Scenario needs no
-// real database at all (SurfaceGateMiddleware 404s before any store is ever touched), so it gets its
-// own, DB-less factory (the Story166/Story374/Story392(T403) precedent).
+// GET/POST/PATCH /api/ad-briefs* and POST /api/sponsors over HTTP with an authed admin session, never
+// AdBriefRepository/AdBriefsController/SponsorRepository/SponsorsController directly. One arc
+// (AdBriefsApiArc) arranges everything every HAPPY-PATH/sad-path Scenario below reads (the SAME
+// "arrange once, many read-only Scenarios" idiom Story392's own AdsApiArc already establishes one
+// controller over); the admin-surface posture Scenario needs no real database at all
+// (SurfaceGateMiddleware 404s before any store is ever touched), so it gets its own, DB-less factory
+// (the Story166/Story374/Story392(T403) precedent).
 
 using System.Net;
 using System.Net.Http.Json;
@@ -37,10 +40,16 @@ public static class FeatureAdBriefsApi
         public void BothPackAndOwnerRowsAppear()
         {
             // GET /api/ad-briefs (F162.1's Briefs tab) — the SEEDED pack row and the POSTed owner row
-            // both come back, bare array, no paging envelope (T403b's own YAGNI call).
+            // both come back, bare array, no paging envelope (T403b's own YAGNI call). Each row's own
+            // sponsor name (SPEC F171.6's sponsor object, not a top-level brand field) is what this
+            // fact reads.
             Assert.Equal(HttpStatusCode.OK, arc.ListStatus);
-            Assert.Contains(arc.ListBrands, b => b is (AdBriefsApiArc.SeededPackBrand, AdBriefsApiArc.SeededPackSlug));
-            Assert.Contains(arc.ListBrands, b => b is (AdBriefsApiArc.CleanOwnerBrand, null));
+            Assert.Contains(arc.ListBrands, b => b is (AdBriefsApiArc.SeededPackBrand, false, AdBriefsApiArc.SeededPackSlug));
+            Assert.Contains(arc.ListBrands, b => b is (AdBriefsApiArc.CleanOwnerBrand, false, null));
+            // review MED-1: every sponsor in THIS arc is unpaused, so `paused` is false for every row
+            // here — Story411's ABriefUnderAPausedSponsorReportsPausedTrue holds the true case (a
+            // paused sponsor's own brief), just not through the LIST endpoint.
+            Assert.All(arc.ListBrands, b => Assert.False(b.Paused));
         }
     }
 
@@ -50,10 +59,11 @@ public static class FeatureAdBriefsApi
         [Fact]
         public void ACleanCreatePostsAndReadsBackEveryFieldVerbatim()
         {
-            // POST /api/ad-briefs {brand,premise,tone,structure,enabled} → 201, every field
-            // round-trips byte-for-byte, pack_slug is null (owner-only creation).
+            // POST /api/ad-briefs {sponsorId,premise,tone,structure,enabled} → 201, every field
+            // round-trips byte-for-byte (the sponsor's own name, under "sponsor", stands in for the
+            // former top-level "brand"), pack_slug is null (owner-only creation).
             Assert.Equal(HttpStatusCode.Created, arc.CleanOwnerPostStatus);
-            Assert.Equal(AdBriefsApiArc.CleanOwnerBrand, arc.RoundTripBrand);
+            Assert.Equal(AdBriefsApiArc.CleanOwnerBrand, arc.RoundTripSponsorName);
             Assert.Equal(AdBriefsApiArc.CleanOwnerPremise, arc.RoundTripPremise);
             Assert.Equal(AdBriefsApiArc.CleanOwnerTone, arc.RoundTripTone);
             Assert.Equal(AdBriefsApiArc.CleanOwnerStructure, arc.RoundTripStructure);
@@ -64,28 +74,34 @@ public static class FeatureAdBriefsApi
         [Fact]
         public void ADuplicateOwnerBrandIs409()
         {
-            // A second POST for the SAME brand — the ratified one-owner-per-brand cap (SPEC F159.1
-            // rider) surfaces as 409, never a silent update.
+            // A second POST for the SAME sponsor and the SAME premise — the ratified per-sponsor-angle
+            // cap (SPEC F171.6, PLAN T431/T432/T435 — station.ad_brief's own
+            // ad_brief_sponsor_id_premise_key) surfaces as 409 duplicate_brief naming the premise field,
+            // never a silent update.
             Assert.Equal(HttpStatusCode.Conflict, arc.DuplicateOwnerPostStatus);
-            Assert.Equal("brand", arc.DuplicateOwnerPostField);
+            Assert.Equal("premise", arc.DuplicateOwnerPostField);
+            Assert.Equal("duplicate_brief", arc.DuplicateOwnerPostType);
         }
 
         [Fact]
         public void ABrandThatOnlyHasAPackBriefCoexists()
         {
-            // A brand already carrying a PACK brief — an owner brief for the SAME brand name is a
-            // SEPARATE row (the cap is scoped to (pack_slug, brand), not brand alone: NULLS NOT
-            // DISTINCT makes (NULL, brand) distinct from (slug, brand) — verified against the REAL
-            // constraint, not asserted from memory).
+            // A sponsor NAME already carrying a PACK-owned sponsor row — creating an OWNER sponsor
+            // (pack_slug NULL) with the SAME folded name now succeeds at the SPONSOR level (SPEC
+            // F171.6 moved the "(pack_slug, brand)" scoping from station.ad_brief onto
+            // station.sponsor's own sponsor_pack_slug_name_key: NULLS NOT DISTINCT makes (NULL,
+            // name_key) distinct from ('another-pack-slug', name_key) — verified against the REAL
+            // constraint, not asserted from memory). A brief for that new owner sponsor then creates
+            // cleanly, since it names a real, distinct sponsor id.
             Assert.Equal(HttpStatusCode.Created, arc.CoexistingOwnerPostStatus);
         }
 
         [Fact]
         public void AnOmittedEnabledDefaultsToTrue()
         {
-            // review F1: the SAME coexisting-brand POST omits `enabled` entirely — the add form's own
-            // "new briefs are live by default" posture (AdBriefCreateRequest's own remarks) pinned
-            // against the real response body, not merely asserted from the controller's own doc
+            // review F1: the SAME coexisting-sponsor brief POST omits `enabled` entirely — the add
+            // form's own "new briefs are live by default" posture (AdBriefCreateRequest's own remarks)
+            // pinned against the real response body, not merely asserted from the controller's own doc
             // comment.
             Assert.True(arc.CoexistingOwnerEnabled);
         }
@@ -93,15 +109,17 @@ public static class FeatureAdBriefsApi
         [Fact]
         public void AWhitespaceOnlyPremiseFoldsToNull()
         {
-            // review F3: the SAME coexisting-brand POST also sends a whitespace-only premise — reads
-            // back null, never the literal spaces.
+            // review F3: the SAME coexisting-sponsor brief POST also sends a whitespace-only premise —
+            // reads back null, never the literal spaces.
             Assert.Null(arc.CoexistingOwnerPremise);
         }
 
         [Fact]
         public void ABlankBrandIs400()
         {
-            Assert.Equal(HttpStatusCode.BadRequest, arc.BlankBrandPostStatus);
+            // Re-targeted (SPEC F171.6, PLAN T435): there is no free-text brand to blank anymore — a
+            // missing sponsorId is what this fact now pins, refused as 400 sponsor_required.
+            Assert.Equal(HttpStatusCode.BadRequest, arc.MissingSponsorIdPostStatus);
         }
     }
 
@@ -113,6 +131,11 @@ public static class FeatureAdBriefsApi
         {
             Assert.Equal(HttpStatusCode.OK, arc.PatchOwnerStatus);
             Assert.False(arc.PatchOwnerResultEnabled);
+            // review MED-1: the PATCH response's own sponsor object, pinned by name — this arc's owner
+            // sponsor is never paused, so asserting `paused` here too would be a tautology a hardcoded
+            // `paused: false` projection could never fail; Story411's NEW fact
+            // (PatchOnAPausedSponsorsBriefStillReportsPausedTrue) pins the true case instead.
+            Assert.Equal(AdBriefsApiArc.CleanOwnerBrand, arc.PatchOwnerResultSponsorName);
         }
 
         [Fact]
@@ -128,7 +151,13 @@ public static class FeatureAdBriefsApi
         [Fact]
         public void PatchWithNoEnabledFieldIs400()
         {
+            // The 400 names the field and carries no type: `field` pins "enabled" (never a bare status
+            // a wrong-field bug could still pass), and the absent `type` key confirms
+            // RequiredFieldProblem's PATCH call site leaves ProblemDetails.Type null (the converter
+            // omits it) rather than merely happening to serialize a null value.
             Assert.Equal(HttpStatusCode.BadRequest, arc.PatchMissingEnabledStatus);
+            Assert.Equal("enabled", arc.PatchMissingEnabledField);
+            Assert.False(arc.PatchMissingEnabledHasType);
         }
 
         [Fact]
@@ -187,7 +216,10 @@ public sealed class AdBriefsApiCollection : ICollectionFixture<AdBriefsApiArc>
 /// pipeline with a real admin session — no <c>AdBriefRepository</c> call, no
 /// <c>AdBriefsController</c> call, anywhere in this class. The pack brief is seeded directly via raw
 /// SQL (the <c>GardenerRotFixtures</c>/<c>AdsWireFixtures</c> precedent): no pack-install endpoint
-/// exists yet, so a pack row can only ever be arranged independently of the API under test.
+/// exists yet, so a pack row can only ever be arranged independently of the API under test. Every
+/// OWNER sponsor this arc needs, though, is created through the real <c>POST /api/sponsors</c> surface
+/// (PLAN T434) — the sponsor-first contract (SPEC F171.6, PLAN T435) means a brief create needs a real
+/// sponsor id, not a free-text brand a compile bridge used to resolve.
 /// </summary>
 public sealed class AdBriefsApiArc : IAsyncLifetime
 {
@@ -202,10 +234,10 @@ public sealed class AdBriefsApiArc : IAsyncLifetime
     const string CoexistingBrand = "Shared Brand Co";
 
     public HttpStatusCode ListStatus { get; private set; }
-    public IReadOnlyList<(string Brand, string? PackSlug)> ListBrands { get; private set; } = [];
+    public IReadOnlyList<(string Brand, bool Paused, string? PackSlug)> ListBrands { get; private set; } = [];
 
     public HttpStatusCode CleanOwnerPostStatus { get; private set; }
-    public string RoundTripBrand { get; private set; } = "";
+    public string RoundTripSponsorName { get; private set; } = "";
     public string? RoundTripPremise { get; private set; }
     public string? RoundTripTone { get; private set; }
     public string? RoundTripStructure { get; private set; }
@@ -214,21 +246,25 @@ public sealed class AdBriefsApiArc : IAsyncLifetime
 
     public HttpStatusCode DuplicateOwnerPostStatus { get; private set; }
     public string? DuplicateOwnerPostField { get; private set; }
+    public string? DuplicateOwnerPostType { get; private set; }
 
     public HttpStatusCode CoexistingOwnerPostStatus { get; private set; }
     public bool CoexistingOwnerEnabled { get; private set; }
     public string? CoexistingOwnerPremise { get; private set; }
 
-    public HttpStatusCode BlankBrandPostStatus { get; private set; }
+    public HttpStatusCode MissingSponsorIdPostStatus { get; private set; }
 
     public HttpStatusCode PatchOwnerStatus { get; private set; }
     public bool PatchOwnerResultEnabled { get; private set; }
+    public string PatchOwnerResultSponsorName { get; private set; } = "";
 
     public HttpStatusCode PatchPackStatus { get; private set; }
     public bool PatchPackResultEnabled { get; private set; }
     public string? PatchPackResultPackSlug { get; private set; }
 
     public HttpStatusCode PatchMissingEnabledStatus { get; private set; }
+    public string? PatchMissingEnabledField { get; private set; }
+    public bool PatchMissingEnabledHasType { get; private set; }
     public HttpStatusCode PatchUnknownIdStatus { get; private set; }
 
     public async Task InitializeAsync()
@@ -247,10 +283,26 @@ public sealed class AdBriefsApiArc : IAsyncLifetime
         if (login.StatusCode != HttpStatusCode.NoContent)
             throw new InvalidOperationException($"login unexpectedly returned {login.StatusCode}");
 
+        // ── The clean owner sponsor, created through the real POST /api/sponsors surface (PLAN T434)
+        // — the sponsor-first contract needs a real sponsor id before a brief for it can exist. Pure
+        // arrange, not a fact under test — an unexpected status throws loudly here rather than crashing
+        // confusingly on the GetProperty("id") below (review LOW-2, the coexisting sponsor create's own
+        // guard a few dozen lines down). ──
+        var cleanOwnerSponsorCreate = await client.PostAsJsonAsync(
+            "/api/sponsors", new { name = CleanOwnerBrand });
+        if (cleanOwnerSponsorCreate.StatusCode != HttpStatusCode.Created)
+        {
+            throw new InvalidOperationException(
+                $"arrange: POST /api/sponsors for the clean owner sponsor unexpectedly returned " +
+                $"{cleanOwnerSponsorCreate.StatusCode}");
+        }
+        var cleanOwnerSponsor = await JsonDocument.ParseAsync(await cleanOwnerSponsorCreate.Content.ReadAsStreamAsync());
+        var cleanOwnerSponsorId = cleanOwnerSponsor.RootElement.GetProperty("id").GetInt64();
+
         // ── The clean owner create: the editor round-trip fact. ──
         var createPayload = new
         {
-            brand = CleanOwnerBrand,
+            sponsorId = cleanOwnerSponsorId,
             premise = CleanOwnerPremise,
             tone = CleanOwnerTone,
             structure = CleanOwnerStructure,
@@ -260,7 +312,7 @@ public sealed class AdBriefsApiArc : IAsyncLifetime
         CleanOwnerPostStatus = createResponse.StatusCode;
         var created = await JsonDocument.ParseAsync(await createResponse.Content.ReadAsStreamAsync());
         var cleanOwnerId = created.RootElement.GetProperty("id").GetInt64();
-        RoundTripBrand = created.RootElement.GetProperty("brand").GetString() ?? "";
+        RoundTripSponsorName = created.RootElement.GetProperty("sponsor").GetProperty("name").GetString() ?? "";
         RoundTripPremise = created.RootElement.GetProperty("premise").GetString();
         RoundTripTone = created.RootElement.GetProperty("tone").GetString();
         RoundTripStructure = created.RootElement.GetProperty("structure").GetString();
@@ -274,43 +326,77 @@ public sealed class AdBriefsApiArc : IAsyncLifetime
         var listBody = await JsonDocument.ParseAsync(await listResponse.Content.ReadAsStreamAsync());
         ListBrands = listBody.RootElement.EnumerateArray()
             .Select(item => (
-                item.GetProperty("brand").GetString() ?? "",
+                item.GetProperty("sponsor").GetProperty("name").GetString() ?? "",
+                item.GetProperty("sponsor").GetProperty("paused").GetBoolean(),
                 item.GetProperty("packSlug").ValueKind == JsonValueKind.Null
                     ? (string?)null : item.GetProperty("packSlug").GetString()))
             .ToList();
 
-        // ── A duplicate owner create for the SAME brand — refused, 409, never a silent update. ──
+        // ── A duplicate owner create for the SAME sponsor AND the SAME folded premise — refused, 409
+        // duplicate_brief naming the premise field, never a silent update (CreateOwnerAsync's own
+        // (sponsor_id, premise_key) cap, SPEC F171.6: a DIFFERENT premise for the same sponsor is a
+        // legal second angle, not a duplicate — this call must match CleanOwnerPremise verbatim to
+        // actually land on the same key). ──
         var duplicateResponse = await client.PostAsJsonAsync("/api/ad-briefs", new
         {
-            brand = CleanOwnerBrand,
-            premise = "A different premise that must never land",
+            sponsorId = cleanOwnerSponsorId,
+            premise = CleanOwnerPremise,
         });
         DuplicateOwnerPostStatus = duplicateResponse.StatusCode;
         var duplicateBody = await JsonDocument.ParseAsync(await duplicateResponse.Content.ReadAsStreamAsync());
         DuplicateOwnerPostField = duplicateBody.RootElement.TryGetProperty("field", out var fieldProperty)
             ? fieldProperty.GetString() : null;
+        DuplicateOwnerPostType = duplicateBody.RootElement.TryGetProperty("type", out var typeProperty)
+            ? typeProperty.GetString() : null;
 
-        // ── An owner create for a brand that ALREADY has a pack brief — coexists, 201, two separate
-        // rows (the (pack_slug, brand) key, not brand alone). The pack row is seeded first, ahead of
-        // the owner POST, so the "brand already has a pack row" precondition is independent of the
-        // API under test. This SAME POST also carries review findings F1/F3 (folded in, not a
+        // ── A PACK-owned sponsor already named CoexistingBrand, seeded by SQL, ahead of the owner
+        // sponsor create below — so the "a pack sponsor already holds this name" precondition is
+        // independent of the API under test. An OWNER sponsor (pack_slug NULL) for the SAME folded
+        // name then creates cleanly at the SPONSOR level (see ABrandThatOnlyHasAPackBriefCoexists's own
+        // remarks) — that sponsor create is pure arrange, so it is asserted 201 here and thrown on any
+        // other status (arrange failures fail loudly as arrange, not as a fact); CoexistingOwnerPostStatus
+        // itself reads the BRIEF create below — the actual "coexists" claim ABrandThatOnlyHasAPackBriefCoexists
+        // pins. A brief for that new owner sponsor is what review findings F1/F3 pin (folded in, not a
         // separate call): `enabled` is OMITTED entirely — pins the "omitted defaults to true" ruling
-        // against the real response body, not merely the controller's own doc comment — and
-        // `premise` is whitespace-only — pins that it folds to null on the wire, never the literal
-        // spaces. ──
+        // against the real response body, not merely the controller's own doc comment — and `premise`
+        // is whitespace-only — pins that it folds to null on the wire, never the literal spaces. ──
         await AdBriefWireFixtures.InsertPackBriefAsync(
             database.StationConnectionString, "another-pack-slug", CoexistingBrand);
-        var coexistingResponse = await client.PostAsJsonAsync(
-            "/api/ad-briefs", new { brand = CoexistingBrand, premise = "   " });
-        CoexistingOwnerPostStatus = coexistingResponse.StatusCode;
-        var coexistingBody = await JsonDocument.ParseAsync(await coexistingResponse.Content.ReadAsStreamAsync());
-        CoexistingOwnerEnabled = coexistingBody.RootElement.GetProperty("enabled").GetBoolean();
-        CoexistingOwnerPremise = coexistingBody.RootElement.GetProperty("premise").ValueKind == JsonValueKind.Null
-            ? null : coexistingBody.RootElement.GetProperty("premise").GetString();
+        var coexistingSponsorCreate = await client.PostAsJsonAsync(
+            "/api/sponsors", new { name = CoexistingBrand });
+        if (coexistingSponsorCreate.StatusCode != HttpStatusCode.Created)
+        {
+            throw new InvalidOperationException(
+                $"arrange: POST /api/sponsors for the coexisting sponsor unexpectedly returned " +
+                $"{coexistingSponsorCreate.StatusCode}");
+        }
+        var coexistingSponsor = await JsonDocument.ParseAsync(await coexistingSponsorCreate.Content.ReadAsStreamAsync());
+        var coexistingSponsorId = coexistingSponsor.RootElement.GetProperty("id").GetInt64();
 
-        // ── A blank brand is refused. ──
-        var blankBrandResponse = await client.PostAsJsonAsync("/api/ad-briefs", new { brand = "  " });
-        BlankBrandPostStatus = blankBrandResponse.StatusCode;
+        var coexistingResponse = await client.PostAsJsonAsync(
+            "/api/ad-briefs", new { sponsorId = coexistingSponsorId, premise = "   " });
+        CoexistingOwnerPostStatus = coexistingResponse.StatusCode;
+
+        // The status itself IS the fact ABrandThatOnlyHasAPackBriefCoexists pins, so — unlike the pure
+        // arrange steps above — a non-201 here is not thrown as an arrange failure. The body is only
+        // ever a created row's own shape on 201; on any other status it's a ProblemDetails with no
+        // `enabled`/`premise` fields, so reading those unconditionally would crash InitializeAsync and
+        // take the whole collection's facts down with it. AnOmittedEnabledDefaultsToTrue/
+        // AWhitespaceOnlyPremiseFoldsToNull simply keep reading these two fields' own declared
+        // defaults (false/null) when the create did not, in fact, succeed.
+        if (coexistingResponse.StatusCode == HttpStatusCode.Created)
+        {
+            var coexistingBody = await JsonDocument.ParseAsync(await coexistingResponse.Content.ReadAsStreamAsync());
+            CoexistingOwnerEnabled = coexistingBody.RootElement.GetProperty("enabled").GetBoolean();
+            CoexistingOwnerPremise = coexistingBody.RootElement.GetProperty("premise").ValueKind == JsonValueKind.Null
+                ? null : coexistingBody.RootElement.GetProperty("premise").GetString();
+        }
+
+        // ── A missing sponsorId is refused — there is no free-text brand to blank anymore (SPEC
+        // F171.6, PLAN T435). ──
+        var missingSponsorIdResponse = await client.PostAsJsonAsync(
+            "/api/ad-briefs", new { sponsorId = (long?)null });
+        MissingSponsorIdPostStatus = missingSponsorIdResponse.StatusCode;
 
         // ── PATCH disables the owner brief just created. ──
         var patchOwnerResponse = await client.PatchAsync(
@@ -318,6 +404,7 @@ public sealed class AdBriefsApiArc : IAsyncLifetime
         PatchOwnerStatus = patchOwnerResponse.StatusCode;
         var patchOwnerBody = await JsonDocument.ParseAsync(await patchOwnerResponse.Content.ReadAsStreamAsync());
         PatchOwnerResultEnabled = patchOwnerBody.RootElement.GetProperty("enabled").GetBoolean();
+        PatchOwnerResultSponsorName = patchOwnerBody.RootElement.GetProperty("sponsor").GetProperty("name").GetString() ?? "";
 
         // ── PATCH enables the SEEDED pack brief. ──
         var patchPackResponse = await client.PatchAsync(
@@ -327,10 +414,15 @@ public sealed class AdBriefsApiArc : IAsyncLifetime
         PatchPackResultEnabled = patchPackBody.RootElement.GetProperty("enabled").GetBoolean();
         PatchPackResultPackSlug = patchPackBody.RootElement.GetProperty("packSlug").GetString();
 
-        // ── PATCH with no `enabled` field is a 400. ──
+        // ── PATCH with no `enabled` field is a 400, naming the field and carrying no `type` (a null
+        // ProblemDetails.Type is omitted by the converter — RequiredFieldProblem's own remarks). ──
         var patchMissingResponse = await client.PatchAsync(
             $"/api/ad-briefs/{cleanOwnerId}", JsonContent.Create(new { }));
         PatchMissingEnabledStatus = patchMissingResponse.StatusCode;
+        var patchMissingBody = await JsonDocument.ParseAsync(await patchMissingResponse.Content.ReadAsStreamAsync());
+        PatchMissingEnabledField = patchMissingBody.RootElement.TryGetProperty("field", out var patchMissingFieldProperty)
+            ? patchMissingFieldProperty.GetString() : null;
+        PatchMissingEnabledHasType = patchMissingBody.RootElement.TryGetProperty("type", out _);
 
         // ── PATCH against an unknown id is a 404. ──
         var patchUnknownResponse = await client.PatchAsync(
@@ -425,7 +517,10 @@ file sealed class Story392AdBriefsDatabase : EphemeralStationDatabase
 /// <summary>Arrange helpers this file's own arc uses — raw SQL against the ephemeral database's own
 /// connection string, never through <c>AdBriefRepository</c> (the <c>GardenerRotFixtures</c>/
 /// <c>AdsWireFixtures</c> precedent): no pack-install endpoint exists yet, so a pack row is seeded
-/// independently of the API under test.</summary>
+/// independently of the API under test. Inserts a PACK-owned <c>station.sponsor</c> row (SPEC F171.6,
+/// PLAN T431/T432) alongside the brief, keyed by (<paramref name="packSlug"/>, folded
+/// <paramref name="brand"/>) — the brief's own <c>sponsor_id</c> then points at that row, never a
+/// free-text brand column (dropped, db/46).</summary>
 public static class AdBriefWireFixtures
 {
     public static async Task<long> InsertPackBriefAsync(string stationConnectionString, string packSlug, string brand)
@@ -435,8 +530,14 @@ public static class AdBriefWireFixtures
         await using var cmd = conn.CreateCommand();
         cmd.CommandText =
             """
-            insert into station.ad_brief (pack_slug, brand, premise, tone, structure, enabled)
-            values (@packSlug, @brand, 'Seeded pack premise', 'dry', null, false)
+            with sponsor as (
+              insert into station.sponsor (name, pack_slug) values (@brand, @packSlug)
+              on conflict on constraint sponsor_pack_slug_name_key do update set name = excluded.name
+              returning id
+            )
+            insert into station.ad_brief (pack_slug, sponsor_id, premise, tone, structure, enabled)
+            select @packSlug, sponsor.id, 'Seeded pack premise', 'dry', null, false
+            from sponsor
             returning id
             """;
         cmd.Parameters.AddWithValue("packSlug", packSlug);

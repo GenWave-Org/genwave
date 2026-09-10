@@ -65,7 +65,7 @@ public sealed class FakeAdSpotStore : IAdSpotStore
     public Task<AdSpot?> StampBedIfNullAsync(long id, long bedMediaId, CancellationToken ct) =>
         throw new NotSupportedException("Not used by AdRenderService.");
 
-    public Task<AdSpotPage> ListByStateAsync(AdState? state, int limit, int offset, CancellationToken ct) =>
+    public Task<AdSpotPage> ListByStateAsync(AdState? state, long? sponsorId, int limit, int offset, CancellationToken ct) =>
         throw new NotSupportedException("Not used by AdRenderService.");
 
     public Task<int> CountStockGeneratedAsync(CancellationToken ct) =>
@@ -78,5 +78,27 @@ public sealed class FakeAdSpotStore : IAdSpotStore
         throw new NotSupportedException("Not used by AdRenderService.");
 
     public Task<bool> ReArmAsync(long id, CancellationToken ct) =>
+        throw new NotSupportedException("Not used by AdRenderService.");
+
+    public Task<IReadOnlyList<long>> ListAiringExclusionsAsync(
+        IReadOnlyList<long> recentMediaIds, int window, CancellationToken ct) =>
+        throw new NotSupportedException("Not used by AdRenderService.");
+
+    public Task<AdSpotJobStampOutcome> StampJobAsync(long id, string kind, CancellationToken ct) =>
+        throw new NotSupportedException("Not used by AdRenderService.");
+
+    public Task<bool> ClearJobAsync(long id, string? error, CancellationToken ct) =>
+        throw new NotSupportedException("Not used by AdRenderService.");
+
+    public Task<bool> StampPreviewAsync(long id, string path, string key, CancellationToken ct) =>
+        throw new NotSupportedException("Not used by AdRenderService.");
+
+    public Task<AdSpot?> ClaimForPromotionAsync(long id, string expectedVersion, CancellationToken ct) =>
+        throw new NotSupportedException("Not used by AdRenderService.");
+
+    public Task<IReadOnlyList<AdSpot>> ListPreviewsToSweepAsync(TimeSpan retention, DateTimeOffset now, CancellationToken ct) =>
+        throw new NotSupportedException("Not used by AdRenderService.");
+
+    public Task<bool> ClearPreviewAsync(long id, CancellationToken ct) =>
         throw new NotSupportedException("Not used by AdRenderService.");
 }

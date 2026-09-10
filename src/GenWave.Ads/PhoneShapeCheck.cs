@@ -31,21 +31,44 @@ internal static partial class PhoneShapeCheck
     const string RequiredDigits = "555";
 
     /// <summary>The first phone-shaped run (as it appeared in the raw text) that does not contain
-    /// <c>555</c>, or <see langword="null"/> when every phone-shaped run does (or none exist).
-    /// Callers check ONE LINE at a time (PLAN T399 review N8) — never a whole script joined into one
-    /// string — so a digit fragment ending one line can never combine with a digit fragment opening
-    /// the next into a synthesized run that existed in neither line alone.</summary>
-    public static string? FindViolation(string rawText)
+    /// <c>555</c> AND does not match the digits of <paramref name="allowedPhone"/>, or <see langword="null"/> when
+    /// every phone-shaped run clears one of those two. Callers check ONE LINE at a time (PLAN T399
+    /// review N8) — never a whole script joined into one string — so a digit fragment ending one line
+    /// can never combine with a digit fragment opening the next into a synthesized run that existed in
+    /// neither line alone.</summary>
+    /// <param name="rawText">One line of raw (never folded) script text.</param>
+    /// <param name="allowedPhone">The owner-sponsor phone skip (SPEC F172.5) — the sponsor's own RAW
+    /// phone number, exactly as it is stored, never pre-digitized by the caller (PLAN T438 ruling: ONE
+    /// normalization point, <see cref="DigitsOf"/>, rather than the caller and this method each
+    /// stripping punctuation their own way). Blank or whitespace-only is treated the SAME as
+    /// <see langword="null"/> — no exemption. When it normalizes to a real digit string, a phone-shaped
+    /// run whose own digits equal it exactly passes even without a 555; every OTHER phone-shaped run in
+    /// <paramref name="rawText"/> is still checked against the 555 rule as usual. <see langword="null"/>
+    /// (the default) runs the plain 555 rule with no exemption, unchanged from before this parameter
+    /// existed.</param>
+    public static string? FindViolation(string rawText, string? allowedPhone = null)
     {
+        var allowedDigits = string.IsNullOrWhiteSpace(allowedPhone) ? null : DigitsOf(allowedPhone);
+
         foreach (Match match in PhoneShapedRunRx().Matches(rawText))
         {
-            var digits = new string(match.Value.Where(char.IsAsciiDigit).ToArray());
-            if (digits.Length >= 7 && !digits.Contains(RequiredDigits, StringComparison.Ordinal))
-                return match.Value.Trim();
+            var digits = DigitsOf(match.Value);
+            if (digits.Length < 7 || digits.Contains(RequiredDigits, StringComparison.Ordinal))
+                continue;
+
+            if (allowedDigits is not null && string.Equals(digits, allowedDigits, StringComparison.Ordinal))
+                continue; // The sponsor's own literal number (SPEC F172.5) — everything else still refuses.
+
+            return match.Value.Trim();
         }
 
         return null;
     }
+
+    /// <summary>Digits only, every other character stripped — the ONE normalization both sides of
+    /// <see cref="FindViolation"/>'s digit-equality comparison run through (PLAN T438 ruling: a matched
+    /// run's own text and the sponsor's raw phone number are never digitized two different ways).</summary>
+    static string DigitsOf(string text) => new(text.Where(char.IsAsciiDigit).ToArray());
 
     // \b sits AFTER the optional leading paren, not before it: a paren is itself a non-word
     // character, so a \b placed before it would never find a word/non-word transition when the

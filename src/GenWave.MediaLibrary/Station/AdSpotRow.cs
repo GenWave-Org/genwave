@@ -15,7 +15,8 @@ namespace GenWave.MediaLibrary.Station;
 sealed class AdSpotRow
 {
     public long Id { get; set; }
-    public string Brand { get; set; } = "";
+    public long SponsorId { get; set; }
+    public string SponsorName { get; set; } = "";
     public string Title { get; set; } = "";
     public string? Brief { get; set; }
     public string? Script { get; set; }
@@ -33,4 +34,10 @@ sealed class AdSpotRow
     public DateTime? RenderedAt { get; set; }
     public DateTime? RetiredAt { get; set; }
     public string Version { get; set; } = "";
+    public string? PreviewPath { get; set; }
+    public DateTime? PreviewAt { get; set; }
+    public string? PreviewKey { get; set; }
+    public string? JobKind { get; set; }
+    public DateTime? JobStartedAt { get; set; }
+    public string? JobError { get; set; }
 }

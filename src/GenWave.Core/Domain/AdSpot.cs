@@ -1,15 +1,20 @@
 namespace GenWave.Core.Domain;
 
 /// <summary>
-/// One row of <c>station.ad_spot</c> (SPEC F159.1, F159.2; STORY-389; PLAN T398) —
-/// <c>Abstractions.IAdSpotStore</c>'s own element type. <see cref="Version"/> is the Postgres system
-/// column <c>xmin</c> serialized as a string (mirrors <see cref="AdminMediaDto"/>'s own
+/// One row of <c>station.ad_spot</c> (SPEC F159.1, F159.2, F171.7; STORY-389, STORY-406; PLAN T398,
+/// T432) — <c>Abstractions.IAdSpotStore</c>'s own element type. <see cref="Version"/> is the Postgres
+/// system column <c>xmin</c> serialized as a string (mirrors <see cref="AdminMediaDto"/>'s own
 /// <c>Version</c>/weak-ETag idiom) — every xmin-guarded transition on <c>Abstractions.IAdSpotStore</c>
 /// takes the PREVIOUS read's own <see cref="Version"/> back as <c>expectedVersion</c>.
 /// </summary>
 /// <param name="Id">The row's own surrogate key — stable across every transition (nothing is ever
 /// deleted, SPEC F159.1).</param>
-/// <param name="Brand">The fictional (or owner's real) brand this spot advertises.</param>
+/// <param name="SponsorId">The <c>station.sponsor</c> row this spot advertises (SPEC F171.7, PLAN
+/// T432) — an FK, <c>RESTRICT</c> on delete (db/46).</param>
+/// <param name="SponsorName">A denormalized snapshot of <c>Sponsor.Name</c>, written at creation and
+/// refreshed on a PATCH that moves this spot to a different sponsor (SPEC F171.7) — so a script or a
+/// rendered clip's own words stay honest even if the sponsor is later renamed; read this, never join
+/// to <c>station.sponsor</c>, for what a spot's copy actually calls the sponsor.</param>
 /// <param name="Title">A short operator-facing label — never read aloud.</param>
 /// <param name="Brief">The premise/tone/structure hint this spot's script was written from, or
 /// <see langword="null"/> for an owner-authored spot with no separate brief.</param>
@@ -48,9 +53,22 @@ namespace GenWave.Core.Domain;
 /// <param name="Version">The row's <c>xmin</c>, as a string — the optimistic-concurrency token every
 /// operator-facing transition (<c>ApproveAsync</c>/<c>RetryAsync</c>/<c>RetireAsync</c>) takes back
 /// as <c>expectedVersion</c>.</param>
+/// <param name="PreviewPath">Where a rendered preview clip currently lives, or <see langword="null"/>
+/// (PLAN T432, the F174/F175 preview seam) — a trailing DEFAULTED param, the <see cref="Show"/>.
+/// <c>Rotation</c> precedent, so pre-existing positional construction sites stay compiling.</param>
+/// <param name="PreviewAt">When <see cref="PreviewPath"/> was last stamped, or <see langword="null"/>.</param>
+/// <param name="PreviewKey">An opaque key identifying the preview render (cache-busting/authorization
+/// seam), or <see langword="null"/>.</param>
+/// <param name="JobKind">The kind of background job currently claiming this row (<c>"write"</c> or
+/// <c>"preview"</c>), or <see langword="null"/> when no job holds it (db/46's own <c>CHECK</c>).</param>
+/// <param name="JobStartedAt">When the current <see cref="JobKind"/> claim was stamped, or
+/// <see langword="null"/>.</param>
+/// <param name="JobError">The most recent job's own failure message, or <see langword="null"/> after a
+/// clean finish — cleared alongside every successful <c>ClearJobAsync</c>.</param>
 public sealed record AdSpot(
     long Id,
-    string Brand,
+    long SponsorId,
+    string SponsorName,
     string Title,
     string? Brief,
     string? Script,
@@ -67,4 +85,10 @@ public sealed record AdSpot(
     DateTime StateChangedAt,
     DateTime? RenderedAt,
     DateTime? RetiredAt,
-    string Version);
+    string Version,
+    string? PreviewPath = null,
+    DateTime? PreviewAt = null,
+    string? PreviewKey = null,
+    string? JobKind = null,
+    DateTime? JobStartedAt = null,
+    string? JobError = null);

@@ -26,7 +26,7 @@ public static class FeatureAdScriptWriterMeetsTheRealValidator
 {
     static AdScriptWriteRequest Request(int spotSeconds, int maxLineChars, double toleranceRatio = 0.4) =>
         new(
-            Brand: "Cravin's Diner", Premise: "A retro diner with a twist", Tone: "warm and playful",
+            SponsorName: "Cravin's Diner", Premise: "A retro diner with a twist", Tone: "warm and playful",
             spotSeconds, AudiencePosture.Everyone, maxLineChars, toleranceRatio);
 
     /// <summary>The exact adapter PLAN T402's own AdSpotWorker will build: closes over the REAL

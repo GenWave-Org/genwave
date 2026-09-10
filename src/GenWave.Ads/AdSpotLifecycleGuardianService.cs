@@ -32,6 +32,7 @@ using GenWave.Core.Abstractions;
 sealed class AdSpotLifecycleGuardianService(
     IAdSpotStore store,
     IOptionsMonitor<AdsOptions> adsOptions,
+    AdSpotLocatorRoots locatorRoots,
     TimeProvider timeProvider,
     ILogger<AdSpotLifecycleGuardianService> logger) : BackgroundService
 {
@@ -82,6 +83,8 @@ sealed class AdSpotLifecycleGuardianService(
             // keeps): no line at all when the tick found nothing to do.
             if (reArmed > 0)
                 logger.LogInformation("Ad spot lifecycle sweep: reArmed={ReArmed}", reArmed);
+
+            await SweepPreviewsAsync(now, ct);
         }
         catch (OperationCanceledException)
         {
@@ -90,6 +93,59 @@ sealed class AdSpotLifecycleGuardianService(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Ad spot lifecycle sweep failed; continuing on the next tick");
+        }
+    }
+
+    /// <summary>
+    /// Deletes a rendered preview's own file, then clears its stamp (SPEC F176.2; STORY-429; PLAN
+    /// T442) for every row <see cref="IAdSpotStore.ListPreviewsToSweepAsync"/> returns — a spot that
+    /// left the editable draft/approved lifecycle, or a preview that simply outlived
+    /// <see cref="AdsOptions.PreviewRetentionDays"/>. Runs AFTER the re-arm pass above, on the SAME
+    /// sweep tick, deliberately never its own timer: one guardian, one cadence, two independent
+    /// cleanup jobs.
+    ///
+    /// <para>
+    /// <b>The path is re-asserted under the preview root here, in this SAME method (the CodeQL
+    /// path-injection guard's own "strong guard" shape, <see cref="AdPreviewRoot.IsUnder"/>'s own
+    /// remarks — the one construction/check site <see cref="AdRenderService"/> and
+    /// <c>AdsController.PreviewWav</c> share, PLAN T442 ruling)</b> — even though <c>preview_path</c>
+    /// only ever reaches this row via <c>AdRenderService.RenderPreviewAsync</c>'s own write, a stored
+    /// path is untrusted the instant it crosses a storage boundary; an escaped row is skipped (deleted
+    /// by no one) rather than trusted, and still has its stamp cleared so no dangling reference lingers
+    /// forever.
+    /// </para>
+    /// </summary>
+    async Task SweepPreviewsAsync(DateTimeOffset now, CancellationToken ct)
+    {
+        var retention = TimeSpan.FromDays(adsOptions.CurrentValue.PreviewRetentionDays);
+        var previewRoot = AdPreviewRoot.Resolve(locatorRoots);
+
+        var candidates = await store.ListPreviewsToSweepAsync(retention, now, ct);
+        foreach (var spot in candidates)
+        {
+            if (spot.PreviewPath is { } previewPath)
+            {
+                var target = Path.GetFullPath(previewPath);
+                if (AdPreviewRoot.IsUnder(previewRoot, target))
+                {
+                    try
+                    {
+                        File.Delete(target);
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        logger.LogWarning(ex, "Ad spot preview sweep could not remove the file for spot {Id}", spot.Id);
+                    }
+                }
+                else
+                {
+                    logger.LogWarning(
+                        "Ad spot preview sweep found a preview path outside the preview root for spot {Id}", spot.Id);
+                }
+            }
+
+            await store.ClearPreviewAsync(spot.Id, ct);
+            logger.LogInformation("Ad spot preview swept spotId={Id}", spot.Id);
         }
     }
 }

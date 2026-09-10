@@ -1,5 +1,6 @@
 namespace GenWave.Tts;
 
+using System.Text;
 using GenWave.Core.Domain;
 
 /// <summary>
@@ -47,9 +48,13 @@ static class AdScriptPromptBuilder
     /// <summary>The four synthesized beats every spot states, in order (this class's own remarks).</summary>
     internal static readonly string[] Beats = ["hook", "pitch", "tagline", "call-to-action"];
 
-    /// <summary>Cap for an operator-authored brief field (<see cref="AdScriptWriteRequest.Brand"/>/
-    /// <see cref="AdScriptWriteRequest.Premise"/>/<see cref="AdScriptWriteRequest.Tone"/>) before it
-    /// reaches the prompt — the SAME unbounded-free-text-field discipline
+    /// <summary>Cap for a single field before it reaches the prompt's user content — every one of
+    /// <see cref="AdScriptWriteRequest.SponsorName"/>, the brief's own <see cref="AdScriptWriteRequest.Premise"/>/
+    /// <see cref="AdScriptWriteRequest.Tone"/>, and the sponsor's own <see cref="AdScriptWriteRequest.Tagline"/>/
+    /// <see cref="AdScriptWriteRequest.About"/>/<see cref="AdScriptWriteRequest.Phone"/>/
+    /// <see cref="AdScriptWriteRequest.Address"/>/<see cref="AdScriptWriteRequest.Website"/>/
+    /// <see cref="AdScriptWriteRequest.HouseTone"/> is run through <see cref="Flatten"/>, then
+    /// <c>Truncate</c>d to this cap independently — the SAME unbounded-free-text-field discipline
     /// <c>CrosstalkPromptBuilder.MaxSoulChars</c>'s own remarks document for <c>ShowName</c>/<c>Daypart</c>.</summary>
     const int MaxBriefFieldChars = 4000;
 
@@ -75,8 +80,11 @@ static class AdScriptPromptBuilder
             $"Write exactly four beats in this order - {beatList} - each roughly " +
             $"{perBeatCharBudget} characters, about {totalCharBudget} characters total across the " +
             "whole spot. Never name a real brand, company, product, or trademark - invent a fictional " +
-            "one instead. Any phone number spoken must use the fictional 555 exchange, for example " +
-            "555-0142. No stage directions, no emoji, no markdown formatting.";
+            "one instead. Any tagline, phone number, address, or website given under \"Sponsor:\" " +
+            "below is a real fact you may speak verbatim - never invent facts beyond what is given " +
+            "there. Any phone number spoken must use the fictional 555 exchange, for example " +
+            "555-0142, unless the sponsor's real phone number is given under \"Sponsor:\" below, in " +
+            "which case speak that one instead. No stage directions, no emoji, no markdown formatting.";
 
         var postureLine = request.Posture == AudiencePosture.Everyone
             ? " Keep the language family-friendly."
@@ -85,17 +93,80 @@ static class AdScriptPromptBuilder
         return scaffold + postureLine;
     }
 
+    /// <summary>
+    /// Builds the user content the model sees (SPEC F174.8, STORY-428): one "Sponsor:" line naming the
+    /// sponsor, then one line per PRESENT sponsor fact (<see cref="AdScriptWriteRequest.Tagline"/>/
+    /// <see cref="AdScriptWriteRequest.About"/>/<see cref="AdScriptWriteRequest.Phone"/>/
+    /// <see cref="AdScriptWriteRequest.Address"/>/<see cref="AdScriptWriteRequest.Website"/> — STORY-428
+    /// AC3 (a null fact is absent); a whitespace-only fact is absent by T443 ruling), then
+    /// <see cref="AdScriptWriteRequest.Premise"/> if present, then exactly one "Tone:" line: the
+    /// brief's own <see cref="AdScriptWriteRequest.Tone"/> when present, else
+    /// <see cref="AdScriptWriteRequest.HouseTone"/> when present, else no "Tone:" line at all (AC4,
+    /// PLAN T443 ruling), then the fixed closing instruction. Each label appears at most once — every
+    /// value emitted below is run through <see cref="Flatten"/> first (T443 ruling), so a fact's own
+    /// text can never smuggle a newline-delimited "Label:" line of its own into this content and forge
+    /// or duplicate one.
+    /// </summary>
     public static string BuildUserContent(AdScriptWriteRequest request)
     {
-        var lines = new List<string> { $"Brand: {Truncate(request.Brand, MaxBriefFieldChars)}" };
+        var lines = new List<string> { $"Sponsor: {Truncate(Flatten(request.SponsorName), MaxBriefFieldChars)}" };
 
-        if (request.Premise is { Length: > 0 } premise)
+        AddFactLine(lines, "Tagline", request.Tagline);
+        AddFactLine(lines, "About", request.About);
+        AddFactLine(lines, "Phone", request.Phone);
+        AddFactLine(lines, "Address", request.Address);
+        AddFactLine(lines, "Website", request.Website);
+
+        var premise = Flatten(request.Premise);
+        if (premise.Length > 0)
             lines.Add($"Premise: {Truncate(premise, MaxBriefFieldChars)}");
-        if (request.Tone is { Length: > 0 } tone)
+
+        var briefTone = Flatten(request.Tone);
+        var houseTone = Flatten(request.HouseTone);
+        var tone = briefTone.Length > 0 ? briefTone : houseTone.Length > 0 ? houseTone : null;
+        if (tone is not null)
             lines.Add($"Tone: {Truncate(tone, MaxBriefFieldChars)}");
 
         lines.Add("Write the spot now.");
         return string.Join('\n', lines);
+    }
+
+    /// <summary>Appends one "{label}: {value}" line when <paramref name="value"/> carries a fact once
+    /// <see cref="Flatten"/>ed — a <see langword="null"/>, blank, or whitespace-only
+    /// <paramref name="value"/> all flatten to <see cref="string.Empty"/> and get no line, the SAME
+    /// "nothing to show" posture either way (STORY-428 AC3; T443 ruling).</summary>
+    static void AddFactLine(List<string> lines, string label, string? value)
+    {
+        var flat = Flatten(value);
+        if (flat.Length > 0)
+            lines.Add($"{label}: {Truncate(flat, MaxBriefFieldChars)}");
+    }
+
+    /// <summary>
+    /// Neutralizes a value before it can reach the user content as a line of its own (T443 ruling): a
+    /// sponsor's own free-text fact — <see cref="AdScriptWriteRequest.About"/> above all, the one field
+    /// with real room for it — reaches this prompt via <c>POST</c>/<c>PATCH /api/sponsors</c> with only
+    /// its ends trimmed, so an embedded newline could otherwise open its own synthetic
+    /// "<c>Sponsor:</c>"/"<c>Tone:</c>"/"<c>Phone:</c>" line and forge a fact the sponsor never gave, or
+    /// duplicate a label <see cref="BuildUserContent"/> already emits once. Every
+    /// <see cref="char.IsControl(char)"/> code point (a newline chief among them) becomes a space, then
+    /// runs of whitespace — original spaces/tabs and control-character replacements alike — collapse to
+    /// one space and the result is trimmed (<see cref="SpeechText.CollapseWhitespace"/>, the SAME rule
+    /// this assembly already applies after every other text-rewriting pass), so the line is the
+    /// delimiter and a flattened value can never contain one. A <see langword="null"/> value flattens to
+    /// <see cref="string.Empty"/> — the SAME "absent" shape a blank or whitespace-only value produces,
+    /// so "present" has exactly one definition for every field this class emits (STORY-428 AC3).
+    /// </summary>
+    static string Flatten(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return "";
+
+        var neutralized = new StringBuilder(value.Length);
+        foreach (var c in value)
+            neutralized.Append(char.IsControl(c) ? ' ' : c);
+
+        return SpeechText.CollapseWhitespace(neutralized.ToString());
     }
 
     /// <summary>

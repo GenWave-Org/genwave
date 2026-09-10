@@ -19,4 +19,11 @@ namespace GenWave.Ads;
 /// where the 300ms default actually lives, and the only place clamping to
 /// <c>MinBedFadeMs</c>/<c>MaxBedFadeMs</c> happens); a second default here would protect zero real
 /// callers and hide a value already owned elsewhere.</param>
-internal sealed record AdLiveSettings(string AnnouncerVoice, IReadOnlyList<string> CastVoices, int BedFadeMs);
+/// <remarks>
+/// Public, not internal (PLAN T442 ruling): <see cref="AdPreviewKey.Compute"/> is a genuine
+/// cross-assembly seam — <c>GenWave.Host</c>'s <c>AdsController</c> calls it on every read to detect a
+/// stale preview — and a public method cannot expose a less-accessible parameter type (CS0051). The
+/// <see cref="AdDeterministicSeed"/> precedent this class otherwise follows stays <c>internal</c>
+/// because it has no caller outside this assembly; this record does now.
+/// </remarks>
+public sealed record AdLiveSettings(string AnnouncerVoice, IReadOnlyList<string> CastVoices, int BedFadeMs);

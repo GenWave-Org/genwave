@@ -20,11 +20,28 @@ internal static class AdSpotWorkerHarness
     public const string StationName = "GWAV Test Station";
     public const string StationVoice = "station_voice";
 
+    /// <summary>A well-formed 30s spot the REAL AdScriptValidator accepts end to end (Story390's own
+    /// proven reply — ANNOUNCER-led, a second voice, a 555 number, comfortably under the 42s ceiling)
+    /// — the one script every scenario that means to generate successfully hands to
+    /// <see cref="ServeSameReplyEveryTime"/>.</summary>
+    public const string WellFormedReply =
+        "ANNOUNCER: Cravin's Diner has a deal so good it's almost illegal.\n" +
+        "VOICE1: Almost. Stop by and taste the difference tonight.\n" +
+        "ANNOUNCER: Call 555-0142 - that's 555-0142 - Cravin's Diner.";
+
+    /// <summary>The one <c>Station:Ads:*</c> key a stock-count scenario most commonly varies, as the
+    /// SAME raw-<see cref="IConfiguration"/> shape <see cref="Build"/>'s own stationSettings takes —
+    /// everything else falls back to <see cref="AdStockSettingsReader"/>'s own SPEC F163.1
+    /// defaults.</summary>
+    public static Dictionary<string, string?> Settings(int targetCount) =>
+        new() { ["Station:Ads:TargetCount"] = targetCount.ToString() };
+
     public sealed record Harness(
         AdSpotWorker Worker,
         AdSpotLifecycleGuardianService Guardian,
         FakeAdSpotLifecycleStore Store,
         FakeAdBriefStore Briefs,
+        FakeSponsorStore Sponsors,
         FakeOnAirRenderSignal Gate,
         FakeCastSegmentAuthor Author,
         FakeTimeProvider TimeProvider,
@@ -71,18 +88,37 @@ internal static class AdSpotWorkerHarness
     /// handler that throws if ever invoked (a scenario that never means to generate should never
     /// reach it silently); a scenario that DOES mean to generate passes
     /// <see cref="ServeSameReplyEveryTime"/> or its own custom handler.</param>
-    /// <param name="workerLogger">Defaults to <see cref="NoOpLogger{T}"/> — a scenario asserting on a
-    /// specific log line (PLAN T415, STORY-402 AC7's own INFO-per-tick fact) passes its own
+    /// <param name="workerLogger">Defaults to <see cref="NoOpLogger{T}"/> — a scenario asserting on an
+    /// <see cref="AdSpotWorker"/>-own log line passes its own
     /// <see cref="GenWave.Ads.Tests.Fakes.CapturingLogger{T}"/> and keeps the reference to read back
     /// after the tick.</param>
+    /// <param name="stamperLogger">Defaults to <see cref="NoOpLogger{T}"/> — a scenario asserting on
+    /// the cast/bed pick's own degraded-pool INFO line (PLAN T415/T416, STORY-402/STORY-403 AC7's own
+    /// INFO-per-tick facts) passes its own <see cref="GenWave.Ads.Tests.Fakes.CapturingLogger{T}"/>
+    /// here instead — that logging moved to <see cref="AdSpotStamper"/> when PLAN T442 hoisted the
+    /// stamping pair out of this worker, so it no longer reaches <paramref name="workerLogger"/>.
+    /// </param>
     public static Harness Build(
         DateTimeOffset now, IReadOnlyDictionary<string, string?>? stationSettings = null,
         int renderBudgetSeconds = 300, double durationToleranceRatio = 0.4, FakeHttpMessageHandler? llmHandler = null,
-        ILogger<AdSpotWorker>? workerLogger = null)
+        ILogger<AdSpotWorker>? workerLogger = null, ILogger<AdSpotStamper>? stamperLogger = null)
     {
         var timeProvider = new FakeTimeProvider(now);
         var store = new FakeAdSpotLifecycleStore();
         var briefs = new FakeAdBriefStore();
+        var sponsors = new FakeSponsorStore(id => briefs.SponsorIdsByBrand
+            .Where(pair => pair.Value == id)
+            .Select(pair => pair.Key)
+            .FirstOrDefault());
+        // PLAN T440 (SPEC F173.2, F173.4): briefs is built above, before sponsors — whose nameLookup
+        // closure reads briefs.SponsorIdsByBrand, so briefs's own declaration order can't flip — so it
+        // is wired to the paused-sponsor check post-construction instead of via a constructor
+        // parameter. store carries no such dependency (its own ctor takes no arguments); its wiring
+        // follows the same post-construction call for symmetry with briefs. A scenario calling only
+        // harness.Sponsors.Pause(id) now reaches BOTH the sample and the stock-count/airing-exclusion
+        // reads through this one call.
+        briefs.ExcludePausedSponsors(sponsors.IsPaused);
+        store.ExcludePausedSponsors(sponsors.IsPaused);
         var gate = new FakeOnAirRenderSignal();
         var author = new FakeCastSegmentAuthor();
         var adminLookup = new FakeAdminMediaLookup();
@@ -117,6 +153,9 @@ internal static class AdSpotWorkerHarness
             author, store, adminLookup, libraries, stationIdentity, adsOptions, locatorRoots,
             new NoOpLogger<AdRenderService>());
 
+        var stamper = new AdSpotStamper(
+            store, bedPool, libraries, stationIdentity, adsOptions, stamperLogger ?? new NoOpLogger<AdSpotStamper>());
+
         var handler = llmHandler ?? new FakeHttpMessageHandler((_, _) =>
             throw new InvalidOperationException(
                 "No LLM handler wired for this scenario — pass one via AdSpotWorkerHarness.Build's own llmHandler parameter."));
@@ -126,15 +165,15 @@ internal static class AdSpotWorkerHarness
             new NoOpLogger<AdScriptWriter>(), timeProvider);
 
         var worker = new AdSpotWorker(
-            store, briefs, scriptWriter, renderService, durationEstimator, audiencePosture, catalogWriter,
-            adminLookup, bedPool, libraries, gate, stationIdentity, adsOptions, llmOptions, configuration,
+            store, briefs, sponsors, scriptWriter, renderService, durationEstimator, audiencePosture, catalogWriter,
+            adminLookup, stamper, gate, adsOptions, llmOptions, configuration,
             timeProvider, workerLogger ?? new NoOpLogger<AdSpotWorker>());
 
         var guardian = new AdSpotLifecycleGuardianService(
-            store, adsOptions, timeProvider, new NoOpLogger<AdSpotLifecycleGuardianService>());
+            store, adsOptions, locatorRoots, timeProvider, new NoOpLogger<AdSpotLifecycleGuardianService>());
 
         return new Harness(
-            worker, guardian, store, briefs, gate, author, timeProvider, adsOptions, catalogWriter, adminLookup,
-            bedPool, handler, adsLibraryId);
+            worker, guardian, store, briefs, sponsors, gate, author, timeProvider, adsOptions, catalogWriter,
+            adminLookup, bedPool, handler, adsLibraryId);
     }
 }
