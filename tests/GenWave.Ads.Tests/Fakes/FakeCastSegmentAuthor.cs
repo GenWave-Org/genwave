@@ -121,6 +121,81 @@ public sealed class FakeCastSegmentAuthor : ICastSegmentAuthor
         return Result;
     }
 
+    /// <summary>The <c>assembled</c> value <see cref="LandAsync"/> was most recently called with
+    /// (PLAN T445) — a spec asserting <c>AdRenderService.PromotePreviewAsync</c> measured the MOVED
+    /// file (not the original preview path) reads this against the destination path it expects.</summary>
+    public CrosstalkAssemblyResult.Assembled? LastLandAssembled { get; private set; }
+
+    /// <summary>The <c>buildInsert</c> result <see cref="LandAsync"/> most recently captured — same
+    /// "invoke the real production closure, never a test-local lookalike" posture as
+    /// <see cref="CapturedInsert"/> above, one seam over.</summary>
+    public AuthoredMediaInsert? CapturedLandInsert { get; private set; }
+
+    /// <summary>What <c>confirmAsync</c> returned the last time <see cref="LandAsync"/> genuinely
+    /// invoked it.</summary>
+    public bool? LandConfirmResult { get; private set; }
+
+    /// <summary>Whether <see cref="LandAsync"/> should actually call <c>buildInsert</c>/<c>confirmAsync</c>
+    /// (true, default) — set false to simulate a landing attempt that never reaches the authored tail
+    /// at all (mirrors <see cref="InvokeDelegates"/> above, one seam over).</summary>
+    public bool InvokeLandDelegates { get; set; } = true;
+
+    /// <summary>The media id handed to <c>confirmAsync</c> from <see cref="LandAsync"/> — a fixed,
+    /// caller-controllable stand-in for what a real <c>InsertAuthoredAsync</c> would have returned.</summary>
+    public long MediaIdToConfirmOnLand { get; set; } = 4200;
+
+    /// <summary>What <see cref="LandAsync"/> returns — success by default.</summary>
+    public CastSegmentAuthorResult LandResult { get; set; } = CastSegmentAuthorResult.Success(4200);
+
+    /// <inheritdoc cref="ICastSegmentAuthor.LandAsync"/>
+    public async Task<CastSegmentAuthorResult> LandAsync(
+        CrosstalkAssemblyResult.Assembled assembled,
+        Func<CrosstalkAssemblyResult.Assembled, AuthoredMediaInsert> buildInsert,
+        Func<long, CancellationToken, Task<bool>> confirmAsync,
+        CancellationToken ct)
+    {
+        LastLandAssembled = assembled;
+
+        if (InvokeLandDelegates)
+        {
+            // The PRODUCTION buildInsert/confirmAsync closures AdRenderService.PromotePreviewAsync
+            // itself builds — never a test-local lookalike, one seam over at PLAN T445.
+            CapturedLandInsert = buildInsert(assembled);
+            LandConfirmResult = await confirmAsync(MediaIdToConfirmOnLand, ct);
+        }
+
+        return LandResult;
+    }
+
+    /// <summary>The path <see cref="MeasureAsync"/> was most recently called with (PLAN T445).</summary>
+    public string? LastMeasurePath { get; private set; }
+
+    /// <summary>Overrides what <see cref="MeasureAsync"/> returns — built from the CALLED path by
+    /// default (so a spec that never overrides this still gets a coherent
+    /// <see cref="CrosstalkAssemblyResult.Assembled.Path"/> back); set to prove
+    /// <c>AdRenderService.PromotePreviewAsync</c> hands the MEASURED result's loudness/cue/duration
+    /// straight through to <c>buildInsert</c> untouched.</summary>
+    public CrosstalkAssemblyResult.Assembled? MeasureResult { get; set; }
+
+    /// <summary>When set, <see cref="MeasureAsync"/> throws this instead of returning (PLAN T445) —
+    /// simulates a failure AFTER <c>AdRenderService.PromotePreviewAsync</c>'s own <c>File.Move</c> has
+    /// already relocated the preview file to its destination, so a spec built on this can prove that
+    /// path's own cleanup (nothing left under the ads root) and its <see cref="AdPromotionOutcome.Failed.FileMoved"/>
+    /// value.</summary>
+    public Exception? MeasureAsyncThrows { get; set; }
+
+    /// <inheritdoc cref="ICastSegmentAuthor.MeasureAsync"/>
+    public Task<CrosstalkAssemblyResult.Assembled> MeasureAsync(string path, CancellationToken ct)
+    {
+        LastMeasurePath = path;
+        if (MeasureAsyncThrows is { } exceptionToThrow)
+            throw exceptionToThrow;
+
+        var assembled = MeasureResult ?? new CrosstalkAssemblyResult.Assembled(
+            path, new GenWave.Core.Domain.Loudness(-16.0, -1.0, true), Cue: null, DurationMs: 1000);
+        return Task.FromResult(assembled);
+    }
+
     /// <summary>
     /// Writes a REAL file to disk, INTO <paramref name="request"/>'s own
     /// <see cref="CastAssemblyRequest.OutputDirectory"/> (PLAN T442 ruling — never

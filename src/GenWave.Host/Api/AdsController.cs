@@ -146,6 +146,7 @@ public sealed class AdsController(
     IPatterDurationEstimator durationEstimator,
     IOptionsMonitor<AdsOptions> adsOptions,
     AdSpotJobService jobService,
+    AdRenderService renderService,
     AdSpotLocatorRoots locatorRoots,
     IConfiguration configuration,
     ILogger<AdsController> logger) : ControllerBase
@@ -163,6 +164,8 @@ public sealed class AdsController(
     const string PreviewNotEditableType = "ad_preview_not_editable";
     const string JobBusyType = "ad_job_busy";
     const string JobQueueFullType = "ad_job_queue_full";
+    const string PreviewStaleType = "preview_stale";
+    const string PreviewPromotionFailedType = "preview_promotion_failed";
 
     static readonly IReadOnlyList<int> AllowedSpotSeconds = [15, 30, 60];
 
@@ -454,11 +457,38 @@ public sealed class AdsController(
     // -----------------------------------------------------------------------
 
     /// <summary>
-    /// POST /api/ads/{id}/approve (SPEC F159.4) — <see cref="AdState.Draft"/> to
-    /// <see cref="AdState.Approved"/>, but ONLY after the row's CURRENT script re-passes the validator
-    /// (T403 review RULING: approve gates exactly like <see cref="Retry"/> — see
-    /// <see cref="ValidateCurrentScriptThenAsync"/>'s own remarks for the shared mechanism and the
-    /// class remarks for why a brief-only draft cannot approve). Requires <c>If-Match</c>.
+    /// POST /api/ads/{id}/approve (SPEC F159.4, F174.5; STORY-425, STORY-429 AC1; PLAN T445) —
+    /// <see cref="AdState.Draft"/> to <see cref="AdState.Approved"/>, but ONLY after the row's CURRENT
+    /// script re-passes the validator (T403 review RULING: approve gates exactly like
+    /// <see cref="Retry"/> — see <see cref="ValidateCurrentScriptThenAsync"/>'s own remarks for the
+    /// shared mechanism and the class remarks for why a brief-only draft cannot approve). Requires
+    /// <c>If-Match</c>.
+    ///
+    /// <para>
+    /// <b>A stamped preview also promotes to on-air, in the SAME call (STORY-425).</b> A row carrying
+    /// no <see cref="AdSpot.PreviewPath"/> takes exactly today's path above — script check, then
+    /// <see cref="IAdSpotStore.ApproveAsync"/>, nothing else (STORY-425 AC3). A row WITH a stamped
+    /// preview gates on <see cref="PreviewIsStaleAsync"/> first (key mismatch OR the file itself gone —
+    /// 409 <see cref="PreviewStaleType"/>, no write attempted, the row untouched) so a rejected approve
+    /// never mutates the row it just refused. Once past that gate, the SAME
+    /// <see cref="ValidateCurrentScriptThenAsync"/> call runs (script check + <c>ApproveAsync</c>,
+    /// mapped exactly as the no-preview path above), then <see cref="IAdSpotStore.ClaimForPromotionAsync"/>
+    /// claims the now-Approved row for THIS request specifically (Approved→Rendering, xmin-guarded
+    /// against the row this request just read) before <see cref="AdRenderService.PromotePreviewAsync"/>
+    /// moves the file and lands it as a real <c>library.media</c> row — see
+    /// <see cref="AfterLandedAsync"/>/<see cref="AfterPromotionFailedAsync"/> for the two outcomes.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>A lost claim is not this request's failure (STORY-425).</b> Between the
+    /// <c>ApproveAsync</c> above and <see cref="IAdSpotStore.ClaimForPromotionAsync"/>, some other actor
+    /// — the stuck-render guardian's own re-arm, or a genuinely concurrent second approve — can already
+    /// have moved the row off <see cref="AdState.Approved"/>. <see cref="IAdSpotStore.ClaimForPromotionAsync"/>
+    /// reports that as <see langword="null"/>, the same "re-read and see" contract every other xmin
+    /// conflict on this row already gets; this one specific race answers 200 with the row's current
+    /// state rather than a 409, since the approve itself already genuinely succeeded — only the
+    /// promotion that would have followed it lost a race to something else that now owns the row.
+    /// </para>
     /// </summary>
     [HttpPost("{id:long}/approve")]
     public async Task<IActionResult> Approve(long id, CancellationToken ct)
@@ -467,7 +497,44 @@ public sealed class AdsController(
         if (ifMatchError is not null)
             return ifMatchError;
 
-        return await ValidateCurrentScriptThenAsync(id, expectedVersion, spotStore.ApproveAsync, ct);
+        var current = await spotStore.GetByIdAsync(id, ct);
+        if (current is null)
+            return NotFound();
+
+        if (current.PreviewPath is null)
+            return await ValidateCurrentScriptThenAsync(id, expectedVersion, spotStore.ApproveAsync, ct);
+
+        if (await PreviewIsStaleAsync(current, ct))
+            return Conflict(PreviewStaleProblem());
+
+        var scriptResult = await ValidateCurrentScriptThenAsync(id, expectedVersion, spotStore.ApproveAsync, ct);
+        if (scriptResult is not ObjectResult { StatusCode: StatusCodes.Status200OK })
+            return scriptResult;
+
+        var approved = await spotStore.GetByIdAsync(id, ct);
+        if (approved is null)
+            return NotFound();
+
+        var claimed = await spotStore.ClaimForPromotionAsync(id, approved.Version, ct);
+        if (claimed is null)
+        {
+            // Something else already moved this row off Approved between the ApproveAsync above and
+            // this claim (the stuck-render guardian's own re-arm racing this exact call is the only
+            // realistic source — see the method remarks). The approve itself already succeeded; only
+            // the promotion that would have followed it lost the race. The worker/guardian owns the row
+            // now — answer 200 with whatever it currently is, never a caller-facing failure.
+            logger.LogInformation(
+                "Ad spot {Id} approved, but its preview promotion was already claimed elsewhere", id);
+            return await Success(approved, ct);
+        }
+
+        var outcome = await renderService.PromotePreviewAsync(claimed, ct);
+        return outcome switch
+        {
+            AdPromotionOutcome.Landed => await AfterLandedAsync(id, ct),
+            AdPromotionOutcome.Failed failed => await AfterPromotionFailedAsync(id, failed, ct),
+            _ => StatusCode(StatusCodes.Status500InternalServerError),
+        };
     }
 
     // -----------------------------------------------------------------------
@@ -634,9 +701,7 @@ public sealed class AdsController(
         if (sponsor is null)
             return NotFound();
 
-        var liveSettings = AdLiveSettingsReader.Read(configuration);
-        var expectedKey = AdPreviewKey.Compute(spot, sponsor, liveSettings, adsOptions.CurrentValue.BedDuckDb);
-        if (storedKey != expectedKey)
+        if (PreviewKeyIsStale(spot, storedKey, sponsor, AdLiveSettingsReader.Read(configuration)))
             return NotFound();
 
         var previewRoot = AdPreviewRoot.Resolve(locatorRoots);
@@ -753,6 +818,88 @@ public sealed class AdsController(
         }
 
         return await MapTransition(await transition(id, expectedVersion, ct), ct);
+    }
+
+    /// <summary>
+    /// <see cref="Approve"/>'s own pre-promotion staleness gate (SPEC F174.5; STORY-425 AC4; PLAN
+    /// T445) — <see langword="true"/> when <paramref name="spot"/>'s stamped preview no longer matches
+    /// what a fresh render of its CURRENT inputs would produce (<see cref="PreviewKeyIsStale"/>, the
+    /// SAME comparison <see cref="ToPreviewDto"/> runs on every read) OR the file it points at is
+    /// simply gone. Only ever called once <see cref="Approve"/> has already confirmed
+    /// <paramref name="spot"/> carries a preview — an unstamped row never reaches here.
+    ///
+    /// <para>
+    /// <b>Path re-asserted under the canonical preview root, IN THIS METHOD (the CodeQL
+    /// path-injection guard's own "strong guard" shape — <see cref="AdPreviewRoot.IsUnder"/>'s own
+    /// remarks, the SAME posture <see cref="PreviewWav"/> and
+    /// <see cref="AdRenderService.PromotePreviewAsync"/> each hold independently rather than sharing a
+    /// filesystem-touching helper).</b> A stored path is untrusted the instant it crosses a storage
+    /// boundary, regardless of how many other call sites already trust it.
+    /// </para>
+    /// </summary>
+    async Task<bool> PreviewIsStaleAsync(AdSpot spot, CancellationToken ct)
+    {
+        if (spot is not { PreviewPath: { } previewPath, PreviewKey: { } previewKey })
+            return true;
+
+        var sponsor = await sponsorStore.GetAsync(spot.SponsorId, ct);
+        var liveSettings = AdLiveSettingsReader.Read(configuration);
+        if (PreviewKeyIsStale(spot, previewKey, sponsor, liveSettings))
+            return true;
+
+        var previewRoot = AdPreviewRoot.Resolve(locatorRoots);
+        var target = Path.GetFullPath(previewPath);
+        if (!AdPreviewRoot.IsUnder(previewRoot, target))
+        {
+            logger.LogWarning(
+                "Ad spot approve found a preview path outside the preview root for spot {Id}", spot.Id);
+            return true;
+        }
+
+        return !System.IO.File.Exists(target);
+    }
+
+    /// <summary>
+    /// <see cref="Approve"/>'s own success path once <see cref="AdRenderService.PromotePreviewAsync"/>
+    /// answers <see cref="AdPromotionOutcome.Landed"/> (STORY-425 AC1, AC2; PLAN T445) — the preview
+    /// stamp is spent (<see cref="IAdSpotStore.ClearPreviewAsync"/>: the file it named is gone, moved
+    /// onto the landed <c>library.media</c> row itself), then the row is re-read fresh so the response
+    /// carries the real post-landing state (<c>ready</c>, <c>mediaId</c> set, <c>preview: null</c>) —
+    /// the promotion already stamped these via <see cref="IAdSpotStore.MarkReadyAsync"/> inside
+    /// <see cref="AdRenderService.PromotePreviewAsync"/> itself, this method's own read simply observes
+    /// it.
+    /// </summary>
+    async Task<IActionResult> AfterLandedAsync(long id, CancellationToken ct)
+    {
+        await spotStore.ClearPreviewAsync(id, ct);
+        var landed = await spotStore.GetByIdAsync(id, ct);
+        return landed is null ? NotFound() : await Success(landed, ct);
+    }
+
+    /// <summary>
+    /// <see cref="Approve"/>'s own failure path once <see cref="AdRenderService.PromotePreviewAsync"/>
+    /// answers <see cref="AdPromotionOutcome.Failed"/> (STORY-425 AC5; PLAN T445) —
+    /// <see cref="IAdSpotStore.ReArmAsync"/> returns the row from <see cref="AdState.Rendering"/> to
+    /// <see cref="AdState.Approved"/> (never <see cref="AdState.Failed"/> — see
+    /// <see cref="AdRenderService.PromotePreviewAsync"/>'s own remarks for why), so the operator can
+    /// simply approve again once whatever blocked the move is fixed. <paramref name="failed"/>'s own
+    /// <see cref="AdPromotionOutcome.Failed.FileMoved"/> decides the preview stamp's fate: if the move
+    /// itself never happened, the stamp still names a real file — left exactly as it was, so a bare
+    /// retry can promote it without re-rendering; if the file is already gone (moved, then something
+    /// downstream failed), the stamp now points at nothing and is cleared. This controller performs no
+    /// filesystem access of its own here — both facts come from <paramref name="failed"/> alone.
+    /// </summary>
+    async Task<IActionResult> AfterPromotionFailedAsync(long id, AdPromotionOutcome.Failed failed, CancellationToken ct)
+    {
+        await spotStore.ReArmAsync(id, ct);
+        if (failed.FileMoved)
+            await spotStore.ClearPreviewAsync(id, ct);
+
+        logger.LogWarning("Ad spot {Id} preview promotion failed: {Reason}", id, LogSanitize.Strip(failed.Reason));
+        return Problem(
+            statusCode: StatusCodes.Status500InternalServerError,
+            type: PreviewPromotionFailedType,
+            detail: "Promoting this spot's approved preview to on-air failed. The spot is back to Approved — try approving again.");
     }
 
     /// <summary>Builds the <see cref="AdScriptValidator"/> request for one script check, carrying the
@@ -881,12 +1028,26 @@ public sealed class AdsController(
         if (spot is not { PreviewPath: not null, PreviewAt: { } at, PreviewKey: { } key })
             return null;
 
-        if (sponsor is null)
-            return new AdSpotPreviewDto(at, key, Stale: true);
-
-        var expectedKey = AdPreviewKey.Compute(spot, sponsor, liveSettings, adsOptions.CurrentValue.BedDuckDb);
-        return new AdSpotPreviewDto(at, key, Stale: key != expectedKey);
+        return new AdSpotPreviewDto(at, key, Stale: PreviewKeyIsStale(spot, key, sponsor, liveSettings));
     }
+
+    /// <summary>
+    /// The key-comparison half of "is this spot's stamped preview stale" (SPEC F174.4/F174.5; PLAN
+    /// T442, T445) — the ONE live copy <see cref="ToPreviewDto"/> (every read), <see cref="PreviewWav"/>
+    /// (once past its own "no preview stamped" and "unresolvable sponsor" guards) and
+    /// <see cref="PreviewIsStaleAsync"/> (<see cref="Approve"/>'s own pre-promotion gate) all call,
+    /// per the brief's "shared helper, one live copy" ruling. The file-existence/path-jail half of
+    /// staleness stays duplicated by design, inline in each of <see cref="PreviewWav"/> and
+    /// <see cref="PreviewIsStaleAsync"/> (the CodeQL path-injection guard's own "strong guard" posture —
+    /// the check belongs in the SAME method as the file access it guards, never behind a shared
+    /// filesystem-touching helper another method calls). A missing <paramref name="sponsor"/> (the
+    /// defensive-only <c>ON DELETE RESTRICT</c> gap — <see cref="PreviewWav"/>'s own remarks) has
+    /// nothing to recompute the key against, so it reads as stale rather than trusting a key nothing can
+    /// verify.
+    /// </summary>
+    bool PreviewKeyIsStale(AdSpot spot, string storedKey, Sponsor? sponsor, AdLiveSettings liveSettings) =>
+        sponsor is null ||
+        storedKey != AdPreviewKey.Compute(spot, sponsor, liveSettings, adsOptions.CurrentValue.BedDuckDb);
 
     /// <summary>
     /// PLAN T403 carry-forward (b), now via the shared <see cref="WeakETag.TryParseVersion"/>:
@@ -1051,6 +1212,14 @@ public sealed class AdsController(
         Title  = "Conflict.",
         Type   = PreviewNotEditableType,
         Detail = "Only a draft or approved spot can be previewed. Re-fetch and retry if this spot has since moved on.",
+    };
+
+    static ProblemDetails PreviewStaleProblem() => new()
+    {
+        Status = StatusCodes.Status409Conflict,
+        Title  = "Conflict.",
+        Type   = PreviewStaleType,
+        Detail = "The preview no longer matches this spot. Render it again, then approve.",
     };
 
     static ProblemDetails JobBusyProblem() => new()

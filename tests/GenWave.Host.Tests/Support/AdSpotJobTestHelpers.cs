@@ -242,4 +242,93 @@ internal static class AdSpotJobTestHelpers
         cmd.CommandText = "select count(*) from library.media";
         return (long)(await cmd.ExecuteScalarAsync() ?? 0L);
     }
+
+    /// <summary>Overwrites <c>preview_path</c>/<c>preview_key</c>/<c>preview_at</c> together (STORY-425;
+    /// PLAN T445) — unlike <see cref="SetAdSpotPreviewPathAsync"/> (path only, left over from
+    /// STORY-424's own path-jail arrangement, which deliberately needs the stored key to keep matching),
+    /// STORY-425's own arrangement stamps a preview onto a spot that never actually rendered one, so all
+    /// three columns must land together or <see cref="GenWave.Ads.AdPreviewKey.Compute"/>'s freshly recomputed key
+    /// would never match what this call stores and every "current preview" fact would 409 for the wrong
+    /// reason.</summary>
+    public static async Task SetAdSpotPreviewStampAsync(
+        string stationConnectionString, long spotId, string previewPath, string previewKey, DateTime previewAt)
+    {
+        await using var conn = new NpgsqlConnection(stationConnectionString);
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "update station.ad_spot set preview_path = @previewPath, preview_key = @previewKey, preview_at = @previewAt where id = @id";
+        cmd.Parameters.AddWithValue("previewPath", previewPath);
+        cmd.Parameters.AddWithValue("previewKey", previewKey);
+        cmd.Parameters.AddWithValue("previewAt", previewAt);
+        cmd.Parameters.AddWithValue("id", spotId);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    /// <summary>Reads <c>state</c>/<c>media_id</c>/<c>preview_path</c>/<c>preview_key</c>/<c>preview_at</c>
+    /// straight out of Postgres, together (STORY-425 AC1, AC3, AC5; PLAN T445) — the row a promotion (or
+    /// a refused one) actually left behind, since <see cref="GenWave.Host.Api.AdsController.Approve"/>'s
+    /// own wire response never echoes a spot's <c>state</c>/<c>mediaId</c>/preview stamps in one single
+    /// claim the way this one query does.</summary>
+    public static async Task<AdSpotRow> ReadAdSpotRowAsync(string stationConnectionString, long spotId)
+    {
+        await using var conn = new NpgsqlConnection(stationConnectionString);
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "select state, media_id, preview_path, preview_key, preview_at from station.ad_spot where id = @id";
+        cmd.Parameters.AddWithValue("id", spotId);
+        await using var reader = await cmd.ExecuteReaderAsync();
+        if (!await reader.ReadAsync())
+            throw new InvalidOperationException($"arrange: station.ad_spot {spotId} not found");
+
+        return new AdSpotRow(
+            State: reader.GetString(0),
+            MediaId: reader.IsDBNull(1) ? null : reader.GetInt64(1),
+            PreviewPath: reader.IsDBNull(2) ? null : reader.GetString(2),
+            PreviewKey: reader.IsDBNull(3) ? null : reader.GetString(3),
+            PreviewAt: reader.IsDBNull(4) ? null : reader.GetDateTime(4));
+    }
+
+    /// <summary>Reads <c>path</c>/<c>title</c>/<c>artist</c>/<c>eligible</c>/<c>imaging_kind</c> off the
+    /// <c>library.media</c> row a promotion landed (STORY-425 AC1, AC2; PLAN T445) — the SAME columns
+    /// <c>MediaRepository.InsertAuthoredAsync</c> writes, proving the promoted row's own on-disk
+    /// location, F161.3 landing stamps, and airability directly, not merely what a caller happened to
+    /// pass in. <c>eligible</c>/<c>imaging_kind</c> matter beside title/artist: a row that landed with
+    /// the right title but <c>eligible = false</c> or a wrong <c>imaging_kind</c> would answer 200
+    /// <c>ready</c> while never actually reaching the on-air rotation.</summary>
+    public static async Task<(string Path, string? Title, string? Artist, bool Eligible, string? ImagingKind)> ReadLibraryMediaAsync(
+        string libraryConnectionString, long mediaId)
+    {
+        await using var conn = new NpgsqlConnection(libraryConnectionString);
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "select path, title, artist, eligible, imaging_kind from library.media where id = @id";
+        cmd.Parameters.AddWithValue("id", mediaId);
+        await using var reader = await cmd.ExecuteReaderAsync();
+        if (!await reader.ReadAsync())
+            throw new InvalidOperationException($"arrange: library.media {mediaId} not found");
+
+        return (
+            reader.GetString(0),
+            reader.IsDBNull(1) ? null : reader.GetString(1),
+            reader.IsDBNull(2) ? null : reader.GetString(2),
+            reader.GetBoolean(3),
+            reader.IsDBNull(4) ? null : reader.GetString(4));
+    }
+
+    /// <summary>STORY-425 AC5's own "no partial media row remains" claim (PLAN T445: a promotion that
+    /// never reaches <c>ICastSegmentAuthor.LandAsync</c> — the destination directory itself could not be
+    /// created — must never leave a row under the ads root it was about to land into) — counts
+    /// <c>library.media</c> rows whose <c>path</c> starts with <paramref name="pathPrefix"/>, the same
+    /// prefix every promoted file's own <c>Path.Combine(adsRoot, ...)</c> destination carries.</summary>
+    public static async Task<long> CountLibraryMediaRowsUnderPathAsync(string libraryConnectionString, string pathPrefix)
+    {
+        await using var conn = new NpgsqlConnection(libraryConnectionString);
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "select count(*) from library.media where path like @prefix";
+        cmd.Parameters.AddWithValue("prefix", pathPrefix + "%");
+        return (long)(await cmd.ExecuteScalarAsync() ?? 0L);
+    }
 }

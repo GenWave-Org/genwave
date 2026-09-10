@@ -24,4 +24,20 @@ public interface ICastSegmentAuthor
     /// the caller owns the resulting artifact's path entirely.
     /// </summary>
     Task<CrosstalkAssemblyResult> AssembleOnlyAsync(CastAssemblyRequest request, CancellationToken ct);
+
+    /// <inheritdoc cref="CastSegmentAuthor.LandAsync"/>
+    Task<CastSegmentAuthorResult> LandAsync(
+        CrosstalkAssemblyResult.Assembled assembled,
+        Func<CrosstalkAssemblyResult.Assembled, AuthoredMediaInsert> buildInsert,
+        Func<long, CancellationToken, Task<bool>> confirmAsync,
+        CancellationToken ct);
+
+    /// <summary>
+    /// Loudness/cue/duration for an EXISTING file at <paramref name="path"/> (SPEC F174.5; STORY-425;
+    /// PLAN T445) — never a fresh ffmpeg invocation of this seam's own; the file was already produced
+    /// (elsewhere, by <see cref="AssembleOnlyAsync"/>'s own earlier preview render) and this method
+    /// only measures what is already on disk, so it can be handed to <see cref="LandAsync"/> exactly
+    /// like a freshly-assembled artifact.
+    /// </summary>
+    Task<CrosstalkAssemblyResult.Assembled> MeasureAsync(string path, CancellationToken ct);
 }

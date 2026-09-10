@@ -31,6 +31,23 @@ sealed class WavHeaderCastSegmentAuthor : ICastSegmentAuthor
         throw new NotSupportedException(
             "this fixture's ICastSegmentAuthor fake exists only for preview mode (PLAN T442) — AuthorAsync is never reached");
 
+    /// <summary>PLAN T445 interface addition — unreached by this Arc for the identical reason
+    /// <see cref="AuthorAsync"/> is: this fixture's WebFactory never drives
+    /// <c>AdRenderService.PromotePreviewAsync</c>, only <see cref="AssembleOnlyAsync"/>.</summary>
+    public Task<CastSegmentAuthorResult> LandAsync(
+        CrosstalkAssemblyResult.Assembled assembled,
+        Func<CrosstalkAssemblyResult.Assembled, AuthoredMediaInsert> buildInsert,
+        Func<long, CancellationToken, Task<bool>> confirmAsync,
+        CancellationToken ct) =>
+        throw new NotSupportedException(
+            "this fixture's ICastSegmentAuthor fake exists only for preview mode (PLAN T442) — LandAsync is never reached");
+
+    /// <summary>PLAN T445 interface addition — unreached by this Arc for the identical reason
+    /// <see cref="AuthorAsync"/> is.</summary>
+    public Task<CrosstalkAssemblyResult.Assembled> MeasureAsync(string path, CancellationToken ct) =>
+        throw new NotSupportedException(
+            "this fixture's ICastSegmentAuthor fake exists only for preview mode (PLAN T442) — MeasureAsync is never reached");
+
     public Task<CrosstalkAssemblyResult> AssembleOnlyAsync(CastAssemblyRequest request, CancellationToken ct)
     {
         LastAssembleOnlyRequest = request;
