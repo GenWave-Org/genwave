@@ -246,12 +246,15 @@ public static class FeatureThemeCatalogIsolation
         // AdminSurface+Settings pairing this file's next Fact asserts on every discovered endpoint.
         // POST api/voice-packs/{slug}/install + DELETE api/voice-packs/{slug} (T413, SPEC F164.5/
         // F164.6) are VoicePackController's own install/uninstall pair, and POST
-        // api/ad-packs/{slug}/install (T407) is AdPackController's own single install route — the
-        // SIXTH and SEVENTH guarded prefixes joining the five above, pinned here the moment they
-        // exist (T413 review round 1 — the SAME "the moment it exists" precedent every prior
-        // addition to this set already followed) rather than left for a future disclosure re-audit
-        // to discover them first. Both controllers carry the SAME class-level AdminSurface+Settings
-        // pairing this file's next Fact asserts on every discovered endpoint. POST
+        // api/ad-packs/{slug}/install (T407) is AdPackController's own install route — the SIXTH and
+        // SEVENTH guarded prefixes joining the five above, pinned here the moment they exist (T413
+        // review round 1 — the SAME "the moment it exists" precedent every prior addition to this set
+        // already followed) rather than left for a future disclosure re-audit to discover them first.
+        // DELETE api/ad-packs/{slug} (T437, SPEC F172.4) is that SAME controller's own later-added
+        // uninstall route, joining its install sibling under the identical prefix the moment IT
+        // exists — the SAME precedent, applied a second time to the seventh prefix. All three
+        // controllers carry the SAME class-level AdminSurface+Settings pairing this file's next Fact
+        // asserts on every discovered endpoint. POST
         // api/jingle-packs/{slug}/install + DELETE api/jingle-packs/{slug} (T414, SPEC F165.1) are
         // JinglePackController's own install/uninstall pair — the EIGHTH guarded prefix joining the
         // seven above, pinned here the moment it exists (the SAME "the moment it exists" precedent
@@ -293,6 +296,7 @@ public static class FeatureThemeCatalogIsolation
                 ("POST", "api/voice-packs/{slug}/install"),
                 ("DELETE", "api/voice-packs/{slug}"),
                 ("POST", "api/ad-packs/{slug}/install"),
+                ("DELETE", "api/ad-packs/{slug}"),
                 ("POST", "api/jingle-packs/{slug}/install"),
                 ("DELETE", "api/jingle-packs/{slug}"),
                 ("GET", "api/voice-packs"),

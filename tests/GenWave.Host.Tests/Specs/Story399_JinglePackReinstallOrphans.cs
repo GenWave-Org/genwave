@@ -292,8 +292,12 @@ public sealed class JinglePackReinstallOrphansArc : IAsyncLifetime
         await conn.OpenAsync();
         return await conn.ExecuteScalarAsync<long>(
             """
-            insert into station.ad_spot (brand, title, source, state, bed_media_id)
-            values ('Test Brand', 'Test Spot', 'owner'::station.ad_source, 'approved'::station.ad_state, @BedMediaId)
+            with sponsor as (
+              insert into station.sponsor (name) values ('Test Brand') returning id
+            )
+            insert into station.ad_spot (sponsor_id, sponsor_name, title, source, state, bed_media_id)
+            select sponsor.id, 'Test Brand', 'Test Spot', 'owner'::station.ad_source, 'approved'::station.ad_state, @BedMediaId
+            from sponsor
             returning id
             """,
             new { BedMediaId = bedMediaId });

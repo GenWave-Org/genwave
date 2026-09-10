@@ -1,6 +1,5 @@
 namespace GenWave.Ads;
 
-using System.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -72,16 +71,15 @@ using GenWave.Tts;
 public sealed class AdSpotWorker(
     IAdSpotStore spotStore,
     IAdBriefStore briefStore,
+    ISponsorStore sponsorStore,
     AdScriptWriter scriptWriter,
     AdRenderService renderService,
     IPatterDurationEstimator durationEstimator,
     IAudiencePostureProvider audiencePosture,
     IAuthoredCatalogWriter catalogWriter,
     IAdminMediaLookup adminLookup,
-    IAdBedPool bedPool,
-    ILibraryRepository libraryRepository,
+    AdSpotStamper stamper,
     IOnAirRenderSignal onAirRenderSignal,
-    IStationIdentityProvider stationIdentity,
     IOptionsMonitor<AdsOptions> adsOptions,
     IOptionsMonitor<LlmOptions> llmOptions,
     IConfiguration configuration,
@@ -189,7 +187,7 @@ public sealed class AdSpotWorker(
         var now = timeProvider.GetUtcNow();
         var window = AdSpotRepairWindow.Compute(adsOptions.CurrentValue);
 
-        var ready = await spotStore.ListByStateAsync(AdState.Ready, int.MaxValue, offset: 0, ct);
+        var ready = await spotStore.ListByStateAsync(AdState.Ready, sponsorId: null, limit: int.MaxValue, offset: 0, ct: ct);
         foreach (var spot in ready.Items)
         {
             var readySince = new DateTimeOffset(spot.StateChangedAt, TimeSpan.Zero);
@@ -206,8 +204,8 @@ public sealed class AdSpotWorker(
             if (await catalogWriter.SetEligibleAsync(mediaId, eligible: true, ct))
             {
                 logger.LogInformation(
-                    "Ad spot {Id} ({Brand}) media row {MediaId} was ready but ineligible within the repair window — repaired",
-                    spot.Id, LogSanitize.Strip(spot.Brand), mediaId);
+                    "Ad spot {Id} ({Sponsor}) media row {MediaId} was ready but ineligible within the repair window — repaired",
+                    spot.Id, LogSanitize.Strip(spot.SponsorName), mediaId);
             }
         }
     }
@@ -237,8 +235,14 @@ public sealed class AdSpotWorker(
     }
 
     /// <summary>SPEC F159.3's stock half — one generation attempt when the stock count (draft through
-    /// ready, llm/pack — gh-#689's rider, see the class remarks) sits below target, never a catch-up
-    /// burst (this class's own remarks).</summary>
+    /// ready, llm/pack, UNPAUSED sponsors only — gh-#689's rider and SPEC F173.4's own pause narrowing,
+    /// PLAN T440, see the class remarks and <see cref="IAdSpotStore.CountStockGeneratedAsync"/>'s own
+    /// remarks) sits below target, never a catch-up burst (this class's own remarks). The one
+    /// Information line below (STORY-420 AC1's own literal, "Ad stock below target: generating one")
+    /// fires right before the ONE attempt this pass ever makes — <see cref="briefStore"/>'s own
+    /// <see cref="IAdBriefStore.SampleEnabledAsync"/> already excludes a paused sponsor's briefs (SPEC
+    /// F173.2), so reaching this line at all already proves the sampled brief belongs to an unpaused
+    /// sponsor.</summary>
     async Task RefillIfNeededAsync(AdStockSettings settings, CancellationToken ct)
     {
         var stockCount = await spotStore.CountStockGeneratedAsync(ct);
@@ -254,28 +258,49 @@ public sealed class AdSpotWorker(
             return;
         }
 
+        logger.LogInformation(
+            "Ad stock below target: generating one ({StockCount}/{TargetCount})", stockCount, settings.TargetCount);
         await GenerateOneAsync(brief, settings.AutoApprove, ct);
     }
 
     /// <summary>
-    /// One brief → one script → one stored spot (SPEC F160.1-F160.3, F159.4; STORY-389 AC2/AC3;
-    /// STORY-390). Builds the SAME validate-delegate adapter shape
-    /// <c>GenWave.Ads.Tests.Specs.FeatureAdScriptWriterMeetsTheRealValidator</c> already previews (that
-    /// file's own remarks name this exact method as the production destination): closes over the REAL
+    /// One brief → one script → one stored spot (SPEC F160.1-F160.3, F159.4, F171; STORY-389 AC2/AC3;
+    /// STORY-390; PLAN T432). Builds the write/validation request pair through
+    /// <see cref="AdScriptRequests.Build"/> (PLAN T441 hoist, shared verbatim with
+    /// <see cref="AdSpotJobService"/>'s own write job) — that helper closes over the REAL
     /// <see cref="AdScriptValidator.Validate"/>, translating its result into the minimal
     /// <see cref="AdScriptValidationOutcome"/> contract <see cref="AdScriptWriter"/> (GenWave.Tts, which
-    /// must never reference this project) accepts.
+    /// must never reference this project) accepts. Resolves <paramref name="brief"/>'s sponsor NAME once
+    /// here, via <see cref="ISponsorStore.GetAsync"/> — <see cref="AdBrief"/> carries only
+    /// <see cref="AdBrief.SponsorId"/>, never a name snapshot of its own (PLAN T432: only
+    /// <see cref="AdSpot.SponsorName"/> is a stamped-at-render snapshot; a brief's own sponsor can be
+    /// renamed freely between ticks with nothing on the brief itself to go stale). A sponsor gone by the
+    /// time this tick runs (deleted between <see cref="IAdBriefStore.SampleEnabledAsync"/>'s own sample
+    /// and this read — <c>ON DELETE RESTRICT</c> makes this vanishingly rare, never impossible under a
+    /// genuine race) skips the tick outright, the SAME "nothing to generate this tick" posture
+    /// <see cref="RefillIfNeededAsync"/>'s own no-enabled-brief branch already takes.
     /// </summary>
     async Task GenerateOneAsync(AdBrief brief, bool autoApprove, CancellationToken ct)
     {
-        var writeRequest = new AdScriptWriteRequest(
-            brief.Brand, brief.Premise, brief.Tone, GeneratedSpotSeconds, audiencePosture.Current,
-            llmOptions.CurrentValue.MaxCopyChars, adsOptions.CurrentValue.DurationToleranceRatio);
-        var validationRequest = new AdScriptValidationRequest(
-            audiencePosture.Current, llmOptions.CurrentValue.MaxCopyChars, GeneratedSpotSeconds,
-            adsOptions.CurrentValue.DurationToleranceRatio);
+        var sponsor = await sponsorStore.GetAsync(brief.SponsorId, ct);
+        if (sponsor is null)
+        {
+            logger.LogInformation(
+                "Ad brief {Id} names sponsor {SponsorId}, which no longer exists; skipping this tick",
+                brief.Id, brief.SponsorId);
+            return;
+        }
 
-        var result = await scriptWriter.WriteAsync(writeRequest, BuildValidateDelegate(validationRequest), ct);
+        // Hoisted (PLAN T441): AdScriptRequests.Build is the SAME request-pair adapter
+        // AdSpotJobService's own write job calls — sponsor.PackSlug (never brief.PackSlug) is what
+        // decides IsPackOwned, a DIFFERENT question from "is this a pack spot" (read separately below
+        // for the source-stamping line): an owner brief can still point at a pack-owned sponsor and
+        // must get the pack posture regardless.
+        var (writeRequest, validate) = AdScriptRequests.Build(
+            sponsor, brief.Premise, brief.Tone, GeneratedSpotSeconds, audiencePosture.Current,
+            llmOptions.CurrentValue.MaxCopyChars, adsOptions.CurrentValue.DurationToleranceRatio, durationEstimator);
+
+        var result = await scriptWriter.WriteAsync(writeRequest, validate, ct);
 
         // SPEC F159.1: a pack-installed brief's own spot is source=pack (T402's own reading of
         // "decide + document" — the ONLY signal this worker has for which of the two applies is
@@ -289,8 +314,8 @@ public sealed class AdSpotWorker(
             case AdScriptWriteResult.Success success:
                 await spotStore.CreateAsync(
                     new NewAdSpot(
-                        brief.Brand, BuildTitle(brief), ComposeBriefSummary(brief), success.Script, source,
-                        brief.PackSlug, GeneratedSpotSeconds, VoicePlan: null, BedMediaId: null,
+                        brief.SponsorId, BuildTitle(sponsor.Name), ComposeBriefSummary(brief), success.Script,
+                        source, brief.PackSlug, GeneratedSpotSeconds, VoicePlan: null, BedMediaId: null,
                         InitialState: autoApprove ? AdState.Approved : AdState.Draft, FailReason: null),
                     ct);
                 break;
@@ -301,8 +326,8 @@ public sealed class AdSpotWorker(
                 // AdScriptWriteResult.Failed never carries the raw rejected text.
                 await spotStore.CreateAsync(
                     new NewAdSpot(
-                        brief.Brand, BuildTitle(brief), ComposeBriefSummary(brief), Script: null, source,
-                        brief.PackSlug, GeneratedSpotSeconds, VoicePlan: null, BedMediaId: null,
+                        brief.SponsorId, BuildTitle(sponsor.Name), ComposeBriefSummary(brief), Script: null,
+                        source, brief.PackSlug, GeneratedSpotSeconds, VoicePlan: null, BedMediaId: null,
                         AdState.Failed, failed.Reason),
                     ct);
                 break;
@@ -315,17 +340,17 @@ public sealed class AdSpotWorker(
                 //
                 // LogSanitize.Strip on BOTH interpolated values (PLAN T402 review F3, the CodeQL
                 // cs/log-forging family, the AdRenderService.TryMarkFailedAsync precedent one file
-                // over): brief.Brand is operator/pack-authored text and failed.Reason is a THIRD-PARTY
+                // over): sponsor.Name is operator/pack-authored text and failed.Reason is a THIRD-PARTY
                 // transport/generation detail (an exception message, a completion fragment) — neither
                 // is bounded upstream the way a validator violation's own EchoForReason already is.
                 logger.LogInformation(
-                    "Ad script generation skipped for brand {Brand}: {Reason}",
-                    LogSanitize.Strip(brief.Brand), LogSanitize.Strip(failed.Reason));
+                    "Ad script generation skipped for sponsor {Sponsor}: {Reason}",
+                    LogSanitize.Strip(sponsor.Name), LogSanitize.Strip(failed.Reason));
                 break;
         }
     }
 
-    static string BuildTitle(AdBrief brief) => $"{brief.Brand} spot";
+    static string BuildTitle(string sponsorName) => $"{sponsorName} spot";
 
     static string? ComposeBriefSummary(AdBrief brief) => (brief.Premise, brief.Tone) switch
     {
@@ -334,17 +359,6 @@ public sealed class AdSpotWorker(
         (null, { } tone) => tone,
         ({ } premise, { } tone) => $"{premise} ({tone})",
     };
-
-    /// <summary>The exact adapter <c>GenWave.Ads.Tests.Specs.FeatureAdScriptWriterMeetsTheRealValidator</c>
-    /// (T400) previews — see this file's own class remarks.</summary>
-    Func<string, AdScriptValidationOutcome> BuildValidateDelegate(AdScriptValidationRequest validationRequest) =>
-        rawScript => AdScriptValidator.Validate(rawScript, validationRequest, durationEstimator) switch
-        {
-            AdScriptValidationResult.Accepted => new AdScriptValidationOutcome.Accepted(),
-            AdScriptValidationResult.Refused refused =>
-                new AdScriptValidationOutcome.Refused(refused.Violation.RuleId, refused.Violation.Reason),
-            _ => throw new UnreachableException($"Unhandled {nameof(AdScriptValidationResult)} case."),
-        };
 
     /// <summary>
     /// SPEC F161.1, STORY-391 AC4/AC6: claims and renders AT MOST one <see cref="AdState.Approved"/>
@@ -370,19 +384,20 @@ public sealed class AdSpotWorker(
     /// so the very next tick — no operator required — resumes it (STORY-391 AC4's own third fact).
     ///
     /// <para>
-    /// <b>Cast pick happens here (SPEC F167; STORY-402; PLAN T415 review R1)</b> — between the claim
-    /// and the render call, on the just-claimed row, via <see cref="StampCastIfNeededAsync"/>. Every
-    /// path that reaches <see cref="AdState.Approved"/> (owner draft, pack spot, LLM spot) is claimed by
-    /// the SAME call above and so takes the SAME single cast-pick step — there is no separate branch
-    /// for "who wrote this spot".
+    /// <b>Cast pick happens here (SPEC F167; STORY-402; PLAN T415)</b> — between the claim
+    /// and the render call, on the just-claimed row, via
+    /// <see cref="AdSpotStamper.StampCastIfNeededAsync"/> (hoisted PLAN T442 ruling, the preview job's
+    /// own render pass calls the SAME helper). Every path that reaches <see cref="AdState.Approved"/>
+    /// (owner draft, pack spot, LLM spot) is claimed by the SAME call above and so takes the SAME
+    /// single cast-pick step — there is no separate branch for "who wrote this spot".
     /// </para>
     ///
     /// <para>
     /// <b>Bed pick happens here too (SPEC F168; STORY-403; PLAN T416)</b> — right after the cast stamp,
-    /// via <see cref="StampBedIfNeededAsync"/>, the SAME "stamp the just-claimed row, once, before the
-    /// render call" shape as the cast pick immediately above: no separate branch for "who wrote this
-    /// spot", and an owner's own explicit <see cref="AdSpot.BedMediaId"/> is never second-guessed
-    /// (SPEC F168.5).
+    /// via <see cref="AdSpotStamper.StampBedIfNeededAsync"/>, the SAME "stamp the just-claimed row, once,
+    /// before the render call" shape as the cast pick immediately above: no separate branch for "who
+    /// wrote this spot", and an owner's own explicit <see cref="AdSpot.BedMediaId"/> is never
+    /// second-guessed (SPEC F168.5).
     /// </para>
     /// </summary>
     async Task RenderOneIfDueAsync(AdLiveSettings liveSettings, CancellationToken stoppingToken)
@@ -393,8 +408,8 @@ public sealed class AdSpotWorker(
         if (await spotStore.ClaimNextApprovedAsync(stoppingToken) is not { } claimed)
             return;
 
-        var castStamped = await StampCastIfNeededAsync(claimed, liveSettings, stoppingToken);
-        var spot = await StampBedIfNeededAsync(castStamped, stoppingToken);
+        var castStamped = await stamper.StampCastIfNeededAsync(claimed, liveSettings, stoppingToken);
+        var spot = await stamper.StampBedIfNeededAsync(castStamped, stoppingToken);
 
         using var budgetCts = new CancellationTokenSource(
             TimeSpan.FromSeconds(adsOptions.CurrentValue.RenderBudgetSeconds), timeProvider);
@@ -439,93 +454,8 @@ public sealed class AdSpotWorker(
     }
 
     /// <summary>
-    /// SPEC F167; STORY-402; PLAN T415 review R1/R2/R5 — casts <see cref="AdCastPicker"/> exactly once,
-    /// ONLY when <paramref name="spot"/> does not already carry a plan (an owner draft's own explicit
-    /// <see cref="AdSpot.VoicePlan"/>, or a plan a previous stamp already wrote, is never re-cast; the
-    /// C# check here is doubled by <see cref="IAdSpotStore.StampVoicePlanIfNullAsync"/>'s own SQL
-    /// <c>coalesce</c> — belt-and-suspenders, not redundant, since the SQL guard is what closes a race
-    /// this C# check alone cannot). Returns the row <see cref="RenderOneIfDueAsync"/> should actually
-    /// render: the freshly stamped row when the store returned one, or the ORIGINAL claimed row when it
-    /// returned <see langword="null"/> — a benign race (the row left <see cref="AdState.Rendering"/>
-    /// between claim and stamp) that must never abort a render; <see cref="AdRenderService"/>'s own
-    /// <c>ResolveCast</c> already degrades gracefully from a null <see cref="AdSpot.VoicePlan"/>.
-    /// </summary>
-    async Task<AdSpot> StampCastIfNeededAsync(AdSpot spot, AdLiveSettings liveSettings, CancellationToken ct)
-    {
-        if (spot.VoicePlan is not null)
-            return spot;
-
-        var pick = AdCastPicker.Pick(spot, liveSettings, stationIdentity.Current.Voice);
-        LogCastOutcome(spot, pick.Outcome);
-
-        var stamped = await spotStore.StampVoicePlanIfNullAsync(spot.Id, AdVoicePlanJson.Serialize(pick.Entries), ct);
-        return stamped ?? spot;
-    }
-
-    /// <summary>PLAN T415 review R8: one INFO line for a degraded pick, never for the happy path — and
-    /// never more than once per tick BY CONSTRUCTION, since <see cref="RenderOneIfDueAsync"/> claims and
-    /// renders at most one spot per tick, so no rate-limit state is kept here (YAGNI).</summary>
-    void LogCastOutcome(AdSpot spot, AdCastOutcome outcome)
-    {
-        switch (outcome)
-        {
-            case AdCastOutcome.Cast:
-                break;
-            case AdCastOutcome.ThinPool:
-                logger.LogInformation(
-                    "Ad cast pool has only one non-announcer voice for spot {Id} ({Brand}); the same voice reads every part",
-                    spot.Id, LogSanitize.Strip(spot.Brand));
-                break;
-            case AdCastOutcome.EmptyPool:
-                logger.LogInformation(
-                    "Ad cast pool is empty for spot {Id} ({Brand}); every part uses the station voice",
-                    spot.Id, LogSanitize.Strip(spot.Brand));
-                break;
-        }
-    }
-
-    /// <summary>
-    /// SPEC F168.1, F168.2, F168.5; STORY-403; PLAN T416 — picks <see cref="AdBedPicker"/> exactly
-    /// once, ONLY when <paramref name="spot"/> does not already carry a bed (an owner's own explicit
-    /// <see cref="AdSpot.BedMediaId"/>, or a pick a previous stamp already wrote, is never re-picked —
-    /// the SAME never-overwrite posture <see cref="StampCastIfNeededAsync"/> already keeps for a voice
-    /// plan, doubled by <see cref="IAdSpotStore.StampBedIfNullAsync"/>'s own SQL <c>coalesce</c>).
-    /// Resolves the ads library id itself (<see cref="AdRenderService"/> resolves it again later for
-    /// the render call proper — the two owners never share a request-scoped cache, so no shared state
-    /// crosses this method boundary): when the library does not exist yet, this method has nothing to
-    /// pick against and returns <paramref name="spot"/> unchanged — <see cref="AdRenderService"/>'s own
-    /// <c>ResolveLibraryIdAsync</c> reaches the SAME "the ads library does not exist yet" failure a
-    /// moment later and fails the render with the honest reason, so nothing is lost by staying silent
-    /// here. An empty pool degrades to an unbedded render with one INFO line (SPEC F168.2's own honest
-    /// fallback) rather than a failure — the SAME "render dry, don't refuse" posture an empty cast pool
-    /// already gets.
-    /// </summary>
-    async Task<AdSpot> StampBedIfNeededAsync(AdSpot spot, CancellationToken ct)
-    {
-        if (spot.BedMediaId is not null)
-            return spot;
-
-        var library = await libraryRepository.GetByNameAsync(adsOptions.CurrentValue.LibraryName, ct);
-        if (library is null)
-            return spot;
-
-        var pool = await bedPool.ListReadyBedIdsAsync(library.Id, ct);
-        var pick = AdBedPicker.Pick(spot.Id, pool);
-        if (pick is null)
-        {
-            logger.LogInformation(
-                "No background music is installed; spot {Id} ({Brand}) renders without it",
-                spot.Id, LogSanitize.Strip(spot.Brand));
-            return spot;
-        }
-
-        var stamped = await spotStore.StampBedIfNullAsync(spot.Id, pick.Value, ct);
-        return stamped ?? spot;
-    }
-
-    /// <summary>
     /// Best-effort recovery after <see cref="RenderOneIfDueAsync"/>'s own <c>renderCts</c> fired
-    /// (PLAN T402 review block 1/2) — uses <see cref="CancellationToken.None"/> deliberately: the
+    /// (PLAN T402) — uses <see cref="CancellationToken.None"/> deliberately: the
     /// token that carried this render is already dead, and this bookkeeping write must still land even
     /// if <paramref name="spotId"/>'s own render was cancelled by the very budget/host-shutdown signal
     /// that would otherwise cancel this cleanup too.

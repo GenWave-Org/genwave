@@ -465,7 +465,7 @@ public static class FeatureAdScriptWriter
 
             // When the write runs...
             var result = await writer.WriteAsync(
-                Request(), RefusesOnceThenAccepts("format", "voice tag \"TAG\" is not uppercase-alphanumeric"),
+                Request(), RefusesOnceThenAccepts("format", "the ANNOUNCER line has no spoken text"),
                 CancellationToken.None);
 
             // Then the re-ask completes inside ITS OWN budget — a success, two completions made.

@@ -79,36 +79,60 @@ namespace GenWave.Host.Api;
 [Authorize(Policy = AuthorizationPolicies.Settings)]
 public sealed partial class ShowsController(
     IShowStore showStore,
+    ISponsorStore sponsorStore,
     IScheduleStore scheduleStore,
     IScheduleSpecialStore specialStore,
     IStationClockProvider stationClock,
     IShowImagingScope imagingScope,
     ILogger<ShowsController> logger) : ControllerBase
 {
-    /// <summary>GET /api/shows — every show row, ordered by name (F115.1).</summary>
+    // ProblemDetails.Type token (the AdBriefsController precedent) for the one failure shape this
+    // controller's sponsor pre-check can produce.
+    const string SponsorNotFoundType = "sponsor_not_found";
+
+    /// <summary>GET /api/shows — every show row, ordered by name (F115.1). Each row's <c>sponsor</c>
+    /// (SPEC F175.1, PLAN T449) is resolved with ONE <see cref="ISponsorStore.ListAsync"/> round trip
+    /// shared across every row — the <see cref="AdBriefsController.List"/> precedent — never one
+    /// <see cref="ISponsorStore.GetAsync"/> call per show.</summary>
     [HttpGet]
     public async Task<IActionResult> List(CancellationToken ct)
     {
         var shows = await showStore.GetAllAsync(ct);
-        return Ok(shows.Select(ToDto).ToArray());
+        var sponsors = await sponsorStore.ListAsync(q: null, ct);
+        var sponsorsById = sponsors.ToDictionary(row => row.Sponsor.Id, row => row.Sponsor);
+        return Ok(shows.Select(show => ToDto(show, sponsorsById)).ToArray());
     }
 
-    /// <summary>GET /api/shows/{slug} — a single show. 404 for an unknown slug.</summary>
+    /// <summary>GET /api/shows/{slug} — a single show. 404 for an unknown slug. Carries <c>sponsor</c>
+    /// (SPEC F175.1, PLAN T449) via ONE <see cref="ISponsorStore.GetAsync"/> call when the show links
+    /// one, <see langword="null"/> when it does not — no store round trip at all for an unlinked
+    /// show.</summary>
     [HttpGet("{slug}")]
     public async Task<IActionResult> Get(string slug, CancellationToken ct)
     {
         var show = await showStore.GetBySlugAsync(slug, ct);
-        return show is null ? NotFound(NotFoundProblem(slug)) : Ok(ToDto(show));
+        if (show is null)
+            return NotFound(NotFoundProblem(slug));
+
+        var sponsor = await ResolveSponsorRefAsync(show.SponsorId, ct);
+        return Ok(ToDto(show, sponsor));
     }
 
     /// <summary>
     /// POST /api/shows — create an authored show. 201 with the row on success; 400 for a blank/
-    /// invalid name or an over-budget field; 409 for a slug collision (F115.1).
+    /// invalid name or an over-budget field; 404 <c>sponsor_not_found</c> when <c>sponsorId</c> names
+    /// no sponsor (SPEC F175.1, PLAN T449 — resolved BEFORE the write, the
+    /// <see cref="AdBriefsController.Create"/> precedent, so a dangling id never surfaces as an
+    /// unhandled foreign-key violation; a PAUSED sponsor is accepted — pausing withholds a sponsor's
+    /// spots from air, it does not lock a show from naming it); 409 for a slug collision (F115.1).
     /// </summary>
     [HttpPost]
     [Consumes("application/json")]
     public async Task<IActionResult> Create([FromBody] ShowRequest request, CancellationToken ct)
     {
+        if (await SponsorNotFoundProblemAsync(request.SponsorId, ct) is { } sponsorProblem)
+            return NotFound(sponsorProblem);
+
         var draft = ToDraft(request);
         var result = await showStore.CreateAsync(draft, ct);
 
@@ -118,16 +142,24 @@ public sealed partial class ShowsController(
 
         return result switch
         {
-            ShowWriteResult.Created c => StatusCode(StatusCodes.Status201Created, ToDto(c.Show)),
+            ShowWriteResult.Created c => StatusCode(
+                StatusCodes.Status201Created, ToDto(c.Show, await ResolveSponsorRefAsync(c.Show.SponsorId, ct))),
             _ => WriteProblem(result, draft.Name),
         };
     }
 
     /// <summary>
-    /// PATCH /api/shows/{slug} — edit an existing authored show. 200 with the row on success; 404 for
-    /// an unknown slug; 409 when the target is imported (SPEC F115.5 — see this class's own remarks)
-    /// or when the edit's derived slug collides with another show; 400 for a blank/invalid name or an
-    /// over-budget field.
+    /// PATCH /api/shows/{slug} — edit an existing authored show. A full-body replace (this class's own
+    /// remarks) — <c>sponsorId</c> (SPEC F175.1, PLAN T449) follows the same rule as <c>tagline</c>/
+    /// <c>flavor</c>: omitted or explicit <c>null</c> clears any sponsor the show currently carries.
+    /// STORY-430 AC3 names an <c>If-Match</c> header; this route carries none (no ETag ceremony exists
+    /// on shows at all — every OTHER field here is already a full-body replace with no concurrency
+    /// guard) and this task does not add one. 200 with the row on success; 404 for an unknown slug, or
+    /// <c>sponsor_not_found</c> when a non-null <c>sponsorId</c> names no sponsor (checked BEFORE the
+    /// write, the <see cref="AdBriefsController.Create"/> precedent — a paused sponsor is accepted, see
+    /// <see cref="Create"/>'s own remarks); 409 when the target is imported (SPEC F115.5 — see this
+    /// class's own remarks) or when the edit's derived slug collides with another show; 400 for a
+    /// blank/invalid name or an over-budget field.
     /// </summary>
     [HttpPatch("{slug}")]
     [Consumes("application/json")]
@@ -136,6 +168,9 @@ public sealed partial class ShowsController(
         var existing = await showStore.GetBySlugAsync(slug, ct);
         if (existing is null)
             return NotFound(NotFoundProblem(slug));
+
+        if (await SponsorNotFoundProblemAsync(request.SponsorId, ct) is { } sponsorProblem)
+            return NotFound(sponsorProblem);
 
         // SPEC F115.5 — the ThemeWriteGate fail-closed posture, mirrored (see class remarks): an
         // authored write never lands on an imported show's slug, so provenance is never even offered
@@ -166,7 +201,7 @@ public sealed partial class ShowsController(
 
         return result switch
         {
-            ShowWriteResult.Updated u => Ok(ToDto(u.Show)),
+            ShowWriteResult.Updated u => Ok(ToDto(u.Show, await ResolveSponsorRefAsync(u.Show.SponsorId, ct))),
             ShowWriteResult.NotFound => NotFound(NotFoundProblem(slug)),
             _ => WriteProblem(result, draft.Name),
         };
@@ -306,7 +341,7 @@ public sealed partial class ShowsController(
             "Show imported slug={Slug} importedFrom={ImportedFrom}",
             LogSafeText.Sanitize(slug), LogSanitize.Strip(importedFrom));
 
-        return Ok(ToDto(imported));
+        return Ok(ToDto(imported, await ResolveSponsorRefAsync(imported.SponsorId, ct)));
     }
 
     /// <summary>
@@ -452,10 +487,57 @@ public sealed partial class ShowsController(
         _ => StatusCode(StatusCodes.Status500InternalServerError),
     };
 
-    static ShowDto ToDto(Show show) => ShowDto.From(show);
+    static ShowDto ToDto(Show show, SponsorRefDto? sponsor) => ShowDto.From(show, sponsor);
+
+    /// <summary>The <see cref="List"/> projection (SPEC F175.1, PLAN T449) — every row's own
+    /// <see cref="Show.SponsorId"/> looked up in the ONE dictionary <see cref="List"/> already built,
+    /// never a second store round trip per row.</summary>
+    static ShowDto ToDto(Show show, IReadOnlyDictionary<long, Sponsor> sponsorsById) => ShowDto.From(
+        show, show.SponsorId is { } sponsorId && sponsorsById.TryGetValue(sponsorId, out var sponsor)
+            ? SponsorRefDto.From(sponsor)
+            : null);
 
     static ShowDraft ToDraft(ShowRequest request) =>
-        new(request.Name?.Trim() ?? string.Empty, request.Tagline, request.Flavor);
+        new(request.Name?.Trim() ?? string.Empty, request.Tagline, request.Flavor, request.SponsorId);
+
+    /// <summary>Resolves a single show's linked sponsor (SPEC F175.1, PLAN T449) for every
+    /// single-show response (<see cref="Get"/>, <see cref="Create"/>, <see cref="Update"/>,
+    /// <see cref="Import"/>) — <see langword="null"/> short-circuits with NO store round trip at all
+    /// for an unlinked show; a non-null id that resolves to nothing (a genuine race against a
+    /// concurrent sponsor delete — <c>station.show.sponsor_id</c> carries <c>ON DELETE RESTRICT</c>, so
+    /// this cannot happen from an ordinary write) degrades to <see langword="null"/> rather than
+    /// faulting an otherwise-successful response.</summary>
+    async Task<SponsorRefDto?> ResolveSponsorRefAsync(long? sponsorId, CancellationToken ct)
+    {
+        if (sponsorId is not { } id)
+            return null;
+
+        var sponsor = await sponsorStore.GetAsync(id, ct);
+        return sponsor is null ? null : SponsorRefDto.From(sponsor);
+    }
+
+    /// <summary>The <see cref="Create"/>/<see cref="Update"/> pre-check (SPEC F175.1, PLAN T449, the
+    /// <see cref="AdBriefsController.Create"/> precedent): a null <paramref name="sponsorId"/> is a
+    /// no-op (clearing/omitting the sponsor is always legal), a non-null one that resolves is also a
+    /// no-op (the write proceeds), and a non-null one that names no sponsor returns the 404 body the
+    /// caller returns immediately, BEFORE <see cref="ToDraft"/>/the store write ever run.</summary>
+    async Task<ProblemDetails?> SponsorNotFoundProblemAsync(long? sponsorId, CancellationToken ct)
+    {
+        if (sponsorId is not { } id)
+            return null;
+
+        var sponsor = await sponsorStore.GetAsync(id, ct);
+        return sponsor is null ? SponsorNotFoundProblem(id) : null;
+    }
+
+    static ProblemDetails SponsorNotFoundProblem(long sponsorId) => new()
+    {
+        Status = StatusCodes.Status404NotFound,
+        Title  = "Not found.",
+        Type   = SponsorNotFoundType,
+        Detail = $"No sponsor with id {sponsorId} exists.",
+        Extensions = { ["field"] = "sponsorId" },
+    };
 
     static ScopedImagingRowDto ToImagingDto(ScopedImagingRow row) => new(row.MediaId, row.Title);
 

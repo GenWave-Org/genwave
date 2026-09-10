@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Core.Logging;
+using GenWave.Host.Catalog;
 
 namespace GenWave.Host.Api;
 
@@ -79,6 +80,15 @@ public sealed class MediaController(
     ///                  F149.5). A never-aired row never matches (no ledger row, or a null
     ///                  <c>last_aired_at</c>, never satisfies the comparison). A value that does not
     ///                  parse as <c>yyyy-MM-dd</c> → 400 naming the field.
+    ///   imagingKind  — one imaging kind (<c>liner</c>/<c>station_id</c>/<c>jingle</c>/<c>promo</c>/
+    ///                  <c>ad</c>, SPEC F174.7, PLAN T446); absent means NO imaging filter at all —
+    ///                  deliberately NOT <see cref="ImagingKindTokens.TryParse"/>'s own null/blank →
+    ///                  <c>liner</c> default (that default exists to preserve pre-kind ROW behavior,
+    ///                  not to make an absent query param mean "filter to liner"). An unrecognized
+    ///                  value → 400.
+    ///   jingleRole   — the jingle asset's stored role (<c>bed</c>/<c>sting</c>/<c>station_id</c>,
+    ///                  db/45's CHECK, SPEC F174.7); valid only alongside <c>imagingKind=jingle</c> —
+    ///                  naming it without that, or naming a value outside the closed set, → 400.
     ///   page         — 1-based page number (default 1)
     ///   limit        — items per page, clamped to [1, 200] (default 50)
     ///
@@ -89,7 +99,9 @@ public sealed class MediaController(
     /// COALESCE against <c>library.media_rating</c> (SPEC F33.10); an unrated row reads the F33.2
     /// ledger default (score 50, not flagged). Every row also carries <c>bpm</c>/<c>trackEnergy</c>
     /// (SPEC F49.2), null until analyzed/measured, and <c>moods</c> (SPEC F86.8), null until the
-    /// mood tagger reaches (or misses on) the row.
+    /// mood tagger reaches (or misses on) the row. A jingle-pack row also carries <c>jingleRole</c>
+    /// and <c>pack</c> (the installing pack's display name, SPEC F165.2/F174.7); both null for every
+    /// other row, filtered or not.
     ///
     /// Response headers:
     ///   X-Pagination: total={n},pages={n},page={n},limit={n}
@@ -116,6 +128,8 @@ public sealed class MediaController(
         [FromQuery(Name = "include-unavailable")] bool? includeUnavailable = null,
         [FromQuery(Name = "never-aired")] bool? neverAired = null,
         [FromQuery(Name = "aired-before")] string? airedBefore = null,
+        [FromQuery] string? imagingKind = null,
+        [FromQuery] string? jingleRole = null,
         [FromQuery] int page = 1,
         [FromQuery] int limit = 50,
         CancellationToken ct = default)
@@ -192,6 +206,60 @@ public sealed class MediaController(
             });
         }
 
+        // SPEC F174.7 (STORY-427, PLAN T446): imagingKind is parsed here rather than through
+        // ImagingKindTokens.TryParse's own null/blank -> liner default — that default exists so an
+        // absent COLUMN reads as pre-kind Liner behavior, not so an absent QUERY PARAM means "filter
+        // to liner". Absent imagingKind means no imaging filter at all; only a non-null value is
+        // parsed, and an unrecognized one 400s naming the field and the accepted set only, never the
+        // caller's own value (the F87.3/F150 posture this whole epic holds everywhere else).
+        ImagingKind? parsedImagingKind = null;
+        if (imagingKind is not null)
+        {
+            if (!ImagingKindTokens.TryParse(imagingKind, out var kind))
+            {
+                return BadRequest(new ProblemDetails
+                {
+                    Status = StatusCodes.Status400BadRequest,
+                    Title  = "Invalid imagingKind.",
+                    Detail = "imagingKind must be one of: liner, station_id, jingle, promo, ad.",
+                });
+            }
+
+            parsedImagingKind = kind;
+        }
+
+        // PLAN T446 ruling (Q1): jingleRole is valid only alongside imagingKind=jingle, and only
+        // from the one closed set CatalogJinglePackManifestSerializer.ValidRoles already declares
+        // for manifest parsing. One guard covers both "jingleRole named but imagingKind absent" and
+        // "jingleRole named but imagingKind isn't jingle" — the nullable comparison below is true in
+        // both cases — rather than writing the same 400 out at two call sites.
+        if (jingleRole is not null)
+        {
+            if (parsedImagingKind != ImagingKind.Jingle)
+            {
+                return BadRequest(new ProblemDetails
+                {
+                    Status = StatusCodes.Status400BadRequest,
+                    Title  = "Invalid jingleRole.",
+                    Detail = "jingleRole applies only with imagingKind=jingle.",
+                });
+            }
+
+            if (!CatalogJinglePackManifestSerializer.ValidRoles.Contains(jingleRole))
+            {
+                return BadRequest(new ProblemDetails
+                {
+                    Status = StatusCodes.Status400BadRequest,
+                    Title  = "Invalid jingleRole.",
+                    Detail = "jingleRole must be one of: bed, sting, station_id.",
+                });
+            }
+        }
+
+        var imaging = parsedImagingKind is { } imagingKindValue
+            ? new ImagingBrowseFilter(imagingKindValue, jingleRole)
+            : null;
+
         // Resolve the effective scope: a named library-id overrides the station rotation scope
         // (F23.2 / STORY-064). An unnamed browse uses the station scope as before. An out-of-scope
         // browse is flagged with X-Out-Of-Scope: true so the UI can surface a banner; rows are
@@ -213,7 +281,11 @@ public sealed class MediaController(
             NeverAired = neverAired,
             AiredBefore = airedBeforeDate,
         };
-        var result = await adminQuery.ListAdminAsync(effectiveScope, query, ct);
+        // Only the two-arg-longer overloads take the imaging filter — every existing caller shape
+        // (no imagingKind named) keeps calling the original overload unchanged (PLAN T446 ruling).
+        var result = imaging is null
+            ? await adminQuery.ListAdminAsync(effectiveScope, query, ct)
+            : await adminQuery.ListAdminAsync(effectiveScope, query, imaging, ct);
 
         Response.Headers["X-Pagination"] =
             $"total={result.Total},pages={result.Pages},page={page},limit={limit}";
@@ -223,7 +295,9 @@ public sealed class MediaController(
         // rule the repository's browse predicate reads, so header and page can never disagree.
         if (query.HidesUnavailable)
         {
-            var hidden = await adminQuery.CountUnavailableAsync(effectiveScope, query, ct);
+            var hidden = imaging is null
+                ? await adminQuery.CountUnavailableAsync(effectiveScope, query, ct)
+                : await adminQuery.CountUnavailableAsync(effectiveScope, query, imaging, ct);
             Response.Headers["X-Unavailable-Hidden"] =
                 hidden.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }

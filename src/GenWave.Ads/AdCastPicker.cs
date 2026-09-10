@@ -67,7 +67,7 @@ internal static class AdCastPicker
         var rng = new Random(AdDeterministicSeed.FromTerms(
             spot.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
             spot.PackSlug ?? AdSourceTokens.ToToken(spot.Source),
-            spot.Brand));
+            spot.SponsorName));
 
         var voice1Index = rng.Next(candidates.Count);
         var voice1 = candidates[voice1Index];

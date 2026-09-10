@@ -952,7 +952,19 @@ sealed class MediaRepository(
         return (row.ToAdminDto(), row.LibraryId);
     }
 
-    public async Task<PagedResult<AdminMediaDto>> ListAdminAsync(LibraryScope scope, MediaQuery query, CancellationToken ct)
+    public Task<PagedResult<AdminMediaDto>> ListAdminAsync(LibraryScope scope, MediaQuery query, CancellationToken ct) =>
+        ListAdminCoreAsync(scope, query, imaging: null, ct);
+
+    /// <summary>PLAN T446 (STORY-427 AC1, SPEC F174.7) — the imaging-filtered overload the wizard
+    /// music picker's browse rides; see <see cref="IAdminMediaQuery"/>'s own remarks on this
+    /// overload for why it exists beside the unfiltered one instead of widening
+    /// <see cref="MediaQuery"/>.</summary>
+    public Task<PagedResult<AdminMediaDto>> ListAdminAsync(
+        LibraryScope scope, MediaQuery query, ImagingBrowseFilter imaging, CancellationToken ct) =>
+        ListAdminCoreAsync(scope, query, imaging, ct);
+
+    async Task<PagedResult<AdminMediaDto>> ListAdminCoreAsync(
+        LibraryScope scope, MediaQuery query, ImagingBrowseFilter? imaging, CancellationToken ct)
     {
         // Default-deny: no scope means no access, no SQL issued.
         if (scope.IsEmpty)
@@ -962,7 +974,7 @@ sealed class MediaRepository(
         var page  = Math.Max(1, query.Page);
         var offset = (page - 1) * limit;
 
-        var (where, filterParams) = BuildAdminWhere(query, scope);
+        var (where, filterParams) = BuildAdminWhere(query, scope, imaging: imaging);
 
         // The never-play filter is browse-only (SPEC F33.10) and deliberately NOT folded into
         // BuildAdminWhere: that helper's WHERE fragment is also used by SetEligibilityAsync,
@@ -995,6 +1007,7 @@ sealed class MediaRepository(
                    eligible, m.xmin::text as xmin,
                    coalesce(r.score, 50) as score, coalesce(r.never_play, false) as never_play,
                    m.moods, m.explicit, m.explicit_source, m.imaging_kind, m.show_id,
+                   m.jingle_role, case when m.pack_slug is not null then m.artist end as pack,
                    not (m.library_id = any(@safeLibraryIds)) as rateable,
                    count(*) over() as total_count
             from library.media m
@@ -1020,18 +1033,31 @@ sealed class MediaRepository(
     /// <summary>
     /// gh-#113 — the "N unavailable tracks hidden" count for a browse whose page excluded them
     /// (<see cref="MediaQuery.HidesUnavailable"/>). Uses <see cref="BuildAdminWhere"/> plus the
-    /// same never-play join/predicate as <see cref="ListAdminAsync"/>, so the count answers "how
-    /// many MORE rows would this exact browse show with unavailable revealed" — never a
-    /// differently-filtered figure. The caller only asks when no state filter is named, but a
-    /// state-filtered query degrades honestly here anyway (two state predicates, zero rows).
+    /// same never-play join/predicate as <see cref="ListAdminAsync(LibraryScope,MediaQuery,CancellationToken)"/>,
+    /// so the count answers "how many MORE rows would this exact browse show with unavailable
+    /// revealed" — never a differently-filtered figure. The caller only asks when no state filter
+    /// is named, but a state-filtered query degrades honestly here anyway (two state predicates,
+    /// zero rows).
     /// </summary>
-    public async Task<int> CountUnavailableAsync(LibraryScope scope, MediaQuery query, CancellationToken ct)
+    public Task<int> CountUnavailableAsync(LibraryScope scope, MediaQuery query, CancellationToken ct) =>
+        CountUnavailableCoreAsync(scope, query, imaging: null, ct);
+
+    /// <summary>PLAN T446 — the imaging-filtered counterpart of
+    /// <see cref="ListAdminAsync(LibraryScope,MediaQuery,ImagingBrowseFilter,CancellationToken)"/>,
+    /// so the "N hidden" header an imaging-filtered browse shows counts against the same filtered
+    /// row set the page itself drew from.</summary>
+    public Task<int> CountUnavailableAsync(
+        LibraryScope scope, MediaQuery query, ImagingBrowseFilter imaging, CancellationToken ct) =>
+        CountUnavailableCoreAsync(scope, query, imaging, ct);
+
+    async Task<int> CountUnavailableCoreAsync(
+        LibraryScope scope, MediaQuery query, ImagingBrowseFilter? imaging, CancellationToken ct)
     {
         // Default-deny: no scope means no access, no SQL issued.
         if (scope.IsEmpty)
             return 0;
 
-        var (where, filterParams) = BuildAdminWhere(query, scope);
+        var (where, filterParams) = BuildAdminWhere(query, scope, imaging: imaging);
 
         if (query.NeverPlay is true)
             where += " and coalesce(r.never_play, false)";
@@ -1184,13 +1210,23 @@ sealed class MediaRepository(
     /// one" bulk action) — it never belongs on a browse query. Non-null and non-empty ANDs in
     /// <c>id = any(@mediaIds)</c> beside every other predicate; <see langword="null"/> or empty
     /// applies no constraint, same tristate posture as the rest of this builder.
+    ///
+    /// <paramref name="imaging"/> (SPEC F174.7, PLAN T446) is likewise a separate parameter rather
+    /// than a <see cref="MediaQuery"/> field, for the identical Abstractions-frozen reason — see
+    /// <see cref="ImagingBrowseFilter"/>'s own remarks. Defaults to <see langword="null"/> so every
+    /// existing call site (none of which filters by imaging kind) compiles and behaves unchanged.
+    /// Non-null ANDs in <c>imaging_kind = @imagingKindFilter</c>; a non-null
+    /// <see cref="ImagingBrowseFilter.JingleRole"/> additionally ANDs in
+    /// <c>jingle_role = @jingleRoleFilter</c>.
     /// </summary>
     internal static (string Where, DynamicParameters Params) BuildAdminWhere(
-        MediaQuery query, LibraryScope scope, IReadOnlyList<long>? mediaIds = null)
+        MediaQuery query, LibraryScope scope, IReadOnlyList<long>? mediaIds = null, ImagingBrowseFilter? imaging = null)
     {
         var parts = new List<string> { "library_id = any(@libraryIds)" };
         var mediaIdArray = mediaIds is { Count: > 0 } ? mediaIds.ToArray() : null;
         if (mediaIdArray is not null) parts.Add("id = any(@mediaIds)");
+        if (imaging is not null) parts.Add("imaging_kind = @imagingKindFilter");
+        if (imaging?.JingleRole is not null) parts.Add("jingle_role = @jingleRoleFilter");
 
         var artistExact = string.IsNullOrWhiteSpace(query.ArtistExact) ? null : query.ArtistExact;
         var albumExact  = string.IsNullOrWhiteSpace(query.AlbumExact)  ? null : query.AlbumExact;
@@ -1228,6 +1264,8 @@ sealed class MediaRepository(
         var p = new DynamicParameters();
         p.Add("libraryIds", scope.LibraryIds.ToArray());
         p.Add("mediaIds",   mediaIdArray);
+        p.Add("imagingKindFilter", imaging is not null ? ImagingKindTokens.ToToken(imaging.Kind) : null);
+        p.Add("jingleRoleFilter",  imaging?.JingleRole);
         p.Add("state",      query.State);
         p.Add("artist",     query.Artist is not null ? $"%{query.Artist}%" : null);
         p.Add("genre",      query.Genre  is not null ? $"%{query.Genre}%"  : null);

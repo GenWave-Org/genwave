@@ -1,0 +1,595 @@
+# GenWave.Abstractions 5.7.0 public surface, from NuGet genwave.abstractions.5.7.0.nupkg lib/net10.0, enumerated by PublicSurface.Of
+GenWave.Abstractions.Playout.EnergyRange::CTOR (System.Double Min, System.Double Max)
+GenWave.Abstractions.Playout.EnergyRange::PROPERTY System.Double Max { public get; public init; }
+GenWave.Abstractions.Playout.EnergyRange::PROPERTY System.Double Min { public get; public init; }
+GenWave.Abstractions.Playout.EnergyRange::PROPERTY static GenWave.Abstractions.Playout.EnergyRange Unconstrained { public get; }
+GenWave.Abstractions.Playout.EnergyRange::TYPE class : none [System.IEquatable<GenWave.Abstractions.Playout.EnergyRange>]
+GenWave.Abstractions.Playout.OnAirSnapshot::CTOR (GenWave.Core.Domain.ScheduleSegment Segment, System.Nullable<System.Int64> PersonaId, GenWave.Abstractions.Playout.SegmentEnvelope Envelope, System.Nullable<System.DateTimeOffset> BoundaryAt, GenWave.Core.Domain.ScheduleSegment NextSegment, GenWave.Core.Domain.ShowSummary Show = null)
+GenWave.Abstractions.Playout.OnAirSnapshot::PROPERTY GenWave.Abstractions.Playout.SegmentEnvelope Envelope { public get; public init; }
+GenWave.Abstractions.Playout.OnAirSnapshot::PROPERTY GenWave.Core.Domain.ScheduleSegment NextSegment { public get; public init; }
+GenWave.Abstractions.Playout.OnAirSnapshot::PROPERTY GenWave.Core.Domain.ScheduleSegment Segment { public get; public init; }
+GenWave.Abstractions.Playout.OnAirSnapshot::PROPERTY GenWave.Core.Domain.ShowSummary Show { public get; public init; }
+GenWave.Abstractions.Playout.OnAirSnapshot::PROPERTY System.Nullable<System.DateTimeOffset> BoundaryAt { public get; public init; }
+GenWave.Abstractions.Playout.OnAirSnapshot::PROPERTY System.Nullable<System.Int64> PersonaId { public get; public init; }
+GenWave.Abstractions.Playout.OnAirSnapshot::TYPE class : none [System.IEquatable<GenWave.Abstractions.Playout.OnAirSnapshot>]
+GenWave.Abstractions.Playout.RotationPredicate::CTOR (System.Nullable<System.Int32> MaxPlays = null, System.Nullable<System.Int32> NotAiredWithinDays = null)
+GenWave.Abstractions.Playout.RotationPredicate::PROPERTY System.Nullable<System.Int32> MaxPlays { public get; public init; }
+GenWave.Abstractions.Playout.RotationPredicate::PROPERTY System.Nullable<System.Int32> NotAiredWithinDays { public get; public init; }
+GenWave.Abstractions.Playout.RotationPredicate::TYPE class : none [System.IEquatable<GenWave.Abstractions.Playout.RotationPredicate>]
+GenWave.Abstractions.Playout.SegmentEnvelope::CTOR (System.TimeOnly StartsAt, System.TimeOnly EndsAt, System.Collections.Generic.IReadOnlyList<System.String> Genres, GenWave.Abstractions.Playout.EnergyRange EnergyRange)
+GenWave.Abstractions.Playout.SegmentEnvelope::PROPERTY GenWave.Abstractions.Playout.EnergyRange EnergyRange { public get; public init; }
+GenWave.Abstractions.Playout.SegmentEnvelope::PROPERTY GenWave.Abstractions.Playout.RotationPredicate Rotation { public get; public init; }
+GenWave.Abstractions.Playout.SegmentEnvelope::PROPERTY System.Collections.Generic.IReadOnlyList<System.String> Genres { public get; public init; }
+GenWave.Abstractions.Playout.SegmentEnvelope::PROPERTY System.TimeOnly EndsAt { public get; public init; }
+GenWave.Abstractions.Playout.SegmentEnvelope::PROPERTY System.TimeOnly StartsAt { public get; public init; }
+GenWave.Abstractions.Playout.SegmentEnvelope::PROPERTY static GenWave.Abstractions.Playout.SegmentEnvelope StationDefault { public get; }
+GenWave.Abstractions.Playout.SegmentEnvelope::TYPE class : none [System.IEquatable<GenWave.Abstractions.Playout.SegmentEnvelope>]
+GenWave.Core.Abstractions.IActivePersonaAccessor::METHOD System.String TryGetCachedName(System.Int64 personaId)
+GenWave.Core.Abstractions.IActivePersonaAccessor::METHOD System.Threading.Tasks.Task<GenWave.Core.Domain.Persona> ResolveAsync(System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IActivePersonaAccessor::METHOD System.Threading.Tasks.Task<GenWave.Core.Domain.PersonaCard> ResolveCardAsync(System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IActivePersonaAccessor::PROPERTY System.Nullable<System.Int64> ActivePersonaId { public get; }
+GenWave.Core.Abstractions.IActivePersonaAccessor::PROPERTY System.Nullable<System.Int64> ActiveShowId { public get; }
+GenWave.Core.Abstractions.IActivePersonaAccessor::TYPE interface : none []
+GenWave.Core.Abstractions.IAdSpotSource::METHOD System.Threading.Tasks.ValueTask<GenWave.Core.Domain.MediaItem> GetNextSpotAsync(System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IAdSpotSource::TYPE interface : none []
+GenWave.Core.Abstractions.IArtworkTokenStore::METHOD System.Threading.Tasks.Task<GenWave.Core.Domain.ArtworkTokenResolution> ResolveAsync(System.String token, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IArtworkTokenStore::METHOD System.Threading.Tasks.Task<System.String> GetOrCreateTokenAsync(System.Int64 mediaId, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IArtworkTokenStore::TYPE interface : none []
+GenWave.Core.Abstractions.IAudiencePostureProvider::PROPERTY GenWave.Core.Domain.AudiencePosture Current { public get; }
+GenWave.Core.Abstractions.IAudiencePostureProvider::TYPE interface : none []
+GenWave.Core.Abstractions.IBoundaryBiasProvider::PROPERTY System.TimeSpan Current { public get; }
+GenWave.Core.Abstractions.IBoundaryBiasProvider::TYPE interface : none []
+GenWave.Core.Abstractions.ICadenceProvider::PROPERTY GenWave.Core.Domain.CadenceConfig Current { public get; }
+GenWave.Core.Abstractions.ICadenceProvider::TYPE interface : none []
+GenWave.Core.Abstractions.IContextProvider::METHOD System.Threading.Tasks.Task<GenWave.Core.Domain.ContextContent> FetchAsync(System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IContextProvider::PROPERTY System.String Key { public get; }
+GenWave.Core.Abstractions.IContextProvider::TYPE interface : none []
+GenWave.Core.Abstractions.ICopyBoundsProvider::PROPERTY System.Int32 MaxCopyChars { public get; }
+GenWave.Core.Abstractions.ICopyBoundsProvider::TYPE interface : none []
+GenWave.Core.Abstractions.IGenWavePlugin::METHOD System.Void Register(GenWave.Core.Abstractions.IPluginHost host)
+GenWave.Core.Abstractions.IGenWavePlugin::PROPERTY System.String Name { public get; }
+GenWave.Core.Abstractions.IGenWavePlugin::TYPE interface : none []
+GenWave.Core.Abstractions.IListenerStatsSource::METHOD System.Threading.Tasks.Task<System.Nullable<System.Int32>> GetListenerCountAsync(System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IListenerStatsSource::TYPE interface : none []
+GenWave.Core.Abstractions.IMediaCatalog::METHOD System.Threading.Tasks.Task<GenWave.Core.Abstractions.PagedResult<GenWave.Core.Domain.MediaReference>> ListAsync(GenWave.Core.Domain.LibraryScope scope, GenWave.Core.Abstractions.MediaQuery query, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IMediaCatalog::METHOD System.Threading.Tasks.Task<GenWave.Core.Domain.CatalogStatusCounts> GetStatusCountsAsync(GenWave.Core.Domain.LibraryScope safeScope, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IMediaCatalog::METHOD System.Threading.Tasks.Task<GenWave.Core.Domain.MediaReference> GetByIdAsync(GenWave.Core.Domain.LibraryScope scope, System.String mediaId, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IMediaCatalog::METHOD System.Threading.Tasks.Task<GenWave.Core.Domain.MediaReference> GetByIdUnscopedAsync(System.String mediaId, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IMediaCatalog::METHOD System.Threading.Tasks.Task<GenWave.Core.Domain.MediaReference> GetRandomPlayableAsync(GenWave.Core.Domain.LibraryScope scope, System.Collections.Generic.IReadOnlyList<System.String> excludeIds, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IMediaCatalog::METHOD System.Threading.Tasks.Task<GenWave.Core.Domain.MediaReference> GetRandomReadyAdSpotAsync(GenWave.Core.Domain.LibraryScope scope, System.Collections.Generic.IReadOnlyList<System.String> excludeIds, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IMediaCatalog::METHOD System.Threading.Tasks.Task<GenWave.Core.Domain.MediaReference> GetRandomReadyAsync(GenWave.Core.Domain.LibraryScope scope, System.Collections.Generic.IReadOnlyList<System.String> excludeIds, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IMediaCatalog::METHOD System.Threading.Tasks.Task<GenWave.Core.Domain.MediaReference> GetRandomReadyByImagingKindAsync(GenWave.Core.Domain.LibraryScope scope, GenWave.Core.Domain.ImagingKind kind, System.Nullable<System.Int64> showId, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IMediaCatalog::METHOD System.Threading.Tasks.Task<GenWave.Core.Domain.MediaReference> GetRandomReadyByImagingKindAsync(GenWave.Core.Domain.LibraryScope scope, GenWave.Core.Domain.ImagingKind kind, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IMediaCatalog::METHOD System.Threading.Tasks.Task<GenWave.Core.Domain.RotationCandidate> GetEnvelopeCandidateAsync(GenWave.Core.Domain.LibraryScope scope, System.Collections.Generic.IReadOnlyList<System.String> orderedRecentIds, System.Int32 artistSeparation, GenWave.Abstractions.Playout.SegmentEnvelope envelope, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IMediaCatalog::METHOD System.Threading.Tasks.Task<GenWave.Core.Domain.RotationCandidate> GetRotationCandidateAsync(GenWave.Core.Domain.LibraryScope scope, System.Collections.Generic.IReadOnlyList<System.String> orderedRecentIds, System.Int32 artistSeparation, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IMediaCatalog::METHOD System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<GenWave.Core.Domain.EnvelopeCandidateRow>> GetEnvelopeCandidatePoolAsync(GenWave.Core.Domain.LibraryScope scope, System.Collections.Generic.IReadOnlyList<System.String> orderedRecentIds, System.Int32 artistSeparation, GenWave.Abstractions.Playout.SegmentEnvelope envelope, System.Int32 limit, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IMediaCatalog::METHOD System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<GenWave.Core.Domain.FacetValue>> GetFacetsAsync(GenWave.Core.Domain.FacetField field, GenWave.Core.Domain.LibraryScope scope, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IMediaCatalog::METHOD System.Threading.Tasks.Task<System.Nullable<System.Int32>> GetEnvelopeCandidateCountAsync(GenWave.Core.Domain.LibraryScope scope, GenWave.Abstractions.Playout.SegmentEnvelope envelope, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IMediaCatalog::METHOD System.Threading.Tasks.Task<System.Nullable<System.Int32>> GetPlayCountQuantileAsync(GenWave.Core.Domain.LibraryScope scope, GenWave.Abstractions.Playout.SegmentEnvelope envelope, System.Double quantile, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IMediaCatalog::TYPE interface : none []
+GenWave.Core.Abstractions.IMediaLibraryMembership::METHOD System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlySet<System.Int64>> FilterToLibrariesAsync(System.Collections.Generic.IReadOnlyCollection<System.Int64> mediaIds, GenWave.Core.Domain.LibraryScope libraries, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IMediaLibraryMembership::TYPE interface : none []
+GenWave.Core.Abstractions.IMediaRating::METHOD System.Threading.Tasks.Task<GenWave.Core.Domain.NeverPlayOutcome> SetNeverPlayAsync(System.String mediaId, System.Boolean neverPlay, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IMediaRating::METHOD System.Threading.Tasks.Task<GenWave.Core.Domain.VoteOutcome> VoteAsync(System.String mediaId, GenWave.Core.Domain.VoteDirection direction, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IMediaRating::METHOD System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<GenWave.Core.Domain.MediaRating>> GetRatingsAsync(System.Collections.Generic.IReadOnlyList<System.String> mediaIds, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IMediaRating::METHOD System.Threading.Tasks.Task<System.Int32> BulkSetNeverPlayAsync(GenWave.Core.Abstractions.MediaQuery filter, System.Boolean neverPlay, GenWave.Core.Domain.LibraryScope scope, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IMediaRating::METHOD System.Threading.Tasks.Task<System.Int32> BulkVoteAsync(GenWave.Core.Abstractions.MediaQuery filter, GenWave.Core.Domain.VoteDirection direction, GenWave.Core.Domain.LibraryScope scope, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IMediaRating::TYPE interface : none []
+GenWave.Core.Abstractions.INextItemProvider::METHOD System.Threading.Tasks.Task<GenWave.Core.Domain.MediaItem> GetNextAsync(GenWave.Core.Domain.PlayoutContext ctx, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.INextItemProvider::TYPE interface : none []
+GenWave.Core.Abstractions.IPatterDurationEstimator::METHOD GenWave.Core.Domain.PatterDurationEstimate Estimate(GenWave.Core.Domain.SegmentKind kind, System.String personaName, System.String voice)
+GenWave.Core.Abstractions.IPatterDurationEstimator::METHOD GenWave.Core.Domain.PatterDurationEstimate Estimate(GenWave.Core.Domain.SegmentKind kind, System.String personaName, System.String voice, System.String showName)
+GenWave.Core.Abstractions.IPatterDurationEstimator::METHOD System.Void ObserveRendered(GenWave.Core.Domain.SegmentKind kind, System.String personaName, System.String voice, System.TimeSpan measured)
+GenWave.Core.Abstractions.IPatterDurationEstimator::METHOD System.Void ObserveRendered(GenWave.Core.Domain.SegmentKind kind, System.String personaName, System.String voice, System.TimeSpan measured, System.String showName)
+GenWave.Core.Abstractions.IPatterDurationEstimator::TYPE interface : none []
+GenWave.Core.Abstractions.IPersonaPreviewWriter::METHOD System.Threading.Tasks.Task<GenWave.Core.Domain.PersonaPreviewResult> WritePreviewAsync(GenWave.Core.Domain.SegmentRequest request, GenWave.Core.Domain.Persona personaOverride, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IPersonaPreviewWriter::TYPE interface : none []
+GenWave.Core.Abstractions.IPluginHost::METHOD System.String Setting(System.String key)
+GenWave.Core.Abstractions.IPluginHost::METHOD System.Void AddAdSpotSource(GenWave.Core.Abstractions.IAdSpotSource source)
+GenWave.Core.Abstractions.IPluginHost::METHOD System.Void AddContextProvider(GenWave.Core.Abstractions.IContextProvider provider)
+GenWave.Core.Abstractions.IPluginHost::TYPE interface : none []
+GenWave.Core.Abstractions.IRenderBudgetProvider::PROPERTY System.TimeSpan Current { public get; }
+GenWave.Core.Abstractions.IRenderBudgetProvider::TYPE interface : none []
+GenWave.Core.Abstractions.IRequestCatalogProbe::METHOD System.Threading.Tasks.Task<GenWave.Core.Domain.MediaReference> FindVibeAsync(System.Collections.Generic.IReadOnlyList<System.String> moods, System.String genre, GenWave.Abstractions.Playout.SegmentEnvelope envelope, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IRequestCatalogProbe::METHOD System.Threading.Tasks.Task<GenWave.Core.Domain.MediaReference> GetSelectableByIdAsync(System.Int64 mediaId, GenWave.Abstractions.Playout.SegmentEnvelope envelope, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IRequestCatalogProbe::METHOD System.Threading.Tasks.Task<System.Boolean> HasRequestableGenreAsync(System.String genre, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IRequestCatalogProbe::METHOD System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<System.String>> ListRequestableGenresAsync(System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IRequestCatalogProbe::METHOD System.Threading.Tasks.Task<System.Nullable<System.Int64>> FindBestAsync(System.String artist, System.String title, System.String genre, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IRequestCatalogProbe::TYPE interface : none []
+GenWave.Core.Abstractions.IRequestOverrideEnvelopeProvider::PROPERTY System.Boolean Current { public get; }
+GenWave.Core.Abstractions.IRequestOverrideEnvelopeProvider::TYPE interface : none []
+GenWave.Core.Abstractions.IRequestStore::METHOD System.Threading.Tasks.Task EvictOldestPendingAsync(System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IRequestStore::METHOD System.Threading.Tasks.Task MarkMatchedAsync(System.Int64 id, System.Int64 mediaId, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IRequestStore::METHOD System.Threading.Tasks.Task MarkParsedAsync(System.Int64 id, System.String artist, System.String title, System.String genre, System.Collections.Generic.IReadOnlyList<System.String> moods, System.Boolean unmatched, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IRequestStore::METHOD System.Threading.Tasks.Task MarkUnmatchedAsync(System.Int64 id, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IRequestStore::METHOD System.Threading.Tasks.Task<GenWave.Core.Domain.FulfillableRequest> GetOldestLiveAsync(System.DateTimeOffset now, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IRequestStore::METHOD System.Threading.Tasks.Task<GenWave.Core.Domain.UnparsedRequest> GetForParseAsync(System.Int64 id, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IRequestStore::METHOD System.Threading.Tasks.Task<System.Boolean> TryMarkFulfilledAsync(System.Int64 id, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IRequestStore::METHOD System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<System.Int64>> ListUnparsedPendingIdsAsync(System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IRequestStore::METHOD System.Threading.Tasks.Task<System.Int32> CountPendingAsync(System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IRequestStore::METHOD System.Threading.Tasks.Task<System.Int32> ExpireStaleAsync(System.DateTimeOffset now, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IRequestStore::METHOD System.Threading.Tasks.Task<System.Int64> InsertAsync(System.String wish, System.String pickedGenre, System.String pickedMood, System.DateTimeOffset expiresAt, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.IRequestStore::TYPE interface : none []
+GenWave.Core.Abstractions.IRotationSettingsProvider::PROPERTY GenWave.Core.Domain.RotationSettings Current { public get; }
+GenWave.Core.Abstractions.IRotationSettingsProvider::TYPE interface : none []
+GenWave.Core.Abstractions.ISafeScopeProvider::PROPERTY GenWave.Core.Domain.LibraryScope Current { public get; }
+GenWave.Core.Abstractions.ISafeScopeProvider::TYPE interface : none []
+GenWave.Core.Abstractions.ISegmentCopyWriter::METHOD System.Threading.Tasks.Task<GenWave.Core.Domain.SegmentCopy> WriteAsync(GenWave.Core.Domain.SegmentRequest request, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.ISegmentCopyWriter::TYPE interface : none []
+GenWave.Core.Abstractions.IStationClockProvider::PROPERTY System.DateTimeOffset LocalNow { public get; }
+GenWave.Core.Abstractions.IStationClockProvider::PROPERTY System.TimeZoneInfo Zone { public get; }
+GenWave.Core.Abstractions.IStationClockProvider::TYPE interface : none []
+GenWave.Core.Abstractions.IStationEventSink::METHOD System.Void Publish(GenWave.Core.Events.StationEvent evt)
+GenWave.Core.Abstractions.IStationEventSink::TYPE interface : none []
+GenWave.Core.Abstractions.IStationIdentityProvider::PROPERTY GenWave.Core.Domain.StationIdentity Current { public get; }
+GenWave.Core.Abstractions.IStationIdentityProvider::TYPE interface : none []
+GenWave.Core.Abstractions.IStationScopeProvider::PROPERTY GenWave.Core.Domain.LibraryScope Current { public get; }
+GenWave.Core.Abstractions.IStationScopeProvider::TYPE interface : none []
+GenWave.Core.Abstractions.ITtsSegmentSource::METHOD System.Threading.Tasks.Task<GenWave.Core.Domain.MediaItem> RenderAsync(GenWave.Core.Domain.SegmentRequest request, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.ITtsSegmentSource::TYPE interface : none []
+GenWave.Core.Abstractions.ITtsSynthesizer::METHOD System.Threading.Tasks.Task<System.String> SynthesizeAsync(GenWave.Core.Domain.TtsRenderContext context, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.ITtsSynthesizer::METHOD System.Threading.Tasks.Task<System.String> SynthesizeAsync(System.String text, System.String voice, System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.ITtsSynthesizer::TYPE interface : none []
+GenWave.Core.Abstractions.ITtsVoiceLister::METHOD System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<System.String>> ListVoicesAsync(System.Threading.CancellationToken ct)
+GenWave.Core.Abstractions.ITtsVoiceLister::TYPE interface : none []
+GenWave.Core.Abstractions.MediaQuery::CTOR (System.String State = null, System.String Artist = null, System.String Genre = null, System.Nullable<System.Int64> LibraryId = null, System.String Q = null, System.Int32 Page = 1, System.Int32 Limit = 50, System.Nullable<System.Boolean> Eligible = null, System.Nullable<System.Boolean> NeverPlay = null, System.Nullable<System.Int32> Year = null, System.Nullable<System.Int32> Decade = null, System.Nullable<System.Boolean> YearMissing = null, System.String ArtistExact = null, System.String AlbumExact = null, System.Collections.Generic.IReadOnlyList<System.String> GenresExact = null, System.Collections.Generic.IReadOnlyList<System.String> MoodsExact = null, System.Nullable<System.Boolean> IncludeUnavailable = null)
+GenWave.Core.Abstractions.MediaQuery::PROPERTY System.Boolean HidesUnavailable { public get; }
+GenWave.Core.Abstractions.MediaQuery::PROPERTY System.Collections.Generic.IReadOnlyList<System.String> GenresExact { public get; public init; }
+GenWave.Core.Abstractions.MediaQuery::PROPERTY System.Collections.Generic.IReadOnlyList<System.String> MoodsExact { public get; public init; }
+GenWave.Core.Abstractions.MediaQuery::PROPERTY System.Int32 Limit { public get; public init; }
+GenWave.Core.Abstractions.MediaQuery::PROPERTY System.Int32 Page { public get; public init; }
+GenWave.Core.Abstractions.MediaQuery::PROPERTY System.Nullable<System.Boolean> Eligible { public get; public init; }
+GenWave.Core.Abstractions.MediaQuery::PROPERTY System.Nullable<System.Boolean> IncludeUnavailable { public get; public init; }
+GenWave.Core.Abstractions.MediaQuery::PROPERTY System.Nullable<System.Boolean> NeverAired { public get; public init; }
+GenWave.Core.Abstractions.MediaQuery::PROPERTY System.Nullable<System.Boolean> NeverPlay { public get; public init; }
+GenWave.Core.Abstractions.MediaQuery::PROPERTY System.Nullable<System.Boolean> YearMissing { public get; public init; }
+GenWave.Core.Abstractions.MediaQuery::PROPERTY System.Nullable<System.DateOnly> AiredBefore { public get; public init; }
+GenWave.Core.Abstractions.MediaQuery::PROPERTY System.Nullable<System.Int32> Decade { public get; public init; }
+GenWave.Core.Abstractions.MediaQuery::PROPERTY System.Nullable<System.Int32> Year { public get; public init; }
+GenWave.Core.Abstractions.MediaQuery::PROPERTY System.Nullable<System.Int64> LibraryId { public get; public init; }
+GenWave.Core.Abstractions.MediaQuery::PROPERTY System.String AlbumExact { public get; public init; }
+GenWave.Core.Abstractions.MediaQuery::PROPERTY System.String Artist { public get; public init; }
+GenWave.Core.Abstractions.MediaQuery::PROPERTY System.String ArtistExact { public get; public init; }
+GenWave.Core.Abstractions.MediaQuery::PROPERTY System.String Genre { public get; public init; }
+GenWave.Core.Abstractions.MediaQuery::PROPERTY System.String Q { public get; public init; }
+GenWave.Core.Abstractions.MediaQuery::PROPERTY System.String State { public get; public init; }
+GenWave.Core.Abstractions.MediaQuery::TYPE class : none [System.IEquatable<GenWave.Core.Abstractions.MediaQuery>]
+GenWave.Core.Abstractions.NoOpStationEventSink::CTOR ()
+GenWave.Core.Abstractions.NoOpStationEventSink::FIELD static GenWave.Core.Abstractions.NoOpStationEventSink Instance readonly
+GenWave.Core.Abstractions.NoOpStationEventSink::METHOD System.Void Publish(GenWave.Core.Events.StationEvent evt)
+GenWave.Core.Abstractions.NoOpStationEventSink::TYPE class : none [GenWave.Core.Abstractions.IStationEventSink]
+GenWave.Core.Abstractions.PagedResult<T>::CTOR (System.Collections.Generic.IReadOnlyList<T> Items, System.Int32 Total, System.Int32 Pages)
+GenWave.Core.Abstractions.PagedResult<T>::PROPERTY System.Collections.Generic.IReadOnlyList<T> Items { public get; public init; }
+GenWave.Core.Abstractions.PagedResult<T>::PROPERTY System.Int32 Pages { public get; public init; }
+GenWave.Core.Abstractions.PagedResult<T>::PROPERTY System.Int32 Total { public get; public init; }
+GenWave.Core.Abstractions.PagedResult<T>::TYPE class : none [System.IEquatable<GenWave.Core.Abstractions.PagedResult<T>>]
+GenWave.Core.Domain.ArtworkTokenResolution::CTOR (System.Int64 MediaId, System.String Path)
+GenWave.Core.Domain.ArtworkTokenResolution::PROPERTY System.Int64 MediaId { public get; public init; }
+GenWave.Core.Domain.ArtworkTokenResolution::PROPERTY System.String Path { public get; public init; }
+GenWave.Core.Domain.ArtworkTokenResolution::TYPE class : none [System.IEquatable<GenWave.Core.Domain.ArtworkTokenResolution>]
+GenWave.Core.Domain.AudiencePosture::FIELD System.Int32 value__
+GenWave.Core.Domain.AudiencePosture::FIELD static GenWave.Core.Domain.AudiencePosture Everyone const = 0
+GenWave.Core.Domain.AudiencePosture::FIELD static GenWave.Core.Domain.AudiencePosture Mature const = 1
+GenWave.Core.Domain.AudiencePosture::TYPE enum : none [System.IComparable,System.IConvertible,System.IFormattable,System.ISpanFormattable]
+GenWave.Core.Domain.AudiencePostureParser::METHOD static GenWave.Core.Domain.AudiencePosture Parse(System.String value)
+GenWave.Core.Domain.AudiencePostureParser::TYPE class : none []
+GenWave.Core.Domain.BoothLogFiredRuleSummary::CTOR (System.String Summary, System.Double Weight)
+GenWave.Core.Domain.BoothLogFiredRuleSummary::METHOD static GenWave.Core.Domain.BoothLogFiredRuleSummary FromTasteRule(GenWave.Core.Domain.TasteRule rule)
+GenWave.Core.Domain.BoothLogFiredRuleSummary::PROPERTY System.Double Weight { public get; public init; }
+GenWave.Core.Domain.BoothLogFiredRuleSummary::PROPERTY System.String Summary { public get; public init; }
+GenWave.Core.Domain.BoothLogFiredRuleSummary::TYPE class : none [System.IEquatable<GenWave.Core.Domain.BoothLogFiredRuleSummary>]
+GenWave.Core.Domain.BoothLogPickStamp::CTOR (System.Collections.Generic.IReadOnlyList<GenWave.Core.Domain.BoothLogFiredRuleSummary> FiredRules, System.Boolean IsExploration)
+GenWave.Core.Domain.BoothLogPickStamp::METHOD static GenWave.Core.Domain.BoothLogPickStamp FromDiagnostics(GenWave.Core.Domain.PersonaPickDiagnostics diagnostics)
+GenWave.Core.Domain.BoothLogPickStamp::PROPERTY System.Boolean IsExploration { public get; public init; }
+GenWave.Core.Domain.BoothLogPickStamp::PROPERTY System.Collections.Generic.IReadOnlyList<GenWave.Core.Domain.BoothLogFiredRuleSummary> FiredRules { public get; public init; }
+GenWave.Core.Domain.BoothLogPickStamp::PROPERTY System.Nullable<System.Double> Nudge { public get; public init; }
+GenWave.Core.Domain.BoothLogPickStamp::PROPERTY System.Nullable<System.Int32> RotationRelax { public get; public init; }
+GenWave.Core.Domain.BoothLogPickStamp::TYPE class : none [System.IEquatable<GenWave.Core.Domain.BoothLogPickStamp>]
+GenWave.Core.Domain.BoothLogPickStampSerializer::METHOD static GenWave.Core.Domain.BoothLogPickStamp Deserialize(System.String json)
+GenWave.Core.Domain.BoothLogPickStampSerializer::METHOD static System.String Serialize(GenWave.Core.Domain.BoothLogPickStamp stamp)
+GenWave.Core.Domain.BoothLogPickStampSerializer::TYPE class : none []
+GenWave.Core.Domain.CadenceConfig::CTOR ()
+GenWave.Core.Domain.CadenceConfig::PROPERTY System.Boolean BackAnnounceAfterEachTrack { public get; public init; }
+GenWave.Core.Domain.CadenceConfig::PROPERTY System.Boolean LeadInBeforeEachTrack { public get; public init; }
+GenWave.Core.Domain.CadenceConfig::PROPERTY System.Int32 StationIdEveryNUnits { public get; public init; }
+GenWave.Core.Domain.CadenceConfig::TYPE class : none [System.IEquatable<GenWave.Core.Domain.CadenceConfig>]
+GenWave.Core.Domain.CatalogStatusCounts::CTOR (System.Int32 Ready, System.Int32 Enriching, System.Int32 Failed, System.Int32 Unavailable, System.Int32 Playable)
+GenWave.Core.Domain.CatalogStatusCounts::PROPERTY System.Int32 Enriching { public get; public init; }
+GenWave.Core.Domain.CatalogStatusCounts::PROPERTY System.Int32 Failed { public get; public init; }
+GenWave.Core.Domain.CatalogStatusCounts::PROPERTY System.Int32 Playable { public get; public init; }
+GenWave.Core.Domain.CatalogStatusCounts::PROPERTY System.Int32 Ready { public get; public init; }
+GenWave.Core.Domain.CatalogStatusCounts::PROPERTY System.Int32 Unavailable { public get; public init; }
+GenWave.Core.Domain.CatalogStatusCounts::TYPE class : none [System.IEquatable<GenWave.Core.Domain.CatalogStatusCounts>]
+GenWave.Core.Domain.ContextContent::CTOR (System.Collections.Generic.IReadOnlyList<System.String> Facts, System.DateTimeOffset FreshUntil)
+GenWave.Core.Domain.ContextContent::PROPERTY System.Collections.Generic.IReadOnlyList<System.String> Facts { public get; public init; }
+GenWave.Core.Domain.ContextContent::PROPERTY System.DateTimeOffset FreshUntil { public get; public init; }
+GenWave.Core.Domain.ContextContent::TYPE class : none [System.IEquatable<GenWave.Core.Domain.ContextContent>]
+GenWave.Core.Domain.CrosstalkAiredLine::CTOR (GenWave.Core.Domain.CrosstalkSpeaker Speaker, System.String Text, System.Boolean IsInterjection)
+GenWave.Core.Domain.CrosstalkAiredLine::PROPERTY GenWave.Core.Domain.CrosstalkSpeaker Speaker { public get; public init; }
+GenWave.Core.Domain.CrosstalkAiredLine::PROPERTY System.Boolean IsInterjection { public get; public init; }
+GenWave.Core.Domain.CrosstalkAiredLine::PROPERTY System.String Text { public get; public init; }
+GenWave.Core.Domain.CrosstalkAiredLine::TYPE class : none [System.IEquatable<GenWave.Core.Domain.CrosstalkAiredLine>]
+GenWave.Core.Domain.CrosstalkAiredScript::CTOR (System.Collections.Generic.IReadOnlyList<GenWave.Core.Domain.CrosstalkAiredLine> Lines)
+GenWave.Core.Domain.CrosstalkAiredScript::PROPERTY System.Collections.Generic.IReadOnlyList<GenWave.Core.Domain.CrosstalkAiredLine> Lines { public get; public init; }
+GenWave.Core.Domain.CrosstalkAiredScript::TYPE class : none [System.IEquatable<GenWave.Core.Domain.CrosstalkAiredScript>]
+GenWave.Core.Domain.CrosstalkAiredScriptSerializer::METHOD static GenWave.Core.Domain.CrosstalkAiredScript Deserialize(System.String json)
+GenWave.Core.Domain.CrosstalkAiredScriptSerializer::METHOD static System.String Serialize(GenWave.Core.Domain.CrosstalkAiredScript script)
+GenWave.Core.Domain.CrosstalkAiredScriptSerializer::TYPE class : none []
+GenWave.Core.Domain.CrosstalkSpeaker::FIELD System.Int32 value__
+GenWave.Core.Domain.CrosstalkSpeaker::FIELD static GenWave.Core.Domain.CrosstalkSpeaker Host const = 0
+GenWave.Core.Domain.CrosstalkSpeaker::FIELD static GenWave.Core.Domain.CrosstalkSpeaker Neighbor const = 1
+GenWave.Core.Domain.CrosstalkSpeaker::TYPE enum : none [System.IComparable,System.IConvertible,System.IFormattable,System.ISpanFormattable]
+GenWave.Core.Domain.CuePoints::CTOR (System.Double CueInSec, System.Double CueOutSec)
+GenWave.Core.Domain.CuePoints::PROPERTY System.Double CueInSec { public get; public init; }
+GenWave.Core.Domain.CuePoints::PROPERTY System.Double CueOutSec { public get; public init; }
+GenWave.Core.Domain.CuePoints::TYPE class : none [System.IEquatable<GenWave.Core.Domain.CuePoints>]
+GenWave.Core.Domain.EnvelopeCandidateRow::CTOR (GenWave.Core.Domain.MediaReference Media, System.Nullable<System.Double> Energy, System.Collections.Generic.IReadOnlyList<System.String> Moods, System.Boolean RepeatedRecent, System.Boolean RepeatedArtist)
+GenWave.Core.Domain.EnvelopeCandidateRow::PROPERTY GenWave.Core.Domain.MediaReference Media { public get; public init; }
+GenWave.Core.Domain.EnvelopeCandidateRow::PROPERTY System.Boolean RepeatedArtist { public get; public init; }
+GenWave.Core.Domain.EnvelopeCandidateRow::PROPERTY System.Boolean RepeatedRecent { public get; public init; }
+GenWave.Core.Domain.EnvelopeCandidateRow::PROPERTY System.Collections.Generic.IReadOnlyList<System.String> Moods { public get; public init; }
+GenWave.Core.Domain.EnvelopeCandidateRow::PROPERTY System.Double Nudge { public get; public init; }
+GenWave.Core.Domain.EnvelopeCandidateRow::PROPERTY System.Int32 PlayCount { public get; public init; }
+GenWave.Core.Domain.EnvelopeCandidateRow::PROPERTY System.Nullable<System.Double> Energy { public get; public init; }
+GenWave.Core.Domain.EnvelopeCandidateRow::TYPE class : none [System.IEquatable<GenWave.Core.Domain.EnvelopeCandidateRow>]
+GenWave.Core.Domain.FacetField::FIELD System.Int32 value__
+GenWave.Core.Domain.FacetField::FIELD static GenWave.Core.Domain.FacetField Album const = 1
+GenWave.Core.Domain.FacetField::FIELD static GenWave.Core.Domain.FacetField Artist const = 0
+GenWave.Core.Domain.FacetField::FIELD static GenWave.Core.Domain.FacetField Genre const = 2
+GenWave.Core.Domain.FacetField::TYPE enum : none [System.IComparable,System.IConvertible,System.IFormattable,System.ISpanFormattable]
+GenWave.Core.Domain.FacetValue::CTOR (System.String Value, System.Int32 Count)
+GenWave.Core.Domain.FacetValue::PROPERTY System.Int32 Count { public get; public init; }
+GenWave.Core.Domain.FacetValue::PROPERTY System.String Value { public get; public init; }
+GenWave.Core.Domain.FacetValue::TYPE class : none [System.IEquatable<GenWave.Core.Domain.FacetValue>]
+GenWave.Core.Domain.FulfillableRequest::CTOR (System.Int64 Id, System.Nullable<System.Int64> MatchedMediaId, System.String Genre, System.Collections.Generic.IReadOnlyList<System.String> Moods)
+GenWave.Core.Domain.FulfillableRequest::PROPERTY System.Collections.Generic.IReadOnlyList<System.String> Moods { public get; public init; }
+GenWave.Core.Domain.FulfillableRequest::PROPERTY System.Int64 Id { public get; public init; }
+GenWave.Core.Domain.FulfillableRequest::PROPERTY System.Nullable<System.Int64> MatchedMediaId { public get; public init; }
+GenWave.Core.Domain.FulfillableRequest::PROPERTY System.String Genre { public get; public init; }
+GenWave.Core.Domain.FulfillableRequest::TYPE class : none [System.IEquatable<GenWave.Core.Domain.FulfillableRequest>]
+GenWave.Core.Domain.ImagingKind::FIELD System.Int32 value__
+GenWave.Core.Domain.ImagingKind::FIELD static GenWave.Core.Domain.ImagingKind Ad const = 4
+GenWave.Core.Domain.ImagingKind::FIELD static GenWave.Core.Domain.ImagingKind Jingle const = 2
+GenWave.Core.Domain.ImagingKind::FIELD static GenWave.Core.Domain.ImagingKind Liner const = 0
+GenWave.Core.Domain.ImagingKind::FIELD static GenWave.Core.Domain.ImagingKind Promo const = 3
+GenWave.Core.Domain.ImagingKind::FIELD static GenWave.Core.Domain.ImagingKind StationId const = 1
+GenWave.Core.Domain.ImagingKind::TYPE enum : none [System.IComparable,System.IConvertible,System.IFormattable,System.ISpanFormattable]
+GenWave.Core.Domain.LibraryScope::CTOR (System.Collections.Generic.IReadOnlyCollection<System.Int64> LibraryIds)
+GenWave.Core.Domain.LibraryScope::FIELD static GenWave.Core.Domain.LibraryScope None readonly
+GenWave.Core.Domain.LibraryScope::PROPERTY System.Boolean IsEmpty { public get; }
+GenWave.Core.Domain.LibraryScope::PROPERTY System.Collections.Generic.IReadOnlyCollection<System.Int64> LibraryIds { public get; public init; }
+GenWave.Core.Domain.LibraryScope::TYPE class : none [System.IEquatable<GenWave.Core.Domain.LibraryScope>]
+GenWave.Core.Domain.Loudness::CTOR (System.Double IntegratedLufs, System.Double TruePeakDbtp, System.Boolean Measurable)
+GenWave.Core.Domain.Loudness::PROPERTY System.Boolean Measurable { public get; public init; }
+GenWave.Core.Domain.Loudness::PROPERTY System.Double IntegratedLufs { public get; public init; }
+GenWave.Core.Domain.Loudness::PROPERTY System.Double TruePeakDbtp { public get; public init; }
+GenWave.Core.Domain.Loudness::TYPE struct : none [System.IEquatable<GenWave.Core.Domain.Loudness>]
+GenWave.Core.Domain.MediaItem::CTOR (System.String MediaId, System.String Locator, System.String Title, GenWave.Core.Domain.Loudness Loudness, System.String Artist = null, GenWave.Core.Domain.CuePoints Cue = null, System.Nullable<System.Double> IntroEnergy = null, System.Nullable<System.Double> OutroEnergy = null, System.String Album = null, System.String Genre = null, System.Nullable<System.Int32> Year = null, System.Nullable<System.Int32> DurationMs = null, GenWave.Core.Domain.PersonaPickDiagnostics PersonaPick = null, System.Boolean RequestFulfilled = False, System.String DjName = null, System.Nullable<GenWave.Core.Domain.SegmentKind> SegmentKind = null)
+GenWave.Core.Domain.MediaItem::PROPERTY GenWave.Core.Domain.CrosstalkAiredScript CrosstalkScript { public get; public init; }
+GenWave.Core.Domain.MediaItem::PROPERTY GenWave.Core.Domain.CuePoints Cue { public get; public init; }
+GenWave.Core.Domain.MediaItem::PROPERTY GenWave.Core.Domain.Loudness Loudness { public get; public init; }
+GenWave.Core.Domain.MediaItem::PROPERTY GenWave.Core.Domain.PersonaPickDiagnostics PersonaPick { public get; public init; }
+GenWave.Core.Domain.MediaItem::PROPERTY System.Boolean RequestFulfilled { public get; public init; }
+GenWave.Core.Domain.MediaItem::PROPERTY System.Nullable<GenWave.Core.Domain.SegmentKind> SegmentKind { public get; public init; }
+GenWave.Core.Domain.MediaItem::PROPERTY System.Nullable<System.Double> IntroEnergy { public get; public init; }
+GenWave.Core.Domain.MediaItem::PROPERTY System.Nullable<System.Double> Nudge { public get; public init; }
+GenWave.Core.Domain.MediaItem::PROPERTY System.Nullable<System.Double> OutroEnergy { public get; public init; }
+GenWave.Core.Domain.MediaItem::PROPERTY System.Nullable<System.Int32> DurationMs { public get; public init; }
+GenWave.Core.Domain.MediaItem::PROPERTY System.Nullable<System.Int32> RotationRelax { public get; public init; }
+GenWave.Core.Domain.MediaItem::PROPERTY System.Nullable<System.Int32> Year { public get; public init; }
+GenWave.Core.Domain.MediaItem::PROPERTY System.String Album { public get; public init; }
+GenWave.Core.Domain.MediaItem::PROPERTY System.String Artist { public get; public init; }
+GenWave.Core.Domain.MediaItem::PROPERTY System.String DjName { public get; public init; }
+GenWave.Core.Domain.MediaItem::PROPERTY System.String Genre { public get; public init; }
+GenWave.Core.Domain.MediaItem::PROPERTY System.String Locator { public get; public init; }
+GenWave.Core.Domain.MediaItem::PROPERTY System.String MediaId { public get; public init; }
+GenWave.Core.Domain.MediaItem::PROPERTY System.String Title { public get; public init; }
+GenWave.Core.Domain.MediaItem::TYPE class : none [System.IEquatable<GenWave.Core.Domain.MediaItem>]
+GenWave.Core.Domain.MediaRating::CTOR (System.String MediaId, System.Int32 Score, System.Boolean NeverPlay, System.Boolean Rateable = True)
+GenWave.Core.Domain.MediaRating::PROPERTY System.Boolean NeverPlay { public get; public init; }
+GenWave.Core.Domain.MediaRating::PROPERTY System.Boolean Rateable { public get; public init; }
+GenWave.Core.Domain.MediaRating::PROPERTY System.Int32 Score { public get; public init; }
+GenWave.Core.Domain.MediaRating::PROPERTY System.String MediaId { public get; public init; }
+GenWave.Core.Domain.MediaRating::TYPE class : none [System.IEquatable<GenWave.Core.Domain.MediaRating>]
+GenWave.Core.Domain.MediaReference::CTOR (System.String MediaId, System.String Locator, System.String Title, GenWave.Core.Domain.Loudness Loudness, System.Nullable<System.Int32> DurationMs, System.Nullable<System.Int32> SampleRate, System.Nullable<System.Int16> Channels, System.Nullable<System.Int32> BitrateKbps, System.String Artist, System.String Album, System.String Genre, System.Nullable<System.Int32> Year, GenWave.Core.Domain.CuePoints Cue = null, System.Nullable<System.Double> IntroEnergy = null, System.Nullable<System.Double> OutroEnergy = null)
+GenWave.Core.Domain.MediaReference::PROPERTY GenWave.Core.Domain.CuePoints Cue { public get; public init; }
+GenWave.Core.Domain.MediaReference::PROPERTY GenWave.Core.Domain.Loudness Loudness { public get; public init; }
+GenWave.Core.Domain.MediaReference::PROPERTY System.Nullable<System.Double> IntroEnergy { public get; public init; }
+GenWave.Core.Domain.MediaReference::PROPERTY System.Nullable<System.Double> OutroEnergy { public get; public init; }
+GenWave.Core.Domain.MediaReference::PROPERTY System.Nullable<System.Int16> Channels { public get; public init; }
+GenWave.Core.Domain.MediaReference::PROPERTY System.Nullable<System.Int32> BitrateKbps { public get; public init; }
+GenWave.Core.Domain.MediaReference::PROPERTY System.Nullable<System.Int32> DurationMs { public get; public init; }
+GenWave.Core.Domain.MediaReference::PROPERTY System.Nullable<System.Int32> SampleRate { public get; public init; }
+GenWave.Core.Domain.MediaReference::PROPERTY System.Nullable<System.Int32> Year { public get; public init; }
+GenWave.Core.Domain.MediaReference::PROPERTY System.String Album { public get; public init; }
+GenWave.Core.Domain.MediaReference::PROPERTY System.String Artist { public get; public init; }
+GenWave.Core.Domain.MediaReference::PROPERTY System.String Genre { public get; public init; }
+GenWave.Core.Domain.MediaReference::PROPERTY System.String Locator { public get; public init; }
+GenWave.Core.Domain.MediaReference::PROPERTY System.String MediaId { public get; public init; }
+GenWave.Core.Domain.MediaReference::PROPERTY System.String Title { public get; public init; }
+GenWave.Core.Domain.MediaReference::TYPE class : none [System.IEquatable<GenWave.Core.Domain.MediaReference>]
+GenWave.Core.Domain.MoodVocabulary::FIELD static System.Collections.Generic.IReadOnlyList<System.String> Terms readonly
+GenWave.Core.Domain.MoodVocabulary::FIELD static System.Int32 MaxMoodsPerTrack const
+GenWave.Core.Domain.MoodVocabulary::FIELD static System.Int32 Version const
+GenWave.Core.Domain.MoodVocabulary::METHOD static System.Boolean Contains(System.String term)
+GenWave.Core.Domain.MoodVocabulary::TYPE class : none []
+GenWave.Core.Domain.MoodWriteResult::FIELD System.Int32 value__
+GenWave.Core.Domain.MoodWriteResult::FIELD static GenWave.Core.Domain.MoodWriteResult NotFound const = 3
+GenWave.Core.Domain.MoodWriteResult::FIELD static GenWave.Core.Domain.MoodWriteResult TooManyMoods const = 2
+GenWave.Core.Domain.MoodWriteResult::FIELD static GenWave.Core.Domain.MoodWriteResult UnknownMood const = 1
+GenWave.Core.Domain.MoodWriteResult::FIELD static GenWave.Core.Domain.MoodWriteResult Written const = 0
+GenWave.Core.Domain.MoodWriteResult::TYPE enum : none [System.IComparable,System.IConvertible,System.IFormattable,System.ISpanFormattable]
+GenWave.Core.Domain.NeverPlayOutcome::CTOR (GenWave.Core.Domain.RatingWriteResult Result, System.Nullable<System.Boolean> NeverPlay)
+GenWave.Core.Domain.NeverPlayOutcome::PROPERTY GenWave.Core.Domain.RatingWriteResult Result { public get; public init; }
+GenWave.Core.Domain.NeverPlayOutcome::PROPERTY System.Nullable<System.Boolean> NeverPlay { public get; public init; }
+GenWave.Core.Domain.NeverPlayOutcome::TYPE struct : none [System.IEquatable<GenWave.Core.Domain.NeverPlayOutcome>]
+GenWave.Core.Domain.PatterDurationEstimate::CTOR (System.TimeSpan Duration, GenWave.Core.Domain.PatterEstimateConfidence Confidence)
+GenWave.Core.Domain.PatterDurationEstimate::PROPERTY GenWave.Core.Domain.PatterEstimateConfidence Confidence { public get; public init; }
+GenWave.Core.Domain.PatterDurationEstimate::PROPERTY System.TimeSpan Duration { public get; public init; }
+GenWave.Core.Domain.PatterDurationEstimate::TYPE class : none [System.IEquatable<GenWave.Core.Domain.PatterDurationEstimate>]
+GenWave.Core.Domain.PatterEstimateConfidence::FIELD System.Int32 value__
+GenWave.Core.Domain.PatterEstimateConfidence::FIELD static GenWave.Core.Domain.PatterEstimateConfidence Exact const = 0
+GenWave.Core.Domain.PatterEstimateConfidence::FIELD static GenWave.Core.Domain.PatterEstimateConfidence Heuristic const = 2
+GenWave.Core.Domain.PatterEstimateConfidence::FIELD static GenWave.Core.Domain.PatterEstimateConfidence Historical const = 1
+GenWave.Core.Domain.PatterEstimateConfidence::TYPE enum : none [System.IComparable,System.IConvertible,System.IFormattable,System.ISpanFormattable]
+GenWave.Core.Domain.Persona::CTOR (System.Int64 Id, System.String Name, System.String Backstory, System.String Style, System.String Voice, System.DateTime CreatedAt, System.DateTime UpdatedAt, System.String ImportedFrom = null, System.Nullable<System.DateTime> ImportedAt = null, System.String Slug = "")
+GenWave.Core.Domain.Persona::PROPERTY System.DateTime CreatedAt { public get; public init; }
+GenWave.Core.Domain.Persona::PROPERTY System.DateTime UpdatedAt { public get; public init; }
+GenWave.Core.Domain.Persona::PROPERTY System.Int64 Id { public get; public init; }
+GenWave.Core.Domain.Persona::PROPERTY System.Nullable<System.DateTime> ImportedAt { public get; public init; }
+GenWave.Core.Domain.Persona::PROPERTY System.String Backstory { public get; public init; }
+GenWave.Core.Domain.Persona::PROPERTY System.String ImportedFrom { public get; public init; }
+GenWave.Core.Domain.Persona::PROPERTY System.String Name { public get; public init; }
+GenWave.Core.Domain.Persona::PROPERTY System.String Slug { public get; public init; }
+GenWave.Core.Domain.Persona::PROPERTY System.String Style { public get; public init; }
+GenWave.Core.Domain.Persona::PROPERTY System.String Voice { public get; public init; }
+GenWave.Core.Domain.Persona::TYPE class : none [System.IEquatable<GenWave.Core.Domain.Persona>]
+GenWave.Core.Domain.PersonaCard::CTOR (System.Int32 SchemaVersion, System.String Name, System.String Tagline, System.String Soul, System.Collections.Generic.IReadOnlyList<System.String> Quirks, GenWave.Core.Domain.VoiceSpec Voice, System.Double EnergyDisposition, System.Collections.Generic.IReadOnlyList<System.String> Lore, System.Collections.Generic.IReadOnlyList<GenWave.Core.Domain.PersonaCorrection> Corrections, System.Collections.Generic.IReadOnlyList<GenWave.Core.Domain.TasteRule> Taste = null, System.Collections.Generic.IReadOnlyList<GenWave.Core.Domain.PronunciationRule> Pronunciations = null)
+GenWave.Core.Domain.PersonaCard::FIELD static System.Int32 CurrentSchemaVersion const
+GenWave.Core.Domain.PersonaCard::PROPERTY GenWave.Core.Domain.VoiceSpec Voice { public get; public init; }
+GenWave.Core.Domain.PersonaCard::PROPERTY System.Collections.Generic.IReadOnlyList<GenWave.Core.Domain.PersonaCorrection> Corrections { public get; public init; }
+GenWave.Core.Domain.PersonaCard::PROPERTY System.Collections.Generic.IReadOnlyList<GenWave.Core.Domain.PronunciationRule> Pronunciations { public get; public init; }
+GenWave.Core.Domain.PersonaCard::PROPERTY System.Collections.Generic.IReadOnlyList<GenWave.Core.Domain.TasteRule> Taste { public get; public init; }
+GenWave.Core.Domain.PersonaCard::PROPERTY System.Collections.Generic.IReadOnlyList<System.String> Lore { public get; public init; }
+GenWave.Core.Domain.PersonaCard::PROPERTY System.Collections.Generic.IReadOnlyList<System.String> Quirks { public get; public init; }
+GenWave.Core.Domain.PersonaCard::PROPERTY System.Double EnergyDisposition { public get; public init; }
+GenWave.Core.Domain.PersonaCard::PROPERTY System.Int32 SchemaVersion { public get; public init; }
+GenWave.Core.Domain.PersonaCard::PROPERTY System.String Name { public get; public init; }
+GenWave.Core.Domain.PersonaCard::PROPERTY System.String Soul { public get; public init; }
+GenWave.Core.Domain.PersonaCard::PROPERTY System.String Tagline { public get; public init; }
+GenWave.Core.Domain.PersonaCard::TYPE class : none [System.IEquatable<GenWave.Core.Domain.PersonaCard>]
+GenWave.Core.Domain.PersonaCardSerializer::FIELD static System.Text.Json.JsonSerializerOptions Options readonly
+GenWave.Core.Domain.PersonaCardSerializer::METHOD static GenWave.Core.Domain.PersonaCard Deserialize(System.String json)
+GenWave.Core.Domain.PersonaCardSerializer::METHOD static System.String Serialize(GenWave.Core.Domain.PersonaCard card)
+GenWave.Core.Domain.PersonaCardSerializer::TYPE class : none []
+GenWave.Core.Domain.PersonaCorrection::CTOR (System.String From, System.String To)
+GenWave.Core.Domain.PersonaCorrection::PROPERTY System.String From { public get; public init; }
+GenWave.Core.Domain.PersonaCorrection::PROPERTY System.String To { public get; public init; }
+GenWave.Core.Domain.PersonaCorrection::TYPE class : none [System.IEquatable<GenWave.Core.Domain.PersonaCorrection>]
+GenWave.Core.Domain.PersonaPickDiagnostics::CTOR (System.Int32 PoolSize, System.Collections.Generic.IReadOnlyList<System.Double> TopScores, System.Collections.Generic.IReadOnlyList<GenWave.Core.Domain.TasteRule> FiredRules, System.Boolean IsExploration)
+GenWave.Core.Domain.PersonaPickDiagnostics::PROPERTY System.Boolean IsExploration { public get; public init; }
+GenWave.Core.Domain.PersonaPickDiagnostics::PROPERTY System.Collections.Generic.IReadOnlyList<GenWave.Core.Domain.TasteRule> FiredRules { public get; public init; }
+GenWave.Core.Domain.PersonaPickDiagnostics::PROPERTY System.Collections.Generic.IReadOnlyList<System.Double> TopNudges { public get; public init; }
+GenWave.Core.Domain.PersonaPickDiagnostics::PROPERTY System.Collections.Generic.IReadOnlyList<System.Double> TopScores { public get; public init; }
+GenWave.Core.Domain.PersonaPickDiagnostics::PROPERTY System.Int32 PoolSize { public get; public init; }
+GenWave.Core.Domain.PersonaPickDiagnostics::TYPE class : none [System.IEquatable<GenWave.Core.Domain.PersonaPickDiagnostics>]
+GenWave.Core.Domain.PersonaPreviewResult+Busy::CTOR ()
+GenWave.Core.Domain.PersonaPreviewResult+Busy::TYPE class : GenWave.Core.Domain.PersonaPreviewResult [System.IEquatable<GenWave.Core.Domain.PersonaPreviewResult+Busy>,System.IEquatable<GenWave.Core.Domain.PersonaPreviewResult>]
+GenWave.Core.Domain.PersonaPreviewResult+Failed::CTOR (System.String Detail)
+GenWave.Core.Domain.PersonaPreviewResult+Failed::PROPERTY System.String Detail { public get; public init; }
+GenWave.Core.Domain.PersonaPreviewResult+Failed::TYPE class : GenWave.Core.Domain.PersonaPreviewResult [System.IEquatable<GenWave.Core.Domain.PersonaPreviewResult+Failed>,System.IEquatable<GenWave.Core.Domain.PersonaPreviewResult>]
+GenWave.Core.Domain.PersonaPreviewResult+Success::CTOR (System.String Text)
+GenWave.Core.Domain.PersonaPreviewResult+Success::PROPERTY System.String Text { public get; public init; }
+GenWave.Core.Domain.PersonaPreviewResult+Success::TYPE class : GenWave.Core.Domain.PersonaPreviewResult [System.IEquatable<GenWave.Core.Domain.PersonaPreviewResult+Success>,System.IEquatable<GenWave.Core.Domain.PersonaPreviewResult>]
+GenWave.Core.Domain.PersonaPreviewResult::TYPE class : none [System.IEquatable<GenWave.Core.Domain.PersonaPreviewResult>]
+GenWave.Core.Domain.PlayoutContext::CTOR (System.Collections.Generic.IReadOnlyList<System.String> RecentMediaIds, System.Nullable<System.Int32> QueuedAheadMs = null)
+GenWave.Core.Domain.PlayoutContext::PROPERTY System.Collections.Generic.IReadOnlyList<System.String> RecentMediaIds { public get; public init; }
+GenWave.Core.Domain.PlayoutContext::PROPERTY System.Nullable<System.Int32> QueuedAheadMs { public get; public init; }
+GenWave.Core.Domain.PlayoutContext::TYPE class : none [System.IEquatable<GenWave.Core.Domain.PlayoutContext>]
+GenWave.Core.Domain.PronunciationRule::CTOR (System.String Pattern, System.String Word, System.String Ipa)
+GenWave.Core.Domain.PronunciationRule::PROPERTY System.String Ipa { public get; public init; }
+GenWave.Core.Domain.PronunciationRule::PROPERTY System.String Pattern { public get; public init; }
+GenWave.Core.Domain.PronunciationRule::PROPERTY System.String Word { public get; public init; }
+GenWave.Core.Domain.PronunciationRule::TYPE class : none [System.IEquatable<GenWave.Core.Domain.PronunciationRule>]
+GenWave.Core.Domain.RatingWriteResult::FIELD System.Int32 value__
+GenWave.Core.Domain.RatingWriteResult::FIELD static GenWave.Core.Domain.RatingWriteResult NotFound const = 1
+GenWave.Core.Domain.RatingWriteResult::FIELD static GenWave.Core.Domain.RatingWriteResult SafeContentExcluded const = 2
+GenWave.Core.Domain.RatingWriteResult::FIELD static GenWave.Core.Domain.RatingWriteResult Updated const = 0
+GenWave.Core.Domain.RatingWriteResult::TYPE enum : none [System.IComparable,System.IConvertible,System.IFormattable,System.ISpanFormattable]
+GenWave.Core.Domain.RotationCandidate::CTOR (GenWave.Core.Domain.MediaReference Media, System.Boolean RepeatedRecent, System.Boolean RepeatedArtist, System.Nullable<System.Double> Energy = null, GenWave.Core.Domain.PersonaPickDiagnostics PersonaPick = null, System.Boolean RequestFulfilled = False)
+GenWave.Core.Domain.RotationCandidate::PROPERTY GenWave.Core.Domain.MediaReference Media { public get; public init; }
+GenWave.Core.Domain.RotationCandidate::PROPERTY GenWave.Core.Domain.PersonaPickDiagnostics PersonaPick { public get; public init; }
+GenWave.Core.Domain.RotationCandidate::PROPERTY System.Boolean RepeatedArtist { public get; public init; }
+GenWave.Core.Domain.RotationCandidate::PROPERTY System.Boolean RepeatedRecent { public get; public init; }
+GenWave.Core.Domain.RotationCandidate::PROPERTY System.Boolean RequestFulfilled { public get; public init; }
+GenWave.Core.Domain.RotationCandidate::PROPERTY System.Nullable<System.Double> Energy { public get; public init; }
+GenWave.Core.Domain.RotationCandidate::PROPERTY System.Nullable<System.Double> Nudge { public get; public init; }
+GenWave.Core.Domain.RotationCandidate::PROPERTY System.Nullable<System.Int32> RotationRelax { public get; public init; }
+GenWave.Core.Domain.RotationCandidate::TYPE class : none [System.IEquatable<GenWave.Core.Domain.RotationCandidate>]
+GenWave.Core.Domain.RotationSettings::CTOR ()
+GenWave.Core.Domain.RotationSettings::PROPERTY System.Int32 ArtistSeparation { public get; public init; }
+GenWave.Core.Domain.RotationSettings::PROPERTY System.Int32 RecentWindow { public get; public init; }
+GenWave.Core.Domain.RotationSettings::TYPE class : none [System.IEquatable<GenWave.Core.Domain.RotationSettings>]
+GenWave.Core.Domain.ScheduleSegment::CTOR (System.Nullable<System.Int64> Id, System.DayOfWeek Day, System.Int32 StartMinute, System.Int32 EndMinute, System.Nullable<System.Int64> PersonaId, System.Collections.Generic.IReadOnlyList<System.String> Genres, System.Nullable<System.Double> EnergyMin, System.Nullable<System.Double> EnergyMax, GenWave.Core.Domain.ShowSummary Show = null, System.Nullable<System.Int64> ShowId = null)
+GenWave.Core.Domain.ScheduleSegment::METHOD GenWave.Abstractions.Playout.SegmentEnvelope EffectiveEnvelope(GenWave.Abstractions.Playout.SegmentEnvelope stationDefault)
+GenWave.Core.Domain.ScheduleSegment::PROPERTY GenWave.Core.Domain.ShowSummary Show { public get; public init; }
+GenWave.Core.Domain.ScheduleSegment::PROPERTY System.Collections.Generic.IReadOnlyList<System.String> Genres { public get; public init; }
+GenWave.Core.Domain.ScheduleSegment::PROPERTY System.DayOfWeek Day { public get; public init; }
+GenWave.Core.Domain.ScheduleSegment::PROPERTY System.Int32 EndMinute { public get; public init; }
+GenWave.Core.Domain.ScheduleSegment::PROPERTY System.Int32 StartMinute { public get; public init; }
+GenWave.Core.Domain.ScheduleSegment::PROPERTY System.Nullable<System.Double> EnergyMax { public get; public init; }
+GenWave.Core.Domain.ScheduleSegment::PROPERTY System.Nullable<System.Double> EnergyMin { public get; public init; }
+GenWave.Core.Domain.ScheduleSegment::PROPERTY System.Nullable<System.Int64> Id { public get; public init; }
+GenWave.Core.Domain.ScheduleSegment::PROPERTY System.Nullable<System.Int64> PersonaId { public get; public init; }
+GenWave.Core.Domain.ScheduleSegment::PROPERTY System.Nullable<System.Int64> ShowId { public get; public init; }
+GenWave.Core.Domain.ScheduleSegment::TYPE class : none [System.IEquatable<GenWave.Core.Domain.ScheduleSegment>]
+GenWave.Core.Domain.ScheduleSpecial::CTOR (System.Nullable<System.Int64> Id, System.DateOnly OnDate, System.Int32 StartMinute, System.Int32 EndMinute, System.Nullable<System.Int64> PersonaId, System.Collections.Generic.IReadOnlyList<System.String> Genres, System.Nullable<System.Double> EnergyMin, System.Nullable<System.Double> EnergyMax, GenWave.Core.Domain.ShowSummary Show = null, System.Nullable<System.Int64> ShowId = null)
+GenWave.Core.Domain.ScheduleSpecial::PROPERTY GenWave.Core.Domain.ShowSummary Show { public get; public init; }
+GenWave.Core.Domain.ScheduleSpecial::PROPERTY System.Collections.Generic.IReadOnlyList<System.String> Genres { public get; public init; }
+GenWave.Core.Domain.ScheduleSpecial::PROPERTY System.DateOnly OnDate { public get; public init; }
+GenWave.Core.Domain.ScheduleSpecial::PROPERTY System.Int32 EndMinute { public get; public init; }
+GenWave.Core.Domain.ScheduleSpecial::PROPERTY System.Int32 StartMinute { public get; public init; }
+GenWave.Core.Domain.ScheduleSpecial::PROPERTY System.Nullable<System.Double> EnergyMax { public get; public init; }
+GenWave.Core.Domain.ScheduleSpecial::PROPERTY System.Nullable<System.Double> EnergyMin { public get; public init; }
+GenWave.Core.Domain.ScheduleSpecial::PROPERTY System.Nullable<System.Int64> Id { public get; public init; }
+GenWave.Core.Domain.ScheduleSpecial::PROPERTY System.Nullable<System.Int64> PersonaId { public get; public init; }
+GenWave.Core.Domain.ScheduleSpecial::PROPERTY System.Nullable<System.Int64> ShowId { public get; public init; }
+GenWave.Core.Domain.ScheduleSpecial::TYPE class : none [System.IEquatable<GenWave.Core.Domain.ScheduleSpecial>]
+GenWave.Core.Domain.ScheduleWeekSnapshot::CTOR (System.Collections.Generic.IReadOnlyList<GenWave.Core.Domain.ScheduleSegment> Segments)
+GenWave.Core.Domain.ScheduleWeekSnapshot::PROPERTY System.Collections.Generic.IReadOnlyList<GenWave.Core.Domain.ScheduleSegment> Segments { public get; public init; }
+GenWave.Core.Domain.ScheduleWeekSnapshot::TYPE class : none [System.IEquatable<GenWave.Core.Domain.ScheduleWeekSnapshot>]
+GenWave.Core.Domain.ScheduleWeekVersion::METHOD static System.String Compute(System.Collections.Generic.IReadOnlyList<GenWave.Core.Domain.ScheduleSegment> segments)
+GenWave.Core.Domain.ScheduleWeekVersion::TYPE class : none []
+GenWave.Core.Domain.SegmentCopy::CTOR (System.String Text, System.Boolean FreshPerAiring)
+GenWave.Core.Domain.SegmentCopy::PROPERTY System.Boolean FreshPerAiring { public get; public init; }
+GenWave.Core.Domain.SegmentCopy::PROPERTY System.String Text { public get; public init; }
+GenWave.Core.Domain.SegmentCopy::TYPE class : none [System.IEquatable<GenWave.Core.Domain.SegmentCopy>]
+GenWave.Core.Domain.SegmentKind::FIELD System.Int32 value__
+GenWave.Core.Domain.SegmentKind::FIELD static GenWave.Core.Domain.SegmentKind Ad const = 9
+GenWave.Core.Domain.SegmentKind::FIELD static GenWave.Core.Domain.SegmentKind Announcement const = 8
+GenWave.Core.Domain.SegmentKind::FIELD static GenWave.Core.Domain.SegmentKind BackAnnounce const = 2
+GenWave.Core.Domain.SegmentKind::FIELD static GenWave.Core.Domain.SegmentKind ContextSegment const = 6
+GenWave.Core.Domain.SegmentKind::FIELD static GenWave.Core.Domain.SegmentKind Crosstalk const = 7
+GenWave.Core.Domain.SegmentKind::FIELD static GenWave.Core.Domain.SegmentKind LeadIn const = 1
+GenWave.Core.Domain.SegmentKind::FIELD static GenWave.Core.Domain.SegmentKind SignOff const = 4
+GenWave.Core.Domain.SegmentKind::FIELD static GenWave.Core.Domain.SegmentKind SignOn const = 5
+GenWave.Core.Domain.SegmentKind::FIELD static GenWave.Core.Domain.SegmentKind StationId const = 0
+GenWave.Core.Domain.SegmentKind::FIELD static GenWave.Core.Domain.SegmentKind TimeDate const = 3
+GenWave.Core.Domain.SegmentKind::TYPE enum : none [System.IComparable,System.IConvertible,System.IFormattable,System.ISpanFormattable]
+GenWave.Core.Domain.SegmentRequest::CTOR (GenWave.Core.Domain.SegmentKind Kind, System.String Voice, System.String StationName, GenWave.Core.Domain.MediaItem Track, System.DateTimeOffset LocalNow, System.String StationId, System.String PersonaName = null, System.String CounterpartName = null, System.String ContextFacts = null, System.String CrossingTrackTitle = null, System.String CrossingTrackArtist = null, System.String ShowName = null, System.String ShowFlavor = null, System.String CounterpartShowName = null)
+GenWave.Core.Domain.SegmentRequest::PROPERTY GenWave.Core.Domain.MediaItem Track { public get; public init; }
+GenWave.Core.Domain.SegmentRequest::PROPERTY GenWave.Core.Domain.SegmentKind Kind { public get; public init; }
+GenWave.Core.Domain.SegmentRequest::PROPERTY GenWave.Core.Domain.TimeAnnouncementFreshness TimeDateFreshness { public get; public init; }
+GenWave.Core.Domain.SegmentRequest::PROPERTY System.Boolean CrosstalkAiredThisBreak { public get; public init; }
+GenWave.Core.Domain.SegmentRequest::PROPERTY System.DateTimeOffset LocalNow { public get; public init; }
+GenWave.Core.Domain.SegmentRequest::PROPERTY System.String ContextFacts { public get; public init; }
+GenWave.Core.Domain.SegmentRequest::PROPERTY System.String CounterpartName { public get; public init; }
+GenWave.Core.Domain.SegmentRequest::PROPERTY System.String CounterpartShowName { public get; public init; }
+GenWave.Core.Domain.SegmentRequest::PROPERTY System.String CrossingTrackArtist { public get; public init; }
+GenWave.Core.Domain.SegmentRequest::PROPERTY System.String CrossingTrackTitle { public get; public init; }
+GenWave.Core.Domain.SegmentRequest::PROPERTY System.String PersonaName { public get; public init; }
+GenWave.Core.Domain.SegmentRequest::PROPERTY System.String ShowFlavor { public get; public init; }
+GenWave.Core.Domain.SegmentRequest::PROPERTY System.String ShowName { public get; public init; }
+GenWave.Core.Domain.SegmentRequest::PROPERTY System.String StationId { public get; public init; }
+GenWave.Core.Domain.SegmentRequest::PROPERTY System.String StationName { public get; public init; }
+GenWave.Core.Domain.SegmentRequest::PROPERTY System.String Voice { public get; public init; }
+GenWave.Core.Domain.SegmentRequest::TYPE class : none [System.IEquatable<GenWave.Core.Domain.SegmentRequest>]
+GenWave.Core.Domain.ShowSummary::CTOR (System.Int64 Id, System.String Name, System.String Tagline, System.String Flavor)
+GenWave.Core.Domain.ShowSummary::PROPERTY GenWave.Abstractions.Playout.RotationPredicate Rotation { public get; public init; }
+GenWave.Core.Domain.ShowSummary::PROPERTY System.Int64 Id { public get; public init; }
+GenWave.Core.Domain.ShowSummary::PROPERTY System.String Flavor { public get; public init; }
+GenWave.Core.Domain.ShowSummary::PROPERTY System.String Name { public get; public init; }
+GenWave.Core.Domain.ShowSummary::PROPERTY System.String Slug { public get; public init; }
+GenWave.Core.Domain.ShowSummary::PROPERTY System.String Tagline { public get; public init; }
+GenWave.Core.Domain.ShowSummary::TYPE class : none [System.IEquatable<GenWave.Core.Domain.ShowSummary>]
+GenWave.Core.Domain.StationIdentity::CTOR (System.String Id, System.String Name, System.String Voice)
+GenWave.Core.Domain.StationIdentity::PROPERTY System.String Id { public get; public init; }
+GenWave.Core.Domain.StationIdentity::PROPERTY System.String Name { public get; public init; }
+GenWave.Core.Domain.StationIdentity::PROPERTY System.String Voice { public get; public init; }
+GenWave.Core.Domain.StationIdentity::TYPE class : none [System.IEquatable<GenWave.Core.Domain.StationIdentity>]
+GenWave.Core.Domain.TasteContext::CTOR (System.Collections.Generic.IReadOnlyList<System.DayOfWeek> DaysOfWeek, System.Nullable<System.Int32> StartHour, System.Nullable<System.Int32> EndHour)
+GenWave.Core.Domain.TasteContext::PROPERTY System.Collections.Generic.IReadOnlyList<System.DayOfWeek> DaysOfWeek { public get; public init; }
+GenWave.Core.Domain.TasteContext::PROPERTY System.Nullable<System.Int32> EndHour { public get; public init; }
+GenWave.Core.Domain.TasteContext::PROPERTY System.Nullable<System.Int32> StartHour { public get; public init; }
+GenWave.Core.Domain.TasteContext::TYPE class : none [System.IEquatable<GenWave.Core.Domain.TasteContext>]
+GenWave.Core.Domain.TastePredicate::CTOR (System.String Artist, System.String Genre, System.String Tag)
+GenWave.Core.Domain.TastePredicate::METHOD System.String LabelOr(System.String fallback)
+GenWave.Core.Domain.TastePredicate::PROPERTY System.String Artist { public get; public init; }
+GenWave.Core.Domain.TastePredicate::PROPERTY System.String Genre { public get; public init; }
+GenWave.Core.Domain.TastePredicate::PROPERTY System.String Tag { public get; public init; }
+GenWave.Core.Domain.TastePredicate::TYPE class : none [System.IEquatable<GenWave.Core.Domain.TastePredicate>]
+GenWave.Core.Domain.TasteRule::CTOR (GenWave.Core.Domain.TastePredicate Predicate, GenWave.Core.Domain.TasteContext Context, System.Double Weight)
+GenWave.Core.Domain.TasteRule::PROPERTY GenWave.Core.Domain.TasteContext Context { public get; public init; }
+GenWave.Core.Domain.TasteRule::PROPERTY GenWave.Core.Domain.TastePredicate Predicate { public get; public init; }
+GenWave.Core.Domain.TasteRule::PROPERTY System.Double Weight { public get; public init; }
+GenWave.Core.Domain.TasteRule::TYPE class : none [System.IEquatable<GenWave.Core.Domain.TasteRule>]
+GenWave.Core.Domain.TimeAnnouncementFreshness::FIELD System.Int32 value__
+GenWave.Core.Domain.TimeAnnouncementFreshness::FIELD static GenWave.Core.Domain.TimeAnnouncementFreshness Late const = 1
+GenWave.Core.Domain.TimeAnnouncementFreshness::FIELD static GenWave.Core.Domain.TimeAnnouncementFreshness OnTime const = 0
+GenWave.Core.Domain.TimeAnnouncementFreshness::TYPE enum : none [System.IComparable,System.IConvertible,System.IFormattable,System.ISpanFormattable]
+GenWave.Core.Domain.TtsRenderContext::CTOR (System.String Text, System.String Voice, System.Nullable<GenWave.Core.Domain.SegmentKind> Kind)
+GenWave.Core.Domain.TtsRenderContext::PROPERTY System.Boolean IsAudition { public get; public init; }
+GenWave.Core.Domain.TtsRenderContext::PROPERTY System.Collections.Generic.IReadOnlyList<GenWave.Core.Domain.PronunciationRule> Rules { public get; public init; }
+GenWave.Core.Domain.TtsRenderContext::PROPERTY System.Double Pace { public get; public init; }
+GenWave.Core.Domain.TtsRenderContext::PROPERTY System.Nullable<GenWave.Core.Domain.SegmentKind> Kind { public get; public init; }
+GenWave.Core.Domain.TtsRenderContext::PROPERTY System.String Text { public get; public init; }
+GenWave.Core.Domain.TtsRenderContext::PROPERTY System.String Voice { public get; public init; }
+GenWave.Core.Domain.TtsRenderContext::TYPE class : none [System.IEquatable<GenWave.Core.Domain.TtsRenderContext>]
+GenWave.Core.Domain.UnparsedRequest::CTOR (System.Int64 Id, System.String Wish, System.String PickedGenre, System.String PickedMood, System.DateTime ExpiresAt)
+GenWave.Core.Domain.UnparsedRequest::PROPERTY System.DateTime ExpiresAt { public get; public init; }
+GenWave.Core.Domain.UnparsedRequest::PROPERTY System.Int64 Id { public get; public init; }
+GenWave.Core.Domain.UnparsedRequest::PROPERTY System.String PickedGenre { public get; public init; }
+GenWave.Core.Domain.UnparsedRequest::PROPERTY System.String PickedMood { public get; public init; }
+GenWave.Core.Domain.UnparsedRequest::PROPERTY System.String Wish { public get; public init; }
+GenWave.Core.Domain.UnparsedRequest::TYPE class : none [System.IEquatable<GenWave.Core.Domain.UnparsedRequest>]
+GenWave.Core.Domain.VoiceSpec::CTOR (System.String Engine, System.String VoiceId, System.Double Pace, System.String Language)
+GenWave.Core.Domain.VoiceSpec::PROPERTY System.Double Pace { public get; public init; }
+GenWave.Core.Domain.VoiceSpec::PROPERTY System.String Engine { public get; public init; }
+GenWave.Core.Domain.VoiceSpec::PROPERTY System.String Language { public get; public init; }
+GenWave.Core.Domain.VoiceSpec::PROPERTY System.String VoiceId { public get; public init; }
+GenWave.Core.Domain.VoiceSpec::TYPE class : none [System.IEquatable<GenWave.Core.Domain.VoiceSpec>]
+GenWave.Core.Domain.VoteDirection::FIELD System.Int32 value__
+GenWave.Core.Domain.VoteDirection::FIELD static GenWave.Core.Domain.VoteDirection Down const = 1
+GenWave.Core.Domain.VoteDirection::FIELD static GenWave.Core.Domain.VoteDirection Up const = 0
+GenWave.Core.Domain.VoteDirection::TYPE enum : none [System.IComparable,System.IConvertible,System.IFormattable,System.ISpanFormattable]
+GenWave.Core.Domain.VoteOutcome::CTOR (GenWave.Core.Domain.RatingWriteResult Result, System.Nullable<System.Int32> Score)
+GenWave.Core.Domain.VoteOutcome::PROPERTY GenWave.Core.Domain.RatingWriteResult Result { public get; public init; }
+GenWave.Core.Domain.VoteOutcome::PROPERTY System.Nullable<System.Int32> Score { public get; public init; }
+GenWave.Core.Domain.VoteOutcome::TYPE struct : none [System.IEquatable<GenWave.Core.Domain.VoteOutcome>]
+GenWave.Core.Events.DegradationModeChanged::CTOR (System.String Previous, System.String New, System.String Cause)
+GenWave.Core.Events.DegradationModeChanged::PROPERTY System.String Cause { public get; public init; }
+GenWave.Core.Events.DegradationModeChanged::PROPERTY System.String New { public get; public init; }
+GenWave.Core.Events.DegradationModeChanged::PROPERTY System.String Previous { public get; public init; }
+GenWave.Core.Events.DegradationModeChanged::TYPE class : GenWave.Core.Events.StationEvent [System.IEquatable<GenWave.Core.Events.DegradationModeChanged>,System.IEquatable<GenWave.Core.Events.StationEvent>]
+GenWave.Core.Events.EnrichmentCompleted::CTOR (System.Int64 MediaId, System.Boolean Succeeded)
+GenWave.Core.Events.EnrichmentCompleted::PROPERTY System.Boolean Succeeded { public get; public init; }
+GenWave.Core.Events.EnrichmentCompleted::PROPERTY System.Int64 MediaId { public get; public init; }
+GenWave.Core.Events.EnrichmentCompleted::TYPE class : GenWave.Core.Events.StationEvent [System.IEquatable<GenWave.Core.Events.EnrichmentCompleted>,System.IEquatable<GenWave.Core.Events.StationEvent>]
+GenWave.Core.Events.HandoffPieceDropped::CTOR (System.String Kind, System.String Cause)
+GenWave.Core.Events.HandoffPieceDropped::PROPERTY System.String Cause { public get; public init; }
+GenWave.Core.Events.HandoffPieceDropped::PROPERTY System.String Kind { public get; public init; }
+GenWave.Core.Events.HandoffPieceDropped::TYPE class : GenWave.Core.Events.StationEvent [System.IEquatable<GenWave.Core.Events.HandoffPieceDropped>,System.IEquatable<GenWave.Core.Events.StationEvent>]
+GenWave.Core.Events.LibraryMutated::CTOR (System.String Change, System.Int64 LibraryId)
+GenWave.Core.Events.LibraryMutated::PROPERTY System.Int64 LibraryId { public get; public init; }
+GenWave.Core.Events.LibraryMutated::PROPERTY System.String Change { public get; public init; }
+GenWave.Core.Events.LibraryMutated::TYPE class : GenWave.Core.Events.StationEvent [System.IEquatable<GenWave.Core.Events.LibraryMutated>,System.IEquatable<GenWave.Core.Events.StationEvent>]
+GenWave.Core.Events.ListenerCountSampled::CTOR (System.Int32 Listeners)
+GenWave.Core.Events.ListenerCountSampled::PROPERTY System.Int32 Listeners { public get; public init; }
+GenWave.Core.Events.ListenerCountSampled::TYPE class : GenWave.Core.Events.StationEvent [System.IEquatable<GenWave.Core.Events.ListenerCountSampled>,System.IEquatable<GenWave.Core.Events.StationEvent>]
+GenWave.Core.Events.MediaMutated::CTOR (System.String Change, System.Nullable<System.Int64> MediaId, System.Int32 Count)
+GenWave.Core.Events.MediaMutated::PROPERTY System.Int32 Count { public get; public init; }
+GenWave.Core.Events.MediaMutated::PROPERTY System.Nullable<System.Int64> MediaId { public get; public init; }
+GenWave.Core.Events.MediaMutated::PROPERTY System.String Change { public get; public init; }
+GenWave.Core.Events.MediaMutated::TYPE class : GenWave.Core.Events.StationEvent [System.IEquatable<GenWave.Core.Events.MediaMutated>,System.IEquatable<GenWave.Core.Events.StationEvent>]
+GenWave.Core.Events.RequestEvicted::CTOR ()
+GenWave.Core.Events.RequestEvicted::TYPE class : GenWave.Core.Events.StationEvent [System.IEquatable<GenWave.Core.Events.RequestEvicted>,System.IEquatable<GenWave.Core.Events.StationEvent>]
+GenWave.Core.Events.RequestExpired::CTOR ()
+GenWave.Core.Events.RequestExpired::TYPE class : GenWave.Core.Events.StationEvent [System.IEquatable<GenWave.Core.Events.RequestExpired>,System.IEquatable<GenWave.Core.Events.StationEvent>]
+GenWave.Core.Events.RequestFulfilled::CTOR ()
+GenWave.Core.Events.RequestFulfilled::TYPE class : GenWave.Core.Events.StationEvent [System.IEquatable<GenWave.Core.Events.RequestFulfilled>,System.IEquatable<GenWave.Core.Events.StationEvent>]
+GenWave.Core.Events.RequestReceived::CTOR ()
+GenWave.Core.Events.RequestReceived::TYPE class : GenWave.Core.Events.StationEvent [System.IEquatable<GenWave.Core.Events.RequestReceived>,System.IEquatable<GenWave.Core.Events.StationEvent>]
+GenWave.Core.Events.SegmentGenerated::CTOR (System.String SegmentId, System.String Kind, System.String Voice)
+GenWave.Core.Events.SegmentGenerated::PROPERTY System.String Kind { public get; public init; }
+GenWave.Core.Events.SegmentGenerated::PROPERTY System.String SegmentId { public get; public init; }
+GenWave.Core.Events.SegmentGenerated::PROPERTY System.String Voice { public get; public init; }
+GenWave.Core.Events.SegmentGenerated::TYPE class : GenWave.Core.Events.StationEvent [System.IEquatable<GenWave.Core.Events.SegmentGenerated>,System.IEquatable<GenWave.Core.Events.StationEvent>]
+GenWave.Core.Events.SettingChanged::CTOR (System.String Key)
+GenWave.Core.Events.SettingChanged::PROPERTY System.String Key { public get; public init; }
+GenWave.Core.Events.SettingChanged::TYPE class : GenWave.Core.Events.StationEvent [System.IEquatable<GenWave.Core.Events.SettingChanged>,System.IEquatable<GenWave.Core.Events.StationEvent>]
+GenWave.Core.Events.StationEvent::CTOR ()
+GenWave.Core.Events.StationEvent::PROPERTY System.DateTimeOffset OccurredAt { public get; public init; }
+GenWave.Core.Events.StationEvent::TYPE class : none [System.IEquatable<GenWave.Core.Events.StationEvent>]
+GenWave.Core.Events.TrackAired::CTOR (System.String MediaId, System.String Title, System.String Artist, System.Double GainDb, System.DateTimeOffset StartedAt, System.Nullable<System.Int32> DurationMs, GenWave.Core.Domain.PersonaPickDiagnostics PersonaPick = null, System.Nullable<GenWave.Core.Domain.SegmentKind> SegmentKind = null)
+GenWave.Core.Events.TrackAired::PROPERTY GenWave.Core.Domain.CrosstalkAiredScript CrosstalkScript { public get; public init; }
+GenWave.Core.Events.TrackAired::PROPERTY GenWave.Core.Domain.PersonaPickDiagnostics PersonaPick { public get; public init; }
+GenWave.Core.Events.TrackAired::PROPERTY System.DateTimeOffset StartedAt { public get; public init; }
+GenWave.Core.Events.TrackAired::PROPERTY System.Double GainDb { public get; public init; }
+GenWave.Core.Events.TrackAired::PROPERTY System.Nullable<GenWave.Core.Domain.SegmentKind> SegmentKind { public get; public init; }
+GenWave.Core.Events.TrackAired::PROPERTY System.Nullable<System.Double> Nudge { public get; public init; }
+GenWave.Core.Events.TrackAired::PROPERTY System.Nullable<System.Int32> DurationMs { public get; public init; }
+GenWave.Core.Events.TrackAired::PROPERTY System.Nullable<System.Int32> RotationRelax { public get; public init; }
+GenWave.Core.Events.TrackAired::PROPERTY System.String Artist { public get; public init; }
+GenWave.Core.Events.TrackAired::PROPERTY System.String MediaId { public get; public init; }
+GenWave.Core.Events.TrackAired::PROPERTY System.String Title { public get; public init; }
+GenWave.Core.Events.TrackAired::TYPE class : GenWave.Core.Events.StationEvent [System.IEquatable<GenWave.Core.Events.StationEvent>,System.IEquatable<GenWave.Core.Events.TrackAired>]

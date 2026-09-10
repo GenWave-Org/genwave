@@ -26,10 +26,10 @@ public static class FeatureAdCastPickerBuildsAVoicePlan
 
     static AdSpot Spot(long id = 1, string brand = "Acme", string? packSlug = null, AdSource source = AdSource.Llm) =>
         new(
-            id, brand, $"{brand} spot", Brief: null, Script: null, source, packSlug, SpotSeconds: 30,
-            VoicePlan: null, BedMediaId: null, AdState.Rendering, FailReason: null, MediaId: null, Generation: 1,
-            CreatedAt: DateTime.UtcNow, StateChangedAt: DateTime.UtcNow, RenderedAt: null, RetiredAt: null,
-            Version: "1");
+            id, SponsorId: 1, SponsorName: brand, $"{brand} spot", Brief: null, Script: null, source, packSlug,
+            SpotSeconds: 30, VoicePlan: null, BedMediaId: null, AdState.Rendering, FailReason: null, MediaId: null,
+            Generation: 1, CreatedAt: DateTime.UtcNow, StateChangedAt: DateTime.UtcNow, RenderedAt: null,
+            RetiredAt: null, Version: "1");
 
     // PLAN T416 review F3+O3: AdLiveSettings.BedFadeMs no longer defaults (that record's own remarks
     // — AdLiveSettingsReader is the ONE construction site with a real default) — this helper is not
@@ -241,7 +241,8 @@ public static class FeatureAdCastPickerBuildsAVoicePlan
                 """[{"tag":"ANNOUNCER","voiceId":"am_onyx","pace":1},{"tag":"VOICE1","voiceId":"am_onyx","pace":1},{"tag":"VOICE2","voiceId":"am_onyx","pace":1}]""";
             var harness = AdSpotWorkerHarness.Build(Now, StationSettings("af_nova,am_michael,bf_alice"));
             harness.Store.AddExisting(new AdSpot(
-                1, "Acme", "Owner spot", Brief: null, Script: "ANNOUNCER: Hi there.\nVOICE1: Come on by.",
+                1, SponsorId: 1, SponsorName: "Acme", "Owner spot", Brief: null,
+                Script: "ANNOUNCER: Hi there.\nVOICE1: Come on by.",
                 AdSource.Owner, PackSlug: null, SpotSeconds: 30, VoicePlan: explicitPlan, BedMediaId: null,
                 AdState.Approved, FailReason: null, MediaId: null, Generation: 1, CreatedAt: DateTime.UtcNow,
                 StateChangedAt: DateTime.UtcNow, RenderedAt: null, RetiredAt: null, Version: "1"));
@@ -252,6 +253,44 @@ public static class FeatureAdCastPickerBuildsAVoicePlan
             // Then the plan is untouched, byte for byte, and a stamp was never even attempted.
             var spot = harness.Store.Spots.Single();
             Assert.Equal(explicitPlan, spot.VoicePlan);
+            Assert.Equal(0, harness.Store.StampVoicePlanCallCount);
+        }
+    }
+
+    /// <summary>The SAME never-re-pick posture
+    /// <see cref="ScenarioOwnerDraftsKeepTheirExplicitVoicePlan"/> already proves for an owner's own
+    /// explicit plan, driven instead through the shape a STORY-424 preview render actually leaves
+    /// behind: a Draft/Approved row that already carries <see cref="AdSpot.VoicePlan"/> from an earlier
+    /// preview, not an owner's own choice. <see cref="AdSpotStamper.StampCastIfNeededAsync"/>'s own
+    /// <c>if (spot.VoicePlan is not null) return spot;</c> guard does not distinguish the two — this
+    /// fact exists so the SQL guard's own draft/approved/rendering widening (PLAN T442) stays proven at
+    /// THIS layer too, not merely in the SQL specs (Story402_AdSpotStampVoicePlanSql.cs).</summary>
+    public sealed class ScenarioADraftAlreadyStampedByAPreviewIsNotRePicked
+    {
+        [Fact]
+        public async Task TheWorkerDoesNotRestampAPreviewsVoicePlan()
+        {
+            // Given an LLM-generated spot, approved but never yet claimed into Rendering, that already
+            // carries a voice plan (exactly what AdSpotStamper.StampCastIfNeededAsync leaves on a row
+            // once a STORY-424 preview has run against it)...
+            const string previewStampedPlan =
+                """[{"tag":"ANNOUNCER","voiceId":"am_onyx","pace":1},{"tag":"VOICE1","voiceId":"am_onyx","pace":1},{"tag":"VOICE2","voiceId":"am_onyx","pace":1}]""";
+            var harness = AdSpotWorkerHarness.Build(Now, StationSettings("af_nova,am_michael,bf_alice"));
+            harness.Store.AddExisting(new AdSpot(
+                1, SponsorId: 1, SponsorName: "Acme", "Acme spot", Brief: null,
+                Script: "ANNOUNCER: Hi there.\nVOICE1: Come on by.",
+                AdSource.Llm, PackSlug: null, SpotSeconds: 30, VoicePlan: previewStampedPlan, BedMediaId: null,
+                AdState.Approved, FailReason: null, MediaId: null, Generation: 1, CreatedAt: DateTime.UtcNow,
+                StateChangedAt: DateTime.UtcNow, RenderedAt: null, RetiredAt: null, Version: "1"));
+
+            // When the worker claims it into Rendering and renders it...
+            await harness.Worker.TickOnceAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+
+            // Then the preview's own plan is untouched, byte for byte, and the store's own stamp call
+            // was never even attempted — AdSpotStamper's C# guard short-circuits before it ever reaches
+            // IAdSpotStore.StampVoicePlanIfNullAsync.
+            var spot = harness.Store.Spots.Single();
+            Assert.Equal(previewStampedPlan, spot.VoicePlan);
             Assert.Equal(0, harness.Store.StampVoicePlanCallCount);
         }
     }
@@ -286,9 +325,9 @@ public static class FeatureAdCastPickerBuildsAVoicePlan
         {
             // Given an approved spot and a live cast pool that narrows to exactly one candidate once
             // the configured announcer voice is stripped out of it...
-            var logger = new CapturingLogger<AdSpotWorker>();
+            var logger = new CapturingLogger<AdSpotStamper>();
             var harness = AdSpotWorkerHarness.Build(
-                Now, StationSettings("af_nova,am_fenrir", announcerVoice: "am_fenrir"), workerLogger: logger);
+                Now, StationSettings("af_nova,am_fenrir", announcerVoice: "am_fenrir"), stamperLogger: logger);
             harness.Store.AddSpot(1, AdState.Approved);
 
             // When the worker ticks...
@@ -328,8 +367,8 @@ public static class FeatureAdCastPickerBuildsAVoicePlan
         public async Task AnInfoLogLinePerTickNamesTheEmptyPool()
         {
             // Given an approved spot and no live cast pool at all...
-            var logger = new CapturingLogger<AdSpotWorker>();
-            var harness = AdSpotWorkerHarness.Build(Now, StationSettings(castVoices: ""), workerLogger: logger);
+            var logger = new CapturingLogger<AdSpotStamper>();
+            var harness = AdSpotWorkerHarness.Build(Now, StationSettings(castVoices: ""), stamperLogger: logger);
             harness.Store.AddSpot(1, AdState.Approved);
 
             // When the worker ticks...

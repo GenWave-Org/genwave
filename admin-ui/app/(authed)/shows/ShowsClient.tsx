@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/chip";
 import { useConfirm } from "@/components/ui/confirm-dialog";
@@ -8,6 +8,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { toast } from "@/components/ui/toast";
 import { formatDateStamp } from "@/lib/format-clock";
 import { readErrorMessage } from "@/lib/problem-details";
+import type { SponsorRefDto } from "@/lib/sponsors-api";
+import { SponsorPicker } from "../ads/SponsorPicker";
 import { ShowRotationRuleEditor } from "./ShowRotationRuleEditor";
 import type { ScopedImagingRowDto, ShowDeleteResponseDto, ShowDto } from "./types";
 
@@ -24,9 +26,12 @@ interface FormValues {
   name: string;
   tagline: string;
   flavor: string;
+  /** PLAN T449 — `null` is "No sponsor", the form's own default; never a wire-level placeholder
+   * value like `0` or `""`, matching `ShowRequestBody.sponsorId`'s own type one-for-one. */
+  sponsorId: number | null;
 }
 
-const EMPTY_FORM: FormValues = { name: "", tagline: "", flavor: "" };
+const EMPTY_FORM: FormValues = { name: "", tagline: "", flavor: "", sponsorId: null };
 
 /** `edit` carries the slug the form's `PATCH` targets, frozen at `startEdit` time — a show's slug
  * re-derives from its name on every authored edit (`ShowRepository.UpdateAsync`), so the field the
@@ -37,15 +42,34 @@ type FormMode = { kind: "create" } | { kind: "edit"; id: number; slug: string };
 
 /** Body accepted by `POST/PATCH /api/shows` (mirrors `GenWave.Host.Api.ShowRequest`). `tagline`/
  * `flavor` travel as plain strings, blank included — the store's own `NullIfBlank` (`ShowRepository`)
- * persists a blank/whitespace-only value as `NULL`, so this form never needs to decide that itself. */
+ * persists a blank/whitespace-only value as `NULL`, so this form never needs to decide that itself.
+ * `sponsorId` (PLAN T449) is a full-body replace, same as every other field here: omitting it is
+ * never an option this form has, so `null` (never `undefined`) is what "No sponsor" sends. */
 interface ShowRequestBody {
   name: string;
   tagline: string;
   flavor: string;
+  sponsorId: number | null;
 }
 
 function requestBodyFrom(form: FormValues): ShowRequestBody {
-  return { name: form.name.trim(), tagline: form.tagline, flavor: form.flavor };
+  return { name: form.name.trim(), tagline: form.tagline, flavor: form.flavor, sponsorId: form.sponsorId };
+}
+
+/** Validates `GET /api/sponsors`'s own response shape (PLAN T449) before it ever reaches this
+ * component's state — mirrors `lib/use-voice-list.ts`'s `isVoiceIdList` guard rather than an
+ * unchecked `as SponsorRefDto[]` cast. */
+function isSponsorRefArray(raw: unknown): raw is SponsorRefDto[] {
+  return (
+    Array.isArray(raw) &&
+    raw.every((entry): entry is SponsorRefDto => {
+      if (typeof entry !== "object" || entry === null) return false;
+      const candidate = entry as Partial<SponsorRefDto>;
+      return (
+        typeof candidate.id === "number" && typeof candidate.name === "string" && typeof candidate.paused === "boolean"
+      );
+    })
+  );
 }
 
 /** SPEC F115.1's field-length budgets, mirrored from `GenWave.Core.Domain.ShowBudgets` — THAT file
@@ -148,10 +172,35 @@ export function ShowsClient({ initialShows, timeZone }: ShowsClientProps): React
   // the poll) the moment it is closed again, mirroring usePoll's own visibility-gated pause one
   // layer down.
   const [expandedRotationIds, setExpandedRotationIds] = useState<ReadonlySet<number>>(new Set());
+  // PLAN T449: every sponsor the form's picker offers — fetched once on mount, the same
+  // fetch-on-mount/fail-closed-to-empty idiom `lib/use-voice-list.ts`'s `useVoiceList` already
+  // follows for its own always-visible picker. Fails closed to an empty list (never throws into
+  // this component) — an unreachable Sponsors API should degrade the picker, not the whole page.
+  const [sponsors, setSponsors] = useState<readonly SponsorRefDto[]>([]);
   const confirm = useConfirm();
 
   const isNameBlank = form.name.trim() === "";
   const isEditing = mode.kind === "edit";
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSponsors(): Promise<void> {
+      try {
+        const resp = await fetch("/api/sponsors");
+        if (!resp.ok) return;
+        const raw = (await resp.json()) as unknown;
+        if (!cancelled && isSponsorRefArray(raw)) setSponsors(raw);
+      } catch {
+        // Fails closed to the empty list already set above — no retry UX exists for this picker.
+      }
+    }
+
+    void loadSponsors();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function toggleRotationExpanded(showId: number): void {
     setExpandedRotationIds((prev) => {
@@ -167,7 +216,12 @@ export function ShowsClient({ initialShows, timeZone }: ShowsClientProps): React
 
   function startEdit(show: ShowDto): void {
     setMode({ kind: "edit", id: show.id, slug: show.slug });
-    setForm({ name: show.name, tagline: show.tagline ?? "", flavor: show.flavor ?? "" });
+    setForm({
+      name: show.name,
+      tagline: show.tagline ?? "",
+      flavor: show.flavor ?? "",
+      sponsorId: show.sponsor?.id ?? null,
+    });
   }
 
   function cancelEdit(): void {
@@ -337,6 +391,15 @@ export function ShowsClient({ initialShows, timeZone }: ShowsClientProps): React
             />
           </div>
 
+          <SponsorPicker
+            id="show-sponsor"
+            value={form.sponsorId}
+            sponsors={sponsors}
+            disabled={isSaving}
+            onChange={(sponsorId) => setForm((prev) => ({ ...prev, sponsorId }))}
+            allowNone
+          />
+
           <div className="flex flex-wrap gap-2">
             <Button type="submit" disabled={isSaving || isNameBlank}>
               {isSaving ? "Saving…" : isEditing ? "Save changes" : "Create show"}
@@ -376,6 +439,7 @@ export function ShowsClient({ initialShows, timeZone }: ShowsClientProps): React
                         timeZone={timeZone}
                       />
                     )}
+                    {show.sponsor !== null && <Chip>{show.sponsor.name}</Chip>}
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Button

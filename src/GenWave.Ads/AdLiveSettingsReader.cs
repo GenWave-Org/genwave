@@ -21,7 +21,10 @@ using Microsoft.Extensions.Configuration;
 /// deterministic across reads of the SAME configured value).
 /// </para>
 /// </summary>
-internal static class AdLiveSettingsReader
+/// <remarks>Public, not internal (PLAN T442 ruling) — carried along with <see cref="AdLiveSettings"/>'s
+/// own visibility change (see that record's remarks); nothing else about this reader's contract
+/// changes.</remarks>
+public static class AdLiveSettingsReader
 {
     internal const string DefaultAnnouncerVoice = "";
 

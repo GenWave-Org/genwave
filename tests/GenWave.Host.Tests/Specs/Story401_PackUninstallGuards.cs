@@ -295,8 +295,14 @@ public sealed class VoicePackUninstallArc : IAsyncLifetime
         var voicePlan = $$"""[{"voiceId": "{{voiceId}}"}]""";
         return await conn.ExecuteScalarAsync<long>(
             """
-            insert into station.ad_spot (brand, title, source, state, voice_plan, fail_reason)
-            values ('Test Brand', 'Test Spot', 'owner'::station.ad_source, @State::station.ad_state, @VoicePlan::jsonb, @FailReason)
+            with sponsor as (
+              insert into station.sponsor (name) values ('Test Brand')
+              on conflict on constraint sponsor_pack_slug_name_key do update set name = excluded.name
+              returning id
+            )
+            insert into station.ad_spot (sponsor_id, sponsor_name, title, source, state, voice_plan, fail_reason)
+            select sponsor.id, 'Test Brand', 'Test Spot', 'owner'::station.ad_source, @State::station.ad_state, @VoicePlan::jsonb, @FailReason
+            from sponsor
             returning id
             """,
             new { State = state, VoicePlan = voicePlan, FailReason = failReason });
@@ -623,8 +629,14 @@ public sealed class JinglePackUninstallArc : IAsyncLifetime
         await conn.OpenAsync();
         return await conn.ExecuteScalarAsync<long>(
             """
-            insert into station.ad_spot (brand, title, source, state, bed_media_id)
-            values ('Test Brand', 'Test Spot', 'owner'::station.ad_source, @State::station.ad_state, @BedMediaId)
+            with sponsor as (
+              insert into station.sponsor (name) values ('Test Brand')
+              on conflict on constraint sponsor_pack_slug_name_key do update set name = excluded.name
+              returning id
+            )
+            insert into station.ad_spot (sponsor_id, sponsor_name, title, source, state, bed_media_id)
+            select sponsor.id, 'Test Brand', 'Test Spot', 'owner'::station.ad_source, @State::station.ad_state, @BedMediaId
+            from sponsor
             returning id
             """,
             new { State = state, BedMediaId = bedMediaId });

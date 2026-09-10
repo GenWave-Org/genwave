@@ -267,18 +267,31 @@ public sealed class DatabaseFixture : IAsyncLifetime
     }
 
     /// <summary>
-    /// Truncate <c>station.ad_spot</c> and <c>station.ad_brief</c> and reset their identities (SPEC
-    /// F159.1; STORY-389; PLAN T398). No FK references either table — <c>bed_media_id</c>/
-    /// <c>media_id</c> are plain, no-FK columns (the db/22 schema-role boundary, db/42's own header)
-    /// and nothing else in the <c>station</c> schema points at either — so no CASCADE is required, the
-    /// same reasoning <see cref="ResetAnnouncementAsync"/>'s own remarks give. One statement, both
-    /// tables: independent of each other, but truncated together for one round trip per test reset.
+    /// Truncate <c>station.ad_spot</c>, <c>station.ad_brief</c>, <c>station.sponsor</c>, and
+    /// <c>station.show</c>, and reset their identities (SPEC F159.1/F171–F175; STORY-389/406/407/410;
+    /// PLAN T398/T432). db/46 gave <c>ad_spot.sponsor_id</c>/<c>ad_brief.sponsor_id</c> a NOT NULL
+    /// <c>ON DELETE RESTRICT</c> FK into <c>station.sponsor</c>, and <c>show.sponsor_id</c> a nullable
+    /// one — TRUNCATE's own FK check is stricter than any single row's <c>ON DELETE</c> action (same
+    /// point <see cref="ResetShowAsync"/>'s own remarks make), so <c>station.sponsor</c> cannot be
+    /// truncated alone once either table holds a row referencing it. CASCADE follows those FKs (and
+    /// <c>show</c>'s own downstream <c>segment_schedule</c> FK) and sweeps every referencing row along
+    /// with <c>station.sponsor</c>'s — the same reasoning <see cref="ResetStationAsync"/>'s and
+    /// <see cref="ResetShowAsync"/>'s own remarks give. One statement, four tables: independent of
+    /// each other structurally, but truncated together for one round trip per test reset, since any
+    /// test seeding ads or briefs must first seed a sponsor row for the NOT NULL FK to hold. Named
+    /// <c>ResetAdsAndShowsAsync</c>, not the former <c>ResetAdsAsync</c> (round-3 finding R4): PLAN
+    /// T432's db/46 sponsor split is what pulled <c>station.show</c> into this CASCADE (it never held
+    /// an FK into the ads tables before), so the former name went stale the moment that happened — a
+    /// SEPARATE method from <see cref="ResetShowAsync"/> above, which stays useful for a show-only
+    /// spec that has no reason to also truncate the ads tables.
     /// </summary>
-    public async Task ResetAdsAsync()
+    public async Task ResetAdsAndShowsAsync()
     {
         await using var conn = await StationDataSource.OpenConnectionAsync();
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "truncate table station.ad_spot, station.ad_brief restart identity";
+        cmd.CommandText =
+            "truncate table station.ad_spot, station.ad_brief, station.sponsor, station.show " +
+            "restart identity cascade";
         await cmd.ExecuteNonQueryAsync();
     }
 

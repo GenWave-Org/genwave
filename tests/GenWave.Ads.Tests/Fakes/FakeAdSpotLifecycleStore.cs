@@ -21,6 +21,33 @@ public sealed class FakeAdSpotLifecycleStore : IAdSpotStore
 
     public IReadOnlyList<AdSpot> Spots => spots;
 
+    /// <summary>Wired to <see cref="FakeSponsorStore.IsPaused"/> by
+    /// <see cref="AdSpotWorkerHarness.Build"/> (PLAN T440 ruling), the SAME single-source-of-
+    /// pause-truth seam <see cref="FakeAdBriefStore.ExcludePausedSponsors"/> already carries one file
+    /// over — a Story420 scenario that only ever calls <c>harness.Sponsors.Pause(id)</c> reaches this
+    /// fake's own <see cref="CountStockGeneratedAsync"/> and <see cref="ListAiringExclusionsAsync"/>
+    /// through the wiring. Defaults to "nobody paused" so a scenario that never calls
+    /// <see cref="ExcludePausedSponsors"/> keeps this fake's pre-T440 behavior exactly.</summary>
+    Func<long, bool> isPausedSponsor = _ => false;
+
+    /// <summary>Wires this store's own paused-sponsor reads (<see cref="CountStockGeneratedAsync"/>,
+    /// <see cref="ListAiringExclusionsAsync"/>) to a paused-sponsor check — the
+    /// <see cref="FakeAdBriefStore.ExcludePausedSponsors"/> precedent, applied here.</summary>
+    public FakeAdSpotLifecycleStore ExcludePausedSponsors(Func<long, bool> isPaused)
+    {
+        isPausedSponsor = isPaused;
+        return this;
+    }
+
+    /// <summary>Sponsor id → current name, read by <see cref="UpdateAsync"/> to mirror
+    /// <see cref="GenWave.MediaLibrary.Station.AdSpotRepository.UpdateAsync"/>'s own "refresh
+    /// <c>sponsor_name</c> from <c>station.sponsor</c>" behavior when <see cref="AdSpotEdit.SponsorId"/>
+    /// is set (PLAN T432, SPEC F171.7). An unseeded id leaves the row's existing
+    /// <see cref="AdSpot.SponsorName"/> unchanged rather than nulling it out — no spec exercising a
+    /// sponsor-changing edit exists yet on this fake, so this stays a documented, narrow gap rather
+    /// than a real subquery.</summary>
+    public Dictionary<long, string> SponsorNames { get; } = [];
+
     public int CreateCallCount { get; private set; }
     public int RetireCallCount { get; private set; }
     public int ReArmCallCount { get; private set; }
@@ -52,12 +79,13 @@ public sealed class FakeAdSpotLifecycleStore : IAdSpotStore
     public FakeAdSpotLifecycleStore AddSpot(
         long id, AdState state, AdSource source = AdSource.Llm, long? mediaId = null,
         DateTime? stateChangedAt = null, string? failReason = null, string? packSlug = null,
-        string brand = "Acme", string script = "ANNOUNCER: Come on down.\nVOICE1: Prices you won't believe.")
+        long sponsorId = 1, string sponsorName = "Acme",
+        string script = "ANNOUNCER: Come on down.\nVOICE1: Prices you won't believe.")
     {
         var stamp = stateChangedAt ?? DateTime.UtcNow;
         return AddExisting(new AdSpot(
-            id, brand, $"{brand} spot", Brief: null, script, source, packSlug, SpotSeconds: 30,
-            VoicePlan: null, BedMediaId: null, state, failReason, mediaId, Generation: 1,
+            id, sponsorId, sponsorName, $"{sponsorName} spot", Brief: null, script, source, packSlug,
+            SpotSeconds: 30, VoicePlan: null, BedMediaId: null, state, failReason, mediaId, Generation: 1,
             CreatedAt: stamp, StateChangedAt: stamp, RenderedAt: state == AdState.Ready ? stamp : null,
             RetiredAt: state == AdState.Retired ? stamp : null, Version: NextVersion()));
     }
@@ -68,10 +96,12 @@ public sealed class FakeAdSpotLifecycleStore : IAdSpotStore
         CreateRequests.Add(spot);
 
         var now = DateTime.UtcNow;
+        var sponsorName = SponsorNames.GetValueOrDefault(spot.SponsorId, "Acme");
         var created = new AdSpot(
-            nextId++, spot.Brand, spot.Title, spot.Brief, spot.Script, spot.Source, spot.PackSlug,
-            spot.SpotSeconds, spot.VoicePlan, spot.BedMediaId, spot.InitialState, spot.FailReason,
-            MediaId: null, Generation: 1, now, now, RenderedAt: null, RetiredAt: null, Version: NextVersion());
+            nextId++, spot.SponsorId, sponsorName, spot.Title, spot.Brief, spot.Script, spot.Source,
+            spot.PackSlug, spot.SpotSeconds, spot.VoicePlan, spot.BedMediaId, spot.InitialState,
+            spot.FailReason, MediaId: null, Generation: 1, now, now, RenderedAt: null, RetiredAt: null,
+            Version: NextVersion());
         spots.Add(created);
         return Task.FromResult(created);
     }
@@ -108,7 +138,10 @@ public sealed class FakeAdSpotLifecycleStore : IAdSpotStore
 
         var updated = current with
         {
-            Brand = edit.Brand ?? current.Brand,
+            SponsorId = edit.SponsorId ?? current.SponsorId,
+            SponsorName = edit.SponsorId is long newSponsorId
+                ? SponsorNames.GetValueOrDefault(newSponsorId, current.SponsorName)
+                : current.SponsorName,
             Title = edit.Title ?? current.Title,
             Brief = edit.Brief ?? current.Brief,
             Script = edit.Script ?? current.Script,
@@ -207,9 +240,11 @@ public sealed class FakeAdSpotLifecycleStore : IAdSpotStore
         }));
     }
 
-    public Task<AdSpotPage> ListByStateAsync(AdState? state, int limit, int offset, CancellationToken ct)
+    public Task<AdSpotPage> ListByStateAsync(AdState? state, long? sponsorId, int limit, int offset, CancellationToken ct)
     {
         var filtered = state is null ? spots.AsEnumerable() : spots.Where(s => s.State == state);
+        if (sponsorId is not null)
+            filtered = filtered.Where(s => s.SponsorId == sponsorId.Value);
         var ordered = filtered.OrderByDescending(s => s.StateChangedAt).ThenByDescending(s => s.Id).ToList();
         var page = ordered.Skip(Math.Max(0, offset)).Take(limit <= 0 ? 1 : limit).ToList();
         return Task.FromResult(new AdSpotPage(page, ordered.Count));
@@ -218,7 +253,12 @@ public sealed class FakeAdSpotLifecycleStore : IAdSpotStore
     public Task<int> CountStockGeneratedAsync(CancellationToken ct) =>
         Task.FromResult(spots.Count(s =>
             (s.State is AdState.Draft or AdState.Approved or AdState.Rendering or AdState.Ready)
-            && (s.Source is AdSource.Llm or AdSource.Pack)));
+            && (s.Source is AdSource.Llm or AdSource.Pack)
+            && !IsPaused(s.SponsorId)));
+
+    /// <summary>The wired paused-sponsor check (a Story420 scenario reaches this through
+    /// <c>harness.Sponsors.Pause(id)</c> alone, PLAN T440 ruling).</summary>
+    bool IsPaused(long sponsorId) => isPausedSponsor(sponsorId);
 
     public Task<IReadOnlyList<AdSpot>> ListReadyOlderThanAsync(TimeSpan age, CancellationToken ct)
     {
@@ -287,5 +327,123 @@ public sealed class FakeAdSpotLifecycleStore : IAdSpotStore
         var updated = apply(spots[index]);
         spots[index] = updated;
         return updated;
+    }
+
+    /// <summary>Mirrors <see cref="GenWave.MediaLibrary.Station.AdSpotRepository.ListAiringExclusionsAsync"/>
+    /// in plain C# (PLAN T432): a <see cref="AdState.Ready"/> row's <see cref="AdSpot.MediaId"/> is
+    /// withheld when <see cref="IsPaused"/> reports its sponsor paused, or when its sponsor also owns
+    /// any spot among the first <paramref name="window"/> entries of <paramref name="recentMediaIds"/>.</summary>
+    public Task<IReadOnlyList<long>> ListAiringExclusionsAsync(
+        IReadOnlyList<long> recentMediaIds, int window, CancellationToken ct)
+    {
+        var recentWindow = recentMediaIds.Take(Math.Max(0, window)).ToHashSet();
+        var recentSponsorIds = spots
+            .Where(s => s.MediaId is long mediaId && recentWindow.Contains(mediaId))
+            .Select(s => s.SponsorId)
+            .ToHashSet();
+
+        var excluded = new List<long>();
+        foreach (var spot in spots)
+        {
+            if (spot.State == AdState.Ready && spot.MediaId is long readyMediaId &&
+                (IsPaused(spot.SponsorId) || recentSponsorIds.Contains(spot.SponsorId)))
+            {
+                excluded.Add(readyMediaId);
+            }
+        }
+        return Task.FromResult<IReadOnlyList<long>>(excluded);
+    }
+
+    /// <summary>Mirrors <see cref="GenWave.MediaLibrary.Station.AdSpotRepository.StampJobAsync"/> in
+    /// plain C# (PLAN T432): guarded on <c>JobKind is null</c> — an already-claimed row reports
+    /// <see cref="AdSpotJobStampResult.Busy"/> rather than stealing the claim.</summary>
+    public Task<AdSpotJobStampOutcome> StampJobAsync(long id, string kind, CancellationToken ct)
+    {
+        var index = spots.FindIndex(s => s.Id == id);
+        if (index < 0)
+            return Task.FromResult(new AdSpotJobStampOutcome(AdSpotJobStampResult.NotFound, null));
+
+        if (spots[index].JobKind is not null)
+            return Task.FromResult(new AdSpotJobStampOutcome(AdSpotJobStampResult.Busy, null));
+
+        var updated = Replace(id, s => s with
+        {
+            JobKind = kind, JobStartedAt = DateTime.UtcNow, JobError = null, Version = NextVersion(),
+        });
+        return Task.FromResult(new AdSpotJobStampOutcome(AdSpotJobStampResult.Stamped, updated));
+    }
+
+    /// <summary>Mirrors <see cref="GenWave.MediaLibrary.Station.AdSpotRepository.ClearJobAsync"/> in
+    /// plain C# (PLAN T432): total by id — clearing an already-clear job is a harmless no-op, not a
+    /// conflict; reports <see langword="false"/> only when no row exists.</summary>
+    public Task<bool> ClearJobAsync(long id, string? error, CancellationToken ct)
+    {
+        var index = spots.FindIndex(s => s.Id == id);
+        if (index < 0)
+            return Task.FromResult(false);
+
+        Replace(id, s => s with { JobKind = null, JobStartedAt = null, JobError = error, Version = NextVersion() });
+        return Task.FromResult(true);
+    }
+
+    /// <summary>Mirrors <see cref="GenWave.MediaLibrary.Station.AdSpotRepository.StampPreviewAsync"/> in
+    /// plain C# (PLAN T432): unconditional by id, no state guard — reports <see langword="false"/> only
+    /// when no row exists.</summary>
+    public Task<bool> StampPreviewAsync(long id, string path, string key, CancellationToken ct)
+    {
+        var index = spots.FindIndex(s => s.Id == id);
+        if (index < 0)
+            return Task.FromResult(false);
+
+        Replace(id, s => s with { PreviewPath = path, PreviewKey = key, PreviewAt = DateTime.UtcNow, Version = NextVersion() });
+        return Task.FromResult(true);
+    }
+
+    /// <summary>Mirrors <see cref="GenWave.MediaLibrary.Station.AdSpotRepository.ClaimForPromotionAsync"/>
+    /// in plain C# (PLAN T432): xmin-guarded <see cref="AdState.Approved"/>-to-<see cref="AdState.Rendering"/>
+    /// for exactly the named row — "not approved" and "stale version" collapse to one
+    /// <see langword="null"/> outcome, the interface's own contract.</summary>
+    public Task<AdSpot?> ClaimForPromotionAsync(long id, string expectedVersion, CancellationToken ct)
+    {
+        var index = spots.FindIndex(s => s.Id == id);
+        if (index < 0)
+            return Task.FromResult<AdSpot?>(null);
+
+        var current = spots[index];
+        if (current.State != AdState.Approved || !string.Equals(current.Version, expectedVersion, StringComparison.Ordinal))
+            return Task.FromResult<AdSpot?>(null);
+
+        var updated = Replace(id, s => s with { State = AdState.Rendering, StateChangedAt = DateTime.UtcNow, Version = NextVersion() });
+        return Task.FromResult<AdSpot?>(updated);
+    }
+
+    /// <summary>Mirrors <see cref="GenWave.MediaLibrary.Station.AdSpotRepository.ListPreviewsToSweepAsync"/>
+    /// in plain C# (PLAN T442): the interface's own predicate verbatim — a stamped preview
+    /// (<see cref="AdSpot.PreviewPath"/> not <see langword="null"/>) whose spot has left the editable
+    /// lifecycle (<see cref="AdState.Ready"/> or <see cref="AdState.Retired"/>), or has simply aged past
+    /// <paramref name="retention"/> since <see cref="AdSpot.PreviewAt"/>.</summary>
+    public Task<IReadOnlyList<AdSpot>> ListPreviewsToSweepAsync(TimeSpan retention, DateTimeOffset now, CancellationToken ct)
+    {
+        var cutoff = now - retention;
+        IReadOnlyList<AdSpot> candidates = spots
+            .Where(s => s.PreviewPath is not null &&
+                (s.State is AdState.Ready or AdState.Retired ||
+                 (s.PreviewAt is DateTime previewAt && new DateTimeOffset(previewAt, TimeSpan.Zero) < cutoff)))
+            .OrderBy(s => s.PreviewAt ?? DateTime.MaxValue).ThenBy(s => s.Id)
+            .ToList();
+        return Task.FromResult(candidates);
+    }
+
+    /// <summary>Mirrors <see cref="GenWave.MediaLibrary.Station.AdSpotRepository.ClearPreviewAsync"/> in
+    /// plain C# (PLAN T442): total by id — nulls the preview trio together, harmless on a row with no
+    /// preview stamped; reports <see langword="false"/> only when no row exists.</summary>
+    public Task<bool> ClearPreviewAsync(long id, CancellationToken ct)
+    {
+        var index = spots.FindIndex(s => s.Id == id);
+        if (index < 0)
+            return Task.FromResult(false);
+
+        Replace(id, s => s with { PreviewPath = null, PreviewAt = null, PreviewKey = null });
+        return Task.FromResult(true);
     }
 }

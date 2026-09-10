@@ -25,9 +25,9 @@ public static class FeatureAdSpotLifecycleStore
     /// <summary>A fully-populated <see cref="NewAdSpot"/> for a llm-sourced draft — every spec that
     /// doesn't care about a particular field overrides only the one it does.</summary>
     static NewAdSpot Draft(
-        string brand = "Bramble & Fitch", string title = "Draft spot", AdSource source = AdSource.Llm,
+        long sponsorId, string title = "Draft spot", AdSource source = AdSource.Llm,
         string? packSlug = null, int spotSeconds = 30) =>
-        new(brand, title, Brief: "A cozy hardware shop", Script: null, source, packSlug, spotSeconds,
+        new(sponsorId, title, Brief: "A cozy hardware shop", Script: null, source, packSlug, spotSeconds,
             VoicePlan: null, BedMediaId: null, InitialState: AdState.Draft, FailReason: null);
 
     /// <summary>An independent raw-SQL read (bypasses <see cref="AdSpotRepository"/> itself) so a
@@ -77,11 +77,12 @@ public static class FeatureAdSpotLifecycleStore
         public async Task ACreatedDraftSpotLandsInDraft()
         {
             // Given no prior spots...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
 
             // When one is created with InitialState = Draft (the default, un-auto-approved path)...
-            var spot = await repo.CreateAsync(Draft(), CancellationToken.None);
+            var spot = await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
 
             // Then it lands Draft.
             Assert.Equal(AdState.Draft, spot.State);
@@ -91,13 +92,14 @@ public static class FeatureAdSpotLifecycleStore
         public async Task ACreatedApprovedSpotLandsInApproved()
         {
             // Given no prior spots...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
 
             // When one is created with InitialState = Approved (Station:Ads:AutoApprove's own path,
             // PLAN T400)...
             var spot = await repo.CreateAsync(
-                Draft() with { InitialState = AdState.Approved }, CancellationToken.None);
+                Draft(sponsorId) with { InitialState = AdState.Approved }, CancellationToken.None);
 
             // Then it lands Approved directly — no separate approve round trip needed.
             Assert.Equal(AdState.Approved, spot.State);
@@ -107,13 +109,14 @@ public static class FeatureAdSpotLifecycleStore
         public async Task ACreatedFailedSpotCarriesItsFailReason()
         {
             // Given no prior spots...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
 
             // When one is created already Failed — STORY-390 AC3's own outcome, a script that never
             // passed validation after its one re-ask...
             var spot = await repo.CreateAsync(
-                Draft() with { InitialState = AdState.Failed, FailReason = "brand_collision" },
+                Draft(sponsorId) with { InitialState = AdState.Failed, FailReason = "brand_collision" },
                 CancellationToken.None);
 
             // Then it lands Failed, with the violated rule's own id.
@@ -125,11 +128,12 @@ public static class FeatureAdSpotLifecycleStore
         public async Task ACreatedSpotStampsStateChangedAtOnCreation()
         {
             // Given no prior spots...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
 
             // When one is created...
-            var spot = await repo.CreateAsync(Draft(), CancellationToken.None);
+            var spot = await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
 
             // Then its initial state_changed_at is stamped, not left null/default.
             Assert.True(spot.StateChangedAt > default(DateTime));
@@ -148,13 +152,14 @@ public static class FeatureAdSpotLifecycleStore
         public async Task CreatingDirectlyIntoReadyIsRejected()
         {
             // Given no prior spots...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
 
             // When a caller attempts to create a spot already Ready — reachable only via a
             // transition on this store, never at birth...
             var ex = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
-                repo.CreateAsync(Draft() with { InitialState = AdState.Ready }, CancellationToken.None));
+                repo.CreateAsync(Draft(sponsorId) with { InitialState = AdState.Ready }, CancellationToken.None));
 
             // Then it is refused before ever reaching Postgres.
             Assert.Contains("Draft, Approved, or Failed", ex.Message);
@@ -164,26 +169,28 @@ public static class FeatureAdSpotLifecycleStore
         public async Task CreatingFailedWithNoFailReasonIsRejected()
         {
             // Given no prior spots...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
 
             // When a caller attempts to create a Failed spot with no reason...
             // Then it is refused — "fail_reason iff Failed" enforced in C#, ahead of db/43's own CHECK.
             await Assert.ThrowsAsync<ArgumentException>(() =>
-                repo.CreateAsync(Draft() with { InitialState = AdState.Failed, FailReason = null }, CancellationToken.None));
+                repo.CreateAsync(Draft(sponsorId) with { InitialState = AdState.Failed, FailReason = null }, CancellationToken.None));
         }
 
         [Fact]
         public async Task CreatingADraftSpotCarryingAFailReasonIsRejected()
         {
             // Given no prior spots...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
 
             // When a caller attempts to create a Draft spot that ALSO carries a fail reason...
             // Then it is refused — the other half of the "iff" guard.
             await Assert.ThrowsAsync<ArgumentException>(() =>
-                repo.CreateAsync(Draft() with { FailReason = "should never be set" }, CancellationToken.None));
+                repo.CreateAsync(Draft(sponsorId) with { FailReason = "should never be set" }, CancellationToken.None));
         }
     }
 
@@ -199,9 +206,10 @@ public static class FeatureAdSpotLifecycleStore
         public async Task DraftToApprovedStampsStateChangedAt()
         {
             // Given a draft spot...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            var spot = await repo.CreateAsync(Draft(), CancellationToken.None);
+            var spot = await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
             await Task.Delay(TimeSpan.FromMilliseconds(20));
 
             // When it is approved...
@@ -217,9 +225,10 @@ public static class FeatureAdSpotLifecycleStore
         public async Task ApprovedToRenderingStampsStateChangedAt()
         {
             // Given an approved spot...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            var spot = await repo.CreateAsync(Draft() with { InitialState = AdState.Approved }, CancellationToken.None);
+            var spot = await repo.CreateAsync(Draft(sponsorId) with { InitialState = AdState.Approved }, CancellationToken.None);
             await Task.Delay(TimeSpan.FromMilliseconds(20));
 
             // When the worker claims it...
@@ -236,9 +245,10 @@ public static class FeatureAdSpotLifecycleStore
         public async Task RenderingToReadyStampsStateChangedAt()
         {
             // Given a spot claimed into Rendering...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            var spot = await repo.CreateAsync(Draft() with { InitialState = AdState.Approved }, CancellationToken.None);
+            var spot = await repo.CreateAsync(Draft(sponsorId) with { InitialState = AdState.Approved }, CancellationToken.None);
             var claimed = (await repo.ClaimNextApprovedAsync(CancellationToken.None))!;
             await Task.Delay(TimeSpan.FromMilliseconds(20));
 
@@ -256,9 +266,10 @@ public static class FeatureAdSpotLifecycleStore
         public async Task RenderingToFailedStampsStateChangedAt()
         {
             // Given a spot claimed into Rendering...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            await repo.CreateAsync(Draft() with { InitialState = AdState.Approved }, CancellationToken.None);
+            await repo.CreateAsync(Draft(sponsorId) with { InitialState = AdState.Approved }, CancellationToken.None);
             var claimed = (await repo.ClaimNextApprovedAsync(CancellationToken.None))!;
             await Task.Delay(TimeSpan.FromMilliseconds(20));
 
@@ -277,10 +288,11 @@ public static class FeatureAdSpotLifecycleStore
         public async Task FailedToApprovedRetryStampsStateChangedAt()
         {
             // Given a failed spot...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
             var spot = await repo.CreateAsync(
-                Draft() with { InitialState = AdState.Failed, FailReason = "brand_collision" },
+                Draft(sponsorId) with { InitialState = AdState.Failed, FailReason = "brand_collision" },
                 CancellationToken.None);
             await Task.Delay(TimeSpan.FromMilliseconds(20));
 
@@ -299,12 +311,13 @@ public static class FeatureAdSpotLifecycleStore
         public async Task ReadyToRetiredStampsStateChangedAtAndRetiredAt()
         {
             // Given a ready spot...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            await repo.CreateAsync(Draft() with { InitialState = AdState.Approved }, CancellationToken.None);
+            await repo.CreateAsync(Draft(sponsorId) with { InitialState = AdState.Approved }, CancellationToken.None);
             var claimed = (await repo.ClaimNextApprovedAsync(CancellationToken.None))!;
             await repo.MarkReadyAsync(claimed.Id, mediaId: 99, CancellationToken.None);
-            var ready = (await repo.ListByStateAsync(AdState.Ready, 10, 0, CancellationToken.None)).Items.Single();
+            var ready = (await repo.ListByStateAsync(AdState.Ready, null, 10, 0, CancellationToken.None)).Items.Single();
             await Task.Delay(TimeSpan.FromMilliseconds(20));
 
             // When it is retired (refresh, or operator)...
@@ -321,9 +334,10 @@ public static class FeatureAdSpotLifecycleStore
         public async Task DraftToRetiredStampsStateChangedAt()
         {
             // Given a draft spot (an operator discard, never rendered)...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            var spot = await repo.CreateAsync(Draft(), CancellationToken.None);
+            var spot = await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
             await Task.Delay(TimeSpan.FromMilliseconds(20));
 
             // When it is retired...
@@ -339,9 +353,10 @@ public static class FeatureAdSpotLifecycleStore
         {
             // Given an approved spot (PLAN T403's own discard-gap ruling: an operator changing their
             // mind before it ever renders)...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            var spot = await repo.CreateAsync(Draft() with { InitialState = AdState.Approved }, CancellationToken.None);
+            var spot = await repo.CreateAsync(Draft(sponsorId) with { InitialState = AdState.Approved }, CancellationToken.None);
             await Task.Delay(TimeSpan.FromMilliseconds(20));
 
             // When it is retired...
@@ -358,10 +373,11 @@ public static class FeatureAdSpotLifecycleStore
         {
             // Given a failed spot (PLAN T403's own discard-gap ruling: a permanently-failing spot
             // needs an exit)...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
             var spot = await repo.CreateAsync(
-                Draft() with { InitialState = AdState.Failed, FailReason = "brand_collision" },
+                Draft(sponsorId) with { InitialState = AdState.Failed, FailReason = "brand_collision" },
                 CancellationToken.None);
             await Task.Delay(TimeSpan.FromMilliseconds(20));
 
@@ -391,9 +407,10 @@ public static class FeatureAdSpotLifecycleStore
         public async Task MarkReadyAsyncPersistsTheGivenMediaId()
         {
             // Given a spot claimed into Rendering...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            await repo.CreateAsync(Draft() with { InitialState = AdState.Approved }, CancellationToken.None);
+            await repo.CreateAsync(Draft(sponsorId) with { InitialState = AdState.Approved }, CancellationToken.None);
             var claimed = (await repo.ClaimNextApprovedAsync(CancellationToken.None))!;
 
             // When it is marked ready with a media id...
@@ -410,9 +427,10 @@ public static class FeatureAdSpotLifecycleStore
         public async Task MarkReadyAsyncAgainstANonRenderingRowIsRefusedAndTheRowUnchanged()
         {
             // Given a draft spot — never claimed into Rendering...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            var spot = await repo.CreateAsync(Draft(), CancellationToken.None);
+            var spot = await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
 
             // When the render seam is called against it anyway (a stale/duplicate signal)...
             var ok = await repo.MarkReadyAsync(spot.Id, mediaId: 1, CancellationToken.None);
@@ -436,16 +454,19 @@ public static class FeatureAdSpotLifecycleStore
         [Fact]
         public async Task ARawInsertOfAReadyRowWithNoMediaIdViolatesTheCheck()
         {
-            // Given a direct connection to the database — no AdSpotRepository involved at all...
-            await db.ResetAdsAsync();
+            // Given a direct connection to the database — no AdSpotRepository involved at all — and a
+            // seeded sponsor (ad_spot.sponsor_id is a NOT NULL FK, PLAN T432)...
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             await using var conn = await db.StationDataSource.OpenConnectionAsync();
 
             // When a raw INSERT attempts state = 'ready' with media_id left NULL...
             var ex = await Assert.ThrowsAsync<PostgresException>(() => conn.ExecuteAsync(
                 """
-                insert into station.ad_spot (brand, title, source, state)
-                values ('Brand', 'Title', 'llm'::station.ad_source, 'ready'::station.ad_state)
-                """));
+                insert into station.ad_spot (sponsor_id, sponsor_name, title, source, state)
+                values (@sponsorId, 'Brand', 'Title', 'llm'::station.ad_source, 'ready'::station.ad_state)
+                """,
+                new { sponsorId }));
 
             // Then Postgres itself refuses it — ad_spot_ready_requires_media_id (db/43).
             Assert.Equal("23514", ex.SqlState);
@@ -454,16 +475,18 @@ public static class FeatureAdSpotLifecycleStore
         [Fact]
         public async Task ARawInsertOfAFailedRowWithNoFailReasonViolatesTheCheck()
         {
-            // Given a direct connection to the database...
-            await db.ResetAdsAsync();
+            // Given a direct connection to the database, and a seeded sponsor...
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             await using var conn = await db.StationDataSource.OpenConnectionAsync();
 
             // When a raw INSERT attempts state = 'failed' with fail_reason left NULL...
             var ex = await Assert.ThrowsAsync<PostgresException>(() => conn.ExecuteAsync(
                 """
-                insert into station.ad_spot (brand, title, source, state)
-                values ('Brand', 'Title', 'llm'::station.ad_source, 'failed'::station.ad_state)
-                """));
+                insert into station.ad_spot (sponsor_id, sponsor_name, title, source, state)
+                values (@sponsorId, 'Brand', 'Title', 'llm'::station.ad_source, 'failed'::station.ad_state)
+                """,
+                new { sponsorId }));
 
             // Then Postgres itself refuses it — ad_spot_fail_reason_iff_failed (db/43).
             Assert.Equal("23514", ex.SqlState);
@@ -472,16 +495,18 @@ public static class FeatureAdSpotLifecycleStore
         [Fact]
         public async Task ARawInsertOfADraftRowCarryingAFailReasonViolatesTheCheck()
         {
-            // Given a direct connection to the database...
-            await db.ResetAdsAsync();
+            // Given a direct connection to the database, and a seeded sponsor...
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             await using var conn = await db.StationDataSource.OpenConnectionAsync();
 
             // When a raw INSERT attempts state = 'draft' but ALSO sets fail_reason...
             var ex = await Assert.ThrowsAsync<PostgresException>(() => conn.ExecuteAsync(
                 """
-                insert into station.ad_spot (brand, title, source, state, fail_reason)
-                values ('Brand', 'Title', 'llm'::station.ad_source, 'draft'::station.ad_state, 'nope')
-                """));
+                insert into station.ad_spot (sponsor_id, sponsor_name, title, source, state, fail_reason)
+                values (@sponsorId, 'Brand', 'Title', 'llm'::station.ad_source, 'draft'::station.ad_state, 'nope')
+                """,
+                new { sponsorId }));
 
             // Then Postgres itself refuses it too — the "iff" runs both directions.
             Assert.Equal("23514", ex.SqlState);
@@ -489,23 +514,25 @@ public static class FeatureAdSpotLifecycleStore
     }
 
     // ---------------------------------------------------------------------
-    // AC1 — the brief upsert, keyed both shapes, incl. the ratified owner-brand cap
+    // AC1 — the brief upsert, keyed on (sponsor_id, premise_key) — PLAN T432 retargets this from
+    // the pre-sponsors (pack_slug, brand) key (SPEC F171.6, db/46's own ad_brief_sponsor_id_premise_key)
     // ---------------------------------------------------------------------
 
     [Collection(DatabaseCollection.Name)]
     [Trait("Category", "Integration")]
-    public sealed class ScenarioTheBriefUpsertIsKeyedOnPackSlugAndBrand(DatabaseFixture db)
+    public sealed class ScenarioTheBriefUpsertIsKeyedOnSponsorAndPremise(DatabaseFixture db)
     {
         [Fact]
         public async Task AFirstUpsertLandsOneRow()
         {
             // Given no prior briefs...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdBriefRepo(db);
 
             // When one owner-authored brief is upserted...
             await repo.UpsertAsync(
-                packSlug: null, brand: "Bramble & Fitch", premise: "A cozy hardware shop",
+                packSlug: null, sponsorId: sponsorId, premise: "A cozy hardware shop",
                 tone: "warm", structure: null, enabled: true, CancellationToken.None);
 
             // Then exactly one row exists.
@@ -513,83 +540,119 @@ public static class FeatureAdSpotLifecycleStore
         }
 
         [Fact]
-        public async Task AnUpsertWithTheSamePackSlugAndBrandUpdatesInPlace()
+        public async Task AnUpsertWithTheSamePackSlugSponsorAndPremiseUpdatesInPlace()
         {
-            // Given a pack-installed brief...
-            await db.ResetAdsAsync();
+            // Given a pack-installed brief — premise held CONSTANT across both calls on purpose: the
+            // constraint this upsert targets is (sponsor_id, premise_key), not (pack_slug, sponsor_id)
+            // — a CHANGED premise folds to a different premise_key and inserts a SECOND row rather
+            // than updating this one (see ADifferentPremiseForTheSameSponsorIsALegalSecondRow below;
+            // only tone varies here to prove the update-in-place half)...
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdBriefRepo(db);
             var first = await repo.UpsertAsync(
-                packSlug: "genwave-catalog", brand: "Bramble & Fitch", premise: "Old premise",
+                packSlug: "genwave-catalog", sponsorId: sponsorId, premise: "Same premise",
                 tone: "warm", structure: null, enabled: true, CancellationToken.None);
 
-            // When the SAME pack re-installs it with a revised premise...
+            // When the SAME pack re-installs it with the SAME premise but a revised tone...
             var second = await repo.UpsertAsync(
-                packSlug: "genwave-catalog", brand: "Bramble & Fitch", premise: "New premise",
-                tone: "warm", structure: null, enabled: true, CancellationToken.None);
+                packSlug: "genwave-catalog", sponsorId: sponsorId, premise: "Same premise",
+                tone: "dry", structure: null, enabled: true, CancellationToken.None);
 
-            // Then it updated the SAME row in place — same id, count stays 1, premise moved.
+            // Then it updated the SAME row in place — same id, count stays 1, tone moved.
             Assert.Equal(first.Id, second.Id);
-            Assert.Equal("New premise", second.Premise);
+            Assert.Equal("dry", second.Tone);
             Assert.Equal(1, await CountAllBriefRowsAsync(db));
         }
 
         [Fact]
-        public async Task TwoOwnerAuthoredUpsertsForTheSameBrandCollapseToOneRow()
+        public async Task TwoOwnerAuthoredUpsertsForTheSameSponsorAndPremiseCollapseToOneRow()
         {
-            // Given no prior briefs — RATIFIED 2026-09-02: one owner brief per brand.
-            await db.ResetAdsAsync();
+            // Given no prior briefs — premise held constant across both calls (the SAME reasoning
+            // as AnUpsertWithTheSamePackSlugSponsorAndPremiseUpdatesInPlace, one section up)...
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdBriefRepo(db);
             var first = await repo.UpsertAsync(
-                packSlug: null, brand: "Bramble & Fitch", premise: "First premise",
+                packSlug: null, sponsorId: sponsorId, premise: "Same premise",
                 tone: "warm", structure: null, enabled: true, CancellationToken.None);
 
-            // When the owner re-authors the SAME brand's brief — a SECOND call, also NULL pack_slug...
+            // When the owner re-authors the SAME sponsor's SAME-premise brief — a SECOND call, also
+            // NULL pack_slug...
             var second = await repo.UpsertAsync(
-                packSlug: null, brand: "Bramble & Fitch", premise: "Second premise",
+                packSlug: null, sponsorId: sponsorId, premise: "Same premise",
                 tone: "dry", structure: null, enabled: true, CancellationToken.None);
 
-            // Then it updated the SAME row — never a second one. A brand is a brand.
+            // Then it updated the SAME row — never a second one. A sponsor+premise is a sponsor+premise.
             Assert.Equal(first.Id, second.Id);
-            Assert.Equal("Second premise", second.Premise);
+            Assert.Equal("dry", second.Tone);
             Assert.Equal(1, await CountAllBriefRowsAsync(db));
         }
 
         [Fact]
-        public async Task AnOwnerBriefAndAPackBriefForTheSameBrandAreTwoSeparateRows()
+        public async Task ADifferentPremiseForTheSameSponsorIsALegalSecondRow()
         {
-            // Given an owner-authored brief for a brand...
-            await db.ResetAdsAsync();
+            // Given an owner-authored brief for a sponsor (SPEC F171.6: several angles are legal per
+            // sponsor)...
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdBriefRepo(db);
             await repo.UpsertAsync(
-                packSlug: null, brand: "Bramble & Fitch", premise: "Owner's own premise",
+                packSlug: null, sponsorId: sponsorId, premise: "First angle",
                 tone: "warm", structure: null, enabled: true, CancellationToken.None);
 
-            // When a PACK installs a brief for the SAME brand name (a different pack_slug half of
-            // the key)...
+            // When a SECOND upsert targets the SAME sponsor with a DIFFERENT premise (folds to a
+            // different premise_key)...
             await repo.UpsertAsync(
-                packSlug: "genwave-catalog", brand: "Bramble & Fitch", premise: "Pack's own premise",
+                packSlug: null, sponsorId: sponsorId, premise: "Second angle",
                 tone: "dry", structure: null, enabled: true, CancellationToken.None);
 
-            // Then they are two distinct rows — the cap is scoped to (pack_slug, brand), not brand
-            // alone.
+            // Then they are two distinct rows — a different angle is a legal second row, never a
+            // collision.
             Assert.Equal(2, await CountAllBriefRowsAsync(db));
+        }
+
+        [Fact]
+        public async Task AnOwnerBriefAndAPackBriefForTheSameSponsorAndPremiseCollapseToOneRow()
+        {
+            // Given an owner-authored brief for a sponsor — pack_slug plays no part in the
+            // (sponsor_id, premise_key) constraint (PLAN T432, AdBriefRepository.UpsertAsync's own
+            // remarks), unlike the pre-sponsors (pack_slug, brand) key this replaced...
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
+            var repo = Harness.AdBriefRepo(db);
+            var owner = await repo.UpsertAsync(
+                packSlug: null, sponsorId: sponsorId, premise: "Shared premise",
+                tone: "warm", structure: null, enabled: true, CancellationToken.None);
+
+            // When a PACK installs a brief for the SAME sponsor and the SAME premise (a different
+            // pack_slug — but pack_slug is not part of the key)...
+            var pack = await repo.UpsertAsync(
+                packSlug: "genwave-catalog", sponsorId: sponsorId, premise: "Shared premise",
+                tone: "dry", structure: null, enabled: true, CancellationToken.None);
+
+            // Then they collapse to the SAME row — the cap is scoped to (sponsor_id, premise_key)
+            // alone.
+            Assert.Equal(owner.Id, pack.Id);
+            Assert.Equal(1, await CountAllBriefRowsAsync(db));
         }
 
         [Fact]
         public async Task AnUpdatingUpsertLeavesCreatedAtUntouched()
         {
-            // Given an existing brief...
-            await db.ResetAdsAsync();
+            // Given an existing brief — premise held constant across both calls (only tone varies)...
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdBriefRepo(db);
             var first = await repo.UpsertAsync(
-                packSlug: null, brand: "Bramble & Fitch", premise: "First premise",
+                packSlug: null, sponsorId: sponsorId, premise: "Same premise",
                 tone: "warm", structure: null, enabled: true, CancellationToken.None);
             await Task.Delay(TimeSpan.FromMilliseconds(20));
 
             // When it is upserted again...
             var second = await repo.UpsertAsync(
-                packSlug: null, brand: "Bramble & Fitch", premise: "Second premise",
-                tone: "warm", structure: null, enabled: true, CancellationToken.None);
+                packSlug: null, sponsorId: sponsorId, premise: "Same premise",
+                tone: "dry", structure: null, enabled: true, CancellationToken.None);
 
             // Then created_at is untouched by the update half.
             Assert.Equal(first.CreatedAt, second.CreatedAt);
@@ -600,22 +663,24 @@ public static class FeatureAdSpotLifecycleStore
         {
             // Given a disabled brief — T405 review RULING (corrects the T398-shipped shape): enabled
             // is PRESERVE-on-conflict, never overwrite; the operator's own lever, never a content
-            // upsert's business...
-            await db.ResetAdsAsync();
+            // upsert's business — premise held constant across both calls on purpose (same reasoning
+            // as this scenario's own update-in-place fact)...
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdBriefRepo(db);
             await repo.UpsertAsync(
-                packSlug: "genwave-catalog", brand: "Bramble & Fitch", premise: "First premise",
+                packSlug: "genwave-catalog", sponsorId: sponsorId, premise: "Same premise",
                 tone: "warm", structure: null, enabled: false, CancellationToken.None);
 
             // When it is upserted again with enabled: true...
             var second = await repo.UpsertAsync(
-                packSlug: "genwave-catalog", brand: "Bramble & Fitch", premise: "Second premise",
-                tone: "warm", structure: null, enabled: true, CancellationToken.None);
+                packSlug: "genwave-catalog", sponsorId: sponsorId, premise: "Same premise",
+                tone: "dry", structure: null, enabled: true, CancellationToken.None);
 
             // Then the row STAYS disabled — the second call's own `enabled` argument is silently
             // irrelevant to an EXISTING row — while the content still refreshed.
             Assert.False(second.Enabled);
-            Assert.Equal("Second premise", second.Premise);
+            Assert.Equal("dry", second.Tone);
         }
     }
 
@@ -630,14 +695,17 @@ public static class FeatureAdSpotLifecycleStore
         [Fact]
         public async Task AFirstBatchLandsEveryDeclaredBriefEnabled()
         {
-            // Given no prior briefs...
-            await db.ResetAdsAsync();
+            // Given no prior briefs, and three distinct sponsors...
+            await db.ResetAdsAndShowsAsync();
+            var brambleId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
+            var acmeId = await Harness.SeedSponsorAsync(db, "Acme Filing Co");
+            var nikeId = await Harness.SeedSponsorAsync(db, "Nike");
             var repo = Harness.AdBriefRepo(db);
             var briefs = new List<AdBriefUpsertInput>
             {
-                new("Bramble & Fitch", "A cozy hardware shop", "warm", "hook-offer-cta"),
-                new("Acme Filing Co", "Bureaucracy, but faster", null, null),
-                new("Nike", "The signature swoosh line", null, null),
+                new(brambleId, "A cozy hardware shop", "warm", "hook-offer-cta"),
+                new(acmeId, "Bureaucracy, but faster", null, null),
+                new(nikeId, "The signature swoosh line", null, null),
             };
 
             // When the whole pack is upserted in one batch...
@@ -653,46 +721,54 @@ public static class FeatureAdSpotLifecycleStore
         [Fact]
         public async Task AReinstallBatchPreservesDisabledAndRefreshesContent()
         {
-            // Given a batch-installed brief, later disabled by the operator...
-            await db.ResetAdsAsync();
+            // Given a batch-installed brief, later disabled by the operator — premise held CONSTANT
+            // across both install calls on purpose: UpsertAllAsync conflicts on (sponsor_id,
+            // premise_key), the same as UpsertAsync (AdBriefRepository's own remarks), so a changed
+            // premise would insert a SECOND row instead of updating this one...
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdBriefRepo(db);
             await repo.UpsertAllAsync(
                 "genwave-catalog",
-                [new AdBriefUpsertInput("Bramble & Fitch", "First premise", "warm", null)],
+                [new AdBriefUpsertInput(sponsorId, "Same premise", "warm", null)],
                 CancellationToken.None);
             var briefRow = (await repo.ListAllAsync(CancellationToken.None)).Single();
             await repo.SetEnabledAsync(briefRow.Id, enabled: false, CancellationToken.None);
 
-            // When the SAME pack reinstalls with a revised premise...
+            // When the SAME pack reinstalls with the SAME premise but a revised tone...
             var reinstalled = await repo.UpsertAllAsync(
                 "genwave-catalog",
-                [new AdBriefUpsertInput("Bramble & Fitch", "Second premise", "warm", null)],
+                [new AdBriefUpsertInput(sponsorId, "Same premise", "dry", null)],
                 CancellationToken.None);
 
             // Then the SAME row updated in place — content refreshed, the operator's own disable
             // survived — "content refreshes, operator state persists," one property.
             var row = Assert.Single(reinstalled);
             Assert.False(row.Enabled);
-            Assert.Equal("Second premise", row.Premise);
+            Assert.Equal("dry", row.Tone);
             Assert.Equal(1, await CountAllBriefRowsAsync(db));
         }
 
         [Fact]
         public async Task AFailingBriefMidBatchRollsBackEveryRowInTheBatch()
         {
-            // Given a three-brief batch whose SECOND brief carries a null brand — bypassing this
-            // store's own C# non-nullable contract deliberately (test-only fault injection, mirrors
+            // Given a three-brief batch whose SECOND brief targets a sponsor id that does not
+            // exist — test-only fault injection (mirrors
             // ScenarioTheDbChecksRefuseIllegalRowsEvenBypassingTheStore's own "reach the real
-            // constraint" idiom one section up): station.ad_brief.brand is NOT NULL at the DB layer,
-            // and this is the one honest way to prove UpsertAllAsync's own transaction rolls
-            // EVERYTHING back, never just the offending row...
-            await db.ResetAdsAsync();
+            // constraint" idiom one section up): ad_brief_sponsor_id_fkey is RESTRICT (db/46), and
+            // this is the one honest way left to prove UpsertAllAsync's own transaction rolls
+            // EVERYTHING back, never just the offending row — sponsor_id is a non-nullable long now,
+            // so a null-fault injection no longer even compiles...
+            await db.ResetAdsAndShowsAsync();
+            var firstId = await Harness.SeedSponsorAsync(db, "First Sponsor");
+            var thirdId = await Harness.SeedSponsorAsync(db, "Third Sponsor");
+            const long NonexistentSponsorId = 999_999_999;
             var repo = Harness.AdBriefRepo(db);
             var briefs = new List<AdBriefUpsertInput>
             {
-                new("First Brand", null, null, null),
-                new(null!, null, null, null),
-                new("Third Brand", null, null, null),
+                new(firstId, null, null, null),
+                new(NonexistentSponsorId, null, null, null),
+                new(thirdId, null, null, null),
             };
 
             // When the batch upsert is attempted...
@@ -717,9 +793,10 @@ public static class FeatureAdSpotLifecycleStore
         public async Task ApprovingAnAlreadyRetiredSpotIsRefused()
         {
             // Given a retired spot...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            var spot = await repo.CreateAsync(Draft(), CancellationToken.None);
+            var spot = await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
             var retired = (await repo.RetireAsync(spot.Id, spot.Version, CancellationToken.None)).Spot!;
 
             // When an approve is attempted against it anyway...
@@ -737,9 +814,10 @@ public static class FeatureAdSpotLifecycleStore
         public async Task RetryingADraftSpotIsRefused()
         {
             // Given a draft spot — never failed...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            var spot = await repo.CreateAsync(Draft(), CancellationToken.None);
+            var spot = await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
 
             // When a retry (Failed -> Approved) is attempted against it...
             var outcome = await repo.RetryAsync(spot.Id, spot.Version, CancellationToken.None);
@@ -754,9 +832,10 @@ public static class FeatureAdSpotLifecycleStore
         public async Task AStaleVersionIsRefusedAsAConflict()
         {
             // Given a draft spot, approved once (its own version now stale)...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            var spot = await repo.CreateAsync(Draft(), CancellationToken.None);
+            var spot = await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
             await repo.ApproveAsync(spot.Id, spot.Version, CancellationToken.None);
 
             // When a SECOND approve is attempted with the ORIGINAL (now stale) version...
@@ -770,7 +849,8 @@ public static class FeatureAdSpotLifecycleStore
         public async Task ApprovingAnUnknownIdReturnsNotFound()
         {
             // Given no spot with this id...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
 
             // When an approve is attempted against it...
@@ -787,9 +867,10 @@ public static class FeatureAdSpotLifecycleStore
             // Given a spot claimed into Rendering (PLAN T403's own discard-gap ruling: Rendering
             // stays undiscardable — it is transient by construction, the guardian re-arms it to
             // Approved within one grace, and the discard happens from there)...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            await repo.CreateAsync(Draft() with { InitialState = AdState.Approved }, CancellationToken.None);
+            await repo.CreateAsync(Draft(sponsorId) with { InitialState = AdState.Approved }, CancellationToken.None);
             var claimed = (await repo.ClaimNextApprovedAsync(CancellationToken.None))!;
 
             // When a retire is attempted against it anyway...
@@ -814,21 +895,22 @@ public static class FeatureAdSpotLifecycleStore
         public async Task EveryRowDrivenThroughEveryTransitionThisStoreOffersStillExists()
         {
             // Given four spots driven through every transition this store offers...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
 
-            await repo.CreateAsync(Draft() with { InitialState = AdState.Approved }, CancellationToken.None);
+            await repo.CreateAsync(Draft(sponsorId) with { InitialState = AdState.Approved }, CancellationToken.None);
             var claimedForReady = (await repo.ClaimNextApprovedAsync(CancellationToken.None))!;
             await repo.MarkReadyAsync(claimedForReady.Id, mediaId: 1, CancellationToken.None);
 
-            await repo.CreateAsync(Draft() with { InitialState = AdState.Approved }, CancellationToken.None);
+            await repo.CreateAsync(Draft(sponsorId) with { InitialState = AdState.Approved }, CancellationToken.None);
             var claimedForFailure = (await repo.ClaimNextApprovedAsync(CancellationToken.None))!;
             await repo.MarkFailedAsync(claimedForFailure.Id, "tts_timeout", CancellationToken.None);
 
-            var retiredDraft = await repo.CreateAsync(Draft(), CancellationToken.None);
+            var retiredDraft = await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
             await repo.RetireAsync(retiredDraft.Id, retiredDraft.Version, CancellationToken.None);
 
-            await repo.CreateAsync(Draft(), CancellationToken.None);
+            await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
 
             // When every row's own outcome is inspected together...
             var totalRows = await CountAllSpotRowsAsync(db);
@@ -850,13 +932,14 @@ public static class FeatureAdSpotLifecycleStore
         public async Task AStateScopedListReturnsOnlyMatchingRows()
         {
             // Given one draft and one approved spot...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            var draft = await repo.CreateAsync(Draft(), CancellationToken.None);
-            await repo.CreateAsync(Draft() with { InitialState = AdState.Approved }, CancellationToken.None);
+            var draft = await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
+            await repo.CreateAsync(Draft(sponsorId) with { InitialState = AdState.Approved }, CancellationToken.None);
 
             // When the page is scoped to Draft...
-            var page = await repo.ListByStateAsync(AdState.Draft, 10, 0, CancellationToken.None);
+            var page = await repo.ListByStateAsync(AdState.Draft, null, 10, 0, CancellationToken.None);
 
             // Then only the draft row comes back.
             Assert.Equal([draft.Id], page.Items.Select(s => s.Id));
@@ -866,12 +949,13 @@ public static class FeatureAdSpotLifecycleStore
         public async Task TheTotalIsExactAcrossAPartialPage()
         {
             // Given three draft spots...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            for (var i = 0; i < 3; i++) await repo.CreateAsync(Draft(), CancellationToken.None);
+            for (var i = 0; i < 3; i++) await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
 
             // When a page of 2 is requested...
-            var page = await repo.ListByStateAsync(AdState.Draft, limit: 2, offset: 0, CancellationToken.None);
+            var page = await repo.ListByStateAsync(AdState.Draft, null, limit: 2, offset: 0, CancellationToken.None);
 
             // Then the total is the exact matching count, not the page's own row count.
             Assert.Equal(2, page.Items.Count);
@@ -882,13 +966,14 @@ public static class FeatureAdSpotLifecycleStore
         public async Task AnOffsetPastTheLastRowStillCarriesTheTrueTotal()
         {
             // Given two draft spots...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            await repo.CreateAsync(Draft(), CancellationToken.None);
-            await repo.CreateAsync(Draft(), CancellationToken.None);
+            await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
+            await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
 
             // When a page starts past the last row...
-            var page = await repo.ListByStateAsync(AdState.Draft, limit: 10, offset: 50, CancellationToken.None);
+            var page = await repo.ListByStateAsync(AdState.Draft, null, limit: 10, offset: 50, CancellationToken.None);
 
             // Then the page is empty but the total is still exact — never derived from Items' count.
             Assert.Empty(page.Items);
@@ -899,14 +984,15 @@ public static class FeatureAdSpotLifecycleStore
         public async Task ANullStateListsEveryRowRegardlessOfState()
         {
             // Given a draft and a retired spot...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            var draft = await repo.CreateAsync(Draft(), CancellationToken.None);
-            var toRetire = await repo.CreateAsync(Draft(), CancellationToken.None);
+            var draft = await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
+            var toRetire = await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
             await repo.RetireAsync(toRetire.Id, toRetire.Version, CancellationToken.None);
 
             // When the list is unscoped (state = null)...
-            var page = await repo.ListByStateAsync(null, 10, 0, CancellationToken.None);
+            var page = await repo.ListByStateAsync(null, null, 10, 0, CancellationToken.None);
 
             // Then both rows come back, any state.
             Assert.Equal(2, page.Total);
@@ -918,18 +1004,39 @@ public static class FeatureAdSpotLifecycleStore
         public async Task ResultsOrderNewestTransitionedFirst()
         {
             // Given two draft spots, the second created after the first...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            var older = await repo.CreateAsync(Draft(), CancellationToken.None);
+            var older = await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
             await Task.Delay(TimeSpan.FromMilliseconds(20));
-            var newer = await repo.CreateAsync(Draft(), CancellationToken.None);
+            var newer = await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
 
             // When the page is read...
-            var page = await repo.ListByStateAsync(AdState.Draft, 10, 0, CancellationToken.None);
+            var page = await repo.ListByStateAsync(AdState.Draft, null, 10, 0, CancellationToken.None);
 
             // Then the newest-transitioned row leads.
             Assert.Equal(newer.Id, page.Items[0].Id);
             Assert.Equal(older.Id, page.Items[1].Id);
+        }
+
+        [Fact]
+        public async Task ASponsorScopedListReturnsOnlyThatSponsorsRowsWithAnExactTotal()
+        {
+            // Given two draft spots under one sponsor and one draft spot under another...
+            await db.ResetAdsAndShowsAsync();
+            var sponsorA = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
+            var sponsorB = await Harness.SeedSponsorAsync(db, "North Side Grocers");
+            var repo = Harness.AdSpotRepo(db);
+            var first = await repo.CreateAsync(Draft(sponsorA), CancellationToken.None);
+            var second = await repo.CreateAsync(Draft(sponsorA), CancellationToken.None);
+            await repo.CreateAsync(Draft(sponsorB), CancellationToken.None);
+
+            // When the page is scoped to sponsor A...
+            var page = await repo.ListByStateAsync(null, sponsorA, 10, 0, CancellationToken.None);
+
+            // Then only sponsor A's two rows come back, and the total excludes sponsor B's row.
+            Assert.Equal(2, page.Total);
+            Assert.Equal([first.Id, second.Id], page.Items.Select(s => s.Id).OrderBy(id => id));
         }
     }
 
@@ -945,9 +1052,10 @@ public static class FeatureAdSpotLifecycleStore
         public async Task ClaimingWithNothingApprovedReturnsNull()
         {
             // Given only a draft spot — nothing approved...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            await repo.CreateAsync(Draft(), CancellationToken.None);
+            await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
 
             // When the worker claims...
             var claimed = await repo.ClaimNextApprovedAsync(CancellationToken.None);
@@ -960,10 +1068,11 @@ public static class FeatureAdSpotLifecycleStore
         public async Task ClaimingReturnsTheOldestApprovedSpotFirst()
         {
             // Given two approved spots, the first approved well before the second...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            var first = await repo.CreateAsync(Draft() with { InitialState = AdState.Approved }, CancellationToken.None);
-            await repo.CreateAsync(Draft() with { InitialState = AdState.Approved }, CancellationToken.None);
+            var first = await repo.CreateAsync(Draft(sponsorId) with { InitialState = AdState.Approved }, CancellationToken.None);
+            await repo.CreateAsync(Draft(sponsorId) with { InitialState = AdState.Approved }, CancellationToken.None);
             await SetStateChangedAtAsync(db, first.Id, DateTime.UtcNow.AddMinutes(-10));
 
             // When the worker claims once...
@@ -977,10 +1086,11 @@ public static class FeatureAdSpotLifecycleStore
         public async Task ClaimingTwiceInARowClaimsTwoDifferentSpots()
         {
             // Given two approved spots...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            var first = await repo.CreateAsync(Draft() with { InitialState = AdState.Approved }, CancellationToken.None);
-            var second = await repo.CreateAsync(Draft() with { InitialState = AdState.Approved }, CancellationToken.None);
+            var first = await repo.CreateAsync(Draft(sponsorId) with { InitialState = AdState.Approved }, CancellationToken.None);
+            var second = await repo.CreateAsync(Draft(sponsorId) with { InitialState = AdState.Approved }, CancellationToken.None);
             await SetStateChangedAtAsync(db, first.Id, DateTime.UtcNow.AddMinutes(-10));
 
             // When the worker claims twice, back to back...
@@ -1001,10 +1111,11 @@ public static class FeatureAdSpotLifecycleStore
     [Trait("Category", "Integration")]
     public sealed class ScenarioStockCountsAndReadyByAge(DatabaseFixture db)
     {
-        async Task<long> MakeReadySpotAsync(DatabaseFixture fixture, AdSpotRepository repo, AdSource source)
+        async Task<long> MakeReadySpotAsync(
+            DatabaseFixture fixture, AdSpotRepository repo, long sponsorId, AdSource source)
         {
             var spot = await repo.CreateAsync(
-                Draft(source: source, packSlug: source == AdSource.Pack ? "genwave-catalog" : null)
+                Draft(sponsorId, source: source, packSlug: source == AdSource.Pack ? "genwave-catalog" : null)
                     with
                 { InitialState = AdState.Approved },
                 CancellationToken.None);
@@ -1017,11 +1128,12 @@ public static class FeatureAdSpotLifecycleStore
         public async Task CountStockGeneratedAsyncCountsLlmAndPackButNotOwner()
         {
             // Given one ready llm spot, one ready pack spot, and one ready OWNER spot...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            await MakeReadySpotAsync(db, repo, AdSource.Llm);
-            await MakeReadySpotAsync(db, repo, AdSource.Pack);
-            await MakeReadySpotAsync(db, repo, AdSource.Owner);
+            await MakeReadySpotAsync(db, repo, sponsorId, AdSource.Llm);
+            await MakeReadySpotAsync(db, repo, sponsorId, AdSource.Pack);
+            await MakeReadySpotAsync(db, repo, sponsorId, AdSource.Owner);
 
             // When the stock count is read...
             var count = await repo.CountStockGeneratedAsync(CancellationToken.None);
@@ -1035,16 +1147,17 @@ public static class FeatureAdSpotLifecycleStore
         {
             // Given one llm spot in EACH state — ready, rendering, approved, draft, failed, retired
             // (gh-#689: the ready shelf alone left the draft pile unbounded under AutoApprove=false)...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            await MakeReadySpotAsync(db, repo, AdSource.Llm);                                                      // ready
-            await repo.CreateAsync(Draft() with { InitialState = AdState.Approved }, CancellationToken.None);
+            await MakeReadySpotAsync(db, repo, sponsorId, AdSource.Llm);                                                      // ready
+            await repo.CreateAsync(Draft(sponsorId) with { InitialState = AdState.Approved }, CancellationToken.None);
             Assert.NotNull(await repo.ClaimNextApprovedAsync(CancellationToken.None));                            // rendering
-            await repo.CreateAsync(Draft() with { InitialState = AdState.Approved }, CancellationToken.None);      // approved
-            await repo.CreateAsync(Draft(), CancellationToken.None);                                              // draft
+            await repo.CreateAsync(Draft(sponsorId) with { InitialState = AdState.Approved }, CancellationToken.None);      // approved
+            await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);                                              // draft
             await repo.CreateAsync(
-                Draft() with { InitialState = AdState.Failed, FailReason = "format" }, CancellationToken.None);    // failed
-            var doomed = await repo.CreateAsync(Draft(), CancellationToken.None);
+                Draft(sponsorId) with { InitialState = AdState.Failed, FailReason = "format" }, CancellationToken.None);    // failed
+            var doomed = await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
             await repo.RetireAsync(doomed.Id, doomed.Version, CancellationToken.None);                            // retired
             Assert.Equal(6, await CountAllSpotRowsAsync(db));
 
@@ -1059,9 +1172,10 @@ public static class FeatureAdSpotLifecycleStore
         public async Task ListReadyOlderThanAsyncExcludesOwnerSpotsRegardlessOfAge()
         {
             // Given one ready owner spot, backdated well past any refresh age...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            var ownerId = await MakeReadySpotAsync(db, repo, AdSource.Owner);
+            var ownerId = await MakeReadySpotAsync(db, repo, sponsorId, AdSource.Owner);
             await SetStateChangedAtAsync(db, ownerId, DateTime.UtcNow.AddDays(-365));
 
             // When the refresh candidates are read for a 30-day age...
@@ -1075,10 +1189,11 @@ public static class FeatureAdSpotLifecycleStore
         public async Task ListReadyOlderThanAsyncOnlyReturnsSpotsOlderThanTheGivenAge()
         {
             // Given one llm spot fresh, and one llm spot backdated past a 30-day age...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            var freshId = await MakeReadySpotAsync(db, repo, AdSource.Llm);
-            var staleId = await MakeReadySpotAsync(db, repo, AdSource.Llm);
+            var freshId = await MakeReadySpotAsync(db, repo, sponsorId, AdSource.Llm);
+            var staleId = await MakeReadySpotAsync(db, repo, sponsorId, AdSource.Llm);
             await SetStateChangedAtAsync(db, staleId, DateTime.UtcNow.AddDays(-31));
 
             // When the refresh candidates are read for a 30-day age...
@@ -1102,9 +1217,10 @@ public static class FeatureAdSpotLifecycleStore
         public async Task AnExistingRowIsReturned()
         {
             // Given a draft spot...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            var spot = await repo.CreateAsync(Draft(), CancellationToken.None);
+            var spot = await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
 
             // When it is read back by id...
             var found = await repo.GetByIdAsync(spot.Id, CancellationToken.None);
@@ -1112,14 +1228,16 @@ public static class FeatureAdSpotLifecycleStore
             // Then the exact row comes back.
             Assert.NotNull(found);
             Assert.Equal(spot.Id, found!.Id);
-            Assert.Equal(spot.Brand, found.Brand);
+            Assert.Equal(spot.SponsorId, found.SponsorId);
+            Assert.Equal(spot.SponsorName, found.SponsorName);
         }
 
         [Fact]
         public async Task AnUnknownIdReturnsNull()
         {
             // Given no spot with this id...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
 
             // When it is read back by id...
@@ -1139,26 +1257,29 @@ public static class FeatureAdSpotLifecycleStore
     public sealed class ScenarioUpdateAsyncEditsDraftAndFailedOnly(DatabaseFixture db)
     {
         static AdSpotEdit Edit(
-            string? brand = null, string? title = null, string? brief = null, string? script = null,
+            long? sponsorId = null, string? title = null, string? brief = null, string? script = null,
             string? voicePlan = null, int? spotSeconds = null, long? bedMediaId = null) =>
-            new(brand, title, brief, script, voicePlan, spotSeconds, bedMediaId);
+            new(sponsorId, title, brief, script, voicePlan, spotSeconds, bedMediaId);
 
         [Fact]
         public async Task EditingADraftSpotUpdatesTheGivenFields()
         {
-            // Given a draft spot...
-            await db.ResetAdsAsync();
+            // Given a draft spot under one sponsor, and a second sponsor to move it to...
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
+            var otherSponsorId = await Harness.SeedSponsorAsync(db, "New Sponsor");
             var repo = Harness.AdSpotRepo(db);
-            var spot = await repo.CreateAsync(Draft(), CancellationToken.None);
+            var spot = await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
 
-            // When brand and title are edited...
+            // When sponsor and title are edited...
             var outcome = await repo.UpdateAsync(
-                spot.Id, Edit(brand: "New Brand", title: "New Title"), spot.Version, CancellationToken.None);
+                spot.Id, Edit(sponsorId: otherSponsorId, title: "New Title"), spot.Version, CancellationToken.None);
 
-            // Then the given fields moved and the state stayed Draft (a content edit, not a
-            // transition).
+            // Then the given fields moved — including SponsorName's own refreshed snapshot
+            // (SPEC F171.7) — and the state stayed Draft (a content edit, not a transition).
             Assert.Equal(AdSpotWriteResult.Updated, outcome.Result);
-            Assert.Equal("New Brand", outcome.Spot!.Brand);
+            Assert.Equal(otherSponsorId, outcome.Spot!.SponsorId);
+            Assert.Equal("New Sponsor", outcome.Spot.SponsorName);
             Assert.Equal("New Title", outcome.Spot.Title);
             Assert.Equal(AdState.Draft, outcome.Spot.State);
         }
@@ -1166,18 +1287,20 @@ public static class FeatureAdSpotLifecycleStore
         [Fact]
         public async Task FieldsLeftNullAreUnchanged()
         {
-            // Given a draft spot with a known brief...
-            await db.ResetAdsAsync();
+            // Given a draft spot with a known sponsor and brief...
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Original Sponsor");
             var repo = Harness.AdSpotRepo(db);
-            var spot = await repo.CreateAsync(Draft(brand: "Original Brand"), CancellationToken.None);
+            var spot = await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
 
             // When only the title is edited...
             var outcome = await repo.UpdateAsync(
                 spot.Id, Edit(title: "New Title"), spot.Version, CancellationToken.None);
 
-            // Then brand/brief are untouched.
+            // Then sponsor/brief are untouched.
             Assert.Equal(AdSpotWriteResult.Updated, outcome.Result);
-            Assert.Equal("Original Brand", outcome.Spot!.Brand);
+            Assert.Equal(sponsorId, outcome.Spot!.SponsorId);
+            Assert.Equal("Original Sponsor", outcome.Spot.SponsorName);
             Assert.Equal(spot.Brief, outcome.Spot.Brief);
         }
 
@@ -1185,10 +1308,11 @@ public static class FeatureAdSpotLifecycleStore
         public async Task EditingAFailedSpotSucceeds()
         {
             // Given a failed spot (the "fix the script before retry" path)...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
             var spot = await repo.CreateAsync(
-                Draft() with { InitialState = AdState.Failed, FailReason = "brand_collision" },
+                Draft(sponsorId) with { InitialState = AdState.Failed, FailReason = "brand_collision" },
                 CancellationToken.None);
 
             // When its script is edited...
@@ -1207,9 +1331,10 @@ public static class FeatureAdSpotLifecycleStore
         {
             // Given an approved spot (PLAN T403's own ruling: editing an approved spot would
             // invalidate a render already in flight)...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            var spot = await repo.CreateAsync(Draft() with { InitialState = AdState.Approved }, CancellationToken.None);
+            var spot = await repo.CreateAsync(Draft(sponsorId) with { InitialState = AdState.Approved }, CancellationToken.None);
 
             // When an edit is attempted against it anyway...
             var outcome = await repo.UpdateAsync(spot.Id, Edit(title: "New Title"), spot.Version, CancellationToken.None);
@@ -1224,12 +1349,13 @@ public static class FeatureAdSpotLifecycleStore
         public async Task EditingAReadySpotIsRefused()
         {
             // Given a ready spot...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            await repo.CreateAsync(Draft() with { InitialState = AdState.Approved }, CancellationToken.None);
+            await repo.CreateAsync(Draft(sponsorId) with { InitialState = AdState.Approved }, CancellationToken.None);
             var claimed = (await repo.ClaimNextApprovedAsync(CancellationToken.None))!;
             await repo.MarkReadyAsync(claimed.Id, mediaId: 1, CancellationToken.None);
-            var ready = (await repo.ListByStateAsync(AdState.Ready, 10, 0, CancellationToken.None)).Items.Single();
+            var ready = (await repo.ListByStateAsync(AdState.Ready, null, 10, 0, CancellationToken.None)).Items.Single();
 
             // When an edit is attempted against it...
             var outcome = await repo.UpdateAsync(ready.Id, Edit(title: "New Title"), ready.Version, CancellationToken.None);
@@ -1242,9 +1368,10 @@ public static class FeatureAdSpotLifecycleStore
         public async Task AStaleVersionIsRefusedAsAConflict()
         {
             // Given a draft spot, edited once (its own version now stale)...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            var spot = await repo.CreateAsync(Draft(), CancellationToken.None);
+            var spot = await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
             await repo.UpdateAsync(spot.Id, Edit(title: "First edit"), spot.Version, CancellationToken.None);
 
             // When a SECOND edit is attempted with the ORIGINAL (now stale) version...
@@ -1258,7 +1385,8 @@ public static class FeatureAdSpotLifecycleStore
         public async Task EditingAnUnknownIdReturnsNotFound()
         {
             // Given no spot with this id...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
 
             // When an edit is attempted against it...
@@ -1272,9 +1400,10 @@ public static class FeatureAdSpotLifecycleStore
         public async Task StateChangedAtIsUntouchedByAContentEdit()
         {
             // Given a draft spot...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdSpotRepo(db);
-            var spot = await repo.CreateAsync(Draft(), CancellationToken.None);
+            var spot = await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
             await Task.Delay(TimeSpan.FromMilliseconds(20));
 
             // When it is edited...
@@ -1297,14 +1426,16 @@ public static class FeatureAdSpotLifecycleStore
         [Fact]
         public async Task BothPackAndOwnerBriefsComeBack()
         {
-            // Given one owner brief and one pack brief...
-            await db.ResetAdsAsync();
+            // Given one owner brief and one pack brief, each for its own sponsor...
+            await db.ResetAdsAndShowsAsync();
+            var ownerSponsorId = await Harness.SeedSponsorAsync(db, "Owner Sponsor");
+            var packSponsorId = await Harness.SeedSponsorAsync(db, "Pack Sponsor");
             var repo = Harness.AdBriefRepo(db);
             await repo.UpsertAsync(
-                packSlug: null, brand: "Owner Brand", premise: null, tone: null, structure: null,
+                packSlug: null, sponsorId: ownerSponsorId, premise: null, tone: null, structure: null,
                 enabled: true, CancellationToken.None);
             await repo.UpsertAsync(
-                packSlug: "genwave-catalog", brand: "Pack Brand", premise: null, tone: null,
+                packSlug: "genwave-catalog", sponsorId: packSponsorId, premise: null, tone: null,
                 structure: null, enabled: true, CancellationToken.None);
 
             // When every brief is listed...
@@ -1312,54 +1443,57 @@ public static class FeatureAdSpotLifecycleStore
 
             // Then both come back — pack and owner alike.
             Assert.Equal(2, briefs.Count);
-            Assert.Contains(briefs, b => b.Brand == "Owner Brand" && b.PackSlug is null);
-            Assert.Contains(briefs, b => b.Brand == "Pack Brand" && b.PackSlug == "genwave-catalog");
+            Assert.Contains(briefs, b => b.SponsorId == ownerSponsorId && b.PackSlug is null);
+            Assert.Contains(briefs, b => b.SponsorId == packSponsorId && b.PackSlug == "genwave-catalog");
         }
 
         [Fact]
         public async Task DisabledBriefsAreListedToo()
         {
             // Given a disabled brief — SampleEnabledAsync would skip it, but the admin list must not.
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Disabled Sponsor");
             var repo = Harness.AdBriefRepo(db);
             await repo.UpsertAsync(
-                packSlug: null, brand: "Disabled Brand", premise: null, tone: null, structure: null,
+                packSlug: null, sponsorId: sponsorId, premise: null, tone: null, structure: null,
                 enabled: false, CancellationToken.None);
 
             // When every brief is listed...
             var briefs = await repo.ListAllAsync(CancellationToken.None);
 
             // Then the disabled row still comes back.
-            Assert.Contains(briefs, b => b.Brand == "Disabled Brand" && !b.Enabled);
+            Assert.Contains(briefs, b => b.SponsorId == sponsorId && !b.Enabled);
         }
 
         [Fact]
         public async Task ResultsOrderNewestCreatedFirst()
         {
-            // Given two briefs, the second created after the first...
-            await db.ResetAdsAsync();
+            // Given two briefs for two sponsors, the second created after the first...
+            await db.ResetAdsAndShowsAsync();
+            var olderSponsorId = await Harness.SeedSponsorAsync(db, "Older Sponsor");
+            var newerSponsorId = await Harness.SeedSponsorAsync(db, "Newer Sponsor");
             var repo = Harness.AdBriefRepo(db);
             await repo.UpsertAsync(
-                packSlug: null, brand: "Older Brand", premise: null, tone: null, structure: null,
+                packSlug: null, sponsorId: olderSponsorId, premise: null, tone: null, structure: null,
                 enabled: true, CancellationToken.None);
             await Task.Delay(TimeSpan.FromMilliseconds(20));
             await repo.UpsertAsync(
-                packSlug: null, brand: "Newer Brand", premise: null, tone: null, structure: null,
+                packSlug: null, sponsorId: newerSponsorId, premise: null, tone: null, structure: null,
                 enabled: true, CancellationToken.None);
 
             // When every brief is listed...
             var briefs = await repo.ListAllAsync(CancellationToken.None);
 
             // Then the newest-created row leads.
-            Assert.Equal("Newer Brand", briefs[0].Brand);
-            Assert.Equal("Older Brand", briefs[1].Brand);
+            Assert.Equal(newerSponsorId, briefs[0].SponsorId);
+            Assert.Equal(olderSponsorId, briefs[1].SponsorId);
         }
 
         [Fact]
         public async Task NoBriefsListsEmpty()
         {
             // Given no briefs at all...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
             var repo = Harness.AdBriefRepo(db);
 
             // When every brief is listed...
@@ -1371,76 +1505,86 @@ public static class FeatureAdSpotLifecycleStore
     }
 
     // ---------------------------------------------------------------------
-    // T362 loop law — CreateOwnerAsync's own live facts (T403b's POST /api/ad-briefs)
+    // T362 loop law — CreateOwnerAsync's own live facts (T403b's POST /api/ad-briefs); PLAN T432
+    // retargets the cap from (pack_slug, brand) to (sponsor_id, premise_key) — pack_slug plays no
+    // part, so a colliding pack-owned row refuses an owner create too (SPEC F171.6)
     // ---------------------------------------------------------------------
 
     [Collection(DatabaseCollection.Name)]
     [Trait("Category", "Integration")]
-    public sealed class ScenarioCreateOwnerAsyncRefusesADuplicateBrandAtomically(DatabaseFixture db)
+    public sealed class ScenarioCreateOwnerAsyncRefusesADuplicateSponsorAndPremiseAtomically(DatabaseFixture db)
     {
         [Fact]
         public async Task AFirstCreateLandsOneRowWithPackSlugNull()
         {
-            // Given no prior briefs...
-            await db.ResetAdsAsync();
+            // Given a sponsor with no prior briefs...
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdBriefRepo(db);
 
             // When an owner brief is created...
             var created = await repo.CreateOwnerAsync(
-                brand: "Bramble & Fitch", premise: "A cozy hardware shop", tone: "warm", structure: null,
+                sponsorId, premise: "A cozy hardware shop", tone: "warm", structure: null,
                 enabled: true, CancellationToken.None);
 
             // Then it lands, pack_slug null, exactly one row.
             Assert.NotNull(created);
             Assert.Null(created!.PackSlug);
-            Assert.Equal("Bramble & Fitch", created.Brand);
+            Assert.Equal(sponsorId, created.SponsorId);
             Assert.Equal(1, await CountAllBriefRowsAsync(db));
         }
 
         [Fact]
-        public async Task ASecondCreateForTheSameBrandIsRefusedAndTheRowUnchanged()
+        public async Task ASecondCreateForTheSameSponsorAndPremiseIsRefusedAndTheRowUnchanged()
         {
-            // Given an existing owner brief for a brand...
-            await db.ResetAdsAsync();
+            // Given an existing owner brief for a sponsor — premise held CONSTANT across both calls
+            // on purpose: the cap this create targets is (sponsor_id, premise_key), so a DIFFERENT
+            // premise would never collide at all (ADifferentPremiseForTheSameSponsorIsALegalSecondRow,
+            // the upsert scenario two sections up)...
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdBriefRepo(db);
             var first = await repo.CreateOwnerAsync(
-                brand: "Bramble & Fitch", premise: "First premise", tone: "warm", structure: null,
+                sponsorId, premise: "Same premise", tone: "warm", structure: null,
                 enabled: true, CancellationToken.None);
 
-            // When a SECOND owner brief is created for the SAME brand...
+            // When a SECOND owner brief is created for the SAME sponsor and the SAME premise...
             var second = await repo.CreateOwnerAsync(
-                brand: "Bramble & Fitch", premise: "Second premise", tone: "dry", structure: null,
+                sponsorId, premise: "Same premise", tone: "dry", structure: null,
                 enabled: true, CancellationToken.None);
 
             // Then it is refused (null back) — never a silent update, never a second row — and the
-            // original row's own premise is untouched (the exact behavior UpsertAsync would NOT give:
+            // original row's own tone is untouched (the exact behavior UpsertAsync would NOT give:
             // this is why CreateOwnerAsync exists as its own member).
             Assert.NotNull(first);
             Assert.Null(second);
             Assert.Equal(1, await CountAllBriefRowsAsync(db));
             var rows = await repo.ListAllAsync(CancellationToken.None);
-            Assert.Equal("First premise", rows.Single().Premise);
+            Assert.Equal("warm", rows.Single().Tone);
         }
 
         [Fact]
-        public async Task ACreateForABrandThatOnlyHasAPackBriefSucceeds()
+        public async Task ACreateCollidingWithAnExistingPackBriefsSponsorAndPremiseIsRefusedToo()
         {
-            // Given a PACK brief for a brand (the cap is scoped to (pack_slug, brand), not brand
-            // alone — the Story389 upsert fact's own coexistence pin, one member over)...
-            await db.ResetAdsAsync();
+            // Given a PACK-installed brief for a sponsor — pack_slug plays no part in the
+            // (sponsor_id, premise_key) cap (AdBriefRepository.CreateOwnerAsync's own remarks), so an
+            // owner create colliding with a PACK row is refused exactly like colliding with an owner
+            // row above...
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdBriefRepo(db);
             await repo.UpsertAsync(
-                packSlug: "genwave-catalog", brand: "Bramble & Fitch", premise: "Pack's own premise",
+                packSlug: "genwave-catalog", sponsorId: sponsorId, premise: "Shared premise",
                 tone: "dry", structure: null, enabled: true, CancellationToken.None);
 
-            // When an OWNER brief is created for the SAME brand name...
+            // When an OWNER brief is created for the SAME sponsor and the SAME premise...
             var created = await repo.CreateOwnerAsync(
-                brand: "Bramble & Fitch", premise: "Owner's own premise", tone: "warm", structure: null,
+                sponsorId, premise: "Shared premise", tone: "warm", structure: null,
                 enabled: true, CancellationToken.None);
 
-            // Then it succeeds — two separate rows, the pack row untouched.
-            Assert.NotNull(created);
-            Assert.Equal(2, await CountAllBriefRowsAsync(db));
+            // Then it is refused — the pack row is the only row, untouched.
+            Assert.Null(created);
+            Assert.Equal(1, await CountAllBriefRowsAsync(db));
         }
     }
 
@@ -1456,10 +1600,11 @@ public static class FeatureAdSpotLifecycleStore
         public async Task DisablingAnEnabledOwnerBriefFlipsIt()
         {
             // Given an enabled owner brief...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdBriefRepo(db);
             var brief = await repo.CreateOwnerAsync(
-                brand: "Bramble & Fitch", premise: null, tone: null, structure: null, enabled: true,
+                sponsorId, premise: null, tone: null, structure: null, enabled: true,
                 CancellationToken.None);
 
             // When it is disabled...
@@ -1475,10 +1620,11 @@ public static class FeatureAdSpotLifecycleStore
         {
             // Given a disabled pack brief — the toggle is the operator's own lever over pack content
             // too, not owner-only (PLAN T403b's own reading of F162.1).
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var repo = Harness.AdBriefRepo(db);
             var brief = await repo.UpsertAsync(
-                packSlug: "genwave-catalog", brand: "Pack Brand", premise: null, tone: null,
+                packSlug: "genwave-catalog", sponsorId: sponsorId, premise: null, tone: null,
                 structure: null, enabled: false, CancellationToken.None);
 
             // When it is enabled...
@@ -1494,7 +1640,7 @@ public static class FeatureAdSpotLifecycleStore
         public async Task AnUnknownIdReturnsNull()
         {
             // Given no brief with this id...
-            await db.ResetAdsAsync();
+            await db.ResetAdsAndShowsAsync();
             var repo = Harness.AdBriefRepo(db);
 
             // When it is toggled...

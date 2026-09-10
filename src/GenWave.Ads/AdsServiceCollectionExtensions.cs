@@ -76,6 +76,12 @@ public static class AdsServiceCollectionExtensions
         // claimed.
         services.AddSingleton<AdRenderService>();
 
+        // The cast/bed stamping pair (SPEC F167, F168; STORY-402, STORY-403; PLAN T415, T416) — a
+        // plain singleton, hoisted out of AdSpotWorker (PLAN T442 ruling) so the write worker AND the
+        // preview job (below) share ONE stamping implementation rather than the worker's own copy
+        // diverging from a second, hand-kept-in-sync one.
+        services.AddSingleton<AdSpotStamper>();
+
         // The off-air-clock tick loop + its stuck-rendering guardian (SPEC F159.3, F159.4, F161.1;
         // STORY-389, STORY-391; PLAN T402) — both live in THIS project (unlike CrosstalkStockWorker/
         // AnnouncementLifecycleGuardianService, which are GenWave.Host types registered from a
@@ -85,6 +91,15 @@ public static class AdsServiceCollectionExtensions
         // IOnAirRenderSignal's own remarks for the one that closes the Host-layering gap.
         services.AddHostedService<AdSpotWorker>();
         services.AddHostedService<AdSpotLifecycleGuardianService>();
+
+        // The station-wide preview/write job runner (SPEC F174.2, F174.3; STORY-422, STORY-423; PLAN
+        // T441) — registered as a concrete singleton FIRST, then exposed as a hosted service resolving
+        // that SAME instance (the IAdSpotVend idiom just below, applied to a concrete type instead of
+        // an interface): AdsController (GenWave.Host) needs to inject AdSpotJobService directly to call
+        // TryEnqueueAsync/CancelAsync/IsWaitingForStation, which a bare AddHostedService<T>() call alone
+        // does not make resolvable as a plain constructor dependency.
+        services.AddSingleton<AdSpotJobService>();
+        services.AddHostedService(sp => sp.GetRequiredService<AdSpotJobService>());
 
         // PLAN T397 — the drain seam: overrides AddGenWaveOrchestration's own
         // TryAddSingleton<IAdSpotVend>(NoOpAdSpotVend.Instance) default (the override-after-the-

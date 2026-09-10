@@ -55,7 +55,7 @@ function CastChips({ spot }: { spot: AdSpotDto }): ReactNode {
 }
 
 /**
- * One ad spot row (SPEC F162.1; STORY-392 AC3/AC4; PLAN T404/T404b) — brand/length, the verbs legal
+ * One ad spot row (SPEC F162.1; STORY-392 AC3/AC4; PLAN T404/T404b) — sponsor/length, the verbs legal
  * for its CURRENT state (mirrors `AdsController`'s own transition guards exactly, so no button here
  * ever fires a request the api would only 409), and — for a `ready` row — a real preview player.
  *
@@ -147,7 +147,7 @@ export function AdSpotRow({ spot, onChanged, onEdit }: AdSpotRowProps): ReactNod
           <CastChips spot={spot} />
         </div>
         <p className="truncate text-[0.8rem] text-mute">
-          {spot.brand} · {spot.spotSeconds}s
+          {spot.sponsorName} · {spot.spotSeconds}s
         </p>
         {spot.state === "failed" && spot.failReason !== null && (
           <p className="mt-1 text-[0.78rem] text-danger">Failed: {spot.failReason}</p>

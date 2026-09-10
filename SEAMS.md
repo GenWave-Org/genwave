@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **120 seams across 7 projects.**
+> **121 seams across 7 projects.**
 
 ## GenWave.Ads (2 seams)
 
@@ -107,7 +107,7 @@
 | `GenWave.Core.Abstractions.IEnergyAnalyzer` | `GenWave.Loudness.FfmpegEnergyAnalyzer` | Singleton | — |
 | `GenWave.Core.Abstractions.ILoudnessAnalyzer` | `GenWave.Loudness.FfmpegLoudnessAnalyzer` | Singleton | — |
 
-## GenWave.MediaLibrary (55 seams)
+## GenWave.MediaLibrary (56 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -161,6 +161,7 @@
 | `GenWave.Core.Abstractions.IScheduleStore` | `GenWave.MediaLibrary.Station.ScheduleRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IShowImagingScope` | `GenWave.MediaLibrary.Catalog.ShowImagingScopeRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IShowStore` | `GenWave.MediaLibrary.Station.ShowRepository` | Singleton | — |
+| `GenWave.Core.Abstractions.ISponsorStore` | `GenWave.MediaLibrary.Station.SponsorRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IStationImageStore` | `GenWave.MediaLibrary.Station.StationImageRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IThemeStore` | `GenWave.MediaLibrary.Station.ThemeRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IThumbStore` | `GenWave.MediaLibrary.Garden.MediaThumbRepository` | Singleton | — |

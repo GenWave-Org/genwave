@@ -500,6 +500,13 @@ file sealed class ShowsApiWebFactory(
 
             services.RemoveAll<IShowImagingScope>();
             services.AddSingleton<IShowImagingScope>(imagingScope ?? new FakeShowImagingScope());
+
+            // ShowsController's own ISponsorStore dependency (SPEC F175.1, PLAN T449) — this factory
+            // predates it and runs with no live Postgres (ConnectionStrings:Library above is
+            // deliberately bogus), so the real store can never resolve here; none of this file's own
+            // Facts name a sponsor, so an empty double is a faithful stand-in.
+            services.RemoveAll<ISponsorStore>();
+            services.AddSingleton<ISponsorStore>(new FakeSponsorStore());
         });
     }
 

@@ -2,9 +2,9 @@ namespace GenWave.Core.Domain;
 
 /// <summary>
 /// The fields <c>Abstractions.IAdSpotStore.CreateAsync</c> needs to land a new
-/// <c>station.ad_spot</c> row (SPEC F159.1, F159.2; STORY-389; PLAN T398). <see cref="InitialState"/>
-/// is restricted to <see cref="AdState.Draft"/>, <see cref="AdState.Approved"/>, or
-/// <see cref="AdState.Failed"/> — the only states a spot can be BORN into (SPEC F159.2's own
+/// <c>station.ad_spot</c> row (SPEC F159.1, F159.2, F171.7; STORY-389, STORY-406; PLAN T398, T432).
+/// <see cref="InitialState"/> is restricted to <see cref="AdState.Draft"/>, <see cref="AdState.Approved"/>,
+/// or <see cref="AdState.Failed"/> — the only states a spot can be BORN into (SPEC F159.2's own
 /// transition graph is between EXISTING rows; <see cref="AdState.Rendering"/>/<see cref="AdState.Ready"/>/
 /// <see cref="AdState.Retired"/> are reachable only via a transition on the store, never at
 /// creation) — <c>IAdSpotStore.CreateAsync</c> rejects any other value.
@@ -20,7 +20,9 @@ namespace GenWave.Core.Domain;
 /// same "visible, never silent" posture every lifecycle store in this codebase keeps.
 /// </para>
 /// </summary>
-/// <param name="Brand">The fictional (or owner's real) brand this spot advertises.</param>
+/// <param name="SponsorId">The sponsor this spot advertises — <c>CreateAsync</c> reads
+/// <c>station.sponsor.name</c> for this id and writes it as <see cref="AdSpot.SponsorName"/>'s own
+/// created-at snapshot (SPEC F171.7).</param>
 /// <param name="Title">A short operator-facing label — never read aloud.</param>
 /// <param name="Brief">The premise/tone/structure hint this spot's script was written from, or
 /// <see langword="null"/>.</param>
@@ -39,7 +41,7 @@ namespace GenWave.Core.Domain;
 /// <param name="FailReason">Required, and only legal, when <paramref name="InitialState"/> is
 /// <see cref="AdState.Failed"/> — the violated validator rule's own id (STORY-390 AC3).</param>
 public sealed record NewAdSpot(
-    string Brand,
+    long SponsorId,
     string Title,
     string? Brief,
     string? Script,

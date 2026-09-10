@@ -13,6 +13,9 @@
 //  - limit: one of ADS_PAGE_SIZES; absent or out-of-set falls back to DEFAULT_ADS_PAGE_SIZE, which
 //    equals `AdsController.DefaultLimit` (50) — the picker's own default reads the same number the
 //    api would apply anyway if this page sent no `limit=` at all.
+//  - sponsor (PLAN T447): a positive sponsor id, scoping the rail's selection — absent,
+//    non-numeric, or repeated all fall back to `null` ("All sponsors"), the same silent-fallback
+//    posture `tab` already holds.
 //  - The "briefs" tab is deliberately unpaged (T403b's own bare, unpaged `GET /api/ad-briefs`) —
 //    `page`/`limit` are still parsed (so a stray `?page=` on that tab never throws), but `page.tsx`
 //    never builds a Pager/size-picker href for it.
@@ -38,6 +41,7 @@ export interface AdsSearchParams {
   tab?: string | string[];
   page?: string | string[];
   limit?: string | string[];
+  sponsor?: string | string[];
 }
 
 export interface ResolvedAdsPaging {
@@ -79,6 +83,15 @@ export function resolveAdsPageNumber(raw: string | string[] | undefined): number
   return Number.isInteger(parsed) && parsed >= 1 ? parsed : 1;
 }
 
+/** Resolves `?sponsor=` (SPEC F171.8) to the sponsor id the rail has selected — absent,
+ * non-numeric, repeated, or non-positive all fall back to `null` ("All sponsors"), the same
+ * silent-fallback posture {@link resolveAdsTab} already holds for `?tab=`. */
+export function resolveSponsorId(raw: string | string[] | undefined): number | null {
+  if (typeof raw !== "string") return null;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 /** `AdsController.List`'s own `offset` query parameter is a C# `int?` — mirrors
  * `clampGardenerPageForOffset` exactly (see that function's own remarks for the ASP.NET model-
  * binding reasoning). */
@@ -106,25 +119,37 @@ export function resolveAdsPageCount(total: number, limit: number): number {
 
 // ── Href builders ────────────────────────────────────────────────────────────────────────────
 //
-// `limit` rides a href only when it differs from the default, and `page` only past page 1 — the
-// common case stays the cleanest URL (mirrors `assembleGardenerHref`).
+// `limit` rides a href only when it differs from the default, `sponsor` only when a sponsor is
+// selected, and `page` only past page 1 — the common case stays the cleanest URL (mirrors
+// `assembleGardenerHref`).
 
-function assembleAdsHref(tab: AdsTabId, limit: AdsPageSize, page?: number): string {
+function assembleAdsHref(tab: AdsTabId, limit: AdsPageSize, sponsorId: number | null, page?: number): string {
   const query = new URLSearchParams();
   if (tab !== FIRST_ADS_TAB) query.set("tab", tab);
   if (limit !== DEFAULT_ADS_PAGE_SIZE) query.set("limit", String(limit));
+  if (sponsorId !== null) query.set("sponsor", String(sponsorId));
   if (page !== undefined && page > 1) query.set("page", String(page));
   const qs = query.toString();
   return qs ? `/ads?${qs}` : "/ads";
 }
 
-/** A same-page-reset link for a given tab+limit (the tab strip and the size picker's shared
- * builder — mirrors `buildGardenerHref`). */
-export function buildAdsHref(tab: AdsTabId, limit: AdsPageSize): string {
-  return assembleAdsHref(tab, limit);
+/** A same-page-reset link for a given tab+limit+sponsor (the tab strip and the size picker's
+ * shared builder — mirrors `buildGardenerHref`). */
+export function buildAdsHref(tab: AdsTabId, limit: AdsPageSize, sponsorId: number | null): string {
+  return assembleAdsHref(tab, limit, sponsorId);
 }
 
-/** A Previous/Next pager link — same tab and `limit`, the target `page`. */
-export function buildAdsPageHref(tab: AdsTabId, limit: AdsPageSize, page: number): string {
-  return assembleAdsHref(tab, limit, page);
+/** A Previous/Next pager link — same tab, `limit`, and sponsor selection, the target `page`. */
+export function buildAdsPageHref(tab: AdsTabId, limit: AdsPageSize, sponsorId: number | null, page: number): string {
+  return assembleAdsHref(tab, limit, sponsorId, page);
+}
+
+/** The sponsor rail's own href builder (SPEC F171.8; PLAN T447) — selecting a sponsor keeps the
+ * current tab and page size, resets to page 1 (the same "changing a filter starts over" posture
+ * {@link buildAdsHref} already holds for a tab switch), never carries `page=`. A distinct export
+ * from {@link buildAdsHref} — same behavior today, reached through its own name — so the rail's
+ * call sites read as "select a sponsor" rather than borrowing the tab strip's builder for an
+ * unrelated gesture; the two are free to diverge later without a rename. */
+export function buildSponsorHref(tab: AdsTabId, limit: AdsPageSize, sponsorId: number | null): string {
+  return assembleAdsHref(tab, limit, sponsorId);
 }

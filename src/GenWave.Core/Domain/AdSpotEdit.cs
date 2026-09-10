@@ -2,8 +2,8 @@ namespace GenWave.Core.Domain;
 
 /// <summary>
 /// The sparse fields <c>Abstractions.IAdSpotStore.UpdateAsync</c> may change on a <see cref="AdState.Draft"/>
-/// or <see cref="AdState.Failed"/> row (SPEC F162.1; STORY-392; PLAN T403) — the owner editor's own
-/// content-edit shape, distinct from the three xmin-guarded STATE transitions
+/// or <see cref="AdState.Failed"/> row (SPEC F162.1, F171.7; STORY-392, STORY-406; PLAN T403, T432) —
+/// the owner editor's own content-edit shape, distinct from the three xmin-guarded STATE transitions
 /// (<c>ApproveAsync</c>/<c>RetryAsync</c>/<c>RetireAsync</c>): this never touches <see cref="AdSpot.State"/>.
 ///
 /// <para>
@@ -16,7 +16,9 @@ namespace GenWave.Core.Domain;
 /// write; <c>AdsController</c> enforces that at the HTTP door (400), not this record.
 /// </para>
 /// </summary>
-/// <param name="Brand">The brand this spot advertises, or <see langword="null"/> to leave unchanged.</param>
+/// <param name="SponsorId">The sponsor to move this spot to, or <see langword="null"/> to leave
+/// unchanged — when set, the store refreshes <see cref="AdSpot.SponsorName"/>'s own snapshot from the
+/// new sponsor's current name (SPEC F171.7).</param>
 /// <param name="Title">The operator-facing label, or <see langword="null"/> to leave unchanged.</param>
 /// <param name="Brief">The premise/tone/structure hint, or <see langword="null"/> to leave unchanged.</param>
 /// <param name="Script">The spot's own line-by-line copy — validated by the caller (SPEC F160.4)
@@ -29,7 +31,7 @@ namespace GenWave.Core.Domain;
 /// <param name="BedMediaId">An optional background bed track's <c>library.media</c> id, or
 /// <see langword="null"/> to leave unchanged.</param>
 public sealed record AdSpotEdit(
-    string? Brand,
+    long? SponsorId,
     string? Title,
     string? Brief,
     string? Script,

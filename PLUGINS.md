@@ -44,7 +44,12 @@ v1's expected set is exactly two contracts, both from `GenWave.Abstractions`:
   Your plugin hands back facts the DJ can work into patter.
 - **`IAdSpotSource`** — the same seam `LibraryAdSpotSource` (the house floor) implements.
   Your plugin can win a break with a real ad without replacing the built-in source; sources
-  form a pipeline, first non-null answer wins, the house source registers last.
+  form a pipeline, first non-null answer wins, the house source registers last. Since v5.8.0
+  the house floor also skips paused sponsors and the most recently aired sponsors
+  (`Station:Ads:AntiRepeatWindow`, now counted in sponsors); a plugin source is asked first
+  and none of that filtering applies to what it returns. The two `Ads__*` render knobs in
+  DEPLOYMENT's Ads section govern the built-in guided spot-creation path only. `GenWave.Abstractions`
+  is unchanged in 5.8.0 — `IAdSpotSource` still returns a `MediaItem`.
 
 Nothing else is reachable. `IPluginHost` — the only object your plugin ever sees — offers
 `AddContextProvider`, `AddAdSpotSource`, and `Setting(key)` to read your own config. There

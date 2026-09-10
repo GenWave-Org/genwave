@@ -108,15 +108,45 @@ public sealed class CastSegmentAuthor(
         if (assembled is CrosstalkAssemblyResult.Discarded discarded)
             return CastSegmentAuthorResult.Failure(CastSegmentFailureReason.Discarded, discarded.Reason);
 
-        var result = (CrosstalkAssemblyResult.Assembled)assembled;
+        return await LandAsync((CrosstalkAssemblyResult.Assembled)assembled, buildInsert, confirmAsync, ct);
+    }
 
+    /// <summary>
+    /// Inserts <paramref name="assembled"/> INELIGIBLE, and — only once <paramref name="confirmAsync"/>
+    /// reports success — flips it eligible (SPEC F174.5; STORY-425; PLAN T445): the landing tail
+    /// <see cref="AuthorAsync"/> itself runs after a fresh assembly, hoisted here so a caller already
+    /// holding an ASSEMBLED artifact from elsewhere — <c>AdRenderService.PromotePreviewAsync</c>'s own
+    /// already-rendered, already-moved preview file, measured via <see cref="MeasureAsync"/> — can
+    /// land it through the exact same insert→confirm→eligible mechanism <see cref="AuthorAsync"/> uses,
+    /// rather than a second, hand-kept copy of this same tail. See the class remarks for the ineligible-
+    /// until-confirmed invariant and the all-or-nothing-up-to-the-insert cleanup this method still
+    /// carries in full.
+    /// </summary>
+    /// <param name="assembled">The already-produced artifact (path, loudness, cue, duration) to land.</param>
+    /// <param name="buildInsert">
+    /// Builds the <see cref="AuthoredMediaInsert"/> from <paramref name="assembled"/>'s own measured
+    /// facts — every OTHER field (library id, tags, kind, show id) is the caller's own static
+    /// knowledge, closed over. <see cref="AuthoredMediaInsert.Eligible"/> on the returned value is
+    /// ignored — this method always inserts ineligible (see the class remarks).
+    /// </param>
+    /// <param name="confirmAsync">
+    /// Called with the newly-inserted media id once it exists. Returning
+    /// <see langword="true"/> confirms the caller's own bookkeeping is consistent and the row should
+    /// become eligible; <see langword="false"/> (or a thrown exception) leaves it ineligible forever.
+    /// </param>
+    public async Task<CastSegmentAuthorResult> LandAsync(
+        CrosstalkAssemblyResult.Assembled assembled,
+        Func<CrosstalkAssemblyResult.Assembled, AuthoredMediaInsert> buildInsert,
+        Func<long, CancellationToken, Task<bool>> confirmAsync,
+        CancellationToken ct)
+    {
         // T401 review F3: buildInsert lives INSIDE this try (folded together with the insert
         // itself) — a throw from a caller's own buildInsert closure gets the identical cleanup an
         // InsertAuthoredAsync failure already got, rather than leaking the final artifact.
         long mediaId;
         try
         {
-            var insert = buildInsert(result) with { Eligible = false };
+            var insert = buildInsert(assembled) with { Eligible = false };
             mediaId = await catalogWriter.InsertAuthoredAsync(insert, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -131,13 +161,13 @@ public sealed class CastSegmentAuthor(
             // deleted out from under an ineligible, undeleted row; that row stays permanently inert
             // (never airable, never re-confirmed) rather than actively harmful, so this is accepted
             // rather than engineered around.
-            DeleteIfExists(result.Path);
+            DeleteIfExists(assembled.Path);
             throw;
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Cast segment catalog insert failed for {Path}", result.Path);
-            DeleteIfExists(result.Path);
+            logger.LogWarning(ex, "Cast segment catalog insert failed for {Path}", assembled.Path);
+            DeleteIfExists(assembled.Path);
             return CastSegmentAuthorResult.Failure(CastSegmentFailureReason.InsertFailed, ex.Message);
         }
 
@@ -178,6 +208,14 @@ public sealed class CastSegmentAuthor(
 
         return CastSegmentAuthorResult.Success(mediaId);
     }
+
+    /// <summary>Renders and returns the file; lands nothing — SPEC F174.4 preview mode (PLAN T442).</summary>
+    public Task<CrosstalkAssemblyResult> AssembleOnlyAsync(CastAssemblyRequest request, CancellationToken ct) =>
+        assembler.AssembleCastAsync(request, ct);
+
+    /// <inheritdoc cref="ICastSegmentAuthor.MeasureAsync"/>
+    public Task<CrosstalkAssemblyResult.Assembled> MeasureAsync(string path, CancellationToken ct) =>
+        assembler.MeasureAsync(path, ct);
 
     static void DeleteIfExists(string path)
     {

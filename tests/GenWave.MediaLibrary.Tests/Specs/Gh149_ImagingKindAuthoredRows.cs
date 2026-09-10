@@ -133,6 +133,54 @@ public static class FeatureImagingKindAuthoredRows
     }
 
     // ---------------------------------------------------------------------
+    // HAPPY PATH — PLAN T446: the ImagingBrowseFilter overload narrows the browse (SPEC F174.7)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioTheImagingBrowseFilterOverloadNarrowsTheQuery(DatabaseFixture db)
+    {
+        /// <summary>Seeds a jingle-pack-shaped row directly (never through the install pipeline,
+        /// which needs real audio bytes and ffmpeg — this fact only cares what
+        /// <c>ListAdminAsync</c>'s own filtered overload reads back out of <c>library.media</c>).</summary>
+        static async Task<long> InsertJingleRowAsync(DatabaseFixture db, string path, string title, string jingleRole, string packSlug)
+        {
+            await using var conn = await db.DataSource.OpenConnectionAsync();
+            return await conn.ExecuteScalarAsync<long>(
+                """
+                insert into library.media
+                    (path, format, size_bytes, mtime, title, artist, imaging_kind, jingle_role, pack_slug)
+                values
+                    (@path, 'wav', 100, now(), @title, 'Test Pack', 'jingle', @jingleRole, @packSlug)
+                returning id
+                """, new { path, title, jingleRole, packSlug });
+        }
+
+        [Fact]
+        public async Task TheOverloadNarrowsBothThePageAndTheTotal()
+        {
+            // PLAN T446 ruling: the two new filters ride the GenWave.Core seam (ImagingBrowseFilter,
+            // IAdminMediaQuery's new overloads) rather than a MediaQuery field, so MediaQuery itself
+            // (a GenWave.Abstractions type) stays byte-unchanged (SPEC F176.4). This proves the
+            // overload narrows BOTH page.Items (the returned rows) and page.Total (the count) to the
+            // matching jingle_role — a bed, a sting, and a plain scanned row are seeded so the fact
+            // fails if either side drifts to the un-filtered count.
+            await db.ResetAsync();
+            var repo = Harness.Repo(db);
+
+            var bedId = await InsertJingleRowAsync(db, "/media/t446-bed.wav", "T446 Bed", "bed", "t446-pack");
+            await InsertJingleRowAsync(db, "/media/t446-sting.wav", "T446 Sting", "sting", "t446-pack");
+            await InsertScannedRowAsync(db, "/media/t446-plain.flac");
+
+            var filter = new ImagingBrowseFilter(ImagingKind.Jingle, "bed");
+            var page = await repo.ListAdminAsync(DefaultScope, new MediaQuery(), filter, CancellationToken.None);
+
+            var row = Assert.Single(page.Items);
+            Assert.Equal((bedId.ToString(), 1), (row.MediaId, page.Total));
+        }
+    }
+
+    // ---------------------------------------------------------------------
     // SAD PATH — the check constraint refuses unknown tokens
     // ---------------------------------------------------------------------
 

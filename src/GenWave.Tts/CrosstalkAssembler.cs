@@ -152,10 +152,10 @@ public sealed class CrosstalkAssembler(
                 return Discard(ceilingReason, lineFiles, "Crosstalk exchange");
             }
 
-            var (loudness, cue, durationMs) = await MeasureAssembledAsync(outputPath, ct);
+            var assembled = await MeasureAsync(outputPath, ct);
             DeleteAll(lineFiles);
 
-            return new CrosstalkAssemblyResult.Assembled(outputPath, loudness, cue, durationMs);
+            return assembled;
         }
         catch (Exception)
         {
@@ -237,10 +237,10 @@ public sealed class CrosstalkAssembler(
                 return Discard(ceilingReason, lineFiles, "Cast segment");
             }
 
-            var (loudness, cue, durationMs) = await MeasureAssembledAsync(finalPath, ct);
+            var assembled = await MeasureAsync(finalPath, ct);
             DeleteAll(lineFiles);
 
-            return new CrosstalkAssemblyResult.Assembled(finalPath, loudness, cue, durationMs);
+            return assembled;
         }
         catch (Exception)
         {
@@ -420,6 +420,21 @@ public sealed class CrosstalkAssembler(
             $"assembled duration {actualSeconds:F1}s exceeds {ceilingSeconds:F1}s (1.5x the " +
             $"{targetSeconds}s {nameof(CrosstalkOptions.DurationTargetSeconds)} target; " +
             $"estimated {estimatedSeconds:F1}s) — the estimate lied";
+    }
+
+    /// <summary>
+    /// Public seam over <see cref="MeasureAssembledAsync"/> (SPEC F174.5; STORY-425; PLAN T445) —
+    /// <see cref="CastSegmentAuthor.MeasureAsync"/> delegates here so a caller measuring a file this
+    /// class did NOT just assemble (<c>AdRenderService.PromotePreviewAsync</c>, plain-text reference:
+    /// GenWave.Tts never references GenWave.Ads — measuring an already-moved preview file it is about
+    /// to land) reuses the exact same <see cref="loudnessAnalyzer"/>/<see cref="MeasureCueAsync"/> pair
+    /// <see cref="AssembleAsync"/>/<see cref="AssembleCastAsync"/> already run over their own output,
+    /// never a second ffmpeg-calling copy.
+    /// </summary>
+    public async Task<CrosstalkAssemblyResult.Assembled> MeasureAsync(string path, CancellationToken ct)
+    {
+        var (loudness, cue, durationMs) = await MeasureAssembledAsync(path, ct);
+        return new CrosstalkAssemblyResult.Assembled(path, loudness, cue, durationMs);
     }
 
     /// <summary>

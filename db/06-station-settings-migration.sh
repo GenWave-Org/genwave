@@ -308,7 +308,16 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	  envelope      jsonb        CONSTRAINT show_envelope_is_object
 	                     CHECK (envelope IS NULL OR jsonb_typeof(envelope) = 'object'),
 	  created_at    timestamptz NOT NULL DEFAULT now(),
-	  updated_at    timestamptz NOT NULL DEFAULT now()
+	  updated_at    timestamptz NOT NULL DEFAULT now(),
+	  -- nullable-fk: shows optionally carry a sponsor (STORY-430, SPEC F175.1); NULL = unsponsored.
+	  -- Plain bigint here — the FK to station.sponsor is added below (after station.sponsor is
+	  -- created) via ALTER TABLE ADD CONSTRAINT in the idempotent DO block immediately below the
+	  -- CREATE TABLE station.sponsor, before the ads section. Postgres requires the referenced table
+	  -- to exist at CREATE TABLE time, and station.sponsor is defined later in this file. On an
+	  -- UPGRADING box, station.show already
+	  -- exists without this column at all — see the `ADD COLUMN IF NOT EXISTS sponsor_id` just
+	  -- above the FK's own DO block for why that ALTER (not just this CREATE TABLE) is required.
+	  sponsor_id    bigint
 	);
 
 	-- The weekly format-clock grid (SPEC F91.1, F91.2; STORY-240, STORY-242; PLAN T118) that replaces
@@ -509,18 +518,94 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	  ON station.announcement (created_at)
 	  WHERE state = 'pending';
 
+	-- station.sponsor_fold(text) (round-3 finding N1): the ONE fold definition, mirroring
+	-- db/46-sponsor-migration.sh step 0's own CREATE OR REPLACE verbatim (byte-identical function
+	-- body — Story414 AC5's text pin asserts this exact string in BOTH files). COLLAPSE FIRST
+	-- (regexp_replace), TRIM SECOND (the outer btrim): bare btrim(x) strips SPACES ONLY — it is
+	-- exactly btrim(x, ' '), never "every Unicode whitespace character" — so a leading tab or
+	-- newline must be collapsed into a single edge-space by regexp_replace FIRST, for the outer
+	-- btrim to then have something it can actually remove. See db/46's own header for the fuller
+	-- N1 defect writeup. RETURNS NULL ON NULL INPUT + IMMUTABLE + PARALLEL SAFE: required for use
+	-- inside the two STORED generated columns below (name_key, and ad_brief.premise_key further
+	-- down this file).
+	CREATE OR REPLACE FUNCTION station.sponsor_fold(text) RETURNS text
+	  LANGUAGE sql IMMUTABLE PARALLEL SAFE RETURNS NULL ON NULL INPUT
+	  AS $$ SELECT btrim(regexp_replace(lower($1), '\s+', ' ', 'g')) $$;
+
+	-- Sponsors (gh-#714, SPEC F171-F176, STORY-406, PLAN T431): fresh-init mirror of
+	-- db/46-sponsor-migration.sh's station.sponsor table. One row per distinct (pack_slug, folded
+	-- brand name) advertiser. name_key is a STORED generated column calling station.sponsor_fold(name)
+	-- — the ONE fold definition every spec text pin asserts lives in a single place, immediately
+	-- above. UNIQUE NULLS NOT DISTINCT on (pack_slug, name_key) collapses mixed-case / extra-space
+	-- variants at the DB level. NULL pack_slug = owner-created sponsor; non-null = ad-pack-installed.
+	-- The FK from station.show.sponsor_id is added via ALTER TABLE below (after this table is
+	-- created) because station.show is defined earlier in this file. The real upgrade path (an
+	-- existing box's ad_brief/ad_spot brand text folding into these rows) is proven by Story414's
+	-- real-Postgres migration spec, not by this fresh-init file — this table's shape here is the END
+	-- state only.
+	CREATE TABLE IF NOT EXISTS station.sponsor (
+	  id         bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+	  name       text        NOT NULL CHECK (char_length(trim(name)) BETWEEN 1 AND 120),
+	  name_key   text GENERATED ALWAYS AS (station.sponsor_fold(name)) STORED,
+	  pack_slug  text,   -- nullable-fk-equivalent: NULL = owner-created, non-null = ad-pack-installed
+	  tagline    text CHECK (tagline IS NULL OR char_length(tagline) <= 160),
+	  about      text CHECK (about IS NULL OR char_length(about) <= 600),
+	  phone      text CHECK (phone IS NULL OR char_length(phone) <= 40),
+	  address    text CHECK (address IS NULL OR char_length(address) <= 200),
+	  website    text CHECK (website IS NULL OR (website ~ '^https?://' AND char_length(website) <= 200)),
+	  tone       text CHECK (tone IS NULL OR char_length(tone) <= 120),
+	  paused     boolean     NOT NULL DEFAULT false,
+	  paused_at  timestamptz,
+	  created_at timestamptz NOT NULL DEFAULT now(),
+	  updated_at timestamptz NOT NULL DEFAULT now(),
+	  CONSTRAINT sponsor_pack_slug_name_key UNIQUE NULLS NOT DISTINCT (pack_slug, name_key)
+	);
+
+	-- station.show.sponsor_id (SPEC F175.1, STORY-430) — the FIRST `ADD COLUMN IF NOT EXISTS` in
+	-- this file (round-2 finding F1). Every table above is genuinely fresh on a fresh install, so
+	-- `CREATE TABLE IF NOT EXISTS` alone was enough everywhere else in db/06 — but station.show is
+	-- defined EARLIER in this same file (before station.sponsor exists), so on a box that is
+	-- UPGRADING (station.show already exists from a pre-sponsors install) the CREATE TABLE above is
+	-- a no-op and never adds this column. Without this ALTER, the FK DO block immediately below
+	-- would fail on such a box: "column sponsor_id referenced in foreign key constraint does not
+	-- exist" — migrate.sh runs db/*-migration.sh sorted, so db/06 always runs before db/46 (which
+	-- WOULD add the column) on every upgrade, permanently deadlocking launch.sh's pinned flow (no
+	-- --keep-going there). Harmless no-op on a genuine fresh install, where the column already
+	-- exists from the CREATE TABLE above.
+	ALTER TABLE station.show ADD COLUMN IF NOT EXISTS sponsor_id bigint;
+
+	-- FK: station.show.sponsor_id → station.sponsor (nullable — shows optionally carry a sponsor,
+	-- SPEC F175.1, STORY-430). station.show is defined earlier in this file (before station.sponsor),
+	-- so the FK must be added here via ALTER TABLE ADD CONSTRAINT rather than inline in the CREATE.
+	-- Idempotent: guarded by pg_constraint existence check (same pattern db/46 uses for every FK).
+	DO $$
+	BEGIN
+	  IF NOT EXISTS (
+	    SELECT 1 FROM pg_constraint
+	    WHERE conname = 'show_sponsor_id_fkey' AND conrelid = 'station.show'::regclass
+	  ) THEN
+	    ALTER TABLE station.show
+	      ADD CONSTRAINT show_sponsor_id_fkey
+	        FOREIGN KEY (sponsor_id) REFERENCES station.sponsor(id) ON DELETE RESTRICT;
+	  END IF;
+	END $$;
+
+	-- Index on the FK child column (round-2 finding F7).
+	CREATE INDEX IF NOT EXISTS show_sponsor_id ON station.show (sponsor_id);
+
 	-- The plugin door & the Ads library (gh-#380, SPEC F159.1, STORY-389, PLAN T389): fresh-init
 	-- mirror of db/42-ads-migration.sh's station-schema objects — see that script's own header for
 	-- the full column-by-column rationale (id-as-identity to match station.announcement above rather
 	-- than db/41's library-schema bigserial tables; bed_media_id/media_id deliberately plain bigint,
 	-- NO FK, across the same db/22 schema-role boundary station.announcement's siblings already
-	-- respect; ad_brief's NULLS NOT DISTINCT upsert key). UNLIKE 01-library.sh (mounted into
-	-- docker-entrypoint-initdb.d only, never re-run), THIS file's own name matches migrate.sh's
-	-- `db/*-migration.sh` glob too, so it is re-executed on every migrate.sh run against a box
-	-- already on a newer db/06 -- it must stay fully idempotent forever, not just at first boot.
-	-- `CREATE TYPE` has no `IF NOT EXISTS` clause, so the enums get the same pg_type-guarded DO
-	-- block db/42's own migration uses; the tables use plain `IF NOT EXISTS` like every other table
-	-- in this file.
+	-- respect). Sponsor-era (db/46): ad_brief carries sponsor_id NOT NULL FK + premise_key GENERATED;
+	-- ad_spot carries sponsor_name (was brand) + sponsor_id NOT NULL FK + preview/job columns.
+	-- UNLIKE 01-library.sh (mounted into docker-entrypoint-initdb.d only, never re-run), THIS file's
+	-- own name matches migrate.sh's `db/*-migration.sh` glob too, so it is re-executed on every
+	-- migrate.sh run against a box already on a newer db/06 -- it must stay fully idempotent forever,
+	-- not just at first boot. `CREATE TYPE` has no `IF NOT EXISTS` clause, so the enums get the same
+	-- pg_type-guarded DO block db/42's own migration uses; tables use plain `IF NOT EXISTS` like every
+	-- other table in this file.
 	DO $$
 	BEGIN
 	  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'ad_source' AND typnamespace = 'station'::regnamespace) THEN
@@ -533,7 +618,8 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 
 	CREATE TABLE IF NOT EXISTS station.ad_spot (
 	  id               bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-	  brand            text        NOT NULL,
+	  sponsor_name     text        NOT NULL,  -- snapshot written at creation, refreshed on PATCH when the sponsor changes (was `brand` pre-db/46; renamed via SPEC F171.7)
+	  sponsor_id       bigint      NOT NULL REFERENCES station.sponsor(id) ON DELETE RESTRICT,
 	  title            text        NOT NULL,
 	  brief            text,
 	  script           text,
@@ -550,6 +636,19 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	  state_changed_at timestamptz NOT NULL DEFAULT now(),
 	  rendered_at      timestamptz,
 	  retired_at       timestamptz,
+	  -- Preview columns (SPEC F174.4, db/46 step 13): preview_path/preview_at/preview_key track the
+	  -- approved-preview asset the guided spot dialog's "Hear" step renders; staleness is DERIVED
+	  -- (preview_key recomputed == stored), never a stored flag of its own.
+	  preview_path     text,
+	  preview_at       timestamptz,
+	  preview_key      text,
+	  -- Job columns (SPEC F174.2, db/46 step 13): the single-slot AdSpotJobService's own state
+	  -- stamps — kind ('write'|'preview'), when it started, and the last failure's reason. No job
+	  -- jsonb envelope: these three columns are the entire state `GET /api/ads/{id}` reports back as
+	  -- `job: {kind, startedAt, error}`.
+	  job_kind         text        CHECK (job_kind IS NULL OR job_kind IN ('write', 'preview')),
+	  job_started_at   timestamptz,
+	  job_error        text,
 	  -- Both CHECKs mirror db/43-ad-spot-invariants-migration.sh's own ALTER TABLE pair (PLAN T398,
 	  -- SPEC F159.2's "ready requires media_id" / "fail_reason iff failed" invariants) — inline here
 	  -- since a fresh install never sees db/43 (only 01+06 run via docker-entrypoint-initdb.d).
@@ -563,20 +662,80 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	-- index covers every query shape PLAN T398's store writes.
 	CREATE INDEX IF NOT EXISTS ad_spot_state_changed_at ON station.ad_spot (state, state_changed_at);
 
+	-- Index on the FK child column (round-2 finding F7). ad_brief needs no equivalent — it is
+	-- already covered by ad_brief_sponsor_id_premise_key's own leading column, below.
+	--
+	-- Guarded by column existence (self-caught while verifying the F1 fix, same bug class): on an
+	-- UPGRADING box, station.ad_spot already exists from db/42, so the CREATE TABLE IF NOT EXISTS
+	-- above is a no-op and sponsor_id does not exist yet — db/46 (which always runs LATER in the
+	-- same sorted migrate.sh pass, not immediately after — 39 other db/*-migration.sh files sort
+	-- between db/06 and db/46) is what adds the column, backfills it, and creates this SAME index
+	-- itself once the column is real. Unlike station.show.sponsor_id above, ad_spot.sponsor_id
+	-- genuinely needs db/46's backfill before it can be NOT NULL/FK'd, so db/06 does not — and must
+	-- not — add the column here; this index must only apply on a genuine fresh install, where the
+	-- column already exists from the CREATE TABLE above. Proven by running every db/*-migration.sh
+	-- sorted (migrate.sh's own loop) against a rewound, upgrade-shaped database — see Story414's
+	-- Story414_FullMigrateLoopArc.
+	DO $$
+	BEGIN
+	  IF EXISTS (
+	    SELECT 1 FROM pg_attribute
+	    WHERE attrelid = 'station.ad_spot'::regclass
+	      AND attname = 'sponsor_id' AND attnum > 0 AND NOT attisdropped
+	  ) THEN
+	    CREATE INDEX IF NOT EXISTS ad_spot_sponsor_id ON station.ad_spot (sponsor_id);
+	  END IF;
+	END $$;
+
 	CREATE TABLE IF NOT EXISTS station.ad_brief (
-	  id         bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-	  pack_slug  text,
-	  brand      text        NOT NULL,
-	  premise    text,
-	  tone       text,
-	  structure  text,
-	  enabled    boolean     NOT NULL DEFAULT true,
-	  created_at timestamptz NOT NULL DEFAULT now(),
-	  -- NULLS NOT DISTINCT (PG15+, this stack pins 16.4): the F162.2 upsert key, made to actually
-	  -- catch an owner-authored brief collision on brand alone since pack_slug is NULL for those
-	  -- rows — see db/42's own header remarks.
-	  CONSTRAINT ad_brief_pack_slug_brand_key UNIQUE NULLS NOT DISTINCT (pack_slug, brand)
+	  id          bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+	  pack_slug   text,
+	  sponsor_id  bigint      NOT NULL REFERENCES station.sponsor(id) ON DELETE RESTRICT,
+	  premise     text,
+	  -- premise_key: STORED generated fold of premise calling the SAME station.sponsor_fold(text)
+	  -- as sponsor.name_key above, wrapped in nullif(..., '') so a NULL/blank premise stores a NULL
+	  -- premise_key (round-2 finding F2) rather than the fold of an empty string — the UNIQUE
+	  -- (sponsor_id, premise_key) constraint below then never collides two angle-less briefs on the
+	  -- same sponsor (SPEC F171.6: "the same angle twice is a 409" — a NULL premise is no angle).
+	  -- Story414 AC5's text-pin asserts the station.sponsor_fold function body (defined once, above)
+	  -- appears verbatim in this file:
+	  --   btrim(regexp_replace(lower($1), '\s+', ' ', 'g'))
+	  premise_key text GENERATED ALWAYS AS (nullif(station.sponsor_fold(premise), '')) STORED,
+	  tone        text,
+	  structure   text,
+	  enabled     boolean     NOT NULL DEFAULT true,
+	  created_at  timestamptz NOT NULL DEFAULT now(),
+	  -- Sponsor-era upsert key (db/46 step 9): replaces the pre-migration ad_brief_pack_slug_brand_key.
+	  -- Two briefs for the same sponsor with the same folded premise are identical (SPEC F171.6).
+	  CONSTRAINT ad_brief_sponsor_id_premise_key UNIQUE (sponsor_id, premise_key)
 	);
+
+	-- Sponsor-era pack-identity index (db/46 step 9b, round-3 finding R1, SPEC F2/F3): a pack
+	-- declares exactly ONE brief per sponsor, regardless of premise — a raw partial index, not a
+	-- constraint, since a CONSTRAINT cannot be partial and an owner-authored sponsor legitimately
+	-- keeps several angles (the premise_key constraint above is what scopes THAT uniqueness).
+	--
+	-- Guarded by column existence (round-4 finding, the SAME bug class already caught + fixed for
+	-- ad_spot_sponsor_id above): on an UPGRADING box, station.ad_brief already exists from db/42
+	-- (pre-sponsor shape, no sponsor_id column), so the CREATE TABLE IF NOT EXISTS above is a
+	-- no-op and sponsor_id does not exist yet — db/46 (which always runs LATER in the same sorted
+	-- migrate.sh pass) is what adds the column, backfills it, and creates this SAME index itself
+	-- once the column is real. This index must only fire here on a genuine fresh install, where
+	-- the column already exists from the CREATE TABLE above. Proven by running every
+	-- db/*-migration.sh sorted (migrate.sh's own loop) against a rewound, upgrade-shaped database
+	-- — see Story414's Story414_FullMigrateLoopArc.
+	DO $$
+	BEGIN
+	  IF EXISTS (
+	    SELECT 1 FROM pg_attribute
+	    WHERE attrelid = 'station.ad_brief'::regclass
+	      AND attname = 'sponsor_id' AND attnum > 0 AND NOT attisdropped
+	  ) THEN
+	    CREATE UNIQUE INDEX IF NOT EXISTS ad_brief_pack_slug_sponsor_id_key
+	      ON station.ad_brief (pack_slug, sponsor_id)
+	      WHERE pack_slug IS NOT NULL;
+	  END IF;
+	END $$;
 
 	-- Jingle packs + voice packs (SPEC F164-F170, gh-#709, STORY-395..405, PLAN T410). Same shape as
 	-- station.font_pack immediately above (id bigint identity, slug UNIQUE, definition jsonb,

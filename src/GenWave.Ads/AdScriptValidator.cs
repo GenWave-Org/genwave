@@ -42,6 +42,22 @@ namespace GenWave.Ads;
 /// tag); its untested Heuristic answer is ignored outright, so a constant-stub estimator can never
 /// make this rule text-blind again.
 /// </para>
+///
+/// <para>
+/// <b>Owner sponsors are real; pack sponsors stay parody</b> (SPEC F172.5): <see
+/// cref="CheckBrandCollision"/> and <see cref="CheckPhoneShape"/> both read the full <see
+/// cref="AdScriptValidationRequest"/> now — not just the folded text or the parsed script — because an
+/// owner sponsor (<see cref="AdScriptValidationRequest.IsPackOwned"/> <see langword="false"/>) gets
+/// its OWN literal name/phone treated as allowed text: the name is stripped from the folded script
+/// before the blocklist match runs, and a phone-shaped run whose digits equal the sponsor's own phone
+/// digits clears the 555 rule. Nothing else about either check moves — a near-miss name still matches
+/// whatever it matches, every other non-555 number still refuses — and a pack-owned sponsor never gets
+/// either skip regardless of what its name/phone fields carry. (PLAN T438 ruling: STORY-417's own rule
+/// ids <c>phone_not_fictional</c>/<c>brand_blocklisted</c> name this SAME pair of shipped checks — <see
+/// cref="AdScriptRuleIds.PhoneShape"/>/<see cref="AdScriptRuleIds.BrandCollision"/> stay exactly as
+/// Story390 pinned them on the wire; only the STORY's own vocabulary maps onto them, nothing here was
+/// renamed.)
+/// </para>
 /// </summary>
 public static class AdScriptValidator
 {
@@ -67,10 +83,10 @@ public static class AdScriptValidator
         // shared by both the brand and posture checks below.
         var foldedVariants = AdCopyFold.FoldVariants(JoinLineText(script));
 
-        if (CheckBrandCollision(foldedVariants) is { } brandViolation)
+        if (CheckBrandCollision(foldedVariants, request) is { } brandViolation)
             return Refused(brandViolation);
 
-        if (CheckPhoneShape(script) is { } phoneViolation)
+        if (CheckPhoneShape(script, request) is { } phoneViolation)
             return Refused(phoneViolation);
 
         if (request.Posture == AudiencePosture.Everyone &&
@@ -116,22 +132,76 @@ public static class AdScriptValidator
             $"(+{request.ToleranceRatio:P0} tolerance, {ceilingSeconds:F1}s ceiling)");
     }
 
-    static AdScriptViolation? CheckBrandCollision(IReadOnlyList<string> foldedVariants)
+    static AdScriptViolation? CheckBrandCollision(IReadOnlyList<string> foldedVariants, AdScriptValidationRequest request)
     {
-        if (FoldedWordListMatcher.FirstMatch(foldedVariants, AdBrandBlocklist.FoldedEntries) is not { } brand)
+        // The owner-sponsor name skip (SPEC F172.5, PLAN T438 ruling): a pack-owned sponsor, or an
+        // owner sponsor with no name on file, checks the variants unchanged — everything below is
+        // identical to before this member existed.
+        var variants = request is { IsPackOwned: false, SponsorName: { } sponsorName } && !string.IsNullOrWhiteSpace(sponsorName)
+            ? StripLiteral(foldedVariants, AdCopyFold.Fold(sponsorName))
+            : foldedVariants;
+
+        if (FoldedWordListMatcher.FirstMatch(variants, AdBrandBlocklist.FoldedEntries) is not { } brand)
             return null;
 
         return new AdScriptViolation(AdScriptRuleIds.BrandCollision, $"the script named a blocklisted brand (\"{brand}\")");
     }
 
-    static AdScriptViolation? CheckPhoneShape(AdScript script)
+    /// <summary>Removes every word-boundary occurrence of <paramref name="foldedLiteral"/> from EACH
+    /// variant (PLAN T438 ruling: an exact-phrase strip, never a fuzzy per-word match — a near-miss
+    /// name sharing only a word with the literal is left untouched, so it still matches whatever
+    /// blocklist entry it matches).
+    ///
+    /// <para>
+    /// <b>Each occurrence is replaced with TWO spaces, and the pass repeats until the string stops
+    /// changing</b> (PLAN T438 ruling): <see cref="string.Replace(string, string, StringComparison)"/>
+    /// is non-overlapping — a single-space replacement of one occurrence would consume the pad space the
+    /// NEXT occurrence needs to be found at all, so two occurrences separated by nothing but punctuation
+    /// or a line break (adjacent once folded) would leave the SECOND one sitting in the output unstripped.
+    /// Replacing with two spaces instead leaves a fresh single-space boundary behind for a repeat pass to
+    /// find, so looping to a fixed point strips every occurrence, however many are adjacent.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>The resulting double spaces are NEVER collapsed back to one</b> (PLAN T438 ruling): <see
+    /// cref="FoldedWordListMatcher"/> is a padded-single-space <see
+    /// cref="string.Contains(string, StringComparison)"/> search, so a run of two-plus spaces is itself a
+    /// word boundary no <c>" entry "</c> pattern can bridge. Collapsing them back to one space would glue
+    /// whatever sat on either side of the stripped literal into a single run — <c>"Mountain " + "Universal
+    /// Pictures" + " Dew"</c> stripped down to <c>"mountain dew"</c> would fabricate a collision against
+    /// that unrelated blocklist entry; left as <c>"mountain  dew"</c> (two spaces), it cannot.
+    /// </para>
+    /// </summary>
+    static IReadOnlyList<string> StripLiteral(IReadOnlyList<string> foldedVariants, string foldedLiteral) =>
+        foldedVariants.Select(variant => StripAllOccurrences(variant, foldedLiteral)).ToList();
+
+    static string StripAllOccurrences(string variant, string foldedLiteral)
     {
+        var needle = $" {foldedLiteral} ";
+        var padded = $" {variant} ";
+
+        string next;
+        while (!string.Equals(next = padded.Replace(needle, "  ", StringComparison.Ordinal), padded, StringComparison.Ordinal))
+            padded = next;
+
+        return padded.Trim();
+    }
+
+    static AdScriptViolation? CheckPhoneShape(AdScript script, AdScriptValidationRequest request)
+    {
+        // The owner-sponsor phone skip (SPEC F172.5, PLAN T438 ruling): the sponsor's OWN raw phone
+        // number, handed to PhoneShapeCheck.FindViolation exactly as stored — that method owns the ONE
+        // digit-normalization point both sides of the comparison go through (PLAN T438 ruling; this
+        // class no longer digitizes it here). A pack-owned sponsor, or an owner sponsor with no phone
+        // on file, passes null through — the plain 555 rule with no exemption.
+        var allowedPhone = request.IsPackOwned ? null : request.SponsorPhone;
+
         // Checked per line, never a whole-script joined string (PLAN T399 review N8) — a digit
         // fragment ending one voice's line must never combine with a fragment opening the next
         // line's into a phone-shaped run that existed in neither line alone.
         foreach (var line in script.Lines)
         {
-            if (PhoneShapeCheck.FindViolation(line.Text) is { } phoneRun)
+            if (PhoneShapeCheck.FindViolation(line.Text, allowedPhone) is { } phoneRun)
                 return new AdScriptViolation(AdScriptRuleIds.PhoneShape, $"a phone-shaped digit run (\"{phoneRun}\") does not contain 555");
         }
 
