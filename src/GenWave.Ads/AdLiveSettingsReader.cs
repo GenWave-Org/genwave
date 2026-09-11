@@ -46,12 +46,24 @@ public static class AdLiveSettingsReader
     internal const int MinBedFadeMs = 100;
     internal const int MaxBedFadeMs = 1000;
 
+    /// <summary>gh-#746 — <c>Station:Ads:BedDuckDb</c>'s own default and clamp: how many dB UNDER the
+    /// voice the background music sits in a generated ad (the mixer makes it relative to what the voice
+    /// and bed actually measure). −12 is the ordinary radio bed level; 0 = no ducking at all; −60 =
+    /// effectively silent. Mirrors <c>appsettings.json</c>'s <c>Station:Ads:BedDuckDb</c> and
+    /// <c>SettingValidator</c>'s <c>AdsBedDuckDbMin/Max</c> — change one, change all three.</summary>
+    internal const double DefaultBedDuckDb = -12.0;
+    internal const double MinBedDuckDb = -60.0;
+    internal const double MaxBedDuckDb = 0.0;
+
     public static AdLiveSettings Read(IConfiguration configuration) => new(
         AnnouncerVoice: ReadString(configuration, "Station:Ads:AnnouncerVoice", DefaultAnnouncerVoice).Trim(),
         CastVoices: ParseCastVoices(ReadString(configuration, "Station:Ads:CastVoices", "")),
         BedFadeMs: Math.Clamp(
             AdSettingsRead.OrDefault(configuration, "Station:Ads:BedFadeMs", DefaultBedFadeMs), MinBedFadeMs,
-            MaxBedFadeMs));
+            MaxBedFadeMs),
+        BedDuckDb: Math.Clamp(
+            AdSettingsRead.OrDefault(configuration, "Station:Ads:BedDuckDb", DefaultBedDuckDb), MinBedDuckDb,
+            MaxBedDuckDb));
 
     static string ReadString(IConfiguration configuration, string key, string fallback)
     {

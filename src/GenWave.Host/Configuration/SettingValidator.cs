@@ -237,6 +237,12 @@ public sealed partial class SettingValidator
     internal const int AdsBedFadeMsMin = 100;
     internal const int AdsBedFadeMsMax = 1000;
 
+    // Station:Ads:BedDuckDb (gh-#746) — how many dB under the voice the background music sits in a
+    // generated ad. 0 = no ducking, -60 = effectively silent (AdLiveSettingsReader's own clamp and
+    // appsettings.json's default carry the same numbers — change one, change all three).
+    internal const double AdsBedDuckDbMin = -60.0;
+    internal const double AdsBedDuckDbMax = 0.0;
+
     // Station:Ads:CastVoices (SPEC F170.1, STORY-405, PLAN T417) — a comma-separated list of Kokoro
     // voice ids, F53.1's fat-finger entry-count ceiling shape (the Crosstalk:Shows precedent above):
     // at least one voice to cast from (enforced by IsValidCastVoices' own IsNullOrWhiteSpace guard,
@@ -518,6 +524,7 @@ public sealed partial class SettingValidator
             ["Station:Ads:AnnouncerVoice"] = IsValidAnnouncerVoice,
             ["Station:Ads:CastVoices"] = IsValidCastVoices,
             ["Station:Ads:BedFadeMs"] = v => IsIntInRange(v, AdsBedFadeMsMin, AdsBedFadeMsMax),
+            ["Station:Ads:BedDuckDb"] = v => IsDoubleInRange(v, AdsBedDuckDbMin, AdsBedDuckDbMax),
         };
 
     // ── Per-key validation ─────────────────────────────────────────────────────────────────────
@@ -1228,6 +1235,8 @@ public sealed partial class SettingValidator
                "surrounding spaces.",
         var k when k.Equals("Station:Ads:BedFadeMs", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an integer between {AdsBedFadeMsMin} and {AdsBedFadeMsMax} (milliseconds).",
+        var k when k.Equals("Station:Ads:BedDuckDb", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be a number in [{AdsBedDuckDbMin}, {AdsBedDuckDbMax}] (dB under the voice).",
         _ => $"Value '{value}' is not valid for '{key}'.",
     };
 }

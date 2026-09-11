@@ -728,14 +728,13 @@ booth-log row per plugin at boot.
 ## 📻 Ads (v5.6.0 → v5.8.0, SPEC F158–F163 + F171–F176, gh-#380 / gh-#714)
 
 The station authors and airs its own ad spots — a `GenWave.Ads.AdsOptions` env/compose-only
-knob set (`Ads__*`, boot-validated via `ValidateDataAnnotations()`) plus eight `Station:Ads:*`
+knob set (`Ads__*`, boot-validated via `ValidateDataAnnotations()`) plus nine `Station:Ads:*`
 Live settings (allowlisted, PUT-able through the settings API/UI, no `api` restart needed).
 
 | Key | Default | Range | What it bounds |
 |---|:---:|:---:|---|
 | `Ads__DurationToleranceRatio` | 0.4 | 0.0–2.0 | Allowed fractional deviation between a script's estimated read time and its target duration before the validator refuses it as over |
 | `Ads__WorkerIntervalMinutes` | 10 | 1–1440 | How often `AdSpotWorker`'s render tick runs |
-| `Ads__BedDuckDb` | -12.0 | -60.0–0.0 | Bed attenuation, in dB, relative to the voice in an offline ad mix |
 | `Ads__LibraryName` | `ads` | — | Display name of the seeded ads library `AdsLibrarySeeder` creates if absent at boot |
 | `Ads__RenderBudgetSeconds` | 180 | 10–1800 | Wall-clock budget the worker gives one render attempt before cancelling it |
 | `Ads__PreviewRetentionDays` | 7 | 1–90 | How many days a rendered sponsor preview is kept before the retention sweep deletes it |
@@ -751,6 +750,7 @@ Live settings (allowlisted, PUT-able through the settings API/UI, no `api` resta
 | `Station:Ads:AnnouncerVoice` | `` (empty) | — | Kokoro voice id cast as an ad's announcer; empty uses the station's own voice (`Station:Voice`) |
 | `Station:Ads:CastVoices` | `af_nova,am_michael,bf_alice,am_onyx` | 1–16 ids | Comma-separated pool of Kokoro voice ids an ad may cast for its other speaking roles |
 | `Station:Ads:BedFadeMs` | 300 | 100–1000 | How long the background music takes to fade out at the end of a generated ad, as the voice ends, in milliseconds |
+| `Station:Ads:BedDuckDb` | -12 | -60–0 | How far below the voice the background music sits in a generated ad, in dB, measured against the voice (so -12 means -12 whatever the music's own level); 0 = no ducking, -60 = effectively silent. Was the env-only `Ads__BedDuckDb` before gh-#746; that env var is now ignored |
 
 No compose overlay is needed to turn ads on — the seam is always registered; `Station:Ads:EveryNUnits=0`
 is what keeps it silent on every existing station until an operator opts in. The Admin UI's

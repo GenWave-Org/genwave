@@ -13,8 +13,7 @@ namespace GenWave.Ads;
 ///
 /// <para>
 /// <b>The GardenerOptions lesson (F163.2's own citation):</b> <see cref="RangeAttribute(double, double)"/>
-/// deliberately, NOT the <c>(int, int)</c> overload, for <see cref="DurationToleranceRatio"/> and
-/// <see cref="BedDuckDb"/> — on an <c>int</c>-typed <see cref="RangeAttribute"/>, an out-of-range
+/// deliberately, NOT the <c>(int, int)</c> overload, for <see cref="DurationToleranceRatio"/> — on an <c>int</c>-typed <see cref="RangeAttribute"/>, an out-of-range
 /// <c>double</c> config value is converted via <c>Convert.ToInt32</c> (banker's rounding,
 /// <see cref="MidpointRounding.ToEven"/>) BEFORE the comparison, so a genuinely out-of-range value
 /// can boot clean with its real, un-rounded value silently outside the documented range
@@ -26,8 +25,9 @@ namespace GenWave.Ads;
 /// <see cref="AdsLibrarySeeder"/> (create-if-absent) and <see cref="LibraryAdSpotSource"/>
 /// (library-id resolution) both key off it. <see cref="DurationToleranceRatio"/> is T399's
 /// (<c>AdScriptValidator</c>'s duration-fit check, SPEC F160.3); <see cref="WorkerIntervalMinutes"/>
-/// and <see cref="BedDuckDb"/> are T401's (<c>AdSpotWorker</c>'s tick cadence and offline bed-duck
-/// mix, SPEC F161.1/F161.2). All four bind and boot-validate now regardless — one options class born
+/// is T401's (<c>AdSpotWorker</c>'s tick cadence, SPEC F161.1). The bed duck that used to live here
+/// (<c>Ads:BedDuckDb</c>) is the Live <c>Station:Ads:BedDuckDb</c> since gh-#746 — read by
+/// <c>AdLiveSettingsReader</c>, never an env knob. All four bind and boot-validate now regardless — one options class born
 /// once at T396, never re-touched just because a later task starts reading a field that was already
 /// here (F163.2 lists all four together for exactly this reason).
 /// </para>
@@ -56,14 +56,6 @@ public sealed class AdsOptions
     [Range(1, 1440)]
     public int WorkerIntervalMinutes { get; set; } = 10;
 
-    /// <summary>
-    /// Bed attenuation, in dB, relative to the voice in the offline ad mix (SPEC F161.2, T401).
-    /// Default -12.0 (T396's own choice — F163.2 leaves this default unstated — matching
-    /// <c>Station:Safe:BedDuckDb</c>'s identical concept). Range -60.0-0.0: 0 is no ducking at all,
-    /// -60 is effectively silent.
-    /// </summary>
-    [Range(-60.0, 0.0)]
-    public double BedDuckDb { get; set; } = -12.0;
 
     /// <summary>
     /// Display name of the seeded ads library (SPEC F158.5, F159.1) — <see cref="AdsLibrarySeeder"/>

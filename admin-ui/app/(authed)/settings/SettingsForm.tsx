@@ -462,6 +462,11 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
   "Station:Ads:BedFadeMs":
     "How long the background music takes to fade out at the end of a generated ad, as the voice " +
     "ends, in milliseconds. Defaults to 300. Accepted range: 100–1000.",
+  "Station:Ads:BedDuckDb":
+    "How far below the voice the background music sits in a generated ad, in decibels, measured " +
+    "against the voice so the number means the same whatever the music's own level. Defaults to " +
+    "-12. 0 means no ducking at all, -60 is effectively silent. Changing it makes existing " +
+    "previews out of date until they are rendered again. Accepted range: -60–0.",
 };
 
 /**

@@ -234,7 +234,7 @@ public sealed class SafeSegmentsController(
 
         var row = found.Value.Row;
         var (cueIn, cueOut) = ResolveBedCue(bedMediaId.Value, row.CueInSec, row.CueOutSec);
-        return (new BedSpec(row.Locator, cueIn, cueOut), null);
+        return (new BedSpec(row.Locator, cueIn, cueOut, row.IntegratedLufs), null);
     }
 
     /// <summary>

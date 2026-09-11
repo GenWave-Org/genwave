@@ -1047,7 +1047,7 @@ public sealed class AdsController(
     /// </summary>
     bool PreviewKeyIsStale(AdSpot spot, string storedKey, Sponsor? sponsor, AdLiveSettings liveSettings) =>
         sponsor is null ||
-        storedKey != AdPreviewKey.Compute(spot, sponsor, liveSettings, adsOptions.CurrentValue.BedDuckDb);
+        storedKey != AdPreviewKey.Compute(spot, sponsor, liveSettings);
 
     /// <summary>
     /// PLAN T403 carry-forward (b), now via the shared <see cref="WeakETag.TryParseVersion"/>:

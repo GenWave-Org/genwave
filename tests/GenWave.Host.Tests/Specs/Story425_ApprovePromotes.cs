@@ -547,7 +547,7 @@ public sealed class Story425Arc : IAsyncLifetime
             BedMediaId: null, State: AdState.Draft, FailReason: null, MediaId: null, Generation: 0,
             CreatedAt: DateTime.UtcNow, StateChangedAt: DateTime.UtcNow, RenderedAt: null, RetiredAt: null,
             Version: "0");
-        return AdPreviewKey.Compute(placeholderSpot, sponsor, liveSettings, bedDuckDb: -12.0);
+        return AdPreviewKey.Compute(placeholderSpot, sponsor, liveSettings);
     }
 
     /// <summary>A real, minimal, exactly-44-byte RIFF/WAVE file (PCM, mono, 8kHz, 16-bit, zero payload

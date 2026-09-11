@@ -24,7 +24,7 @@ namespace GenWave.Loudness;
 /// On failure (missing/unreadable input, ffmpeg non-zero exit) this throws
 /// <see cref="InvalidOperationException"/> and deletes any partially-written output file.
 /// </summary>
-public sealed class FfmpegAudioMixer : IAudioMixer
+public sealed class FfmpegAudioMixer(ILoudnessAnalyzer loudnessAnalyzer) : IAudioMixer
 {
     // The bed branch is resampled to this rate before looping so the aloop buffer size (computed in
     // samples) is deterministic regardless of the bed file's native sample rate.
@@ -69,8 +69,16 @@ public sealed class FfmpegAudioMixer : IAudioMixer
     /// Mixes the cue-trimmed, looped/trimmed, ducked bed under the voice (delayed by the lead-in pad)
     /// in a single filter_complex pass.
     /// </summary>
-    static async Task RunWithBedAsync(AudioMixRequest request, BedSpec bed, CancellationToken ct)
+    async Task RunWithBedAsync(AudioMixRequest request, BedSpec bed, CancellationToken ct)
     {
+        // gh-#746 — BedDuckDb is "dB UNDER THE VOICE", so the bed's gain is relative to what the voice
+        // and the bed actually measure, never a flat volume= on the raw bed file. The assembled voice
+        // is always measured here (it is freshly mixed, never a catalog row); the bed's loudness is the
+        // catalog's own when the caller carried it on the BedSpec, measured here otherwise.
+        var voiceLoudness = await loudnessAnalyzer.AnalyzeAsync(request.VoicePath, ct);
+        var bedLufs = bed.IntegratedLufs ?? await MeasureBedLufsAsync(bed.Path, ct);
+        var bedGainDb = ResolveBedGainDb(request.BedDuckDb, voiceLoudness, bedLufs);
+
         var voiceDurationSec = await FfmpegProcess.ProbeDurationSecondsAsync(request.VoicePath, ct);
         var totalDurationSec = voiceDurationSec + (2 * request.BedPadSeconds);
 
@@ -88,7 +96,7 @@ public sealed class FfmpegAudioMixer : IAudioMixer
             bedSegmentDurationSec * BedProcessingSampleRate, MidpointRounding.AwayFromZero);
         var delayMs = (long)Math.Round(request.BedPadSeconds * 1000.0, MidpointRounding.AwayFromZero);
 
-        var filter = BuildBedFilterGraph(request, cueInSec, cueOutSec, totalDurationSec, loopBufferSamples, delayMs);
+        var filter = BuildBedFilterGraph(request, bedGainDb, cueInSec, cueOutSec, totalDurationSec, loopBufferSamples, delayMs);
 
         var args = new List<string>
         {
@@ -116,14 +124,32 @@ public sealed class FfmpegAudioMixer : IAudioMixer
     /// fact pinning it to this call site at all; a mutant deleting that call stayed green because only
     /// the pure helper itself, never this graph, was ever asserted against.
     /// </summary>
+    async Task<double?> MeasureBedLufsAsync(string bedPath, CancellationToken ct)
+    {
+        var measured = await loudnessAnalyzer.AnalyzeAsync(bedPath, ct);
+        return measured.Measurable ? measured.IntegratedLufs : null;
+    }
+
+    /// <summary>
+    /// The gain applied to the bed branch (gh-#746): <c>voice + duck − bed</c> — the bed lands exactly
+    /// <paramref name="duckDb"/> dB under the voice's integrated loudness. When either side is
+    /// unmeasurable (a silent voice track, a bed the analyzer cannot gate — <c>null</c>
+    /// <paramref name="bedLufs"/>) there is nothing to be relative to, and the duck falls back to the
+    /// pre-gh-#746 absolute reading: a flat <paramref name="duckDb"/> on the raw bed.
+    /// </summary>
+    internal static double ResolveBedGainDb(double duckDb, Core.Domain.Loudness voice, double? bedLufs) =>
+        voice.Measurable && bedLufs is double measuredBed && double.IsFinite(measuredBed)
+            ? voice.IntegratedLufs + duckDb - measuredBed
+            : duckDb;
+
     internal static string BuildBedFilterGraph(
-        AudioMixRequest request, double cueInSec, double cueOutSec, double totalDurationSec,
+        AudioMixRequest request, double bedGainDb, double cueInSec, double cueOutSec, double totalDurationSec,
         long loopBufferSamples, long delayMs) =>
         $"[1:a]atrim=start={Fmt(cueInSec)}:end={Fmt(cueOutSec)},asetpts=PTS-STARTPTS," +
         $"aformat=sample_rates={BedProcessingSampleRate}:channel_layouts=stereo," +
         $"aloop=loop=-1:size={loopBufferSamples}," +
         $"atrim=start=0:end={Fmt(totalDurationSec)},asetpts=PTS-STARTPTS," +
-        $"volume={Fmt(request.BedDuckDb)}dB{BuildFadeSuffix(totalDurationSec, request.BedFadeSeconds)}[bed];" +
+        $"volume={Fmt(bedGainDb)}dB{BuildFadeSuffix(totalDurationSec, request.BedFadeSeconds)}[bed];" +
         $"[0:a]aformat=sample_rates={BedProcessingSampleRate}:channel_layouts=stereo," +
         $"adelay=delays={delayMs}:all=1[voice];" +
         "[bed][voice]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[out]";

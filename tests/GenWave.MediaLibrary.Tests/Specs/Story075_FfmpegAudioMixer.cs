@@ -54,7 +54,7 @@ public static class FeatureFfmpegAudioMixer
                     BedPadSeconds: 1.5,
                     OutputPath: outputPath);
 
-                await new FfmpegAudioMixer().MixAsync(request, CancellationToken.None);
+                await new FfmpegAudioMixer(new FfmpegLoudnessAnalyzer()).MixAsync(request, CancellationToken.None);
 
                 var exists = File.Exists(outputPath);
                 var (artist, title) = exists ? await ProbeTagsAsync(outputPath) : (null, null);
@@ -133,7 +133,7 @@ public static class FeatureFfmpegAudioMixer
                     voicePath, new BedSpec(bedPath, CueInSec: null, CueOutSec: null),
                     new AudioTags(StationArtist, DefaultTitle),
                     DuckDb, PadSeconds, outputPath);
-                await new FfmpegAudioMixer().MixAsync(request, CancellationToken.None);
+                await new FfmpegAudioMixer(new FfmpegLoudnessAnalyzer()).MixAsync(request, CancellationToken.None);
 
                 var duration = await ProbeDurationSecondsAsync(outputPath);
                 var onset = await ProbeFirstSilenceEndSecondsAsync(outputPath, VoiceFrequencyHz);
@@ -187,7 +187,7 @@ public static class FeatureFfmpegAudioMixer
                     voicePath, new BedSpec(bedPath, CueInSec: null, CueOutSec: null),
                     new AudioTags(StationArtist, DefaultTitle),
                     DuckDb, PadSeconds, outputPath);
-                await new FfmpegAudioMixer().MixAsync(request, CancellationToken.None);
+                await new FfmpegAudioMixer(new FfmpegLoudnessAnalyzer()).MixAsync(request, CancellationToken.None);
 
                 var gapCount = await ProbeBandSilenceStartCountAsync(outputPath, BedFrequencyHz);
                 Assert.Equal(0, gapCount);
@@ -214,7 +214,7 @@ public static class FeatureFfmpegAudioMixer
                     voicePath, new BedSpec(bedPath, CueInSec: null, CueOutSec: null),
                     new AudioTags(StationArtist, DefaultTitle),
                     DuckDb, PadSeconds, outputPath);
-                await new FfmpegAudioMixer().MixAsync(request, CancellationToken.None);
+                await new FfmpegAudioMixer(new FfmpegLoudnessAnalyzer()).MixAsync(request, CancellationToken.None);
 
                 var duration = await ProbeDurationSecondsAsync(outputPath);
                 var expected = voiceDurationSec + (2 * PadSeconds);
@@ -243,7 +243,7 @@ public static class FeatureFfmpegAudioMixer
                     voicePath, new BedSpec(bedPath, CueInSec: 2.0, CueOutSec: 7.0),
                     new AudioTags(StationArtist, DefaultTitle),
                     DuckDb, PadSeconds, outputPath);
-                await new FfmpegAudioMixer().MixAsync(request, CancellationToken.None);
+                await new FfmpegAudioMixer(new FfmpegLoudnessAnalyzer()).MixAsync(request, CancellationToken.None);
 
                 // If the silent flanks ever entered the loop, they would surface as a silence gap.
                 var gapCount = await ProbeBandSilenceStartCountAsync(outputPath, BedFrequencyHz);
@@ -261,6 +261,76 @@ public static class FeatureFfmpegAudioMixer
     // ---------------------------------------------------------------------
 
     [Trait("Category", "Integration")]
+    // gh-#746 — BedDuckDb means "dB UNDER THE VOICE". Before this fix the mixer applied it as a flat
+    // volume= on the raw bed file, so a pack bed mastered hot sat ON the voice ("way too loud, it
+    // makes the voices almost impossible to hear" — the demo, 2026-09-11). The scenario above uses
+    // two equal-level tones, which cannot tell relative from absolute; this one can.
+    public sealed class ScenarioTheDuckIsRelativeToTheVoiceNotTheBedFile
+    {
+        const double VoiceGainDb = -20.0;   // the voice tone, 20 dB below full scale
+        const double DuckDb = -12.0;
+
+        sealed record RelativeOutcome(double VoiceSoloLufs, double BedSoloLufs, double BedInMixLufs);
+
+        static async Task<RelativeOutcome> ArrangeQuietVoiceMixAsync(double? catalogBedLufs)
+        {
+            var dir = TestMedia.NewTempDir();
+            try
+            {
+                var voicePath = TestMedia.CreateTone(dir, "voice.wav", seconds: 5.0, frequency: VoiceFrequencyHz, gainDb: VoiceGainDb);
+                var bedPath = TestMedia.CreateTone(dir, "bed.wav", seconds: 3.0, frequency: BedFrequencyHz);
+                var outputPath = Path.Combine(dir, "out.wav");
+                var voiceSolo = await ProbeIntegratedLufsAsync(voicePath, bandFrequencyHz: null);
+                var bedSolo = await ProbeIntegratedLufsAsync(bedPath, bandFrequencyHz: null);
+                var request = new AudioMixRequest(
+                    voicePath, new BedSpec(bedPath, CueInSec: null, CueOutSec: null, IntegratedLufs: catalogBedLufs),
+                    new AudioTags(StationArtist, DefaultTitle),
+                    DuckDb, 1.5, outputPath);
+                await new FfmpegAudioMixer(new FfmpegLoudnessAnalyzer()).MixAsync(request, CancellationToken.None);
+                var bedInMix = await ProbeIntegratedLufsAsync(outputPath, BedFrequencyHz);
+                return new RelativeOutcome(voiceSolo, bedSolo, bedInMix);
+            }
+            finally
+            {
+                Directory.Delete(dir, recursive: true);
+            }
+        }
+
+        [Fact]
+        public async Task TheBedLandsDuckDbUnderTheVoiceWhateverTheBedFilesOwnLevel()
+        {
+            // The voice is 20 dB down; the bed is full scale. Relative: bed-in-mix ≈ voice + duck
+            // (≈ 32 dB below the bed's own solo level). Absolute (the old bug) would leave it only
+            // 12 dB below solo — 20 dB hotter than this fact allows.
+            var outcome = await ArrangeQuietVoiceMixAsync(catalogBedLufs: null);
+            var expected = outcome.VoiceSoloLufs + DuckDb;
+            Assert.InRange(outcome.BedInMixLufs, expected - 3.0, expected + 3.0);
+        }
+
+        [Fact]
+        public async Task ACatalogMeasurementOnTheBedSpecIsTrustedOverMeasuringTheFile()
+        {
+            // The BedSpec claims the bed is 10 dB quieter than it really is; the mixer must use the
+            // claim (one measurement fewer per render) — so the bed comes out 10 dB hotter than the
+            // measured-file path would place it, still relative to the voice.
+            var measured = await ArrangeQuietVoiceMixAsync(catalogBedLufs: null);
+            var claimed = await ArrangeQuietVoiceMixAsync(catalogBedLufs: measured.BedSoloLufs - 10.0);
+            Assert.InRange(claimed.BedInMixLufs - measured.BedInMixLufs, 10.0 - 3.0, 10.0 + 3.0);
+        }
+
+        [Fact]
+        public void TheGainIsVoicePlusDuckMinusBed()
+            => Assert.Equal(-16.0 + -12.0 - -9.0, FfmpegAudioMixer.ResolveBedGainDb(-12.0, new GenWave.Core.Domain.Loudness(-16.0, -1.0, true), -9.0), precision: 9);
+
+        [Fact]
+        public void AnUnmeasurableVoiceFallsBackToTheAbsoluteDuck()
+            => Assert.Equal(-12.0, FfmpegAudioMixer.ResolveBedGainDb(-12.0, new GenWave.Core.Domain.Loudness(double.NegativeInfinity, double.NegativeInfinity, false), -9.0));
+
+        [Fact]
+        public void AnUnmeasurableBedFallsBackToTheAbsoluteDuck()
+            => Assert.Equal(-12.0, FfmpegAudioMixer.ResolveBedGainDb(-12.0, new GenWave.Core.Domain.Loudness(-16.0, -1.0, true), null));
+    }
+
     public sealed class ScenarioFfmpegFailureLeavesNoPartialOutput
     {
         sealed record FailedMixOutcome(Exception? Thrown, bool OutputExists);
@@ -281,7 +351,7 @@ public static class FeatureFfmpegAudioMixer
                     OutputPath: outputPath);
 
                 var thrown = await Record.ExceptionAsync(
-                    () => new FfmpegAudioMixer().MixAsync(request, CancellationToken.None));
+                    () => new FfmpegAudioMixer(new FfmpegLoudnessAnalyzer()).MixAsync(request, CancellationToken.None));
 
                 return new FailedMixOutcome(thrown, File.Exists(outputPath));
             }
@@ -337,7 +407,7 @@ public static class FeatureFfmpegAudioMixer
                 cts.Cancel();
 
                 var thrown = await Record.ExceptionAsync(
-                    () => new FfmpegAudioMixer().MixAsync(request, cts.Token));
+                    () => new FfmpegAudioMixer(new FfmpegLoudnessAnalyzer()).MixAsync(request, cts.Token));
 
                 return new CancelledMixOutcome(thrown, File.Exists(outputPath));
             }

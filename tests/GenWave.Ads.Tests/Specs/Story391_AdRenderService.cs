@@ -36,7 +36,7 @@ public static class FeatureAdRenderService
     /// fail-safe) never vary <c>BedFadeMs</c>, so <see cref="AdLiveSettingsReader.DefaultBedFadeMs"/>
     /// is enough here; Story403_AdBedPicker.cs is where a real override gets its own fact.</summary>
     static AdLiveSettings LiveSettings(int bedFadeMs = AdLiveSettingsReader.DefaultBedFadeMs) =>
-        new(AnnouncerVoice: "", CastVoices: [], BedFadeMs: bedFadeMs);
+        new(AnnouncerVoice: "", CastVoices: [], BedFadeMs: bedFadeMs, BedDuckDb: AdLiveSettingsReader.DefaultBedDuckDb);
 
     /// <summary>Wires a REAL <see cref="AdRenderService"/> against fakes at every I/O seam — the
     /// SAME "real subject, faked edges" posture every other spec in this suite uses. Seeds the ads
@@ -44,7 +44,7 @@ public static class FeatureAdRenderService
     /// failure path).</summary>
     static (AdRenderService Service, FakeCastSegmentAuthor Author, FakeAdSpotStore Store,
         FakeAdminMediaLookup AdminLookup, FakeAdsLibraryStore Libraries, long AdsLibraryId) Build(
-            bool seedAdsLibrary = true, double toleranceRatio = 0.4, double bedDuckDb = -12.0)
+            bool seedAdsLibrary = true, double toleranceRatio = 0.4)
     {
         var author = new FakeCastSegmentAuthor();
         var store = new FakeAdSpotStore();
@@ -53,7 +53,7 @@ public static class FeatureAdRenderService
         var adsLibraryId = seedAdsLibrary ? libraries.AddExisting("ads") : -1;
         var stationIdentity = new FakeStationIdentityProvider(new StationIdentity("station-1", StationName, StationVoice));
         var adsOptions = new FakeOptionsMonitor<AdsOptions>(
-            new AdsOptions { LibraryName = "ads", DurationToleranceRatio = toleranceRatio, BedDuckDb = bedDuckDb });
+            new AdsOptions { LibraryName = "ads", DurationToleranceRatio = toleranceRatio });
         var locatorRoots = new AdSpotLocatorRoots("/media", "/authored");
 
         var service = new AdRenderService(

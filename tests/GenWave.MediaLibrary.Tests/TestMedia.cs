@@ -17,13 +17,16 @@ static class TestMedia
         string dir, string fileName,
         string? title = null, string? artist = null, string? album = null, string? genre = null, int? year = null,
         string? itunesAdvisory = null,
-        double seconds = 2.0, int frequency = 440)
+        double seconds = 2.0, int frequency = 440, double gainDb = 0.0)
     {
         var path = Path.Combine(dir, fileName);
+        // gainDb (gh-#746): a tone deliberately quieter than full scale, so a mix spec can pin a
+        // LEVEL RELATIONSHIP between two tones rather than two equal-level ones.
+        var gain = gainDb == 0.0 ? "" : $",volume={gainDb.ToString(CultureInfo.InvariantCulture)}dB";
         var args = new List<string>
         {
             "-nostats", "-hide_banner", "-loglevel", "error", "-y",
-            "-f", "lavfi", "-i", $"sine=frequency={frequency}:duration={seconds.ToString(CultureInfo.InvariantCulture)}",
+            "-f", "lavfi", "-i", $"sine=frequency={frequency}:duration={seconds.ToString(CultureInfo.InvariantCulture)}{gain}",
             "-ar", "44100", "-ac", "2",
         };
 
