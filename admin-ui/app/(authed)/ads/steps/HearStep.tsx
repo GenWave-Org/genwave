@@ -6,6 +6,7 @@ import { Chip } from "@/components/ui/chip";
 import { inFlightJob, listBackgroundMusic, updateAdSpot, type AdSpotDto, type BackgroundMusicOption } from "@/lib/ads-api";
 import { FIELD_INPUT_CLASSES, FIELD_LABEL_CLASSES } from "../FieldRow";
 import { JobRunner } from "./JobRunner";
+import { StepActions } from "./StepActions";
 
 interface HearStepProps {
   spot: AdSpotDto;
@@ -14,6 +15,8 @@ interface HearStepProps {
   onNext: () => void;
   onPreview: () => void;
   onCancelJob: () => void;
+  onBack: () => void;
+  onCancel: () => void;
 }
 
 /**
@@ -26,7 +29,7 @@ interface HearStepProps {
  * station's own pick, and the plain sentence under the select says so. No numeric input anywhere
  * (STORY-427 AC4) — every choice is a `<select>` option, never a typed id.
  */
-export function HearStep({ spot, onSpotUpdated, onError, onNext, onPreview, onCancelJob }: HearStepProps): ReactNode {
+export function HearStep({ spot, onSpotUpdated, onError, onNext, onPreview, onCancelJob, onBack, onCancel }: HearStepProps): ReactNode {
   const [musicOptions, setMusicOptions] = useState<BackgroundMusicOption[] | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -119,11 +122,11 @@ export function HearStep({ spot, onSpotUpdated, onError, onNext, onPreview, onCa
         )}
       </div>
 
-      <div className="flex justify-end">
+      <StepActions onCancel={onCancel} onBack={onBack} disabled={jobActive || pending}>
         <Button type="button" disabled={jobActive || pending} onClick={onNext}>
           Next
         </Button>
-      </div>
+      </StepActions>
     </div>
   );
 }

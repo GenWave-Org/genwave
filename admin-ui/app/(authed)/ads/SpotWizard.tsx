@@ -67,6 +67,13 @@ export function SpotWizard({ sponsors, initialSponsorId, onClose }: SpotWizardPr
     setStepIndex(WIZARD_STEPS.findIndex((step) => step.id === fromId) + 1);
   }
 
+  // The mirror of `goToNext` — keyed on the step being LEFT for the same drift reason. Only ever
+  // wired on steps past the first, so the index never goes below 0.
+  function goBack(fromId: WizardStepId): void {
+    setError(null);
+    setStepIndex(WIZARD_STEPS.findIndex((step) => step.id === fromId) - 1);
+  }
+
   function applySpot(next: AdSpotDto): void {
     setSpot(next);
     setError(null);
@@ -162,17 +169,21 @@ export function SpotWizard({ sponsors, initialSponsorId, onClose }: SpotWizardPr
                 onSponsorCreated={(sponsor) => setLocalSponsors((prev) => [...prev, sponsor])}
                 onError={setError}
                 onNext={() => goToNext("sponsor")}
+                onCancel={onClose}
               />
             )}
 
             {currentStep.id === "angle" && sponsor !== undefined && (
               <AngleLengthStep
                 sponsor={sponsor}
-                onSpotCreated={(created) => {
-                  applySpot(created);
+                existingSpot={spot ?? undefined}
+                onSpotCommitted={(committed) => {
+                  applySpot(committed);
                   goToNext("angle");
                 }}
                 onError={setError}
+                onBack={() => goBack("angle")}
+                onCancel={onClose}
               />
             )}
 
@@ -184,6 +195,8 @@ export function SpotWizard({ sponsors, initialSponsorId, onClose }: SpotWizardPr
                 onNext={() => goToNext("script")}
                 onWrite={() => void handleStartJob("write")}
                 onCancelJob={() => void handleCancelJob()}
+                onBack={() => goBack("script")}
+                onCancel={onClose}
               />
             )}
 
@@ -195,11 +208,20 @@ export function SpotWizard({ sponsors, initialSponsorId, onClose }: SpotWizardPr
                 onNext={() => goToNext("hear")}
                 onPreview={() => void handleStartJob("preview")}
                 onCancelJob={() => void handleCancelJob()}
+                onBack={() => goBack("hear")}
+                onCancel={onClose}
               />
             )}
 
             {currentStep.id === "approve" && spot !== null && (
-              <ApproveStep spot={spot} onApproved={handleApproved} onSpotUpdated={applySpot} onError={setError} />
+              <ApproveStep
+                spot={spot}
+                onApproved={handleApproved}
+                onSpotUpdated={applySpot}
+                onError={setError}
+                onBack={() => goBack("approve")}
+                onCancel={onClose}
+              />
             )}
           </div>
         </Dialog.Content>

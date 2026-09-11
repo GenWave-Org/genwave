@@ -6,6 +6,7 @@ import { createSponsor } from "@/lib/ads-api";
 import type { SponsorRefDto } from "@/lib/sponsors-api";
 import { FieldRow, FIELD_INPUT_CLASSES } from "../FieldRow";
 import { SponsorPicker } from "../SponsorPicker";
+import { StepActions } from "./StepActions";
 
 interface SponsorStepProps {
   sponsors: readonly SponsorRefDto[];
@@ -17,6 +18,7 @@ interface SponsorStepProps {
   onSponsorCreated: (sponsor: SponsorRefDto) => void;
   onError: (detail: string) => void;
   onNext: () => void;
+  onCancel: () => void;
 }
 
 /** Lowercase, whitespace-collapsed-then-trimmed — mirrors `station.sponsor_fold(text)`'s own
@@ -41,6 +43,7 @@ export function SponsorStep({
   onSponsorCreated,
   onError,
   onNext,
+  onCancel,
 }: SponsorStepProps): ReactNode {
   const [typedName, setTypedName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -111,11 +114,11 @@ export function SponsorStep({
         </div>
       </FieldRow>
 
-      <div className="flex justify-end">
+      <StepActions onCancel={onCancel} disabled={creating}>
         <Button type="button" disabled={creating} onClick={handleNext}>
           Next
         </Button>
-      </div>
+      </StepActions>
     </div>
   );
 }

@@ -183,8 +183,7 @@ describe("Feature: New spot is a five-step wizard", () => {
             onError={jest.fn()}
             onNext={jest.fn()}
             onPreview={jest.fn()}
-            onCancelJob={jest.fn()}
-          />
+            onCancelJob={jest.fn()} onCancel={jest.fn()} onBack={jest.fn()} />
         );
         await Promise.resolve();
       });
@@ -205,8 +204,7 @@ describe("Feature: New spot is a five-step wizard", () => {
             onError={jest.fn()}
             onNext={jest.fn()}
             onPreview={jest.fn()}
-            onCancelJob={jest.fn()}
-          />
+            onCancelJob={jest.fn()} onCancel={jest.fn()} onBack={jest.fn()} />
         );
         await Promise.resolve();
       });
@@ -232,8 +230,7 @@ describe("Feature: New spot is a five-step wizard", () => {
             onError={jest.fn()}
             onNext={jest.fn()}
             onPreview={jest.fn()}
-            onCancelJob={jest.fn()}
-          />
+            onCancelJob={jest.fn()} onCancel={jest.fn()} onBack={jest.fn()} />
         );
         await Promise.resolve();
       });
@@ -253,8 +250,7 @@ describe("Feature: New spot is a five-step wizard", () => {
           spot={adSpot({ preview: { at: "2026-09-01T00:00:00Z", key: "abc", stale: true } })}
           onApproved={jest.fn()}
           onSpotUpdated={jest.fn()}
-          onError={jest.fn()}
-        />
+          onError={jest.fn()} onCancel={jest.fn()} onBack={jest.fn()} />
       );
       expect(screen.getByRole("button", { name: "Approve as heard" })).toBeDisabled();
 
@@ -263,8 +259,7 @@ describe("Feature: New spot is a five-step wizard", () => {
           spot={adSpot({ preview: { at: "2026-09-01T00:00:00Z", key: "abc", stale: false } })}
           onApproved={jest.fn()}
           onSpotUpdated={jest.fn()}
-          onError={jest.fn()}
-        />
+          onError={jest.fn()} onCancel={jest.fn()} onBack={jest.fn()} />
       );
       expect(screen.getByRole("button", { name: "Approve as heard" })).toBeEnabled();
     });
@@ -298,8 +293,7 @@ describe("Feature: New spot is a five-step wizard", () => {
           spot={adSpot({ id: 77, preview: { at: "2026-09-01T00:00:00Z", key: "abc", stale: false }, version: "100" })}
           onApproved={jest.fn()}
           onSpotUpdated={onSpotUpdated}
-          onError={onError}
-        />
+          onError={onError} onCancel={jest.fn()} onBack={jest.fn()} />
       );
 
       fireEvent.click(screen.getByRole("button", { name: "Approve as heard" }));
@@ -316,8 +310,7 @@ describe("Feature: New spot is a five-step wizard", () => {
           spot={adSpot({ preview: { at: "2026-09-01T00:00:00Z", key: "abc", stale: true } })}
           onApproved={jest.fn()}
           onSpotUpdated={jest.fn()}
-          onError={jest.fn()}
-        />
+          onError={jest.fn()} onCancel={jest.fn()} onBack={jest.fn()} />
       );
 
       expect(
@@ -333,8 +326,7 @@ describe("Feature: New spot is a five-step wizard", () => {
           spot={adSpot({ preview: { at: "2026-09-01T00:00:00Z", key: "abc", stale: false } })}
           onApproved={jest.fn()}
           onSpotUpdated={jest.fn()}
-          onError={jest.fn()}
-        />
+          onError={jest.fn()} onCancel={jest.fn()} onBack={jest.fn()} />
       );
 
       expect(
@@ -344,7 +336,7 @@ describe("Feature: New spot is a five-step wizard", () => {
     });
 
     it("offers the without-preview button and no hint when no preview has ever been rendered", () => {
-      render(<ApproveStep spot={adSpot({ preview: null })} onApproved={jest.fn()} onSpotUpdated={jest.fn()} onError={jest.fn()} />);
+      render(<ApproveStep spot={adSpot({ preview: null })} onApproved={jest.fn()} onSpotUpdated={jest.fn()} onError={jest.fn()} onCancel={jest.fn()} onBack={jest.fn()} />);
 
       expect(screen.getByRole("button", { name: "Approve without a preview" })).toBeInTheDocument();
       expect(
@@ -376,8 +368,7 @@ describe("Feature: New spot is a five-step wizard", () => {
           onChange={jest.fn()}
           onSponsorCreated={jest.fn()}
           onError={onError}
-          onNext={onNext}
-        />
+          onNext={onNext} onCancel={jest.fn()} />
       );
 
       fireEvent.click(screen.getByRole("button", { name: "Next" }));
@@ -482,8 +473,7 @@ describe("Feature: New spot is a five-step wizard", () => {
             onError={jest.fn()}
             onNext={jest.fn()}
             onPreview={jest.fn()}
-            onCancelJob={jest.fn()}
-          />
+            onCancelJob={jest.fn()} onCancel={jest.fn()} onBack={jest.fn()} />
         );
         await Promise.resolve();
       });
@@ -507,8 +497,7 @@ describe("Feature: New spot is a five-step wizard", () => {
             onError={jest.fn()}
             onNext={jest.fn()}
             onPreview={jest.fn()}
-            onCancelJob={jest.fn()}
-          />
+            onCancelJob={jest.fn()} onCancel={jest.fn()} onBack={jest.fn()} />
         );
         await Promise.resolve();
       });
@@ -535,8 +524,7 @@ describe("Feature: New spot is a five-step wizard", () => {
             onError={jest.fn()}
             onNext={jest.fn()}
             onPreview={jest.fn()}
-            onCancelJob={jest.fn()}
-          />
+            onCancelJob={jest.fn()} onCancel={jest.fn()} onBack={jest.fn()} />
         );
         await Promise.resolve();
       });
@@ -553,7 +541,7 @@ describe("Feature: New spot is a five-step wizard", () => {
       installFetchMock([{ method: "GET", match: (u) => u.pathname === "/api/ad-briefs", respond: () => ({ status: 200, body: [] }) }]);
 
       await act(async () => {
-        render(<AngleLengthStep sponsor={SPONSOR_ACME} onSpotCreated={jest.fn()} onError={jest.fn()} />);
+        render(<AngleLengthStep sponsor={SPONSOR_ACME} onSpotCommitted={jest.fn()} onError={jest.fn()} onCancel={jest.fn()} onBack={jest.fn()} />);
         await Promise.resolve();
       });
 
@@ -565,9 +553,9 @@ describe("Feature: New spot is a five-step wizard", () => {
     it("keeps 'Keep this angle for later' checked by default, and saves the typed angle as a brief on Next when left checked", async () => {
       installFetchMock([{ method: "GET", match: (u) => u.pathname === "/api/ad-briefs", respond: () => ({ status: 200, body: [] }) }]);
 
-      const onSpotCreated = jest.fn<(spot: AdSpotDto) => void>();
+      const onSpotCommitted = jest.fn<(spot: AdSpotDto) => void>();
       await act(async () => {
-        render(<AngleLengthStep sponsor={SPONSOR_ACME} onSpotCreated={onSpotCreated} onError={jest.fn()} />);
+        render(<AngleLengthStep sponsor={SPONSOR_ACME} onSpotCommitted={onSpotCommitted} onError={jest.fn()} onCancel={jest.fn()} onBack={jest.fn()} />);
         await Promise.resolve();
       });
 
@@ -582,7 +570,7 @@ describe("Feature: New spot is a five-step wizard", () => {
       fireEvent.change(screen.getByLabelText("Angle"), { target: { value: "A kept angle." } });
       fireEvent.click(screen.getByRole("button", { name: "Next" }));
 
-      await waitFor(() => expect(onSpotCreated).toHaveBeenCalled());
+      await waitFor(() => expect(onSpotCommitted).toHaveBeenCalled());
 
       const briefPost = mockFetch.mock.calls.find((call) => {
         const method = (call[1] as RequestInit | undefined)?.method;
@@ -633,8 +621,7 @@ describe("Feature: New spot is a five-step wizard", () => {
             onError={jest.fn()}
             onNext={jest.fn()}
             onPreview={jest.fn()}
-            onCancelJob={jest.fn()}
-          />
+            onCancelJob={jest.fn()} onCancel={jest.fn()} onBack={jest.fn()} />
         );
         await Promise.resolve();
       });
@@ -653,8 +640,7 @@ describe("Feature: New spot is a five-step wizard", () => {
           onChange={jest.fn()}
           onSponsorCreated={jest.fn()}
           onError={jest.fn()}
-          onNext={jest.fn()}
-        />
+          onNext={jest.fn()} onCancel={jest.fn()} />
       );
 
       const select = screen.getByLabelText("Sponsor") as HTMLSelectElement;
@@ -671,8 +657,7 @@ describe("Feature: New spot is a five-step wizard", () => {
           onChange={jest.fn()}
           onSponsorCreated={jest.fn()}
           onError={jest.fn()}
-          onNext={jest.fn()}
-        />
+          onNext={jest.fn()} onCancel={jest.fn()} />
       );
 
       expect(
@@ -746,8 +731,7 @@ describe("Feature: New spot is a five-step wizard", () => {
           onError={jest.fn()}
           onNext={jest.fn()}
           onWrite={jest.fn()}
-          onCancelJob={jest.fn()}
-        />
+          onCancelJob={jest.fn()} onCancel={jest.fn()} onBack={jest.fn()} />
       );
 
       expect(screen.getByRole("button", { name: "Write it for me" })).toBeEnabled();
@@ -766,8 +750,7 @@ describe("Feature: New spot is a five-step wizard", () => {
             onError={jest.fn()}
             onNext={jest.fn()}
             onPreview={jest.fn()}
-            onCancelJob={jest.fn()}
-          />
+            onCancelJob={jest.fn()} onCancel={jest.fn()} onBack={jest.fn()} />
         );
         await Promise.resolve();
       });
@@ -878,7 +861,7 @@ describe("Feature: New spot is a five-step wizard", () => {
       expect(pollCallCount(mockFetch)).toBe(1);
     });
 
-    it("Cancel fires exactly one DELETE /api/ads/{id}/job request and re-fetches the row", async () => {
+    it("Stop fires exactly one DELETE /api/ads/{id}/job request and re-fetches the row", async () => {
       const mockFetch = await reachScriptStepWithActiveWriteJob([
         { method: "DELETE", match: (u) => u.pathname === "/api/ads/55/job", respond: () => ({ status: 204 }) },
         {
@@ -888,7 +871,7 @@ describe("Feature: New spot is a five-step wizard", () => {
         },
       ]);
 
-      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      fireEvent.click(screen.getByRole("button", { name: "Stop" }));
       await flush();
 
       const deleteCalls = mockFetch.mock.calls.filter((call) => ((call[1] as RequestInit | undefined)?.method ?? "GET") === "DELETE");
@@ -901,7 +884,154 @@ describe("Feature: New spot is a five-step wizard", () => {
         return method === "GET" && url.pathname === "/api/ads/55";
       });
       expect(getCalls).toHaveLength(1);
-      expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
+    });
+  });
+
+  describe("Scenario: every step offers Cancel, and every step after the first offers Back (Dean, 2026-09-11)", () => {
+    const IN_FLIGHT_WRITE: AdSpotJobDto = { kind: "write", startedAt: "2026-09-11T14:06:06Z", waitingForStation: false, error: null };
+
+    it("the Sponsor step has Cancel but no Back, and Cancel closes the wizard", () => {
+      installFetchMock([]);
+      const onClose = jest.fn();
+      render(<SpotWizard sponsors={[SPONSOR_ACME]} initialSponsorId={null} onClose={onClose} />);
+
+      expect(screen.queryByRole("button", { name: "Back" })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it("Back from Angle & length returns to Sponsor with the sponsor still chosen", async () => {
+      installFetchMock([{ method: "GET", match: (u) => u.pathname === "/api/ad-briefs", respond: () => ({ status: 200, body: [] }) }]);
+      render(<SpotWizard sponsors={[SPONSOR_ACME]} initialSponsorId={SPONSOR_ACME.id} onClose={jest.fn()} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Next" })); // Sponsor -> Angle
+      await screen.findByText(WIZARD_STEPS[1]?.purpose ?? "");
+
+      fireEvent.click(screen.getByRole("button", { name: "Back" })); // Angle -> Sponsor
+      expect(await screen.findByText(WIZARD_STEPS[0]?.purpose ?? "")).toBeInTheDocument();
+      expect(screen.getByLabelText("Sponsor")).toHaveValue(String(SPONSOR_ACME.id));
+    });
+
+    it("Script, Hear, and Approve each wire Back to the wizard", async () => {
+      const onBack = jest.fn();
+      render(
+        <ScriptStep spot={adSpot()} onSpotUpdated={jest.fn()} onError={jest.fn()} onNext={jest.fn()} onWrite={jest.fn()} onCancelJob={jest.fn()} onCancel={jest.fn()} onBack={onBack} />
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Back" }));
+      expect(onBack).toHaveBeenCalledTimes(1);
+      cleanup();
+
+      installFetchMock([{ method: "GET", match: (u) => u.pathname === "/api/media", respond: () => ({ status: 200, body: [] }) }]);
+      await act(async () => {
+        render(
+          <HearStep spot={adSpot()} onSpotUpdated={jest.fn()} onError={jest.fn()} onNext={jest.fn()} onPreview={jest.fn()} onCancelJob={jest.fn()} onCancel={jest.fn()} onBack={onBack} />
+        );
+        await Promise.resolve();
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Back" }));
+      expect(onBack).toHaveBeenCalledTimes(2);
+      cleanup();
+
+      render(<ApproveStep spot={adSpot()} onApproved={jest.fn()} onSpotUpdated={jest.fn()} onError={jest.fn()} onCancel={jest.fn()} onBack={onBack} />);
+      fireEvent.click(screen.getByRole("button", { name: "Back" }));
+      expect(onBack).toHaveBeenCalledTimes(3);
+    });
+
+    it("Back and Cancel are disabled while a job is in flight, and the job's own button reads Stop, never Cancel", () => {
+      render(
+        <ScriptStep spot={adSpot({ job: IN_FLIGHT_WRITE })} onSpotUpdated={jest.fn()} onError={jest.fn()} onNext={jest.fn()} onWrite={jest.fn()} onCancelJob={jest.fn()} onCancel={jest.fn()} onBack={jest.fn()} />
+      );
+
+      expect(screen.getByRole("button", { name: "Back" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
+      expect(screen.getAllByRole("button", { name: "Cancel" })).toHaveLength(1);
+    });
+  });
+
+  describe("Scenario: Back to Angle & length edits the spot the wizard already created, never a second one", () => {
+    it("reads the row's own angle and length back, and Next with nothing changed sends no request", async () => {
+      const mockFetch = installFetchMock([
+        { method: "GET", match: (u) => u.pathname === "/api/ad-briefs", respond: () => ({ status: 200, body: [] }) },
+      ]);
+      const existing = adSpot({ id: 61, brief: "Fresh bread every morning", spotSeconds: 60 });
+      const onSpotCommitted = jest.fn();
+
+      await act(async () => {
+        render(
+          <AngleLengthStep sponsor={SPONSOR_ACME} existingSpot={existing} onSpotCommitted={onSpotCommitted} onError={jest.fn()} onCancel={jest.fn()} onBack={jest.fn()} />
+        );
+        await Promise.resolve();
+      });
+
+      expect(screen.getByLabelText("Angle")).toHaveValue("Fresh bread every morning");
+      expect(screen.getByLabelText("60s")).toBeChecked();
+
+      fireEvent.click(screen.getByRole("button", { name: "Next" }));
+      expect(onSpotCommitted).toHaveBeenCalledWith(existing);
+      expect(mockFetch.mock.calls.filter((call) => ((call[1] as RequestInit | undefined)?.method ?? "GET") !== "GET")).toHaveLength(0);
+    });
+
+    it("a changed length is a PATCH on the existing row carrying only the change — never a POST /api/ads", async () => {
+      const existing = adSpot({ id: 61, brief: "Fresh bread every morning", spotSeconds: 30 });
+      const mockFetch = installFetchMock([
+        { method: "GET", match: (u) => u.pathname === "/api/ad-briefs", respond: () => ({ status: 200, body: [] }) },
+        { method: "PATCH", match: (u) => u.pathname === "/api/ads/61", respond: () => ({ status: 200, body: { ...existing, spotSeconds: 60, version: "101" } }) },
+      ]);
+      const onSpotCommitted = jest.fn();
+
+      await act(async () => {
+        render(
+          <AngleLengthStep sponsor={SPONSOR_ACME} existingSpot={existing} onSpotCommitted={onSpotCommitted} onError={jest.fn()} onCancel={jest.fn()} onBack={jest.fn()} />
+        );
+        await Promise.resolve();
+      });
+
+      fireEvent.click(screen.getByLabelText("60s"));
+      fireEvent.click(screen.getByLabelText("Keep this angle for later")); // unchanged angle — no brief POST to muddy the count
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Next" }));
+        await Promise.resolve();
+      });
+
+      await waitFor(() => expect(onSpotCommitted).toHaveBeenCalledTimes(1));
+      const mutations = mockFetch.mock.calls.filter((call) => ((call[1] as RequestInit | undefined)?.method ?? "GET") !== "GET");
+      expect(mutations).toHaveLength(1);
+      expect(new URL(String(mutations[0]?.[0]), "http://localhost").pathname).toBe("/api/ads/61");
+      expect((mutations[0]?.[1] as RequestInit).method).toBe("PATCH");
+      expect(JSON.parse(String((mutations[0]?.[1] as RequestInit).body))).toMatchObject({ spotSeconds: 60, brief: null, script: null });
+      expect(onSpotCommitted.mock.calls[0]?.[0]).toMatchObject({ spotSeconds: 60, version: "101" });
+    });
+
+    it("the whole trip Sponsor -> Angle -> Script -> Back -> Next creates exactly one spot", async () => {
+      const angleText = "Fresh bread every morning";
+      const created = adSpot({ id: 61, script: null, brief: angleText });
+      const mockFetch = installFetchMock([
+        { method: "GET", match: (u) => u.pathname === "/api/ad-briefs", respond: () => ({ status: 200, body: [] }) },
+        { method: "POST", match: (u) => u.pathname === "/api/ads", respond: () => ({ status: 201, body: created }) },
+      ]);
+      render(<SpotWizard sponsors={[SPONSOR_ACME]} initialSponsorId={SPONSOR_ACME.id} onClose={jest.fn()} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Next" })); // Sponsor -> Angle
+      await screen.findByText(WIZARD_STEPS[1]?.purpose ?? "");
+      fireEvent.change(screen.getByLabelText("Angle"), { target: { value: angleText } });
+      fireEvent.click(screen.getByLabelText("Keep this angle for later"));
+      fireEvent.click(screen.getByRole("button", { name: "Next" })); // Angle -> Script (the one POST)
+      await screen.findByText(WIZARD_STEPS[2]?.purpose ?? "");
+
+      fireEvent.click(screen.getByRole("button", { name: "Back" })); // Script -> Angle, revisiting the row
+      await screen.findByText(WIZARD_STEPS[1]?.purpose ?? "");
+      expect(await screen.findByLabelText("Angle")).toHaveValue(angleText);
+
+      fireEvent.click(screen.getByRole("button", { name: "Next" })); // Angle -> Script again, nothing changed
+      await screen.findByText(WIZARD_STEPS[2]?.purpose ?? "");
+
+      const adsPosts = mockFetch.mock.calls.filter((call) => {
+        const method = (call[1] as RequestInit | undefined)?.method;
+        return method === "POST" && new URL(String(call[0]), "http://localhost").pathname === "/api/ads";
+      });
+      expect(adsPosts).toHaveLength(1);
     });
   });
 });

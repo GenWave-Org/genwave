@@ -11,7 +11,7 @@ export interface JobRunnerProps {
   onStart: () => void;
   onCancel: () => void;
   /** An unrelated save-in-flight the caller also wants to block starting a new job during (e.g.
-   * `ScriptStep`'s own "Next" PATCH) — never affects Cancel, which stays available whenever a job
+   * `ScriptStep`'s own "Next" PATCH) — never affects Stop, which stays available whenever a job
    * is genuinely running regardless of this flag. */
   disabled?: boolean;
 }
@@ -34,7 +34,7 @@ export function JobRunner({ job, actionLabel, progressLabel, onStart, onCancel, 
         </Button>
         {activeJob !== null && (
           <Button type="button" variant="secondary" onClick={onCancel}>
-            Cancel
+            Stop
           </Button>
         )}
       </div>
