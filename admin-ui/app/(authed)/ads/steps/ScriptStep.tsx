@@ -7,6 +7,7 @@ import { inFlightJob, updateAdSpot, type AdSpotDto } from "@/lib/ads-api";
 import { parseScriptTags } from "@/lib/ad-script-tags";
 import { FieldRow, FIELD_INPUT_CLASSES } from "../FieldRow";
 import { JobRunner } from "./JobRunner";
+import { StepActions } from "./StepActions";
 
 interface ScriptStepProps {
   spot: AdSpotDto;
@@ -15,6 +16,8 @@ interface ScriptStepProps {
   onNext: () => void;
   onWrite: () => void;
   onCancelJob: () => void;
+  onBack: () => void;
+  onCancel: () => void;
 }
 
 /**
@@ -24,7 +27,7 @@ interface ScriptStepProps {
  * way, an unlabeled line still reaches the announcer voice — F174.6's own rule — so the purpose
  * sentence above this step says so rather than leaving that a surprise once it airs.
  */
-export function ScriptStep({ spot, onSpotUpdated, onError, onNext, onWrite, onCancelJob }: ScriptStepProps): ReactNode {
+export function ScriptStep({ spot, onSpotUpdated, onError, onNext, onWrite, onCancelJob, onBack, onCancel }: ScriptStepProps): ReactNode {
   const [script, setScript] = useState(spot.script ?? "");
   const [pending, setPending] = useState(false);
 
@@ -102,11 +105,11 @@ export function ScriptStep({ spot, onSpotUpdated, onError, onNext, onWrite, onCa
         </span>
       )}
 
-      <div className="flex justify-end">
+      <StepActions onCancel={onCancel} onBack={onBack} disabled={jobActive || pending}>
         <Button type="button" disabled={jobActive || pending} onClick={() => void handleNext()}>
           Next
         </Button>
-      </div>
+      </StepActions>
     </div>
   );
 }

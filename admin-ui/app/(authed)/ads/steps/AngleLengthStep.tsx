@@ -2,17 +2,27 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
-import { createAdBrief, createAdSpot, listAdBriefs, type AdBriefDto, type AdSpotDto } from "@/lib/ads-api";
+import { createAdBrief, createAdSpot, listAdBriefs, updateAdSpot, type AdBriefDto, type AdSpotDto } from "@/lib/ads-api";
 import type { SponsorRefDto } from "@/lib/sponsors-api";
 import { FieldRow, FIELD_INPUT_CLASSES, FIELD_LABEL_CLASSES } from "../FieldRow";
+import { StepActions } from "./StepActions";
 
 const SPOT_SECONDS_OPTIONS = [15, 30, 60] as const;
 const DEFAULT_SPOT_SECONDS = 30;
 
 interface AngleLengthStepProps {
   sponsor: SponsorRefDto;
-  onSpotCreated: (spot: AdSpotDto) => void;
+  /** The spot this wizard already created, when the operator came BACK to this step from Script
+   * (or later). Present: "Next" edits that row (`PATCH /api/ads/{id}`) instead of creating a
+   * second one, and the fields start from the row's own angle and length. Absent: the first visit
+   * — "Next" is the `POST /api/ads` that brings the spot into existence. */
+  existingSpot?: AdSpotDto;
+  /** Fires with the row "Next" committed — the freshly created spot, the freshly edited one, or
+   * `existingSpot` itself untouched when nothing changed (no request is sent then). */
+  onSpotCommitted: (spot: AdSpotDto) => void;
   onError: (detail: string) => void;
+  onBack: () => void;
+  onCancel: () => void;
 }
 
 /**
@@ -26,12 +36,25 @@ interface AngleLengthStepProps {
  * — a second, best-effort `POST /api/ad-briefs` right after the spot's own create; a 409 there
  * just means today's angle already matches an existing brief for this sponsor, which is fine
  * (nothing left undone), so it is never surfaced as a step failure.
+ *
+ * Revisited via Back (`existingSpot` present): the row already exists, so "Next" is a PATCH
+ * carrying only what changed (`null` = leave unchanged, the `AdSpotSaveBody` contract) and sends
+ * nothing at all when nothing did — coming back to look and going forward again never touches the
+ * row or its `version`. The brief that matches the row's own angle verbatim is preselected so the
+ * step reads back what was chosen, not a blank.
  */
-export function AngleLengthStep({ sponsor, onSpotCreated, onError }: AngleLengthStepProps): ReactNode {
+export function AngleLengthStep({
+  sponsor,
+  existingSpot,
+  onSpotCommitted,
+  onError,
+  onBack,
+  onCancel,
+}: AngleLengthStepProps): ReactNode {
   const [briefs, setBriefs] = useState<AdBriefDto[] | null>(null);
   const [selectedBriefId, setSelectedBriefId] = useState<number | null>(null);
-  const [typedAngle, setTypedAngle] = useState("");
-  const [spotSeconds, setSpotSeconds] = useState<number>(DEFAULT_SPOT_SECONDS);
+  const [typedAngle, setTypedAngle] = useState(existingSpot?.brief ?? "");
+  const [spotSeconds, setSpotSeconds] = useState<number>(existingSpot?.spotSeconds ?? DEFAULT_SPOT_SECONDS);
   const [saveAngleAsBrief, setSaveAngleAsBrief] = useState(true);
   const [pending, setPending] = useState(false);
 
@@ -45,13 +68,20 @@ export function AngleLengthStep({ sponsor, onSpotCreated, onError }: AngleLength
         setBriefs([]);
         return;
       }
-      setBriefs(outcome.briefs.filter((brief) => brief.sponsor.id === sponsor.id && brief.enabled && brief.premise !== null));
+      const usable = outcome.briefs.filter(
+        (brief) => brief.sponsor.id === sponsor.id && brief.enabled && brief.premise !== null
+      );
+      setBriefs(usable);
+      // Back from a later step: the brief whose premise IS the row's angle reads back as chosen.
+      const matching = existingSpot === undefined ? undefined : usable.find((brief) => brief.premise === existingSpot.brief);
+      if (matching !== undefined) setSelectedBriefId(matching.id);
     })();
     return () => {
       cancelled = true;
     };
-    // Runs once, at mount — the sponsor is fixed for this step's whole lifetime (the wizard never
-    // reopens this step against a different sponsor without remounting it).
+    // Runs once, at mount — the sponsor and the revisited row are fixed for this step's whole
+    // lifetime (the wizard never reopens this step against a different sponsor without remounting
+    // it).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -65,16 +95,15 @@ export function AngleLengthStep({ sponsor, onSpotCreated, onError }: AngleLength
       return;
     }
 
+    const edit = existingSpot === undefined ? undefined : editSpot(existingSpot, angleText);
+    if (existingSpot !== undefined && edit === null) {
+      // Nothing changed on a revisit — no request, the row and its version are exactly as they were.
+      onSpotCommitted(existingSpot);
+      return;
+    }
+
     setPending(true);
-    const outcome = await createAdSpot({
-      sponsorId: sponsor.id,
-      title: `${sponsor.name} spot`,
-      brief: angleText,
-      script: null,
-      voicePlan: null,
-      spotSeconds,
-      bedMediaId: null,
-    });
+    const outcome = edit === undefined || edit === null ? await createSpot(angleText) : await edit;
     if (!outcome.ok) {
       setPending(false);
       onError(outcome.detail);
@@ -87,7 +116,35 @@ export function AngleLengthStep({ sponsor, onSpotCreated, onError }: AngleLength
     }
 
     setPending(false);
-    onSpotCreated(outcome.spot);
+    onSpotCommitted(outcome.spot);
+  }
+
+  function createSpot(angleText: string): ReturnType<typeof createAdSpot> {
+    return createAdSpot({
+      sponsorId: sponsor.id,
+      title: `${sponsor.name} spot`,
+      brief: angleText,
+      script: null,
+      voicePlan: null,
+      spotSeconds,
+      bedMediaId: null,
+    });
+  }
+
+  /** `null` when neither the angle nor the length differs from the row — the caller sends nothing. */
+  function editSpot(spot: AdSpotDto, angleText: string): ReturnType<typeof updateAdSpot> | null {
+    const briefChanged = angleText !== (spot.brief ?? "");
+    const secondsChanged = spotSeconds !== spot.spotSeconds;
+    if (!briefChanged && !secondsChanged) return null;
+    return updateAdSpot(spot.id, spot.version, {
+      sponsorId: null,
+      title: null,
+      brief: briefChanged ? angleText : null,
+      script: null,
+      voicePlan: null,
+      spotSeconds: secondsChanged ? spotSeconds : null,
+      bedMediaId: null,
+    });
   }
 
   return (
@@ -169,11 +226,11 @@ export function AngleLengthStep({ sponsor, onSpotCreated, onError }: AngleLength
         </div>
       </fieldset>
 
-      <div className="flex justify-end">
+      <StepActions onCancel={onCancel} onBack={onBack} disabled={pending}>
         <Button type="button" disabled={pending} onClick={() => void handleNext()}>
-          {pending ? "Creating…" : "Next"}
+          {pending ? (existingSpot === undefined ? "Creating…" : "Saving…") : "Next"}
         </Button>
-      </div>
+      </StepActions>
     </div>
   );
 }

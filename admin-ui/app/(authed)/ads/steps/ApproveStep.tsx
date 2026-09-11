@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { approveAdSpot, fetchAdSpot, type AdSpotDto } from "@/lib/ads-api";
+import { StepActions } from "./StepActions";
 
 const STALE_PREVIEW_HINT = "The preview is out of date. Render it again to approve what you heard.";
 
@@ -11,6 +12,8 @@ interface ApproveStepProps {
   onApproved: (spot: AdSpotDto) => void;
   onSpotUpdated: (spot: AdSpotDto) => void;
   onError: (detail: string) => void;
+  onBack: () => void;
+  onCancel: () => void;
 }
 
 /**
@@ -24,7 +27,7 @@ interface ApproveStepProps {
  * so the dialog reflects the CURRENT staleness, surfacing the server's own `detail` for that
  * specific 409 rather than a second, client-side wording of the same rule.
  */
-export function ApproveStep({ spot, onApproved, onSpotUpdated, onError }: ApproveStepProps): ReactNode {
+export function ApproveStep({ spot, onApproved, onSpotUpdated, onError, onBack, onCancel }: ApproveStepProps): ReactNode {
   const [pending, setPending] = useState(false);
 
   const stale = spot.preview !== null && spot.preview.stale;
@@ -55,7 +58,7 @@ export function ApproveStep({ spot, onApproved, onSpotUpdated, onError }: Approv
     <div className="flex flex-col gap-4">
       {stale && <p className="text-[0.82rem] text-mute">{STALE_PREVIEW_HINT}</p>}
 
-      <div className="flex justify-end gap-2">
+      <StepActions onCancel={onCancel} onBack={onBack} disabled={pending}>
         {spot.preview === null && (
           <Button type="button" variant="secondary" disabled={pending} onClick={() => void handleApprove()}>
             Approve without a preview
@@ -64,7 +67,7 @@ export function ApproveStep({ spot, onApproved, onSpotUpdated, onError }: Approv
         <Button type="button" disabled={pending || !canApproveAsHeard} onClick={() => void handleApprove()}>
           Approve as heard
         </Button>
-      </div>
+      </StepActions>
     </div>
   );
 }
