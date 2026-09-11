@@ -64,6 +64,28 @@ public static class FeatureMusicPickerIsTheInstalledMusic
 
     /// <summary>imagingKind alone (no jingleRole) returns the whole pack — the 8 beds plus the 1
     /// sting plus the 1 station_id row — never the plain scanned-music row or the liner row.</summary>
+    // gh-#718 — the packs' library normally sits OUTSIDE the station rotation scope, so the
+    // picker's unnamed browse came back empty while the station's own render picked a bed anyway.
+    // The picker now names the pack's library (learned from GET /api/jingle-packs' libraryId,
+    // Story399); this Scenario is the Host fact that the named browse reaches those beds.
+    [Collection(MusicPickerBrowseCollection.Name)]
+    public sealed class ScenarioANamedLibraryBrowseReachesBedsOutsideTheStationScope(MusicPickerBrowseArc arc)
+    {
+        [Fact]
+        public void TheNamedLibraryBrowseIs200()
+            => Assert.Equal(HttpStatusCode.OK, arc.NamedLibraryBedsStatus);
+
+        [Fact]
+        public void ItReturnsExactlyTheBedInThatLibrary()
+            => Assert.Equal([arc.OutOfScopeBedId], arc.NamedLibraryBedIds);
+
+        [Fact]
+        public void ItIsFlaggedOutOfScopeRatherThanHidden()
+            // F23.6 — scope is a curation boundary, not a trust boundary: rows come back, the
+            // header says so. The unnamed browse keeps hiding this bed (ExactlyTheEightBedsAreReturned).
+            => Assert.Equal("true", arc.NamedLibraryOutOfScopeHeader);
+    }
+
     [Collection(MusicPickerBrowseCollection.Name)]
     public sealed class ScenarioImagingKindAloneReturnsTheWholeInstalledPack(MusicPickerBrowseArc arc)
     {
@@ -200,6 +222,14 @@ public sealed class MusicPickerBrowseArc : IAsyncLifetime
     /// facts do.</summary>
     public string? FilteredHiddenCountHeader { get; private set; }
 
+    /// <summary>gh-#718 — the one bed seeded into a SECOND library (the packs' own, outside
+    /// <c>Station:Scope:LibraryIds</c> = [1]) and the named-library browse that reaches it.</summary>
+    public long OutOfScopeLibraryId { get; private set; }
+    public long OutOfScopeBedId { get; private set; }
+    public HttpStatusCode NamedLibraryBedsStatus { get; private set; }
+    public string? NamedLibraryOutOfScopeHeader { get; private set; }
+    public IReadOnlyList<long> NamedLibraryBedIds { get; private set; } = [];
+
     public HttpStatusCode UnknownImagingKindStatus { get; private set; }
     public HttpStatusCode UnknownJingleRoleStatus { get; private set; }
     public HttpStatusCode JingleRoleAloneStatus { get; private set; }
@@ -252,12 +282,34 @@ public sealed class MusicPickerBrowseArc : IAsyncLifetime
 
         AllSeededIds = [.. bedIds, stingId, stationIdRowId, plainMusicId, linerId];
 
+        // gh-#718 — a second library standing in for the packs' own `ads` library, deliberately
+        // OUTSIDE this factory's Station:Scope:LibraryIds = [1], with one ready bed under the same
+        // pack. Never part of AllSeededIds: every unnamed browse above is station-scoped and must
+        // keep hiding it (ExactlyTheEightBedsAreReturned already pins that by set equality).
+        OutOfScopeLibraryId = await InsertLibraryAsync(database.LibraryConnectionString, "ads");
+        OutOfScopeBedId = await InsertJinglePackRowAsync(
+            database.LibraryConnectionString, "/test/t446-bed-outside-scope.flac", "Story 427 Out-Of-Scope Bed", "bed",
+            libraryId: OutOfScopeLibraryId);
+
         await using var factory = new Story427WebFactory(database);
         var client = factory.CreateClient();
         var login = await client.PostAsJsonAsync(
             "/api/auth/login", new { password = Story427WebFactory.Password });
         if (login.StatusCode != HttpStatusCode.NoContent)
             throw new InvalidOperationException($"login unexpectedly returned {login.StatusCode}");
+
+        // gh-#718 — the picker's exact query plus F23.2's named-library override.
+        var namedLibrary = await client.GetAsync(
+            $"/api/media?imagingKind=jingle&jingleRole=bed&limit=200&library-id={OutOfScopeLibraryId}");
+        NamedLibraryBedsStatus = namedLibrary.StatusCode;
+        NamedLibraryOutOfScopeHeader = namedLibrary.Headers.TryGetValues("X-Out-Of-Scope", out var outOfScopeValues)
+            ? string.Join(",", outOfScopeValues)
+            : null;
+        NamedLibraryBedIds = JsonDocument.Parse(await namedLibrary.Content.ReadAsStringAsync())
+            .RootElement.EnumerateArray()
+            .Select(row => long.Parse(row.GetProperty("mediaId").GetString() ?? "0"))
+            .OrderBy(id => id)
+            .ToList();
 
         // STORY-427 AC1 — the happy path.
         var filtered = await client.GetAsync("/api/media?imagingKind=jingle&jingleRole=bed");
@@ -319,7 +371,8 @@ public sealed class MusicPickerBrowseArc : IAsyncLifetime
     public Task DisposeAsync() => Task.CompletedTask;
 
     static async Task<long> InsertJinglePackRowAsync(
-        string libraryConnectionString, string path, string title, string jingleRole, string state = "ready")
+        string libraryConnectionString, string path, string title, string jingleRole, string state = "ready",
+        long libraryId = 1)
     {
         await using var conn = new NpgsqlConnection(libraryConnectionString);
         await conn.OpenAsync();
@@ -328,18 +381,29 @@ public sealed class MusicPickerBrowseArc : IAsyncLifetime
             """
             insert into library.media
                 (path, format, size_bytes, mtime, state, duration_ms, title, artist,
-                 eligible, imaging_kind, jingle_role, pack_slug)
+                 eligible, imaging_kind, jingle_role, pack_slug, library_id)
             values
                 (@path, 'wav', 1024, now(), @state, 3000, @title, @artist,
-                 true, 'jingle', @jingleRole, @packSlug)
+                 true, 'jingle', @jingleRole, @packSlug, @libraryId)
             returning id
             """;
+        cmd.Parameters.AddWithValue("libraryId", libraryId);
         cmd.Parameters.AddWithValue("path", path);
         cmd.Parameters.AddWithValue("title", title);
         cmd.Parameters.AddWithValue("artist", PackName);
         cmd.Parameters.AddWithValue("jingleRole", jingleRole);
         cmd.Parameters.AddWithValue("packSlug", PackSlug);
         cmd.Parameters.AddWithValue("state", state);
+        return (long)(await cmd.ExecuteScalarAsync() ?? throw new InvalidOperationException("insert returned no id"));
+    }
+
+    static async Task<long> InsertLibraryAsync(string libraryConnectionString, string name)
+    {
+        await using var conn = new NpgsqlConnection(libraryConnectionString);
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "insert into library.library (name) values (@name) returning id";
+        cmd.Parameters.AddWithValue("name", name);
         return (long)(await cmd.ExecuteScalarAsync() ?? throw new InvalidOperationException("insert returned no id"));
     }
 
