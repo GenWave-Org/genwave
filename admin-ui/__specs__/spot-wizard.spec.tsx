@@ -173,7 +173,11 @@ describe("Feature: New spot is a five-step wizard", () => {
     // still pass here since the default option renders before that effect resolves, but would log
     // a spurious "not wrapped in act" warning on every one of these three).
     it("the dropdown's default option has a null value — STORY-427 AC3", async () => {
-      installFetchMock([{ method: "GET", match: (u) => u.pathname === "/api/media", respond: () => ({ status: 200, body: [] }) }]);
+      installFetchMock([
+        { method: "GET", match: (u) => u.pathname === "/api/jingle-packs", respond: () => ({ status: 200, body: [] }) },
+        { method: "GET", match: (u) => u.pathname === "/api/jingle-packs", respond: () => ({ status: 200, body: [] }) },
+        { method: "GET", match: (u) => u.pathname === "/api/media", respond: () => ({ status: 200, body: [] }) },
+      ]);
 
       await act(async () => {
         render(
@@ -194,7 +198,11 @@ describe("Feature: New spot is a five-step wizard", () => {
     });
 
     it("the default option's label reads 'Let the station pick' — STORY-427 AC3", async () => {
-      installFetchMock([{ method: "GET", match: (u) => u.pathname === "/api/media", respond: () => ({ status: 200, body: [] }) }]);
+      installFetchMock([
+        { method: "GET", match: (u) => u.pathname === "/api/jingle-packs", respond: () => ({ status: 200, body: [] }) },
+        { method: "GET", match: (u) => u.pathname === "/api/jingle-packs", respond: () => ({ status: 200, body: [] }) },
+        { method: "GET", match: (u) => u.pathname === "/api/media", respond: () => ({ status: 200, body: [] }) },
+      ]);
 
       await act(async () => {
         render(
@@ -215,6 +223,7 @@ describe("Feature: New spot is a five-step wizard", () => {
 
     it("there is no numeric text input for a media id — STORY-427 AC4", async () => {
       installFetchMock([
+        { method: "GET", match: (u) => u.pathname === "/api/jingle-packs", respond: () => ({ status: 200, body: [] }) },
         {
           method: "GET",
           match: (u) => u.pathname === "/api/media",
@@ -413,6 +422,7 @@ describe("Feature: New spot is a five-step wizard", () => {
         { method: "GET", match: (u) => u.pathname === "/api/ad-briefs", respond: () => ({ status: 200, body: [] }) },
         { method: "POST", match: (u) => u.pathname === "/api/ads", respond: () => ({ status: 201, body: createdSpot }) },
         { method: "PATCH", match: (u) => u.pathname === "/api/ads/61", respond: () => ({ status: 200, body: scriptedSpot }) },
+        { method: "GET", match: (u) => u.pathname === "/api/jingle-packs", respond: () => ({ status: 200, body: [] }) },
         { method: "GET", match: (u) => u.pathname === "/api/media", respond: () => ({ status: 200, body: [] }) },
       ]);
 
@@ -458,6 +468,7 @@ describe("Feature: New spot is a five-step wizard", () => {
     it("choosing the disabled default option while a title is committed fires no request", async () => {
       const onSpotUpdated = jest.fn<(spot: AdSpotDto) => void>();
       const mockFetch = installFetchMock([
+        { method: "GET", match: (u) => u.pathname === "/api/jingle-packs", respond: () => ({ status: 200, body: [] }) },
         {
           method: "GET",
           match: (u) => u.pathname === "/api/media",
@@ -487,7 +498,11 @@ describe("Feature: New spot is a five-step wizard", () => {
     });
 
     it("the default option is disabled once a title is committed", async () => {
-      installFetchMock([{ method: "GET", match: (u) => u.pathname === "/api/media", respond: () => ({ status: 200, body: [] }) }]);
+      installFetchMock([
+        { method: "GET", match: (u) => u.pathname === "/api/jingle-packs", respond: () => ({ status: 200, body: [] }) },
+        { method: "GET", match: (u) => u.pathname === "/api/jingle-packs", respond: () => ({ status: 200, body: [] }) },
+        { method: "GET", match: (u) => u.pathname === "/api/media", respond: () => ({ status: 200, body: [] }) },
+      ]);
 
       await act(async () => {
         render(
@@ -509,6 +524,7 @@ describe("Feature: New spot is a five-step wizard", () => {
 
     it("reads the committed title back into the select and states the one-way rule verbatim", async () => {
       installFetchMock([
+        { method: "GET", match: (u) => u.pathname === "/api/jingle-packs", respond: () => ({ status: 200, body: [] }) },
         {
           method: "GET",
           match: (u) => u.pathname === "/api/media",
@@ -611,7 +627,11 @@ describe("Feature: New spot is a five-step wizard", () => {
 
   describe("Scenario: the Hear step's rendered preview carries a cache-busting key", () => {
     it("the <audio> element's src carries the preview's own key as a query param", async () => {
-      installFetchMock([{ method: "GET", match: (u) => u.pathname === "/api/media", respond: () => ({ status: 200, body: [] }) }]);
+      installFetchMock([
+        { method: "GET", match: (u) => u.pathname === "/api/jingle-packs", respond: () => ({ status: 200, body: [] }) },
+        { method: "GET", match: (u) => u.pathname === "/api/jingle-packs", respond: () => ({ status: 200, body: [] }) },
+        { method: "GET", match: (u) => u.pathname === "/api/media", respond: () => ({ status: 200, body: [] }) },
+      ]);
 
       await act(async () => {
         render(
@@ -693,6 +713,7 @@ describe("Feature: New spot is a five-step wizard", () => {
         { method: "GET", match: (u) => u.pathname === "/api/ad-briefs", respond: () => ({ status: 200, body: [] }) },
         { method: "POST", match: (u) => u.pathname === "/api/ads", respond: () => ({ status: 201, body: createdSpot }) },
         { method: "PATCH", match: (u) => u.pathname === "/api/ads/63", respond: () => ({ status: 200, body: scriptedSpot }) },
+        { method: "GET", match: (u) => u.pathname === "/api/jingle-packs", respond: () => ({ status: 200, body: [] }) },
         { method: "GET", match: (u) => u.pathname === "/api/media", respond: () => ({ status: 200, body: [] }) },
       ]);
 
@@ -741,7 +762,11 @@ describe("Feature: New spot is a five-step wizard", () => {
       expect(screen.getByText("Model timed out")).toBeInTheDocument();
       cleanup();
 
-      installFetchMock([{ method: "GET", match: (u) => u.pathname === "/api/media", respond: () => ({ status: 200, body: [] }) }]);
+      installFetchMock([
+        { method: "GET", match: (u) => u.pathname === "/api/jingle-packs", respond: () => ({ status: 200, body: [] }) },
+        { method: "GET", match: (u) => u.pathname === "/api/jingle-packs", respond: () => ({ status: 200, body: [] }) },
+        { method: "GET", match: (u) => u.pathname === "/api/media", respond: () => ({ status: 200, body: [] }) },
+      ]);
       await act(async () => {
         render(
           <HearStep
@@ -1032,6 +1057,66 @@ describe("Feature: New spot is a five-step wizard", () => {
         return method === "POST" && new URL(String(call[0]), "http://localhost").pathname === "/api/ads";
       });
       expect(adsPosts).toHaveLength(1);
+    });
+  });
+
+  describe("Scenario: the Hear step's music picker reaches beds in the installed pack's own library (gh-#718)", () => {
+    it("names each installed pack's library with library-id= and offers those beds alongside the station-scoped browse", async () => {
+      const mockFetch = installFetchMock([
+        {
+          method: "GET",
+          match: (u) => u.pathname === "/api/jingle-packs",
+          respond: () => ({ status: 200, body: [{ slug: "gw-first-beds", packName: "First Beds", libraryId: 3 }, { slug: "twice", packName: "Same Library", libraryId: 3 }] }),
+        },
+        {
+          method: "GET",
+          match: (u) => u.pathname === "/api/media" && u.searchParams.get("library-id") === "3",
+          respond: () => ({ status: 200, body: [{ mediaId: "2569", title: "Swinging Sweet", pack: "First Beds" }] }),
+        },
+        {
+          method: "GET",
+          match: (u) => u.pathname === "/api/media" && u.searchParams.get("library-id") === null,
+          respond: () => ({ status: 200, body: [{ mediaId: "42", title: "In-Scope Bed", pack: null }] }),
+        },
+      ]);
+
+      await act(async () => {
+        render(
+          <HearStep spot={adSpot()} onSpotUpdated={jest.fn()} onError={jest.fn()} onNext={jest.fn()} onPreview={jest.fn()} onCancelJob={jest.fn()} onBack={jest.fn()} onCancel={jest.fn()} />
+        );
+        await Promise.resolve();
+      });
+
+      const select = await screen.findByLabelText("Background music");
+      await waitFor(() => expect(within(select).getByRole("option", { name: "Swinging Sweet — First Beds" })).toBeInTheDocument());
+      expect(within(select).getByRole("option", { name: "In-Scope Bed" })).toBeInTheDocument();
+
+      const mediaBrowses = mockFetch.mock.calls
+        .map((call) => new URL(String(call[0]), "http://localhost"))
+        .filter((u) => u.pathname === "/api/media");
+      expect(mediaBrowses.map((u) => u.searchParams.get("library-id")).sort()).toEqual([null, "3"].sort());
+      expect(mediaBrowses).toHaveLength(2); // one named browse per DISTINCT library, not per pack
+      for (const u of mediaBrowses) {
+        expect(u.searchParams.get("imagingKind")).toBe("jingle");
+        expect(u.searchParams.get("jingleRole")).toBe("bed");
+      }
+    });
+
+    it("falls back to the station-scoped browse alone when no pack is installed", async () => {
+      const mockFetch = installFetchMock([
+        { method: "GET", match: (u) => u.pathname === "/api/jingle-packs", respond: () => ({ status: 200, body: [] }) },
+        { method: "GET", match: (u) => u.pathname === "/api/media", respond: () => ({ status: 200, body: [] }) },
+      ]);
+
+      await act(async () => {
+        render(
+          <HearStep spot={adSpot()} onSpotUpdated={jest.fn()} onError={jest.fn()} onNext={jest.fn()} onPreview={jest.fn()} onCancelJob={jest.fn()} onBack={jest.fn()} onCancel={jest.fn()} />
+        );
+        await Promise.resolve();
+      });
+
+      await waitFor(() => expect(mockFetch.mock.calls.filter((call) => String(call[0]).startsWith("/api/media"))).toHaveLength(1));
+      expect(String(mockFetch.mock.calls.find((call) => String(call[0]).startsWith("/api/media"))?.[0])).not.toContain("library-id");
     });
   });
 });
