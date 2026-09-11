@@ -149,6 +149,10 @@ public sealed class JinglePackController(
     public async Task<IActionResult> List(CancellationToken ct)
     {
         var rows = await jinglePackStore.ListAsync(ct);
+        // gh-#718: the SAME Ads:LibraryName lookup Install resolves before writing a single asset,
+        // resolved once per listing rather than per row — every installed jingle pack lands in that
+        // one library. Null (renamed/deleted since install) is reported as null, never guessed.
+        var library = await libraryRepository.GetByNameAsync(adsOptions.Value.LibraryName, ct);
         var summaries = rows
             .OrderBy(row => row.Slug, StringComparer.Ordinal)
             .Select(row =>
@@ -162,7 +166,7 @@ public sealed class JinglePackController(
                         LogSanitize.Strip(row.Slug));
                 }
 
-                return new InstalledPackSummaryDto(row.Slug, manifest?.PackName ?? row.Slug);
+                return new InstalledJinglePackSummaryDto(row.Slug, manifest?.PackName ?? row.Slug, library?.Id);
             })
             .ToArray();
 

@@ -167,6 +167,17 @@ public static class FeatureJinglePackInstallPutsBedsInTheLibrary
         }
 
         [Fact]
+        public void EachInstalledPackNamesTheLibraryItsAssetsLandedIn()
+        {
+            // gh-#718 — the wizard's Background music picker browses THIS library by id (F23.2's
+            // named-library override) because the packs' library is normally outside the station
+            // rotation scope; the id must be the very one the install route resolved (F6.3's own
+            // "library_id = the ads library" pin on every row), read back from the listing route.
+            var summary = Assert.Single(arc.ListingAfterInstall);
+            Assert.Equal(arc.AdsLibraryId, summary.LibraryId);
+        }
+
+        [Fact]
         public void AMalformedStoredDefinitionListsWithPackNameFallingBackToTheSlug()
         {
             // A row whose stored definition fails to re-parse (seeded directly via raw SQL,
@@ -244,7 +255,7 @@ public sealed class JinglePackInstallArc : IAsyncLifetime
     /// this arc's own install, over the SAME logged-in client, before the app is torn down — never
     /// re-queried by a Scenario later (this type's own "compute every DB/HTTP-backed fact HERE"
     /// discipline).</summary>
-    public IReadOnlyList<InstalledPackSummaryDto> ListingAfterInstall { get; private set; } = [];
+    public IReadOnlyList<InstalledJinglePackSummaryDto> ListingAfterInstall { get; private set; } = [];
 
     /// <summary>T418 review round 1 finding O3 — the listing route's own answer for a SECOND row
     /// whose <c>station.jingle_pack.definition</c> was seeded directly via raw SQL as <c>{}</c>
@@ -256,7 +267,7 @@ public sealed class JinglePackInstallArc : IAsyncLifetime
 
     /// <summary>The malformed row's own listing entry, or <see langword="null"/> if the listing
     /// somehow dropped it (which would itself be the bug this fact exists to catch).</summary>
-    public InstalledPackSummaryDto? MalformedListingSummary { get; private set; }
+    public InstalledJinglePackSummaryDto? MalformedListingSummary { get; private set; }
 
     public async Task InitializeAsync()
     {
@@ -292,13 +303,13 @@ public sealed class JinglePackInstallArc : IAsyncLifetime
             RandomAfterInstallStatus = random.StatusCode;
 
             var listing = await client.GetAsync("/api/jingle-packs");
-            ListingAfterInstall = await listing.Content.ReadFromJsonAsync<InstalledPackSummaryDto[]>() ?? [];
+            ListingAfterInstall = await listing.Content.ReadFromJsonAsync<InstalledJinglePackSummaryDto[]>() ?? [];
 
             await SeedMalformedDefinitionAsync(database.StationConnectionString);
             var malformedListing = await client.GetAsync("/api/jingle-packs");
             MalformedListingStatus = malformedListing.StatusCode;
             var afterMalformedInsert =
-                await malformedListing.Content.ReadFromJsonAsync<InstalledPackSummaryDto[]>() ?? [];
+                await malformedListing.Content.ReadFromJsonAsync<InstalledJinglePackSummaryDto[]>() ?? [];
             MalformedListingSummary = afterMalformedInsert
                 .SingleOrDefault(summary => summary.Slug == JinglePackInstallFixtures.MalformedSlug);
 

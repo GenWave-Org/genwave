@@ -468,16 +468,63 @@ interface AdminMediaRow {
  * failure, so the step can fall back to offering only its "Let the station pick" default rather
  * than reading an empty list as "nothing installed". `limit=200` matches `MediaController.List`'s
  * own upper clamp — this read never pages. */
-export async function listBackgroundMusic(): Promise<BackgroundMusicOption[] | null> {
+/** Wire shape of a `GET /api/jingle-packs` row (`InstalledJinglePackSummaryDto`, gh-#718) — only the
+ * field the picker reads: the library the pack's assets were installed into (`null` when that
+ * library no longer resolves server-side). */
+interface InstalledJinglePackRow {
+  libraryId: number | null;
+}
+
+const BACKGROUND_MUSIC_BROWSE = "/api/media?imagingKind=jingle&jingleRole=bed&limit=200";
+
+/** Every library an installed jingle pack lives in, deduplicated; `[]` when there are no packs or the
+ * listing fails (the picker then offers only what the station-scoped browse finds). */
+async function listJinglePackLibraryIds(): Promise<number[]> {
   let response: Response;
   try {
-    response = await fetch("/api/media?imagingKind=jingle&jingleRole=bed&limit=200", { credentials: "include" });
+    response = await fetch("/api/jingle-packs", { credentials: "include" });
+  } catch {
+    return [];
+  }
+  if (!response.ok) return [];
+  const rows = (await response.json()) as InstalledJinglePackRow[];
+  return [...new Set(rows.map((row) => row.libraryId).filter((id): id is number => typeof id === "number"))];
+}
+
+async function fetchBackgroundMusicRows(url: string): Promise<AdminMediaRow[] | null> {
+  let response: Response;
+  try {
+    response = await fetch(url, { credentials: "include" });
   } catch {
     return null;
   }
   if (!response.ok) return null;
-  const rows = (await response.json()) as AdminMediaRow[];
-  return rows.map((row) => ({ mediaId: Number(row.mediaId), title: row.title ?? `#${row.mediaId}`, pack: row.pack }));
+  return (await response.json()) as AdminMediaRow[];
+}
+
+/**
+ * The Hear step's Background music choices (SPEC F174.7; gh-#718): the station-scoped bed browse
+ * PLUS the same browse named to each installed jingle pack's own library (`library-id=`, F23.2's
+ * named-library override). An unnamed browse is scoped to the station's rotation libraries, and the
+ * packs' library (`Ads:LibraryName` — station imaging, not rotation) is normally outside it, so
+ * the picker used to come back empty while the station's own render picked a bed anyway. Rows are
+ * deduplicated by media id (a pack library that IS in scope answers both browses). `null` only
+ * when every browse failed.
+ */
+export async function listBackgroundMusic(): Promise<BackgroundMusicOption[] | null> {
+  const libraryIds = await listJinglePackLibraryIds();
+  const urls = [BACKGROUND_MUSIC_BROWSE, ...libraryIds.map((id) => `${BACKGROUND_MUSIC_BROWSE}&library-id=${id}`)];
+  const results = await Promise.all(urls.map(fetchBackgroundMusicRows));
+  if (results.every((rows) => rows === null)) return null;
+
+  const byMediaId = new Map<number, BackgroundMusicOption>();
+  for (const rows of results) {
+    for (const row of rows ?? []) {
+      const mediaId = Number(row.mediaId);
+      if (!byMediaId.has(mediaId)) byMediaId.set(mediaId, { mediaId, title: row.title ?? `#${row.mediaId}`, pack: row.pack });
+    }
+  }
+  return [...byMediaId.values()];
 }
 
 // ── Sponsors (SPEC F171.3; PLAN T448) ───────────────────────────────────────────────────────────
