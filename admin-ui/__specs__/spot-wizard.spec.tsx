@@ -1082,7 +1082,7 @@ describe("Feature: New spot is a five-step wizard", () => {
 
       await act(async () => {
         render(
-          <HearStep spot={adSpot()} onSpotUpdated={jest.fn()} onError={jest.fn()} onNext={jest.fn()} onPreview={jest.fn()} onCancelJob={jest.fn()} />
+          <HearStep spot={adSpot()} onSpotUpdated={jest.fn()} onError={jest.fn()} onNext={jest.fn()} onPreview={jest.fn()} onCancelJob={jest.fn()} onBack={jest.fn()} onCancel={jest.fn()} />
         );
         await Promise.resolve();
       });
@@ -1110,7 +1110,7 @@ describe("Feature: New spot is a five-step wizard", () => {
 
       await act(async () => {
         render(
-          <HearStep spot={adSpot()} onSpotUpdated={jest.fn()} onError={jest.fn()} onNext={jest.fn()} onPreview={jest.fn()} onCancelJob={jest.fn()} />
+          <HearStep spot={adSpot()} onSpotUpdated={jest.fn()} onError={jest.fn()} onNext={jest.fn()} onPreview={jest.fn()} onCancelJob={jest.fn()} onBack={jest.fn()} onCancel={jest.fn()} />
         );
         await Promise.resolve();
       });
