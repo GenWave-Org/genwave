@@ -132,7 +132,7 @@ internal static class AdSpotWorkerHarness
 
         var adsOptions = new FakeOptionsMonitor<AdsOptions>(new AdsOptions
         {
-            LibraryName = "ads", DurationToleranceRatio = durationToleranceRatio, BedDuckDb = -12.0,
+            LibraryName = "ads", DurationToleranceRatio = durationToleranceRatio,
             RenderBudgetSeconds = renderBudgetSeconds, WorkerIntervalMinutes = 10,
         });
         var llmOptions = new FakeOptionsMonitor<LlmOptions>(new LlmOptions

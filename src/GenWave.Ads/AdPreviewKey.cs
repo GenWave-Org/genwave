@@ -27,7 +27,7 @@ public static class AdPreviewKey
     /// spot's own script/cast/bed, a sponsor detail update, or an operator changing a Live Ads
     /// setting — changes this digest.
     /// </summary>
-    public static string Compute(AdSpot spot, Sponsor sponsor, AdLiveSettings live, double bedDuckDb)
+    public static string Compute(AdSpot spot, Sponsor sponsor, AdLiveSettings live)
     {
         var canonical = AdDeterministicSeed.Canonical(
             spot.Script ?? "",
@@ -44,7 +44,7 @@ public static class AdPreviewKey
             live.AnnouncerVoice,
             string.Join(',', live.CastVoices),
             live.BedFadeMs.ToString(CultureInfo.InvariantCulture),
-            bedDuckDb.ToString(CultureInfo.InvariantCulture));
+            live.BedDuckDb.ToString(CultureInfo.InvariantCulture));
 
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
         return Convert.ToHexStringLower(hash);

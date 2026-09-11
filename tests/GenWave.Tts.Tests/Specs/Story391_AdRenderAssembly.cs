@@ -55,7 +55,7 @@ public static class FeatureAdRenderAssembly
         var ttsMonitor = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = outputDirectory, Format = "wav" });
         var crosstalkMonitor = new TestOptionsMonitor<CrosstalkOptions>(new CrosstalkOptions());
         var assembler = new CrosstalkAssembler(
-            synth, pronunciations, loudnessAnalyzer, cueAnalyzer, new FfmpegAudioMixer(),
+            synth, pronunciations, loudnessAnalyzer, cueAnalyzer, new FfmpegAudioMixer(loudnessAnalyzer),
             ttsMonitor, crosstalkMonitor, NullLogger<CrosstalkAssembler>.Instance);
         return (assembler, synth, loudnessAnalyzer, cueAnalyzer, outputDirectory);
     }
@@ -141,7 +141,7 @@ public static class FeatureAdRenderAssembly
                 NullLogger<NormalizingTtsSynthesizer>.Instance);
             var pronunciations = NoCorrections.PronunciationProvider();
             var normalizingAssembler = new CrosstalkAssembler(
-                normalizing, pronunciations, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), new FfmpegAudioMixer(),
+                normalizing, pronunciations, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), new FfmpegAudioMixer(new FakeLoudnessAnalyzer()),
                 new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = outputDirectory, Format = "wav" }),
                 new TestOptionsMonitor<CrosstalkOptions>(new CrosstalkOptions()), NullLogger<CrosstalkAssembler>.Instance);
 
@@ -350,7 +350,7 @@ public static class FeatureAdRenderAssembly
             var graph = FfmpegAudioMixer.BuildBedFilterGraph(
                 new AudioMixRequest("voice.wav", null, new AudioTags("station", "spot"), BedDuckDb: -12.0,
                     BedPadSeconds: 0.0, OutputPath: "out.wav", BedFadeSeconds: 0.5),
-                cueInSec: 0.0, cueOutSec: 10.0, totalDurationSec: 10.0, loopBufferSamples: 441000, delayMs: 0);
+                bedGainDb: -12.0, cueInSec: 0.0, cueOutSec: 10.0, totalDurationSec: 10.0, loopBufferSamples: 441000, delayMs: 0);
 
             Assert.Contains("afade=t=out:st=9.5:d=0.5", graph, StringComparison.Ordinal);
         }
@@ -361,7 +361,7 @@ public static class FeatureAdRenderAssembly
             var graph = FfmpegAudioMixer.BuildBedFilterGraph(
                 new AudioMixRequest("voice.wav", null, new AudioTags("station", "spot"), BedDuckDb: -12.0,
                     BedPadSeconds: 0.0, OutputPath: "out.wav", BedFadeSeconds: 0.0),
-                cueInSec: 0.0, cueOutSec: 10.0, totalDurationSec: 10.0, loopBufferSamples: 441000, delayMs: 0);
+                bedGainDb: -12.0, cueInSec: 0.0, cueOutSec: 10.0, totalDurationSec: 10.0, loopBufferSamples: 441000, delayMs: 0);
 
             Assert.DoesNotContain("afade", graph, StringComparison.Ordinal);
         }

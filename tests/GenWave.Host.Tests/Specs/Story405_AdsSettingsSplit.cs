@@ -63,6 +63,7 @@ public static class FeatureAdsSettingsAreLiveAndPacksSettingsAreEnvOnly
         new("Station:Ads:AnnouncerVoice", ""),
         new("Station:Ads:CastVoices",     "af_nova,am_michael,bf_alice,am_onyx"),
         new("Station:Ads:BedFadeMs",      "300"),
+        new("Station:Ads:BedDuckDb",      "-12"),
     ];
 
     /// <summary>
@@ -129,6 +130,34 @@ public static class FeatureAdsSettingsAreLiveAndPacksSettingsAreEnvOnly
             Assert.Equal(1, store.WriteCallCount);
             var overrides = await store.ReadAllAsync(CancellationToken.None);
             Assert.Equal("500", overrides["Station:Ads:BedFadeMs"]);
+        }
+
+        [Fact]
+        public async Task AdsBedDuckDbIsAcceptedByThePutSettingsEndpointAndRefusedOutsideMinusSixtyToZero()
+        {
+            // gh-#746 — the duck moved off the env-only Ads:* section so an operator can tune it by
+            // ear on a running station; boundaries pass, one past each refuses with nothing persisted.
+            var (controller, store) = NewController();
+
+            foreach (var accepted in new[] { "-60", "0", "-18.5" })
+            {
+                var okResult = await controller.Put(
+                    new List<SettingUpdateRequest> { new("Station:Ads:BedDuckDb", accepted) },
+                    CancellationToken.None);
+                Assert.IsType<OkObjectResult>(okResult);
+            }
+            var overrides = await store.ReadAllAsync(CancellationToken.None);
+            Assert.Equal("-18.5", overrides["Station:Ads:BedDuckDb"]);
+
+            var writesBefore = store.WriteCallCount;
+            foreach (var outOfRange in new[] { "-60.5", "0.5", "loud" })
+            {
+                var result = await controller.Put(
+                    new List<SettingUpdateRequest> { new("Station:Ads:BedDuckDb", outOfRange) },
+                    CancellationToken.None);
+                Assert.IsNotType<OkObjectResult>(result);
+            }
+            Assert.Equal(writesBefore, store.WriteCallCount);
         }
 
         [Fact]

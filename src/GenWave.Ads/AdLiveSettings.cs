@@ -26,4 +26,4 @@ namespace GenWave.Ads;
 /// <see cref="AdDeterministicSeed"/> precedent this class otherwise follows stays <c>internal</c>
 /// because it has no caller outside this assembly; this record does now.
 /// </remarks>
-public sealed record AdLiveSettings(string AnnouncerVoice, IReadOnlyList<string> CastVoices, int BedFadeMs);
+public sealed record AdLiveSettings(string AnnouncerVoice, IReadOnlyList<string> CastVoices, int BedFadeMs, double BedDuckDb);

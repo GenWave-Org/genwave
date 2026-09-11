@@ -97,6 +97,7 @@ export const SETTINGS_HELP_KEYS = [
   "Station:Ads:AnnouncerVoice",
   "Station:Ads:CastVoices",
   "Station:Ads:BedFadeMs",
+  "Station:Ads:BedDuckDb",
 ] as const;
 
 export type SettingsHelpKey = (typeof SETTINGS_HELP_KEYS)[number];

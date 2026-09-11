@@ -182,6 +182,15 @@ describe("Feature: Every settings field explains itself", () => {
       expect(help).toHaveTextContent(/fade out at the end of a generated ad, as the voice ends/);
       expect(help).not.toHaveTextContent("fades in");
     });
+
+    it("Station:Ads:BedDuckDb says the level is measured against the voice and names the range (gh-#746)", () => {
+      renderWithProviders(<SettingsForm settings={makeFullAllowlistSettings()} />);
+
+      const help = screen.getByTestId("setting-help-Station:Ads:BedDuckDb");
+      expect(help).toHaveTextContent(/below the voice/);
+      expect(help).toHaveTextContent(/measured against the voice/);
+      expect(help).toHaveTextContent("Accepted range: -60–0");
+    });
   });
 
   describe("Scenario: the YearLookup copy reads like English", () => {

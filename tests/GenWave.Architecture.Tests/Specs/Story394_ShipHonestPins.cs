@@ -130,10 +130,11 @@ public static class FeatureShipHonestPins
     public sealed class ScenarioTheSettingsSplitHolds
     {
         [Fact]
-        public void TheEightStationAdsKeysAreLiveWithValidatorsAndHelpText()
+        public void TheNineStationAdsKeysAreLiveWithValidatorsAndHelpText()
         {
             // EveryNUnits/TargetCount/RefreshDays/AutoApprove/AntiRepeatWindow (F163.1) plus
-            //   AnnouncerVoice/CastVoices/BedFadeMs (F170.1, STORY-405, PLAN T417) — allowlisted,
+            //   AnnouncerVoice/CastVoices/BedFadeMs (F170.1, STORY-405, PLAN T417) plus BedDuckDb
+            //   (gh-#746, moved off the env-only Ads:* section) — allowlisted,
             //   validated, three-way help parity. Help-text coverage/parity is guarded by the
             //   admin-ui jest suite (settings-help-coverage.spec.tsx) — this fact pins the two
             //   halves a C# suite can actually see: the allowlist row shape and the validator's
@@ -148,6 +149,7 @@ public static class FeatureShipHonestPins
                 ("Station:Ads:AnnouncerVoice", SettingKind.String),
                 ("Station:Ads:CastVoices", SettingKind.String),
                 ("Station:Ads:BedFadeMs", SettingKind.Number),
+                ("Station:Ads:BedDuckDb", SettingKind.Number),
             };
 
             foreach (var (key, kind) in expected)
@@ -171,6 +173,12 @@ public static class FeatureShipHonestPins
             AssertRangeEnforced(validator, "Station:Ads:RefreshDays", min: 1, max: 365);
             AssertRangeEnforced(validator, "Station:Ads:AntiRepeatWindow", min: 0, max: 50);
             AssertRangeEnforced(validator, "Station:Ads:BedFadeMs", min: 100, max: 1000);
+            // gh-#746 — a real (double) range: -60 and 0 pass, one past each fails.
+            Assert.Null(validator.Validate("Station:Ads:BedDuckDb", "-60"));
+            Assert.Null(validator.Validate("Station:Ads:BedDuckDb", "0"));
+            Assert.Null(validator.Validate("Station:Ads:BedDuckDb", "-12.5"));
+            Assert.NotNull(validator.Validate("Station:Ads:BedDuckDb", "-60.5"));
+            Assert.NotNull(validator.Validate("Station:Ads:BedDuckDb", "0.5"));
 
             Assert.Null(validator.Validate("Station:Ads:AutoApprove", "true"));
             Assert.NotNull(validator.Validate("Station:Ads:AutoApprove", "not-a-bool"));
@@ -208,7 +216,7 @@ public static class FeatureShipHonestPins
             // Plugins:* and Ads:* never appear in StationSettingsAllowlist (F156.1/F163.2) —
             // Plugins:{name}:* is env/compose-only (IPluginHost.Setting reads IConfiguration
             // directly, F157.2); GenWave.Ads.AdsOptions' own Ads:* section is the identical
-            // env/compose-only posture. Only Station:Ads:* (eight rows, asserted above) is Live.
+            // env/compose-only posture. Only Station:Ads:* (nine rows, asserted above) is Live.
             foreach (var setting in StationSettingsAllowlist.All)
             {
                 Assert.False(

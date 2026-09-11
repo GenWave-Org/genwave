@@ -32,12 +32,11 @@ public static class FeaturePreviewKeyChangesWhenAnyInputChanges
             CreatedAt: DateTime.UtcNow, UpdatedAt: DateTime.UtcNow, Version: "1");
 
     static AdLiveSettings MakeLive(
-        string announcerVoice = "af_heart", IReadOnlyList<string>? castVoices = null, int bedFadeMs = 300) =>
-        new(announcerVoice, castVoices ?? ["voice_a", "voice_b"], bedFadeMs);
+        string announcerVoice = "af_heart", IReadOnlyList<string>? castVoices = null, int bedFadeMs = 300,
+        double bedDuckDb = -12.0) =>
+        new(announcerVoice, castVoices ?? ["voice_a", "voice_b"], bedFadeMs, bedDuckDb);
 
-    const double BaseBedDuckDb = -12.0;
-
-    static string BaseKey() => AdPreviewKey.Compute(MakeSpot(), MakeSponsor(), MakeLive(), BaseBedDuckDb);
+    static string BaseKey() => AdPreviewKey.Compute(MakeSpot(), MakeSponsor(), MakeLive());
 
     // ---------------------------------------------------------------------
     // Spot-level inputs
@@ -48,33 +47,33 @@ public static class FeaturePreviewKeyChangesWhenAnyInputChanges
         [Fact]
         public void ScriptChangeChangesTheKey()
         {
-            var before = AdPreviewKey.Compute(MakeSpot(script: BaseScript), MakeSponsor(), MakeLive(), BaseBedDuckDb);
-            var after = AdPreviewKey.Compute(MakeSpot(script: BaseScript + " Extra line."), MakeSponsor(), MakeLive(), BaseBedDuckDb);
+            var before = AdPreviewKey.Compute(MakeSpot(script: BaseScript), MakeSponsor(), MakeLive());
+            var after = AdPreviewKey.Compute(MakeSpot(script: BaseScript + " Extra line."), MakeSponsor(), MakeLive());
             Assert.NotEqual(before, after);
         }
 
         [Fact]
         public void VoicePlanChangeChangesTheKey()
         {
-            var before = AdPreviewKey.Compute(MakeSpot(voicePlan: null), MakeSponsor(), MakeLive(), BaseBedDuckDb);
+            var before = AdPreviewKey.Compute(MakeSpot(voicePlan: null), MakeSponsor(), MakeLive());
             var after = AdPreviewKey.Compute(
-                MakeSpot(voicePlan: """[{"tag":"ANNOUNCER","voiceId":"af_heart"}]"""), MakeSponsor(), MakeLive(), BaseBedDuckDb);
+                MakeSpot(voicePlan: """[{"tag":"ANNOUNCER","voiceId":"af_heart"}]"""), MakeSponsor(), MakeLive());
             Assert.NotEqual(before, after);
         }
 
         [Fact]
         public void BedMediaIdChangeChangesTheKey()
         {
-            var before = AdPreviewKey.Compute(MakeSpot(bedMediaId: null), MakeSponsor(), MakeLive(), BaseBedDuckDb);
-            var after = AdPreviewKey.Compute(MakeSpot(bedMediaId: 42), MakeSponsor(), MakeLive(), BaseBedDuckDb);
+            var before = AdPreviewKey.Compute(MakeSpot(bedMediaId: null), MakeSponsor(), MakeLive());
+            var after = AdPreviewKey.Compute(MakeSpot(bedMediaId: 42), MakeSponsor(), MakeLive());
             Assert.NotEqual(before, after);
         }
 
         [Fact]
         public void SpotSecondsChangeChangesTheKey()
         {
-            var before = AdPreviewKey.Compute(MakeSpot(spotSeconds: 30), MakeSponsor(), MakeLive(), BaseBedDuckDb);
-            var after = AdPreviewKey.Compute(MakeSpot(spotSeconds: 60), MakeSponsor(), MakeLive(), BaseBedDuckDb);
+            var before = AdPreviewKey.Compute(MakeSpot(spotSeconds: 30), MakeSponsor(), MakeLive());
+            var after = AdPreviewKey.Compute(MakeSpot(spotSeconds: 60), MakeSponsor(), MakeLive());
             Assert.NotEqual(before, after);
         }
     }
@@ -90,7 +89,7 @@ public static class FeaturePreviewKeyChangesWhenAnyInputChanges
         public void NameChangeChangesTheKey()
         {
             var before = BaseKey();
-            var after = AdPreviewKey.Compute(MakeSpot(), MakeSponsor(name: "Zenith Anvils"), MakeLive(), BaseBedDuckDb);
+            var after = AdPreviewKey.Compute(MakeSpot(), MakeSponsor(name: "Zenith Anvils"), MakeLive());
             Assert.NotEqual(before, after);
         }
 
@@ -98,7 +97,7 @@ public static class FeaturePreviewKeyChangesWhenAnyInputChanges
         public void TaglineChangeChangesTheKey()
         {
             var before = BaseKey();
-            var after = AdPreviewKey.Compute(MakeSpot(), MakeSponsor(tagline: "Forged for the future"), MakeLive(), BaseBedDuckDb);
+            var after = AdPreviewKey.Compute(MakeSpot(), MakeSponsor(tagline: "Forged for the future"), MakeLive());
             Assert.NotEqual(before, after);
         }
 
@@ -106,7 +105,7 @@ public static class FeaturePreviewKeyChangesWhenAnyInputChanges
         public void AboutChangeChangesTheKey()
         {
             var before = BaseKey();
-            var after = AdPreviewKey.Compute(MakeSpot(), MakeSponsor(about: "Family-owned since 1988"), MakeLive(), BaseBedDuckDb);
+            var after = AdPreviewKey.Compute(MakeSpot(), MakeSponsor(about: "Family-owned since 1988"), MakeLive());
             Assert.NotEqual(before, after);
         }
 
@@ -114,7 +113,7 @@ public static class FeaturePreviewKeyChangesWhenAnyInputChanges
         public void PhoneChangeChangesTheKey()
         {
             var before = BaseKey();
-            var after = AdPreviewKey.Compute(MakeSpot(), MakeSponsor(phone: "555-0199"), MakeLive(), BaseBedDuckDb);
+            var after = AdPreviewKey.Compute(MakeSpot(), MakeSponsor(phone: "555-0199"), MakeLive());
             Assert.NotEqual(before, after);
         }
 
@@ -122,7 +121,7 @@ public static class FeaturePreviewKeyChangesWhenAnyInputChanges
         public void AddressChangeChangesTheKey()
         {
             var before = BaseKey();
-            var after = AdPreviewKey.Compute(MakeSpot(), MakeSponsor(address: "2 Foundry Row"), MakeLive(), BaseBedDuckDb);
+            var after = AdPreviewKey.Compute(MakeSpot(), MakeSponsor(address: "2 Foundry Row"), MakeLive());
             Assert.NotEqual(before, after);
         }
 
@@ -130,7 +129,7 @@ public static class FeaturePreviewKeyChangesWhenAnyInputChanges
         public void WebsiteChangeChangesTheKey()
         {
             var before = BaseKey();
-            var after = AdPreviewKey.Compute(MakeSpot(), MakeSponsor(website: "https://acme.example/sale"), MakeLive(), BaseBedDuckDb);
+            var after = AdPreviewKey.Compute(MakeSpot(), MakeSponsor(website: "https://acme.example/sale"), MakeLive());
             Assert.NotEqual(before, after);
         }
 
@@ -138,7 +137,7 @@ public static class FeaturePreviewKeyChangesWhenAnyInputChanges
         public void ToneChangeChangesTheKey()
         {
             var before = BaseKey();
-            var after = AdPreviewKey.Compute(MakeSpot(), MakeSponsor(tone: "brash"), MakeLive(), BaseBedDuckDb);
+            var after = AdPreviewKey.Compute(MakeSpot(), MakeSponsor(tone: "brash"), MakeLive());
             Assert.NotEqual(before, after);
         }
     }
@@ -153,7 +152,7 @@ public static class FeaturePreviewKeyChangesWhenAnyInputChanges
         public void AnnouncerVoiceChangeChangesTheKey()
         {
             var before = BaseKey();
-            var after = AdPreviewKey.Compute(MakeSpot(), MakeSponsor(), MakeLive(announcerVoice: "am_liam"), BaseBedDuckDb);
+            var after = AdPreviewKey.Compute(MakeSpot(), MakeSponsor(), MakeLive(announcerVoice: "am_liam"));
             Assert.NotEqual(before, after);
         }
 
@@ -161,7 +160,7 @@ public static class FeaturePreviewKeyChangesWhenAnyInputChanges
         public void CastVoicesChangeChangesTheKey()
         {
             var before = BaseKey();
-            var after = AdPreviewKey.Compute(MakeSpot(), MakeSponsor(), MakeLive(castVoices: ["voice_c"]), BaseBedDuckDb);
+            var after = AdPreviewKey.Compute(MakeSpot(), MakeSponsor(), MakeLive(castVoices: ["voice_c"]));
             Assert.NotEqual(before, after);
         }
 
@@ -169,7 +168,7 @@ public static class FeaturePreviewKeyChangesWhenAnyInputChanges
         public void BedFadeMsChangeChangesTheKey()
         {
             var before = BaseKey();
-            var after = AdPreviewKey.Compute(MakeSpot(), MakeSponsor(), MakeLive(bedFadeMs: 800), BaseBedDuckDb);
+            var after = AdPreviewKey.Compute(MakeSpot(), MakeSponsor(), MakeLive(bedFadeMs: 800));
             Assert.NotEqual(before, after);
         }
 
@@ -177,7 +176,8 @@ public static class FeaturePreviewKeyChangesWhenAnyInputChanges
         public void BedDuckDbChangeChangesTheKey()
         {
             var before = BaseKey();
-            var after = AdPreviewKey.Compute(MakeSpot(), MakeSponsor(), MakeLive(), bedDuckDb: -6.0);
+            // gh-#746 — the duck rides on the live settings now (Station:Ads:BedDuckDb), still a key input.
+            var after = AdPreviewKey.Compute(MakeSpot(), MakeSponsor(), MakeLive(bedDuckDb: -6.0));
             Assert.NotEqual(before, after);
         }
     }
@@ -212,8 +212,8 @@ public static class FeaturePreviewKeyChangesWhenAnyInputChanges
         [Fact]
         public void NullAndEmptyFieldsCollapseToTheSameKey()
         {
-            var withNullTagline = AdPreviewKey.Compute(MakeSpot(), MakeSponsor(tagline: null), MakeLive(), BaseBedDuckDb);
-            var withEmptyTagline = AdPreviewKey.Compute(MakeSpot(), MakeSponsor(tagline: ""), MakeLive(), BaseBedDuckDb);
+            var withNullTagline = AdPreviewKey.Compute(MakeSpot(), MakeSponsor(tagline: null), MakeLive());
+            var withEmptyTagline = AdPreviewKey.Compute(MakeSpot(), MakeSponsor(tagline: ""), MakeLive());
             Assert.Equal(withNullTagline, withEmptyTagline);
         }
     }

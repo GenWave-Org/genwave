@@ -565,6 +565,12 @@ public static class StationSettingsAllowlist
         new("Station:Ads:AnnouncerVoice",                     SettingApplyMode.Live,          SettingKind.String,     ""),
         new("Station:Ads:CastVoices",                         SettingApplyMode.Live,          SettingKind.String,     ""),
         new("Station:Ads:BedFadeMs",                          SettingApplyMode.Live,          SettingKind.Number,     "ms"),
+        // BedDuckDb (gh-#746) is how many dB UNDER the voice the background music sits in a generated
+        // ad — the mixer places it relative to what the voice and bed actually measure, so -12 means
+        // -12 whatever the pack's mastering level. -60..0: 0 is no ducking at all, -60 is effectively
+        // silent. Previously the env-only Ads:BedDuckDb, moved here so an operator can tune it by ear
+        // on a running station; a change makes every existing preview report stale (AdPreviewKey).
+        new("Station:Ads:BedDuckDb",                          SettingApplyMode.Live,          SettingKind.Number,     "dB"),
     };
 
     /// <summary>All operator-editable settings, keyed by configuration key.</summary>

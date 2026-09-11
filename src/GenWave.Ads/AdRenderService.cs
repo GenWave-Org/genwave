@@ -320,7 +320,7 @@ public sealed class AdRenderService(
                 $"preview needs Tts:Format=wav; the station renders {(assembledExtension.Length > 0 ? assembledExtension : "an unlabeled format")}");
         }
 
-        var key = AdPreviewKey.Compute(spot, sponsor, live, adsOptions.CurrentValue.BedDuckDb);
+        var key = AdPreviewKey.Compute(spot, sponsor, live);
         var finalPath = Path.Combine(previewRoot, $"{spot.Id}-{key}.wav");
         File.Move(result.Path, finalPath, overwrite: true);
         return new AdPreviewOutcome.Rendered(finalPath, key);
@@ -370,7 +370,7 @@ public sealed class AdRenderService(
         // BedPadSeconds member (Station:Safe:* padding, never set by Ads) between BedDuckDb and
         // BedFadeSeconds — a positional trailing arg here would silently land in the wrong slot.
         var request = new CastAssemblyRequest(
-            lines, cast, ceilingSeconds, tags, outputDirectory, bed, adsOptions.CurrentValue.BedDuckDb,
+            lines, cast, ceilingSeconds, tags, outputDirectory, bed, liveSettings.BedDuckDb,
             BedFadeSeconds: bedFadeSeconds);
         return (request, null);
     }
@@ -466,7 +466,7 @@ public sealed class AdRenderService(
 
         var row = found.Value.Row;
         var (cueIn, cueOut) = ResolveBedCue(bedMediaId.Value, row.CueInSec, row.CueOutSec);
-        return (new BedSpec(row.Locator, cueIn, cueOut), null);
+        return (new BedSpec(row.Locator, cueIn, cueOut, row.IntegratedLufs), null);
     }
 
     /// <summary>
