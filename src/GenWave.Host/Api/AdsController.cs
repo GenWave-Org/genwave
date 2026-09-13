@@ -989,8 +989,10 @@ public sealed class AdsController(
     /// needs <see cref="jobService"/>'s own in-memory <see cref="AdSpotJobService.IsWaitingForStation"/>
     /// read (PLAN T441 ruling: <c>job: null</c> exactly when the row carries neither
     /// <see cref="AdSpot.JobKind"/> nor <see cref="AdSpot.JobError"/>, otherwise the object — so a
-    /// failed job's error stays visible with <c>kind</c> null). <paramref name="sponsor"/> is the FULL
-    /// row (a single <see cref="ISponsorStore.GetAsync"/> call at every single-row call site, or
+    /// failed job's error stays visible with <c>kind</c> null), and now <see cref="RenderWindowFor"/>
+    /// needs its own <see cref="adsOptions"/> read too (PLAN T457) — two instance reads.
+    /// <paramref name="sponsor"/> is the FULL row (a single <see cref="ISponsorStore.GetAsync"/> call
+    /// at every single-row call site, or
     /// <see cref="List"/>'s own page-wide dictionary), not merely its wire cross-reference —
     /// <see cref="ToPreviewDto"/> needs it to recompute the staleness key. <paramref name="liveSettings"/>
     /// is read ONCE by the caller (PLAN T442 ruling) — never re-read here per row; see
@@ -1000,7 +1002,13 @@ public sealed class AdsController(
         spot.Script, AdSourceTokens.ToToken(spot.Source), spot.PackSlug, spot.SpotSeconds,
         DeserializeVoicePlan(spot.VoicePlan), spot.BedMediaId, AdStateTokens.ToToken(spot.State), spot.FailReason,
         spot.MediaId, spot.CreatedAt, spot.StateChangedAt, spot.RenderedAt, spot.RetiredAt, spot.Version,
-        ToJobDto(spot), ToPreviewDto(spot, sponsor, liveSettings));
+        ToJobDto(spot), ToPreviewDto(spot, sponsor, liveSettings), RenderWindowFor(spot));
+
+    /// <summary>The configured worker interval for an approved spot, else <see langword="null"/>
+    /// (STORY-433; PLAN T457; gh-#745).</summary>
+    int? RenderWindowFor(AdSpot spot) => spot.State == AdState.Approved
+        ? adsOptions.CurrentValue.WorkerIntervalMinutes
+        : null;
 
     AdSpotJobDto? ToJobDto(AdSpot spot) => spot is { JobKind: null, JobError: null }
         ? null

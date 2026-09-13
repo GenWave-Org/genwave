@@ -108,7 +108,10 @@ export interface AdSpotPreviewDto {
  * change snapshot the wire already carries; `sponsor` is the live {@link SponsorRefDto} cross-
  * reference — a spot references its sponsor by id/name/paused, never a free-text customer label.
  * `job`/`preview` are the SpotWizard's own Script/Hear-step state (PLAN T448's wire-gap fix — these
- * two members were missing here although the C# record has always carried them). */
+ * two members were missing here although the C# record has always carried them).
+ * `renderWithinMinutes` is the configured render pass cadence (`Ads:WorkerIntervalMinutes`) for a spot
+ * in the approved state, and `null` for every other state — it tells the operator roughly when the
+ * spot will be picked up, not a guaranteed bound (STORY-433; PLAN T457). */
 export interface AdSpotDto {
   id: number;
   sponsorId: number;
@@ -132,6 +135,7 @@ export interface AdSpotDto {
   version: string;
   job: AdSpotJobDto | null;
   preview: AdSpotPreviewDto | null;
+  renderWithinMinutes: number | null;
 }
 
 /** `GET /api/ads`'s own `{ items, total }` envelope (`AdsController.List`, the

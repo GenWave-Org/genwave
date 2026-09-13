@@ -78,6 +78,7 @@ function adSpot(overrides: Partial<AdSpotDto> = {}): AdSpotDto {
     version: "100",
     job: null,
     preview: null,
+    renderWithinMinutes: null,
     ...overrides,
   };
 }
