@@ -743,6 +743,7 @@ describe("Feature: New spot is a five-step wizard", () => {
 
   describe("Scenario: a failed job leaves the wizard fully usable, not wedged (SPEC F174.3, F174.4; PLAN T448)", () => {
     const FAILED_JOB: AdSpotJobDto = { kind: null, failedKind: "write", startedAt: null, waitingForStation: false, error: "Model timed out" };
+    const FAILED_PREVIEW_JOB: AdSpotJobDto = { ...FAILED_JOB, failedKind: "preview" };
 
     it("keeps the action button, Next, and the script textarea enabled with no progress copy, on both Script and Hear", async () => {
       render(
@@ -770,7 +771,7 @@ describe("Feature: New spot is a five-step wizard", () => {
       await act(async () => {
         render(
           <HearStep
-            spot={adSpot({ job: FAILED_JOB })}
+            spot={adSpot({ job: FAILED_PREVIEW_JOB })}
             onSpotUpdated={jest.fn()}
             onError={jest.fn()}
             onNext={jest.fn()}

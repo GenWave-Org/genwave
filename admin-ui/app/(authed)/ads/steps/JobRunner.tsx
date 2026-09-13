@@ -2,10 +2,14 @@
 
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
-import { inFlightJob, type AdSpotJobDto } from "@/lib/ads-api";
+import { inFlightJob, type AdJobKind, type AdSpotJobDto } from "@/lib/ads-api";
 
 export interface JobRunnerProps {
   job: AdSpotJobDto | null;
+  /** The job kind this control starts and therefore owns the error for — `ScriptStep` passes
+   * `"write"`, `HearStep` passes `"preview"`. Routes `job.error` to whichever step's own job
+   * actually failed (STORY-435 AC6–AC8) instead of both steps echoing it. */
+  kind: AdJobKind;
   actionLabel: string;
   progressLabel: string;
   onStart: () => void;
@@ -21,9 +25,13 @@ export interface JobRunnerProps {
  * start/cancel button pair plus progress/error copy, reused verbatim rather than the two steps each
  * carrying a near-identical block. Once `job` is no longer in flight ({@link inFlightJob}), the
  * action button re-enables, no Cancel renders (there is nothing left to cancel), and no progress
- * copy shows — only the error, which renders whenever it is present, in flight or not.
+ * copy shows. The error renders only when `job.failedKind === kind` (PLAN T465, STORY-435) — each
+ * step owns just the failure its own action caused, so a failed preview never surfaces on the
+ * script step or vice versa. A legacy row with `error` set but `failedKind` still null (failed
+ * before db/47 added the column, which does not backfill it) shows on neither step; that's
+ * accepted rather than given a fallback, since the next stamped job clears it.
  */
-export function JobRunner({ job, actionLabel, progressLabel, onStart, onCancel, disabled = false }: JobRunnerProps): ReactNode {
+export function JobRunner({ job, kind, actionLabel, progressLabel, onStart, onCancel, disabled = false }: JobRunnerProps): ReactNode {
   const activeJob = inFlightJob(job);
 
   return (
@@ -44,7 +52,7 @@ export function JobRunner({ job, actionLabel, progressLabel, onStart, onCancel, 
           {activeJob.waitingForStation ? "Waiting for the station to finish talking…" : progressLabel}
         </p>
       )}
-      {job !== null && job.error !== null && (
+      {job !== null && job.error !== null && job.failedKind === kind && (
         <p role="alert" aria-live="assertive" className="text-[0.82rem] text-danger">
           {job.error}
         </p>
