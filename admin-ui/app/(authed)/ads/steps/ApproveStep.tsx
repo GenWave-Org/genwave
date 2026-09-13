@@ -2,7 +2,8 @@
 
 import { useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
-import { approveAdSpot, fetchAdSpot, type AdSpotDto } from "@/lib/ads-api";
+import { toast } from "@/components/ui/toast";
+import { approveAdSpot, describeApproved, fetchAdSpot, type AdSpotDto } from "@/lib/ads-api";
 import { StepActions } from "./StepActions";
 
 const STALE_PREVIEW_HINT = "The preview is out of date. Render it again to approve what you heard.";
@@ -26,6 +27,10 @@ interface ApproveStepProps {
  * background music change landed between this row's last read and the click) re-fetches the row
  * so the dialog reflects the CURRENT staleness, surfacing the server's own `detail` for that
  * specific 409 rather than a second, client-side wording of the same rule.
+ *
+ * On success, both buttons toast `describeApproved` (STORY-433 AC4–AC7; PLAN T458) naming the
+ * render window before calling `onApproved` — the wizard-level `handleApproved` in `SpotWizard.tsx`
+ * stays copy-free.
  */
 export function ApproveStep({ spot, onApproved, onSpotUpdated, onError, onBack, onCancel }: ApproveStepProps): ReactNode {
   const [pending, setPending] = useState(false);
@@ -38,6 +43,7 @@ export function ApproveStep({ spot, onApproved, onSpotUpdated, onError, onBack, 
     const outcome = await approveAdSpot(spot.id, spot.version);
     if (outcome.ok) {
       setPending(false);
+      toast.success(describeApproved(outcome.spot));
       onApproved(outcome.spot);
       return;
     }

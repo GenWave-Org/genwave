@@ -233,6 +233,20 @@ export function describeAdMutationFailure(failure: AdMutationFailure): string {
   return failure.ruleId !== undefined ? `${failure.detail} (rule: ${failure.ruleId})` : failure.detail;
 }
 
+/** Renders the approve-success toast for `spot` (STORY-433 AC4–AC7; PLAN T458) — reads
+ * `spot.renderWithinMinutes` off the just-approved spot returned by `approveAdSpot`, never a
+ * caller-supplied number, so the row toast (`AdSpotRow.handleApprove`) and both `ApproveStep`
+ * buttons ("Approve as heard" and "Approve without a preview") say the exact same sentence for the
+ * exact same response. `renderWithinMinutes` is the configured render pass cadence
+ * (`Ads:WorkerIntervalMinutes`), not a guaranteed bound — `null` means the window doesn't apply to
+ * the spot's state, so this falls back to a bare confirmation rather than implying a promise the
+ * response didn't make. */
+export function describeApproved(spot: AdSpotDto): string {
+  if (spot.renderWithinMinutes === null) return "Approved.";
+  const minutes = spot.renderWithinMinutes;
+  return `Approved. The station will render it within ${minutes} minute${minutes === 1 ? "" : "s"}.`;
+}
+
 /** The sparse `AdSpotSaveRequest` wire body shared by create and edit (`AdsController.Create`/
  * `.Update`) — every field always present, `null` standing in for "not supplied"/"unchanged" (the
  * same explicit-null convention `MediaPatch` callers already use), never an omitted key.
