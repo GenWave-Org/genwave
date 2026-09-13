@@ -52,7 +52,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "c=$(jq -r '.tool_input.command // empty'); case \"$c\" in *'git tag'*-l*|*'git tag'*--list*|*'git tag --contains'*) exit 0;; *'gh pr merge'*|*'gh release create'*|*'git tag'*|*'git push'*--tags*|*'git push'*' main'*|*'git push'*':main'*|*'git push'*'HEAD:refs/heads/main'*) echo 'refuse: merge / tag / release / push to main needs Dean'\\''s per-action consent (MERGE RULE, gh-#751). Hand him the command instead.' >&2; exit 2;; esac; exit 0"
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/merge-guard.sh"
           }
         ]
       }

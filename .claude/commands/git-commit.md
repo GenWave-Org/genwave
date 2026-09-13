@@ -1,73 +1,45 @@
 ---
-description: Stage and commit current changes using Conventional Commits, branch-or-trunk by size. Uses the `git-workflow` skill.
+description: Stage the current changes explicitly and commit with a Conventional Commit message on a non-main branch. Defers to the `git-workflow` skill.
 argument-hint: [optional summary or scope hint]
 ---
 
 # commit
 
-Create a clean, well-described commit for the current working changes.
-Defers to the **`git-workflow`** skill for branching and message format.
+Create one clean, well-described commit for the current working changes.
+All policy lives in the **`git-workflow`** skill — read it first; this
+command only sequences it.
 
 ## Behavior
 
-1. **Inspect first.** Run in parallel:
-   - `git status` (no `-uall`)
-   - `git diff` (staged + unstaged)
-   - `git log -n 10 --oneline` to match the project's commit style
-   - `ls .gitignore` to confirm a `.gitignore` exists
-2. **Require a `.gitignore`.** If one is missing, **stop and offer to
-   create one** scaffolded to the project (.NET by default — `bin/`,
-   `obj/`, `*.user`, `.vs/`, `.env*`, IDE folders; plus
-   `node_modules/`, `dist/` when a JS/TS UI is present). Do not
-   proceed with the commit until the user accepts or
-   provides their own. If `.gitignore` exists, glance at it and warn if
-   anything obviously sensitive in the diff isn't covered.
-3. **Check change size first.** Roughly: count files changed and lines
-   touched. If it looks like **a lot** (rule of thumb: >10 files OR
-   >300 lines OR touches >2 distinct concerns), **stop and ask** whether
-   a short-lived branch would be better. Recommend a name in
-   `<type>/<slug>` form derived from the diff (e.g.
-   `feat/order-fulfillment-tx`). Wait for the user before continuing.
-4. **Decide branch vs trunk** per `git-workflow` skill:
-   - Trunk → commit straight to `main` for tiny, obvious changes.
-   - Branch → create `<type>/<short-slug>` if the change is non-trivial,
-     spans multiple files meaningfully, or implements a story task.
-5. **Stage everything with `-am`.** Use `git commit -am "<summary>"`
-   (with `-F` for the long body via a HEREDOC file when needed) so
-   tracked modifications and deletions are all included — nothing gets
-   left behind. For brand-new untracked files, `git add <file>` them
-   explicitly first (since `-a` won't pick those up).
-   **Always re-scan for likely secrets** (`.env*`, `*.pem`,
-   `*credentials*`, API tokens in the diff) before staging — refuse
-   the commit if any are found, name the file, and ask the user.
-6. **Write the message** per the `git-workflow` skill:
-   - Conventional Commit summary (`<type>(<scope>): <imperative>`).
-   - Detailed body: what changed, why, trade-offs. Wrap ~72 cols.
-   - Footers: `Refs <story-id>` / `Closes #<n>` where applicable.
-7. **Commit via HEREDOC** so formatting is preserved. Append:
-   ```
-   Co-Authored-By: Claude <noreply@anthropic.com>
-   ```
-8. **Verify** with `git status` after the commit. If a hook fails, fix
-   the underlying issue and create a NEW commit — never `--amend` without
-   being asked.
+1. **Inspect first.** In parallel: `git status`, `git diff` (staged +
+   unstaged), `git log -n 10 --oneline` for the house style, and
+   `git branch --show-current`.
+2. **Never on `main`.** If the current branch is `main`, create
+   `<type>/<slug>` from the diff (e.g. `fix/bed-picker-empty-718`) and
+   switch to it before anything else. There is no trunk lane.
+3. **Size check.** If the diff spans more than one concern, say so and
+   propose splitting into separate commits; wait for the user.
+4. **Secrets scan.** Re-read the diff for `.env*`, `*.pem`,
+   `*credentials*`, tokens, real connection strings. Any hit: refuse,
+   name the file, stop.
+5. **Stage explicitly.** `git add <path> …` for exactly the files that
+   belong to this change. Never `-am`, never `-A`. Leave out generated
+   files (`next-env.d.ts`, tsconfig rewrites from `next build`) and
+   anything that is someone else's WIP.
+6. **Write the message** per `git-workflow`: Conventional Commit summary,
+   a body that says what and why, `Refs gh-#N` / `Closes #N` footer.
+   **No trailers** — no `Co-Authored-By`, no `Claude-Session`.
+7. **Commit via HEREDOC** (`git commit -F - <<'EOF' … EOF`) so formatting
+   survives. If a hook fails, fix the cause and make a NEW commit — never
+   `--amend` unless asked.
+8. **Verify** with `git status` and `git log -1`.
 
 ## Rules
 
-- Always require a `.gitignore`. Offer to create one if missing; do not
-  commit without it.
-- Always use `-am` (plus explicit `git add` for new files) so nothing
-  tracked is left out of the commit.
-- If the change is large (see step 3 thresholds), stop and recommend a
-  branch name before committing.
 - Never push as part of `/git-commit` unless the user asks.
-- Never `--no-verify` or `--no-gpg-sign`.
-- Never force-push.
-- If the working tree is clean, say so and stop — don't create empty commits.
-- If the diff contains a likely secret, refuse and tell the user what
-  was found.
+- Never `--no-verify`, `--no-gpg-sign`, or force-push.
+- Clean tree → say so and stop; no empty commits.
 
 ## Hand off
 
-Report: branch (created or trunk), files staged, summary line, and the
-new commit SHA.
+Report: branch, files staged, summary line, new commit SHA.
