@@ -1,6 +1,5 @@
 {
-  "$comment": "Rename to settings.json (project-shared) or settings.local.json (personal, gitignored). Hooks below are examples — uncomment to enable. See https://docs.claude.com/claude-code/hooks for the full schema.",
-
+  "$comment": "Rename to settings.json (project-shared) or settings.local.json (personal, gitignored). Hooks below are live examples. See https://docs.claude.com/claude-code/hooks for the full schema.",
   "permissions": {
     "$comment": "Pre-approve common safe commands so you stop seeing prompts.",
     "allow": [
@@ -33,40 +32,22 @@
       "Bash(curl * | bash)"
     ]
   },
-
   "env": {
     "$comment": "Project-wide env hints for the AI. Real secrets go in .env (gitignored)."
   },
-
   "hooks": {
-    "$comment_PostToolUse": "Run after each Edit/Write — uncomment to auto-format on save (dotnet format for .cs, prettier for TS/JS).",
-    "PostToolUse": [
-      {
-        "matcher": "Edit|Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "case \"$CLAUDE_FILE_PATHS\" in *.cs) dotnet format --include \"$CLAUDE_FILE_PATHS\" 2>/dev/null || true ;; *.ts|*.tsx|*.js|*.jsx) test -f package.json && bunx prettier --write \"$CLAUDE_FILE_PATHS\" 2>/dev/null || true ;; esac"
-          }
-        ]
-      }
-    ],
-
-    "$comment_PreToolUse": "Block edits to sensitive files. Uncomment to enable.",
+    "$comment": "Hook input arrives as JSON on stdin (.tool_input.file_path / .tool_input.command). There is no $CLAUDE_FILE_PATHS. Exit 2 blocks the tool call and feeds stderr back to the model. No formatter hook: admin-ui has no prettier and CI runs eslint; dotnet format per edit is too slow.",
     "PreToolUse": [
       {
-        "$comment": "Example: refuse to edit .env files.",
         "matcher": "Edit|Write",
         "hooks": [
           {
             "type": "command",
-            "command": "echo \"$CLAUDE_FILE_PATHS\" | grep -qE '\\.env(\\..*)?$' && { echo 'refuse: do not edit .env files'; exit 2; } || exit 0"
+            "command": "f=$(jq -r '.tool_input.file_path // empty'); case \"$f\" in *.env|*.env.*) echo \"refuse: $f is an env file\" >&2; exit 2;; esac; exit 0"
           }
         ]
       }
     ],
-
-    "$comment_Stop": "Run on session end — uncomment to print a summary or trigger CI.",
     "Stop": []
   }
 }
