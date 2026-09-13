@@ -9,6 +9,7 @@ Self-hosted internet radio station for a small private community. A C# .NET 10 c
 - Use emoji for markdown documents for readability.
 - Get to the point, be terse, do not over explain. Tokens are water, we're in the desert.
 - Never install a package by editing the manifest — always use `dotnet add package`.
+- Never add `Claude-Session:` trailers, `Co-Authored-By` lines, or claude.ai/code links to commits, PRs, issues, or releases.
 
 ## Stack
 
