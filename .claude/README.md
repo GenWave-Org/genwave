@@ -78,7 +78,7 @@ ceremony. Plain git only: PRs and issues are opened in the Gitea web UI
 
 | Command | Purpose |
 |---|---|---|
-| `/git-commit` | Stage and commit using Conventional Commits; branch-or-trunk by size. |
+| `/git-commit` | Stage explicitly and commit using Conventional Commits on a non-main branch. |
 | `/git-merge` | Merge current branch into `main` safely — checks, confirms, merges. |
 
 ## Agents
@@ -177,7 +177,7 @@ agents also invoke them explicitly via the Skill tool.
 
 ### Workflow
 
-- `git-workflow` — Conventional Commits, branch-or-trunk, plain git; PR/issue templates for the Gitea web UI
+- `git-workflow` — the one Git policy: GitHub + `gh`, branches only, explicit staging, no trailers, merge/tag/release = Dean
 
 ### Personal context
 

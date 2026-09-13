@@ -11,8 +11,9 @@ misnamed variable, a stray import. The kind of bug where opening
 
 ## Scope
 
-- IN: one-spot fixes that a competent engineer would commit straight to
-  `main` without ceremony. Single concern. Usually < ~20 lines changed.
+- IN: one-spot fixes that need no design call. Single concern. Usually
+  < ~20 lines changed. Still on a branch — never on `main` (see the
+  `git-workflow` skill).
 - OUT: anything that needs a design call, touches a public API contract,
   changes behavior across modules, or needs new tests beyond what already
   exists. If it smells like that, stop and suggest `/plan` or `/build-loop`.
@@ -47,8 +48,9 @@ If empty, ask one short clarifying question.
    file, or the single related test). For C#, zero warnings is part of
    "verified" — warnings as errors is the house rule.
 6. **Report and ask before committing.** Show the diff summary and propose
-   a one-line commit message. Do **not** commit unless the user says go —
-   committing straight to `main` is a shared-state action.
+   a one-line commit message. Do **not** commit unless the user says go.
+   On go: if on `main`, branch first (`fix/<slug>`); stage the touched
+   files explicitly; no trailers; then offer to open the PR.
 
 ## Commit message style
 

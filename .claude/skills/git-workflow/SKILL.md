@@ -1,171 +1,115 @@
 ---
 name: git-workflow
 description: >-
-  Git workflow conventions for a Gitea-hosted repo using plain git (no
-  gh/tea CLI): writing clear conventional commits, choosing trunk-based
-  vs short-lived branch flow based on the size of the change, and
-  preparing pushes for PRs/issues that are opened in the Gitea web UI.
-  Use whenever the user wants to commit, branch, push, or asks how to
-  structure any of those. Keep it light — direct, detailed messages,
-  no ceremony.
+  The one Git policy for this repo: GitHub + gh CLI, short-lived branches
+  only (never main), explicit staging, Conventional Commits with gh-#N
+  refs, no attribution trailers, and merge/tag/release/push-main reserved
+  for Dean. Use whenever you commit, branch, push, open a PR or issue, or
+  are asked how to structure any of those. Other commands and agents
+  reference this file instead of restating it.
 ---
 
-# Git workflow (plain git + Gitea)
+# Git workflow (GitHub + `gh`)
 
-The point: write commits and branches that read clearly weeks later.
-Be direct, be specific, skip the filler. All remote collaboration
-(PRs, issues, reviews) happens in the **Gitea web UI** — the CLI side
-is plain git only: branch, commit, push.
+🎯 Commits and branches should read clearly weeks later. Direct, specific,
+no filler. Remote work (PRs, issues, checks) goes through the `gh` CLI
+against `GenWave-Org/genwave`; branch protection requires a review, so
+nothing lands on `main` without a PR.
 
-## Branching — when to branch, when not
+## 🔒 The five laws
 
-**Trunk-based (commit straight to `main`)** when:
-- Never, this is prohibited
+1. **Never commit to `main`.** No trunk lane, not even for one-liners.
+   On `main`? Stop. `git checkout -b <type>/<slug>`. Then work.
+2. **Stage explicitly.** `git add <path> <path>`; never `git commit -am`
+   or `git add -A`. A commit contains one task's files, nothing swept in
+   (scratch, PLAN.md ticks, generated `next-env.d.ts`).
+3. **No attribution trailers.** No `Co-Authored-By`, no `Claude-Session`,
+   no claude.ai/code links — in commits, PR bodies, issues, or releases.
+   The repo is public.
+4. **Merge, tag, release, push-main are Dean's.** Open the PR, report the
+   URL, stop. A PreToolUse hook (`.claude/hooks/merge-guard.sh`) enforces
+   this for every subagent; if it fires, hand Dean the command instead.
+5. **No `--force` to shared branches, no `--no-verify`, no `--amend` after
+   push** unless Dean asks. `--force-with-lease` on your own PR branch
+   after a rebase is fine.
 
-**Short-lived branch** when:
-- Always, we live on short-lived branches exclusively
+## 🌿 Branches
 
-**If you're working on main. Stop. Switch. Now.**
-
-Branch naming: `<type>/<short-slug>` — type is one of
-`task`, `feat`, `fix`, `chore`, `docs`, `refactor`, `test`. Examples:
-
-```
-feat/order-fulfillment-tx
-fix/signature-verify-header-case
-chore/bump-npgsql
-```
-
-Keep branches short-lived. Push early (`git push -u origin HEAD`) and
-open the PR in Gitea early, even as a draft/WIP.
-
-## Commits — Conventional Commits, kept honest
-
-Format:
+`<type>/<short-slug>` — type ∈ `feat fix chore docs refactor test ci`.
+Suffix the issue number when there is one.
 
 ```
-<type>(<optional scope>): <imperative summary, lower-case, no period>
-
-<body — what changed and why, wrapped at ~72 cols>
-
-<footer — refs, breaking changes>
+feat/sponsors-wizard-714
+fix/bed-duck-relative-746
+chore/toolkit-model-pins-749
 ```
 
-**Types:** `task`, `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `perf`,
-`build`, `ci`, `revert`.
+Push early: `git push -u origin HEAD`. Open the PR early, draft is fine.
 
-**Summary line rules:**
-- 50 chars or fewer when possible, hard cap 72.
-- Imperative mood (`add`, not `added`/`adds`).
-- No trailing period.
-- Scope is optional; use it when there's an obvious area
-  (`feat(cadence): …`, `fix(streaming): …`).
-
-**Body rules:**
-- Always include one if the change isn't self-evident from the diff.
-- Explain **what** changed and **why** — never restate the diff line by
-  line. Mention trade-offs or alternatives rejected if relevant.
-- One blank line between summary and body.
-- Reference issues with `Refs gitea-#123` or `Closes gitea-#123` — Gitea links and
-  auto-closes these just like GitHub does.
-
-**Footers:**
-- `Closes #N` to auto-close a Gitea issue on merge.
-- `BREAKING CHANGE: <what breaks, how to migrate>` for breakages.
-- `Co-Authored-By:` lines when pairing.
-
-**Example — good:**
+## ✍️ Commits — Conventional Commits, kept honest
 
 ```
-feat(streaming): reconnect to icecast with capped backoff
+<type>(<scope>): <imperative summary, lower-case, no period>
 
-A dropped Icecast connection previously killed the output until a
-manual restart. The streamer now:
+<body — what changed and why, wrapped ~72 cols>
 
-  1. detects the dropped socket on push failure
-  2. retries with exponential backoff capped at 30s
-  3. logs each attempt with the mount point and attempt count
-
-Silence is pushed to the buffer during reconnect so listeners hear
-dead air no longer than one buffer length.
-
-Refs STORY-014
+Refs gh-#123          # or: Closes #123 (auto-closes on merge)
 ```
 
-**Example — bad (don't):**
+- Summary ≤ 72 chars, imperative (`add`, not `added`), scope when obvious
+  (`fix(ads): …`, `feat(admin-ui): …`, `fix(toolkit): …`).
+- Body whenever the diff doesn't explain itself: what + why, trade-offs,
+  alternatives rejected. Never a line-by-line restatement.
+- Build-loop tasks: `<type>(<scope>): T<n> <what>` so the PLAN maps to
+  history.
+- `BREAKING CHANGE: <what breaks, how to migrate>` footer for breakages.
 
-- `fix stuff`
-- `WIP`
-- `Update Streamer.cs` (says nothing the diff doesn't)
-- `Added some changes and refactored a couple of things` (vague +
-  past tense)
+Bad: `fix stuff`, `WIP`, `Update Streamer.cs`, `Added some changes`.
 
-## Issues — drafted here, opened in Gitea
+## 🔀 Pull requests
 
-A useful issue answers: **what's wrong / what's wanted, what's the
-context, what does done look like.** Draft the body in this shape and
-paste it into the Gitea new-issue form:
+```
+gh pr create -R GenWave-Org/genwave -t "<conventional title>" -F body.md
+```
+
+Body shape (emoji headings, terse):
 
 ```markdown
-## Context
-<one paragraph: where this came from, why it matters, link to story id
-or spec section if relevant>
+## 🔧 What
+- headline change
+- next
+- caveats / non-changes
 
-## What we want
-<the concrete change or behavior — bulleted is fine>
+## 🧪 How to verify
+- [ ] concrete check, ideally a command
 
-## Acceptance criteria
-- [ ] <observable outcome 1>
-- [ ] <observable outcome 2>
+## ⚠️ Risk / rollback
+one line; "low, git revert" when true
 
-## Notes
-<optional — links, screenshots, related PRs, anything that helps the
-person picking this up>
+Closes #<n>
 ```
 
-Add labels/assignee in the Gitea form if the repo uses them.
+After opening: report the URL and stop. Merge conflicts on your PR:
+rebase onto `origin/main`, resolve, `git push --force-with-lease`.
 
-**For the GenWave project, all issues _must_ use the `genwave-2.0` tag or they will not be picked up and addressed.**
+## 🐛 Issues
 
-## Pull requests — pushed here, opened in Gitea
-
-A useful PR answers: **what changed, why, how to verify, what could
-go wrong.**
-
-1. Make sure the branch is pushed: `git push -u origin HEAD`.
-2. Open the PR in the Gitea UI (Gitea also prints a direct
-   create-PR link in the `git push` output — use it).
-3. Title follows Conventional Commits, same as a commit summary.
-4. Body in this shape:
-
-```markdown
-## Summary
-- <bullet 1 — the headline change>
-- <bullet 2 — the next>
-- <bullet 3 — caveats / non-changes>
-
-## Why
-<one paragraph: the motivation. Link the story or issue.>
-
-## How to verify
-- [ ] <step 1 — a concrete check, ideally a command, e.g. `dotnet test`>
-- [ ] <step 2>
-- [ ] <step 3>
-
-## Risk / rollback
-<what could go wrong, how to revert. "low risk, revert via git revert"
-is fine when true.>
-
-Closes #<issue-number, if any>
+```
+gh issue create -R GenWave-Org/genwave -t "<title>" -l "<labels>" -F body.md
 ```
 
-## Sanity rules
+Labels from the existing set: `bug enhancement documentation P0 P1 P2 P3
+demo`. Body: **problem** (what's wrong, evidence), **fix** (concrete),
+**source** (spec section, memory, PR). File into the matching GitHub
+Project at triage.
 
-- Don't push to `main` with `--force`. Ever. In fact, don't push to `main`. Ever.
-- Don't `--no-verify` to skip hooks unless explicitly asked.
-- Never commit secrets — re-check the diff for `.env`, tokens, keys,
-  connection strings with real passwords.
-- Never commit build output or dependencies — confirm `.gitignore`
-  covers `bin/`, `obj/`, `node_modules/`, `dist/`.
-- If `git status` shows untracked files you didn't expect, investigate
-  before staging — could be the user's WIP.
+## 🚦 Sanity
+
+- Re-check the diff for secrets (`.env*`, tokens, keys, real connection
+  strings) before every commit.
+- Never commit build output or deps; `.gitignore` covers `bin/ obj/
+  node_modules/ dist/ docs/`.
+- Unexpected untracked files in `git status` = someone's WIP. Ask before
+  staging or reverting.
+- Clean tree before starting a build loop; never build on uncommitted
+  changes.
