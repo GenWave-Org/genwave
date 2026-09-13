@@ -123,6 +123,8 @@ public static class FeatureEveryApprovedSpotRendersOnTheNextTick
 
         public async Task InitializeAsync()
         {
+            // Canned failure, no confirm (the Story391_AdRenderService precedent) — otherwise the fake's real confirmAsync lands MarkReady first.
+            harness.Author.InvokeDelegates = false;
             harness.Author.Result = CastSegmentAuthorResult.Failure(
                 CastSegmentFailureReason.ConfirmationFailed, "confirmation declined");
             AddApproved(harness, 2);
