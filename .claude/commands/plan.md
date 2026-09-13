@@ -1,7 +1,6 @@
 ---
 description: Slice SPEC into stories and an ordered task DAG. Owns STORIES.md + PLAN.md.
 argument-hint: [scope to plan, optional]
-model: claude-opus-4-7
 ---
 
 # plan

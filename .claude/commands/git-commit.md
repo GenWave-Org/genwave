@@ -1,7 +1,6 @@
 ---
 description: Stage and commit current changes using Conventional Commits, branch-or-trunk by size. Uses the `git-workflow` skill.
 argument-hint: [optional summary or scope hint]
-model: claude-haiku-4-5-20251001
 ---
 
 # commit

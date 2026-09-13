@@ -1,7 +1,6 @@
 ---
 description: Drive a PLAN.md to completion task-by-task — builder builds, reviewer gates, commit only on pass.
 argument-hint: [path-to-PLAN.md]
-model: claude-sonnet-4-6
 ---
 
 # build-loop
@@ -34,7 +33,7 @@ code or review it yourself — you dispatch and gate.
 For each task still unchecked (`- [ ]`), in order, top to bottom:
 
 1. **Build.** Dispatch a `builder` subagent (Agent tool,
-   `subagent_type: builder`, model **sonnet**). Give it: the exact task text,
+   `subagent_type: builder`, model **sonnet** (alias; tracks the current generation)). Give it: the exact task text,
    the relevant section of PLAN.md, the files it owns, and an instruction to
    invoke the project's language + DB skills (`csharp-best-practices` for C#,
    `typescript-best-practices` for TS, `postgres-dba` for schema work) and
@@ -42,7 +41,7 @@ For each task still unchecked (`- [ ]`), in order, top to bottom:
    before reporting back. The builder **does not commit**.
 
 2. **Review.** Dispatch a `reviewer` subagent (Agent tool,
-   `subagent_type: reviewer`, model **opus** — reviewer must be ≥ builder).
+   `subagent_type: reviewer`, model **inherit** — the reviewer runs on the session model, so it is always ≥ the builder).
    It invokes the matching security skill (`security-api` for backend code,
    `security-web` for UI code) and `simplify`, reads the builder's diff, and
    returns a verdict: `PASS` or `FAIL` with specific findings.

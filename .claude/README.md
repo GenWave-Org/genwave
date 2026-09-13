@@ -51,16 +51,16 @@ documents and is **re-entrant** (re-run to refine, not restart).
 
 ### Phase commands
 
-| Command | Model | Question it answers | Owns |
-|---|---|---|---|
-| `/init` | sonnet | What files do we need? | `CLAUDE.md`, `docs/` skeleton, `README.md` stub, `.gitignore` |
-| `/explore` | opus | What problem, for whom, why? | `docs/PROJECT.md` |
-| `/design` | opus | How do we build it? | `docs/ARCHITECTURE.md`, `docs/SPEC.md` |
-| `/plan` | opus | In what order, as what tasks? | `docs/STORIES.md`, `docs/PLAN.md` |
-| `/spec` | sonnet | Pending BDD specs from stories | spec files (via `bdd-specs` skill) |
-| `/build-loop` | sonnet | Build it. | the code + git history |
-| `/document` | sonnet | Do the docs still match reality? | `README.md`, `docs/ARCHITECTURE.md` prose, `docs/MEMORY.md` |
-| `/quick-fix` | sonnet | Trivial fix on the current branch — no plan, no stories. | the code |
+| Command | Question it answers | Owns |
+|---|---|---|
+| `/init` | What files do we need? | `CLAUDE.md`, `docs/` skeleton, `README.md` stub, `.gitignore` |
+| `/explore` | What problem, for whom, why? | `docs/PROJECT.md` |
+| `/design` | How do we build it? | `docs/ARCHITECTURE.md`, `docs/SPEC.md` |
+| `/plan` | In what order, as what tasks? | `docs/STORIES.md`, `docs/PLAN.md` |
+| `/spec` | Pending BDD specs from stories | spec files (via `bdd-specs` skill) |
+| `/build-loop` | Build it. | the code + git history |
+| `/document` | Do the docs still match reality? | `README.md`, `docs/ARCHITECTURE.md` prose, `docs/MEMORY.md` |
+| `/quick-fix` | Trivial fix on the current branch — no plan, no stories. | the code |
 
 `docs/MEMORY.md` is the project's decision log — every phase *appends* dated
 entries; `/document` curates it. It is distinct from the `~/.claude` memory
@@ -76,10 +76,10 @@ Small commands that defer to the `git-workflow` skill — direct, detailed, no
 ceremony. Plain git only: PRs and issues are opened in the Gitea web UI
 (the skill ships copy-paste body templates for both).
 
-| Command | Model | Purpose |
+| Command | Purpose |
 |---|---|---|
-| `/git-commit` | haiku | Stage and commit using Conventional Commits; branch-or-trunk by size. |
-| `/git-merge` | haiku | Merge current branch into `main` safely — checks, confirms, merges. |
+| `/git-commit` | Stage and commit using Conventional Commits; branch-or-trunk by size. |
+| `/git-merge` | Merge current branch into `main` safely — checks, confirms, merges. |
 
 ## Agents
 
@@ -88,7 +88,7 @@ ceremony. Plain git only: PRs and issues are opened in the Gitea web UI
 | Agent | Model | Tools | Role |
 |---|---|---|---|
 | `builder` | sonnet | Read, Write, Edit, Glob, Grep, Bash, Skill | Implements one PLAN.md task. Stays in its files. Never commits unless told. |
-| `reviewer` | opus | Read, Glob, Grep, Bash, Skill (**no** Write/Edit) | Read-only gate. Returns `PASS` or `FAIL` with findings. A gate that can fix itself isn't a gate. |
+| `reviewer` | inherit | Read, Glob, Grep, Bash, Skill (**no** Write/Edit) | Read-only gate. Returns `PASS` or `FAIL` with findings. A gate that can fix itself isn't a gate. |
 
 The reviewer is intentionally stronger than the builder.
 
@@ -114,7 +114,7 @@ confirm a clean git working tree. Stop and report if any of these fail.
   │              reports a diff. Does NOT commit.         │
   │     │                                                │
   │     ▼                                                │
-  │  2. REVIEW  → reviewer subagent (opus)                │
+  │  2. REVIEW  → reviewer subagent (inherit)               │
   │              read-only; runs the matching security    │
   │              skill (security-api / security-web) +    │
   │              simplify; returns PASS or FAIL.          │
@@ -195,8 +195,10 @@ controls when it triggers, plus optional `references/` and `templates/`.
   preserves completed work (e.g. `/plan` never drops `- [x]` tasks).
 - **Stop, don't guess.** A phase missing its input (no PLAN.md, a SPEC full of
   `TODO`) stops and points back to the owning command instead of inventing.
-- **Model choice is deliberate.** Heavy thinking → opus (`/explore`, `/design`,
-  `/plan`, reviewer). Execution → sonnet. Quick git plumbing → haiku.
+- **Commands inherit the session model.** No command pins a model, so the
+  phases run on whatever you launched Claude Code with. The `builder` agent
+  is pinned to the `sonnet` alias (execution); the `reviewer` inherits the
+  session model so the gate is never weaker than the session.
 
 ## Usage
 

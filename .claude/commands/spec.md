@@ -1,7 +1,6 @@
 ---
 description: Generate executable BDD specs from STORIES.md via the bdd-specs skill. Stories-first, idempotent, pending by default.
 argument-hint: [scope or story id, optional]
-model: claude-sonnet-4-6
 ---
 
 # spec

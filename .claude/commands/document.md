@@ -1,7 +1,6 @@
 ---
 description: Reconcile docs with reality — README, DEPLOYMENT values, ARCHITECTURE prose, MEMORY log. Run anytime.
 argument-hint: [area to focus, optional]
-model: claude-sonnet-4-6
 ---
 
 # document
