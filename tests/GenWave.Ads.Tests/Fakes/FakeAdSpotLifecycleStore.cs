@@ -355,8 +355,10 @@ public sealed class FakeAdSpotLifecycleStore : IAdSpotStore
     }
 
     /// <summary>Mirrors <see cref="GenWave.MediaLibrary.Station.AdSpotRepository.StampJobAsync"/> in
-    /// plain C# (PLAN T432): guarded on <c>JobKind is null</c> — an already-claimed row reports
-    /// <see cref="AdSpotJobStampResult.Busy"/> rather than stealing the claim.</summary>
+    /// plain C# (PLAN T432, T463): guarded on <c>JobKind is null</c> — an already-claimed row reports
+    /// <see cref="AdSpotJobStampResult.Busy"/> rather than stealing the claim; a successful claim
+    /// nulls <see cref="AdSpot.JobFailedKind"/> alongside <see cref="AdSpot.JobError"/>, even on a row
+    /// whose previous job failed.</summary>
     public Task<AdSpotJobStampOutcome> StampJobAsync(long id, string kind, CancellationToken ct)
     {
         var index = spots.FindIndex(s => s.Id == id);
@@ -368,21 +370,29 @@ public sealed class FakeAdSpotLifecycleStore : IAdSpotStore
 
         var updated = Replace(id, s => s with
         {
-            JobKind = kind, JobStartedAt = DateTime.UtcNow, JobError = null, Version = NextVersion(),
+            JobKind = kind, JobStartedAt = DateTime.UtcNow, JobError = null, JobFailedKind = null,
+            Version = NextVersion(),
         });
         return Task.FromResult(new AdSpotJobStampOutcome(AdSpotJobStampResult.Stamped, updated));
     }
 
     /// <summary>Mirrors <see cref="GenWave.MediaLibrary.Station.AdSpotRepository.ClearJobAsync"/> in
-    /// plain C# (PLAN T432): total by id — clearing an already-clear job is a harmless no-op, not a
-    /// conflict; reports <see langword="false"/> only when no row exists.</summary>
+    /// plain C# (PLAN T432, T463): total by id — clearing an already-clear job is a harmless no-op, not
+    /// a conflict; reports <see langword="false"/> only when no row exists. Stamps
+    /// <see cref="AdSpot.JobFailedKind"/> from the row's OWN pre-clear <see cref="AdSpot.JobKind"/> when
+    /// <paramref name="error"/> is non-null, else nulls it.</summary>
     public Task<bool> ClearJobAsync(long id, string? error, CancellationToken ct)
     {
         var index = spots.FindIndex(s => s.Id == id);
         if (index < 0)
             return Task.FromResult(false);
 
-        Replace(id, s => s with { JobKind = null, JobStartedAt = null, JobError = error, Version = NextVersion() });
+        Replace(id, s => s with
+        {
+            JobKind = null, JobStartedAt = null, JobError = error,
+            JobFailedKind = error is null ? null : s.JobKind,
+            Version = NextVersion(),
+        });
         return Task.FromResult(true);
     }
 

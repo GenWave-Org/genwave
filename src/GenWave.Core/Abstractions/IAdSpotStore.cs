@@ -259,11 +259,14 @@ public interface IAdSpotStore
 
     /// <summary>
     /// Claims a row for a background job by stamping <c>job_kind</c>/<c>job_started_at</c> and
-    /// clearing any prior <c>job_error</c> (SPEC F174, F175; PLAN T432 — the preview/write job seam
-    /// PLAN T439–T445 build against). Guarded on <c>job_kind IS NULL</c>: a row already claimed by
-    /// another job reports <see cref="AdSpotJobStampResult.Busy"/> rather than stealing or queuing
-    /// behind it — the caller's own signal to skip this tick, the <see cref="ClaimNextApprovedAsync"/>
-    /// "SKIP LOCKED, never block" posture applied per-row instead of via a locking read.
+    /// clearing any prior <c>job_error</c>/<c>job_failed_kind</c> (SPEC F174, F175; PLAN T432, T463 —
+    /// the preview/write job seam PLAN T439–T445 build against). Guarded on <c>job_kind IS NULL</c>: a
+    /// row already claimed by another job reports <see cref="AdSpotJobStampResult.Busy"/> rather than
+    /// stealing or queuing behind it — the caller's own signal to skip this tick, the
+    /// <see cref="ClaimNextApprovedAsync"/> "SKIP LOCKED, never block" posture applied per-row instead
+    /// of via a locking read. A fresh claim always starts with <see cref="AdSpot.JobFailedKind"/>
+    /// null, even on a row whose PREVIOUS job failed — that fact only names the most recent job's own
+    /// failure, and this one hasn't failed yet.
     /// </summary>
     Task<AdSpotJobStampOutcome> StampJobAsync(long id, string kind, CancellationToken ct);
 
@@ -275,6 +278,14 @@ public interface IAdSpotStore
     /// harmless no-op, not a conflict, the <see cref="MarkReadyAsync"/>/<see cref="MarkFailedAsync"/>
     /// "guarded WHERE, total" shape narrowed to "row exists" rather than "row in a specific state".
     /// Reports <see langword="false"/> only when no row exists with the given id.
+    ///
+    /// <para>
+    /// Also stamps <see cref="AdSpot.JobFailedKind"/> (PLAN T463, db/47): the kind that was just
+    /// cleared (the row's own <c>job_kind</c> going into this call) when <paramref name="error"/> is
+    /// non-null, else <see langword="null"/> — so a caller reading the row back can tell WHICH step
+    /// (<c>"write"</c> or <c>"preview"</c>) the most recent failure happened during, without also
+    /// keeping <c>job_kind</c> itself non-null once the claim is released.
+    /// </para>
     /// </summary>
     Task<bool> ClearJobAsync(long id, string? error, CancellationToken ct);
 

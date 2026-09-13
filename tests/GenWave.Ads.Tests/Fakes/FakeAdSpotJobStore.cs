@@ -66,7 +66,7 @@ public sealed class FakeAdSpotJobStore : IAdSpotStore
         if (spot.JobKind is not null)
             return Task.FromResult(new AdSpotJobStampOutcome(AdSpotJobStampResult.Busy, null));
 
-        spot = spot with { JobKind = kind, JobStartedAt = DateTime.UtcNow, JobError = null };
+        spot = spot with { JobKind = kind, JobStartedAt = DateTime.UtcNow, JobError = null, JobFailedKind = null };
         spots[id] = spot;
         return Task.FromResult(new AdSpotJobStampOutcome(AdSpotJobStampResult.Stamped, spot));
     }
@@ -74,7 +74,11 @@ public sealed class FakeAdSpotJobStore : IAdSpotStore
     public async Task<bool> ClearJobAsync(long id, string? error, CancellationToken ct)
     {
         if (spots.TryGetValue(id, out var spot))
-            spots[id] = spot with { JobKind = null, JobStartedAt = null, JobError = error };
+            spots[id] = spot with
+            {
+                JobKind = null, JobStartedAt = null, JobError = error,
+                JobFailedKind = error is null ? null : spot.JobKind,
+            };
 
         clearJobCallCounts.AddOrUpdate(id, 1, (_, count) => count + 1);
 
