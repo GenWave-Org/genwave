@@ -16,11 +16,11 @@ BEGIN;
 -- ALTER TYPE order_status ADD VALUE 'returned';   -- own migration if used below
 
 -- Schema change example: additive and safe.
-ALTER TABLE orders
+ALTER TABLE purchase_order
   ADD COLUMN cancelled_reason text;
 
 -- Backfill with a set-based statement, never a row loop.
-UPDATE orders
+UPDATE purchase_order
 SET    cancelled_reason = 'legacy: unknown'
 WHERE  status = 'cancelled' AND cancelled_reason IS NULL;
 
@@ -38,7 +38,7 @@ BEGIN
       USING errcode = 'check_violation';
   END IF;
 
-  UPDATE orders
+  UPDATE purchase_order
   SET    status = 'cancelled',
          cancelled_reason = p_reason,
          updated_at = now()
@@ -58,7 +58,7 @@ COMMIT;
 -- ============================================================================
 -- BEGIN;
 --   DROP FUNCTION IF EXISTS cancel_order(int, text);
---   ALTER TABLE orders DROP COLUMN IF EXISTS cancelled_reason;
+--   ALTER TABLE purchase_order DROP COLUMN IF EXISTS cancelled_reason;
 --   -- Note: a removed enum value cannot be restored by DROP; see enums.md
 --   -- for the new-type-and-swap recipe if a value rollback is ever needed.
 -- COMMIT;

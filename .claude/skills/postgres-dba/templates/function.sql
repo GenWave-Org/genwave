@@ -30,7 +30,7 @@ BEGIN
       USING errcode = 'check_violation';
   END IF;
 
-  IF NOT EXISTS (SELECT 1 FROM customers WHERE id = p_customer_id) THEN
+  IF NOT EXISTS (SELECT 1 FROM customer WHERE id = p_customer_id) THEN
     RAISE EXCEPTION 'place_order: customer % not found', p_customer_id
       USING errcode = 'foreign_key_violation';
   END IF;
@@ -38,17 +38,17 @@ BEGIN
   ---------------------------------------------------------------------------
   -- 2. do the work as a SET, not a FOR ... LOOP of single-row inserts
   ---------------------------------------------------------------------------
-  INSERT INTO orders (customer_id)
+  INSERT INTO purchase_order (customer_id)
   VALUES (p_customer_id)
   RETURNING id INTO v_order_id;
 
-  INSERT INTO order_items (order_id, product_id, quantity, unit_cents)
+  INSERT INTO order_item (order_id, product_id, quantity, unit_cents)
   SELECT v_order_id,
          (i->>'product_id')::int,
          (i->>'quantity')::int,
          p.price_cents
   FROM   jsonb_array_elements(p_items) AS i
-  JOIN   products p ON p.id = (i->>'product_id')::int;
+  JOIN   product p ON p.id = (i->>'product_id')::int;
 
   RETURN v_order_id;
 END;

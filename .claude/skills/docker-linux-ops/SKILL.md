@@ -182,7 +182,7 @@ state says Y) is a known dead-air footgun.
 
 | File | Use |
 |---|---|
-| `templates/Dockerfile.dotnet` | Multi-stage .NET 9 build, non-root, ffmpeg example, exec-form entrypoint |
+| `templates/Dockerfile.dotnet` | Multi-stage .NET 10 build, non-root, ffmpeg example, exec-form entrypoint |
 | `templates/compose.example.yml` | Service + Postgres with healthchecks, named volumes, NFS volume, .env wiring |
 
 ## Non-negotiable defaults

@@ -5,8 +5,7 @@ description: >-
   settings, type-level modeling (discriminated unions, branded/nominal types,
   `as const`/`satisfies`, exhaustiveness), `unknown` over `any`, immutability,
   error handling with a Result type, null/undefined hygiene, async/promise
-  rules, module and naming conventions, and the project rule that every class
-  exposes `toString()` and `toJSON()`. Use when writing new TypeScript, doing
+  rules, module and naming conventions. Use when writing new TypeScript, doing
   code review, setting up a tsconfig, modeling a domain type, or answering
   "what is the idiomatic TypeScript way to do this" questions. Ships ready-to-
   copy templates for value objects, entities, errors, Result, state machines,
@@ -39,34 +38,11 @@ This skill is about *idioms and conventions*. For OO design pressure use
 2. Open `references/idioms.md` for that rule's full rationale, a bad
    example, the idiomatic refactor, and when *not* to apply it.
 3. Copy the closest file from `templates/` and adapt it. The templates
-   already encode the conventions below (strict types, `toString`/`toJSON`,
-   exhaustiveness) so you start compliant instead of retrofitting.
+   already encode the conventions below (strict types, exhaustiveness) so you start compliant instead of retrofitting.
 4. Apply the smallest change that removes real pain. Strictness is earned
    by demonstrated bugs, not applied as ceremony — but the *defaults* here
    (strict tsconfig, no `any`, no floating promises) are non-negotiable
    because their failure mode is silent.
-
-## Project rule: every class has `toString()` and `toJSON()`
-
-This is a hard convention in this codebase, not a suggestion.
-
-- **`toJSON()`** — returns a plain, serializable object. `JSON.stringify`
-  calls it automatically, so logs, API responses, and persistence get a
-  stable, intentional shape instead of leaking private fields, class
-  internals, or `undefined`. Never return the instance itself.
-- **`toString()`** — returns a short human-readable identifier for logs,
-  error messages, and template literals (`` `order ${order}` ``). It is for
-  humans; `toJSON()` is for machines. They are not interchangeable.
-
-Why it is mandatory: without `toJSON()`, serialization is accidental — it
-exposes whatever fields happen to be public today and breaks the moment a
-private field is added. Without `toString()`, a class interpolated into a
-string is `[object Object]`, which destroys logs and error context. Both
-methods make the class's *external contract* explicit and decoupled from
-its internal representation (information hiding). See
-`references/tostring-tojson.md` for the full rationale, edge cases
-(circular refs, `Date`, `bigint`, secrets redaction), and the
-copy-ready pattern. Every template in `templates/` demonstrates it.
 
 ## Decision guide
 
@@ -94,8 +70,6 @@ copy-ready pattern. Every template in `templates/` demonstrates it.
 - `references/idioms.md` — every rule above with motivation, a bad
   example, the idiomatic refactor, TypeScript-specific notes, and when the
   rule is over-engineering.
-- `references/tostring-tojson.md` — the mandatory `toString`/`toJSON`
-  convention in depth: contract, edge cases, redaction, testing.
 
 ## Templates (copy and adapt)
 
@@ -117,6 +91,8 @@ These are silent-failure rules; apply them everywhere from day one:
 1. `strict: true` (and `noUncheckedIndexedAccess`) in tsconfig.
 2. No `any` in committed code — `unknown` + narrowing instead.
 3. No floating promises — `await` or explicit `void`.
-4. Every class implements `toString()` and `toJSON()`.
-5. Exported functions have explicit return types.
-6. External/untrusted data is validated at the boundary, never cast.
+4. Exported functions have explicit return types.
+5. External/untrusted data is validated at the boundary, never cast.
+6. Classes that are logged or serialized get an explicit `toJSON()`;
+   this is a judgement call, not a house rule — admin-ui is mostly
+   functions and React components.

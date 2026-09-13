@@ -1,7 +1,7 @@
 ---
 name: csharp-best-practices
 description: >-
-  Idiomatic modern C# (.NET 9) conventions and best practices: nullable
+  Idiomatic modern C# (.NET 10) conventions and best practices: nullable
   reference types everywhere with NO null-forgiving `!` operator in
   production code, records for values/DTOs, pattern matching and switch
   exhaustiveness, async/await rules (CancellationToken propagation, no

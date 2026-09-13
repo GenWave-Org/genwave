@@ -5,8 +5,8 @@ description: >-
   naming, `id serial primary key` surrogate keys, compound primary keys for
   many-to-many junctions, NOT NULL foreign keys by default (nullable only with
   an explicit override), enums instead of excessive lookup tables, STORED
-  generated columns for derived/searchable data, business logic in plpgsql
-  functions instead of application code, and JSONB used as a document store
+  generated columns for derived/searchable data, set-based integrity in SQL
+  with business logic in the C# host, and JSONB used as a document store
   alongside a relational spine. Use when designing or reviewing a Postgres
   schema, writing DDL/migrations, naming tables/columns/constraints, deciding
   enum vs lookup table, modeling many-to-many, choosing JSONB vs columns, or
@@ -47,8 +47,9 @@ application.
 
 ## The hard rules (non-negotiable defaults)
 
-1. **Naming is `snake_case`, lowercase, unquoted, forever.** Tables plural
-   (`orders`), columns singular (`shipped_at`), no reserved words, no
+1. **Naming is `snake_case`, lowercase, unquoted, forever.** Tables
+   **singular** and schema-qualified (`station.persona`, `library.media`,
+   `station.ad_spot`), columns singular (`shipped_at`), no reserved words, no
    `CamelCase`, no quoted identifiers in the schema. If you ever need to
    double-quote an identifier in normal queries, the name is wrong. See
    `references/naming.md`.
@@ -80,11 +81,12 @@ application.
    Don't store what you can compute for free; do store what you index. See
    `references/generated-columns.md`.
 
-7. **Set-based and integrity logic lives in `plpgsql` functions,** invoked
-   by the app, not reimplemented in every caller. `plpgsql` only — no
-   `language sql` one-liners sprinkled around, no business rules stranded
-   in application code. Functions are versioned via `CREATE OR REPLACE` in
-   migrations. See `references/functions.md`.
+7. **Business logic lives in the C# host, not in the database.** SQL
+   functions are for set-based integrity only (a constraint that needs a
+   query, a migration backfill), versioned via `CREATE OR REPLACE` in
+   numbered `db/NN-*.sh` migrations. No rules stranded in `plpgsql` that
+   the Architecture fitness laws can't see. See `references/functions.md`
+   for the rare cases that earn a function.
 
 8. **JSONB is a first-class document store, used on purpose.** A
    relational spine (keys, FKs, hot fields as generated columns) carries a

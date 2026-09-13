@@ -1,7 +1,7 @@
 ---
 name: aspnetcore-patterns
 description: >-
-  ASP.NET Core (.NET 9) structural conventions: controllers vs minimal
+  ASP.NET Core (.NET 10) structural conventions: controllers vs minimal
   APIs, middleware pipeline order, BackgroundService/IHostedService for
   long-running work (24/7 loops, queues, schedulers), the options
   pattern (IOptions<T> with validation), DI lifetimes and the

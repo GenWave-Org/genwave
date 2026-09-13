@@ -1,7 +1,7 @@
 ---
 name: security-api
 description: >-
-  API and service security review for ASP.NET Core (.NET 9) backends:
+  API and service security review for ASP.NET Core (.NET 10) backends:
   JWT authentication and policy/role authorization, IDOR/object-level
   checks, injection (SQL via Npgsql/EF Core, command injection via
   Process.Start), SSRF, mass assignment (binding request bodies to

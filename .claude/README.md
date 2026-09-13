@@ -1,13 +1,13 @@
-# Personal Claude Code Toolkit
+# GenWave Claude Code Toolkit
 
-A portable `.claude/` configuration that turns Claude Code into a disciplined,
-phased software-development pipeline. Drop it into a project and you get a set
-of slash commands that take an idea from a one-line pitch to committed,
-reviewed code — plus a curated skill library the commands and agents lean on.
+The `.claude/` configuration that turns Claude Code into a disciplined,
+phased software-development pipeline for this repo: slash commands that take
+an idea from a one-line pitch to committed, reviewed code, plus the skill
+library the commands and agents lean on.
 
-There is no application code here. This repository **is** the `.claude/`
-directory: commands, agents, and skills. You use it *from inside other
-projects*.
+It started life as a portable toolkit. Most of it still is; the parts that
+are GenWave-specific are marked 🎙️ below. `.claude/templates/lang-template`
+is the starting point for a new language skill and is not loaded as a skill.
 
 ## 🎯 Guiding principle: Design for Change
 
@@ -73,13 +73,13 @@ batched `AskUserQuestion` rounds. Phases that transform (`/plan`, `/spec`,
 ### Git helpers
 
 Small commands that defer to the `git-workflow` skill — direct, detailed, no
-ceremony. Plain git only: PRs and issues are opened in the Gitea web UI
-(the skill ships copy-paste body templates for both).
+ceremony. PRs and issues go through the `gh` CLI against `GenWave-Org/genwave`
+(the skill ships body templates for both). Merging, tagging, releasing and
+pushing `main` are Dean's; a PreToolUse hook enforces it.
 
 | Command | Purpose |
-|---|---|---|
+|---|---|
 | `/git-commit` | Stage explicitly and commit using Conventional Commits on a non-main branch. |
-| `/git-merge` | Merge current branch into `main` safely — checks, confirms, merges. |
 
 ## Agents
 
@@ -149,16 +149,16 @@ agents also invoke them explicitly via the Skill tool.
 
 ### Language & design
 
-- `csharp-best-practices` — modern C#/.NET 9: nullable discipline (no `!`), async/cancellation, records, one type per file, zero warnings
+- `csharp-best-practices` — modern C#/.NET 10: nullable discipline (no `!`), async/cancellation, records, one type per file, zero warnings
 - `aspnetcore-patterns` — endpoints, middleware order, BackgroundService, options pattern, DI lifetimes, health checks
-- `typescript-best-practices` — strict TS for the Admin UI, type modeling, Result errors, `toString`/`toJSON` rule
+- `typescript-best-practices` — strict TS for the Admin UI, type modeling, Result errors, validated boundaries
 - `solid-principles` — the five SOLID principles (language-agnostic; TS examples)
 - `design-principles` — coupling/cohesion, DRY/YAGNI/KISS, Demeter, Tell Don't Ask, CQS, fail-fast
 - `gof-patterns` — all 23 Gang of Four patterns (language-agnostic; TS examples)
 
 ### Data
 
-- `postgres-dba` — snake_case, surrogate keys, NOT NULL FKs, enums, JSONB, plpgsql
+- `postgres-dba` — snake_case singular tables, surrogate keys, NOT NULL FKs, enums, JSONB; logic in the host
 
 ### Security
 
@@ -169,19 +169,19 @@ agents also invoke them explicitly via the Skill tool.
 
 - `docker-linux-ops` — multi-stage .NET images, compose, NFS media volumes, graceful shutdown, container debugging
 
+### Product
+
+- `design-aesthetic` 🎙️ — GenWave's "Wireless" visual identity: tokens, type, spacing, motion; auto-surfaced when generating UI
+
 ### Process & specs
 
 - `user-stories` — agile stories + Given/When/Then acceptance criteria → `docs/STORIES.md`
-- `bdd-specs` — executable specs from STORIES.md (Feature > Scenario > Specification; xUnit / bun:test / Jest)
+- `bdd-specs` 🎙️ — executable specs from STORIES.md (Feature > Scenario > Specification; xUnit / Jest; the entry-point scenario rule is GenWave's)
 - `agent-teams` — orchestrate parallel agent teammates (the multi-agent counterpart to `/build-loop`)
 
 ### Workflow
 
 - `git-workflow` — the one Git policy: GitHub + `gh`, branches only, explicit staging, no trailers, merge/tag/release = Dean
-
-### Personal context
-
-- `you/` — your background, tech preferences, and writing voice (auto-surfaced; edit before first run)
 
 Each SKILL.md skill is a directory with frontmatter `name` + `description` that
 controls when it triggers, plus optional `references/` and `templates/`.

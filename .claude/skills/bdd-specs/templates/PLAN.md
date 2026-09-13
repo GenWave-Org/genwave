@@ -35,7 +35,7 @@ must enforce).
 ## 5. Technical boundaries
 
 - Runtime / package manager: (Bun? Node?)
-- Test runner: auto-detected by the skill (bun:test for Bun, else Jest)
+- Test runner: auto-detected by the skill (xUnit for C#, Jest for TypeScript)
 - External dependencies / services:
 - Constraints (performance, security, compliance):
 

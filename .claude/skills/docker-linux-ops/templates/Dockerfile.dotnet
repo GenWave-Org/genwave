@@ -1,9 +1,9 @@
-# Multi-stage .NET 9 Dockerfile template.
+# Multi-stage .NET 10 Dockerfile template.
 # Adapt: project paths, the ffmpeg block (only if the service shells out
 # to it), and the assembly name in ENTRYPOINT.
 
 # ---- Build stage ----
-FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
 # Restore first, on its own layer, so source edits don't re-restore.
@@ -18,7 +18,7 @@ RUN dotnet publish API/GenWave.Example.Manager/GenWave.Example.Manager.csproj \
     -c Release -o /app/publish --no-restore
 
 # ---- Runtime stage ----
-FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 
 # Native dependencies for the audio pipeline — final stage only,
