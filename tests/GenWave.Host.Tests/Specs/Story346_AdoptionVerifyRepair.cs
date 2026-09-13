@@ -600,9 +600,13 @@ public static class FeatureAdoptionVerifyRepair
         [Fact]
         public void AnUnappliedMigrationIsReportedAgainstTheRepoDbMax()
         {
-            // db/46 (PLAN T431) is this repo's own newest table-creating migration and its own
-            // repo/db max both at once — the derived marker and "repo's db/ max" name the SAME
-            // number here, unlike ScenarioMigrationMarkerDerivation's own scratch gap facts below.
+            // db/46 (PLAN T431) is this repo's own newest table-creating migration — the derived
+            // marker. Since db/47 (PLAN T462) landed, that no longer equals "repo's db/ max": db/47
+            // only ALTERs an existing table, so the marker stays at db/46 while the repo max moves
+            // to db/47, and setup.sh's own B2 range message now names BOTH numbers ("Can't verify
+            // past db/46 — db/47 adds no new table"). This fact only asserts the marker half of
+            // that message, which is unchanged — see ScenarioMigrationMarkerDerivation's own scratch
+            // gap facts below for the two-number case spelled out explicitly.
             var envFile = ScratchEnvPath();
             WriteEnvFile(envFile, HealthyEnvValues(Path.GetTempPath(), "compose.yaml"));
             var docker = WriteDockerStub(migrationMarker: "f");

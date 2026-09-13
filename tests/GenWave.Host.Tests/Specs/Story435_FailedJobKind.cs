@@ -83,6 +83,34 @@ public static class FeatureAFailedJobSaysWhichStepFailed
         public void JobIsNull()
             => Assert.False(arc.SuccessJobIsPresent);
     }
+
+    // ── PLAN T462 — the job_failed_kind CHECK predicate is text-pinned, identically, in BOTH
+    // db/47 (the in-place ALTER) and db/06 (the fresh-init mirror) — the gh-#618 lesson (see either
+    // file's own header). No DB needed, so this scenario sits outside Story435Collection.
+
+    public sealed class ScenarioTheFailedKindColumnIsMirroredInFreshInit
+    {
+        const string FailedKindCheckPredicate =
+            "job_failed_kind IS NULL OR job_failed_kind IN ('write', 'preview')";
+
+        [Fact]
+        public void Db47CarriesTheCheckPredicate()
+        {
+            var db47 = File.ReadAllText(
+                Path.Combine(RepoRootLocator.Find(AppContext.BaseDirectory), "db", "47-ad-spot-job-failed-kind-migration.sh"));
+            Assert.Contains(FailedKindCheckPredicate, db47);
+        }
+
+        [Fact]
+        public void Db06CarriesTheIdenticalCheckPredicate()
+        {
+            // The fresh-init mirror must define the SAME predicate as db/47's own ALTER — a fresh
+            // install and an upgraded box must enforce job_failed_kind identically.
+            var db06 = File.ReadAllText(
+                Path.Combine(RepoRootLocator.Find(AppContext.BaseDirectory), "db", "06-station-settings-migration.sh"));
+            Assert.Contains(FailedKindCheckPredicate, db06);
+        }
+    }
 }
 
 [CollectionDefinition(Name)]
