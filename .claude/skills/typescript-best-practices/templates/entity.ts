@@ -8,7 +8,7 @@
  *  - identity fields `readonly`; mutable state changed only via methods
  *    that enforce invariants
  *  - `equals` by id
- *  - `toString()` / `toJSON()` per project rule, with secrets redacted and
+ *  - `toString()` / `toJSON()` (this entity is logged), secrets redacted and
  *    a named `OrderJSON` contract + `fromJSON` for round-tripping
  */
 

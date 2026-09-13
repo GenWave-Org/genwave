@@ -34,13 +34,13 @@ as a finding instead. A reviewer that fixes its own findings isn't a gate.
   async/cancellation correctness, error handling, one-type-per-file, and
   naming (no underscore prefixes).
 - `typescript-best-practices` — for UI code: type modeling, `any` usage,
-  error handling, the `toString()`/`toJSON()` rule.
+  error handling, validated boundaries.
 
 ## Workflow
 
 1. `git diff` to see exactly what the builder changed. Review only that, in the
    context of the task it was meant to satisfy.
-2. Run the test suite (`dotnet test` / `bun test` / configured runner)
+2. Run the test suite (`dotnet test` / `npm test` in `admin-ui/` / configured runner)
    yourself — confirm it actually passes and that specs weren't weakened or
    skipped to fake green.
 3. **Zero-warnings gate (C#).** Build with warnings as errors

@@ -42,7 +42,7 @@ skill. This command is the bridge between agreed stories and red specs that
    one Specification).
 4. **Every newly generated spec is pending by default** — use the runner's
    skip / todo / pending marker (`[Fact(Skip = "pending — not yet implemented")]`
-   for xUnit; `it.todo` / `it.skip` / `test.todo` for bun:test or Jest).
+   for xUnit; `it.todo` / `it.skip` / `test.todo` for Jest).
    They must not accidentally pass; they must be visibly *pending* until
    `/build-loop` implements them.
 5. Specs must align to stories, but **names should read naturally**:

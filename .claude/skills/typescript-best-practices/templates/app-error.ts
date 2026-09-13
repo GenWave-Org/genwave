@@ -4,7 +4,7 @@
  * - One base class so `catch` can narrow with a single `instanceof`.
  * - A stable string `code` for programmatic handling (don't switch on
  *   `message` — that's human text and will change).
- * - `toJSON()` / `toString()` per the project convention: safe to log and
+ * - `toJSON()` / `toString()` because errors get logged and returned: safe to log and
  *   to put on an API response without leaking internals or secrets.
  */
 

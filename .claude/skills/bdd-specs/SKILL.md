@@ -9,11 +9,11 @@ description: >-
   every Specification makes exactly one assertion, happy-path specs come
   first and exhaustively, and sad-path specs live in their own separate
   blocks. Auto-detects the runner from the project: xUnit for C#/.NET
-  (.csproj present), bun:test if the project uses Bun, otherwise Jest.
+  (.csproj present), Jest for the TypeScript admin-ui.
   Use when starting a new project or feature, when asked to "spec out",
   "write the tests first", do BDD/TDD, or turn a plan or user stories
   into a test suite. Ships PLAN.md and STORIES.md scaffolds plus
-  ready-to-copy xUnit, bun:test, and Jest spec templates.
+  ready-to-copy xUnit and Jest spec templates.
 ---
 
 # Behavior-Driven Design — Specifications First
@@ -70,17 +70,13 @@ Pick the runner from the project, do not ask:
   `.csproj` governs the code being specified. Specs live in the
   project's test project (`*.Tests.csproj` — scaffold one with
   `dotnet new xunit` if missing). Run with `dotnet test`.
-- **Use `bun:test`** if the feature is TypeScript and any of these are
-  true: `bun.lockb` or `bun.lock` exists, `bunfig.toml` exists,
-  `package.json` scripts invoke `bun`, or the user explicitly says they
-  use Bun. Import from `"bun:test"`. Run with `bun test`.
-- **Otherwise use Jest** for TypeScript. Import from
-  `"@jest/globals"`. Run with `npx jest` (or the project's `test`
-  script).
+- **Use Jest** for TypeScript (`admin-ui/`). Import from
+  `"@jest/globals"` explicitly (CI's `tsc` pass needs the imports). Run
+  with `npm test` in `admin-ui/`.
 
 In a mixed repo (C# backend + TS admin UI), the runner follows the code
 the story touches — backend stories get xUnit specs, UI stories get
-bun/Jest specs. State which runner you detected and why before
+Jest specs. State which runner you detected and why before
 generating files.
 
 ### 4. Generate the specs
@@ -168,8 +164,7 @@ hand-write the scaffold:
 - `templates/Feature.xunit.cs` — xUnit spec (C#/.NET), full
   Feature/Scenario/Specification shape with happy + segregated sad
   paths.
-- `templates/feature.bun.spec.ts` — `bun:test` spec, same structure.
-- `templates/feature.jest.spec.ts` — identical structure for Jest.
+- `templates/feature.jest.spec.ts` — Jest spec, same structure.
 - `templates/PLAN.md` — build-plan scaffold to hand the user when
   `/docs/PLAN.md` is missing.
 - `templates/STORIES.md` — user-story scaffold (story + acceptance

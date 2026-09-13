@@ -9,8 +9,9 @@ unscathed.
 
 - **Case:** `snake_case`, all lowercase. No `CamelCase`, no `PascalCase`,
   no quoted mixed-case identifiers anywhere in the schema.
-- **Tables:** plural nouns — `users`, `orders`, `order_items`. A table is
-  a collection; its name says so.
+- **Tables:** singular nouns, schema-qualified — `station.persona`,
+  `library.media`, `station.ad_spot`. The row is the thing; the schema
+  is the module. (This repo chose singular; don't mix.)
 - **Columns:** singular — `email`, `shipped_at`, `total_cents`. A column
   describes one attribute of one row.
 - **Primary key:** always literally `id`. Never `user_id` *in* the
@@ -25,8 +26,8 @@ unscathed.
   `created_at`, `updated_at`, `deleted_at`, `confirmed_at`. Durations are
   `interval`; money is integer minor units (`amount_cents`) or `numeric`,
   never `float`.
-- **Junction tables:** the two table names joined, alphabetical, plural is
-  fine: `groups_users`, `roles_users`. If the relationship is a domain
+- **Junction tables:** the two table names joined, alphabetical:
+  `group_user`, `role_user`. If the relationship is a domain
   noun in its own right (it carries data, e.g. `enrollments`), name it
   that instead and treat it as a real entity.
 - **Indexes:** `ix_<table>_<cols>` (btree), `ux_<table>_<cols>` (unique),
@@ -41,8 +42,8 @@ unscathed.
 - **Functions:** `verb_noun` describing the action —
   `place_order`, `recalculate_cart_total`, `archive_user`.
 - **No reserved words.** `user`, `order`, `group`, `end` are SQL keywords.
-  `users`, `orders`, `groups` (plural) sidestep the trap; this is a second
-  reason tables are plural.
+  Schema-qualify (`station.user_account`) or pick a fuller noun
+  (`user_account`, `purchase_order`) rather than quoting.
 - **No abbreviations** unless they are universal in the domain (`url`,
   `id`, `sku`). `qty`, `desc`, `addr` are not universal — spell them.
 

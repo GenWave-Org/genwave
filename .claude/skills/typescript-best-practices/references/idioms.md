@@ -362,13 +362,13 @@ crosses a process/IO boundary.
   better error messages and extension ergonomics for object contracts.
 - **`class`** — when you need identity, invariants enforced in a
   constructor, behavior bundled with data, or instances (`instanceof`).
-  Classes here **must** implement `toString()` and `toJSON()` — see
-  `references/tostring-tojson.md`.
+  Give a class an explicit `toJSON()` when it is logged or serialized
+  (see `templates/app-error.ts`); it is a judgement call, not a house rule.
 
 ```ts
 type Result<T, E> = Ok<T> | Err<E>;          // unions → type
 interface Repository<T> { save(x: T): Promise<void>; } // contract → interface
-class Money { /* invariants + behavior + toString/toJSON */ } // class
+class Money { /* invariants + behavior */ }                    // class
 ```
 
 **Rule of thumb:** reach for `type`; switch to `interface` for an

@@ -22,7 +22,7 @@ Detect the language from the task's files, then:
   `!`), async/cancellation rules, one type per file, no underscore
   prefixes, zero warnings.
 - `typescript-best-practices` — always for TS/UI work. Strict types, no
-  `any`, the `toString()`/`toJSON()` class rule.
+  `any`, explicit return types, validated boundaries.
 - `aspnetcore-patterns` — when the task touches endpoints, hosted
   services, DI wiring, options/config, or health checks.
 - `design-principles` and `solid-principles` — when adding or reshaping
@@ -48,7 +48,7 @@ Pick the minimum set the task actually needs; don't load all of them.
    push, email). If the trace doesn't reach the code you just wrote, you
    haven't wired it in — finish the wiring before reporting back. Unit-test
    green through an internal seam is not enough.
-4. Run the project's test suite (`dotnet test`, `bun test`, or the configured
+4. Run the project's test suite (`dotnet test`, `npm test` in `admin-ui/`, or the configured
    runner). Fix until the relevant specs pass. Do not weaken or skip specs to
    go green. For C#: the build must produce **zero warnings** — warnings are
    failures here.

@@ -1,7 +1,7 @@
 # C# Idioms — rules in depth
 
 Each rule: why it exists, the bad pattern, the idiomatic refactor, and
-when it's over-engineering. Examples target C# 13 / .NET 9.
+when it's over-engineering. Examples target C# 14 / .NET 10.
 
 ---
 

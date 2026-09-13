@@ -1,7 +1,7 @@
 # ASP.NET Core backend security — rules in depth
 
 Each section: the exploit, the vulnerable pattern, the fix, and the
-false-positive caveat. Examples target .NET 9 with Npgsql/EF Core and a
+false-positive caveat. Examples target .NET 10 with Npgsql/EF Core and a
 JWT-authenticated multi-role API (SuperAdmin/Admin/User).
 
 ---
@@ -240,7 +240,7 @@ slashes, and don't "normalize" backslashes into separators.
 instantiate — known RCE gadget chains.
 
 **Rules:**
-- `BinaryFormatter` is banned (and throws on .NET 9 by default — don't
+- `BinaryFormatter` is banned (and throws on .NET 10 by default — don't
   re-enable it).
 - Newtonsoft: `TypeNameHandling.None` (the default). Any other value on
   untrusted data is a finding.
