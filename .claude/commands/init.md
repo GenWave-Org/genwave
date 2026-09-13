@@ -1,7 +1,6 @@
 ---
 description: Scaffold the project files I like — CLAUDE.md and the /docs skeleton.
 argument-hint: [project name]
-model: claude-sonnet-4-6
 ---
 
 # init

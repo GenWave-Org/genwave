@@ -1,7 +1,6 @@
 ---
 description: Interview the idea — problem, who, why, scope. Owns docs/PROJECT.md.
 argument-hint: [one-line idea]
-model: claude-opus-4-7
 ---
 
 # explore

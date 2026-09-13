@@ -1,7 +1,6 @@
 ---
 description: Make a small, obvious fix directly on the current branch. No sprint, no PLAN, no stories.
 argument-hint: <describe the fix>
-model: claude-sonnet-4-6
 ---
 
 # quick-fix

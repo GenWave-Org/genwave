@@ -1,7 +1,6 @@
 ---
 description: Interview the solution — architecture, schema, platform. Owns ARCHITECTURE.md + SPEC.md.
 argument-hint: [area to focus, optional]
-model: claude-opus-4-7
 ---
 
 # design
