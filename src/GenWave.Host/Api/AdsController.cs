@@ -987,9 +987,10 @@ public sealed class AdsController(
     /// <summary>Projects one row to its wire shape — an INSTANCE method (PLAN T441), not
     /// <see langword="static"/> like every other pure helper below it, because <see cref="AdSpotJobDto"/>
     /// needs <see cref="jobService"/>'s own in-memory <see cref="AdSpotJobService.IsWaitingForStation"/>
-    /// read (PLAN T441 ruling: <c>job: null</c> exactly when the row carries neither
-    /// <see cref="AdSpot.JobKind"/> nor <see cref="AdSpot.JobError"/>, otherwise the object — so a
-    /// failed job's error stays visible with <c>kind</c> null). <paramref name="sponsor"/> is the FULL
+    /// read (PLAN T441/T464 ruling: <c>job: null</c> exactly when the row carries none of
+    /// <see cref="AdSpot.JobKind"/>, <see cref="AdSpot.JobError"/>, or <see cref="AdSpot.JobFailedKind"/>,
+    /// otherwise the object — so a failed job's error and its <c>failedKind</c> stay visible with
+    /// <c>kind</c> null). <paramref name="sponsor"/> is the FULL
     /// row (a single <see cref="ISponsorStore.GetAsync"/> call at every single-row call site, or
     /// <see cref="List"/>'s own page-wide dictionary), not merely its wire cross-reference —
     /// <see cref="ToPreviewDto"/> needs it to recompute the staleness key. <paramref name="liveSettings"/>
@@ -1002,9 +1003,10 @@ public sealed class AdsController(
         spot.MediaId, spot.CreatedAt, spot.StateChangedAt, spot.RenderedAt, spot.RetiredAt, spot.Version,
         ToJobDto(spot), ToPreviewDto(spot, sponsor, liveSettings));
 
-    AdSpotJobDto? ToJobDto(AdSpot spot) => spot is { JobKind: null, JobError: null }
+    AdSpotJobDto? ToJobDto(AdSpot spot) => spot is { JobKind: null, JobError: null, JobFailedKind: null }
         ? null
-        : new AdSpotJobDto(spot.JobKind, spot.JobStartedAt, jobService.IsWaitingForStation(spot.Id), spot.JobError);
+        : new AdSpotJobDto(
+            spot.JobKind, spot.JobFailedKind, spot.JobStartedAt, jobService.IsWaitingForStation(spot.Id), spot.JobError);
 
     /// <summary>
     /// Projects a spot's own preview stamp to its wire shape (SPEC F174.4; STORY-424 AC4; PLAN T442) —

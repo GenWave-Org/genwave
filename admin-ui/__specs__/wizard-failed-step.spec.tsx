@@ -36,8 +36,7 @@ const SPONSOR_ACME: SponsorRefDto = { id: 1, name: "Acme", paused: false };
 const ERROR_TEXT = "tts_timeout";
 
 /** A settled failure: `kind: null` (nothing running — the in-flight invariant) plus the kind that
- * failed. `failedKind` joins `AdSpotJobDto` at PLAN T464; the assertion keeps this file type-clean
- * until then. */
+ * failed. */
 function failedJob(failedKind: AdJobKind): AdSpotJobDto {
   return {
     kind: null,
@@ -45,7 +44,7 @@ function failedJob(failedKind: AdJobKind): AdSpotJobDto {
     waitingForStation: false,
     error: ERROR_TEXT,
     failedKind,
-  } as AdSpotJobDto;
+  };
 }
 
 function adSpot(overrides: Partial<AdSpotDto> = {}): AdSpotDto {
