@@ -88,29 +88,7 @@ public static class FeatureAdSpotWorker
         }
     }
 
-    public sealed class ScenarioOneSpotPerTick
-    {
-        [Fact]
-        public async Task TwoApprovedSpotsTakeTwoTicks()
-        {
-            // Given two approved spots...
-            var harness = AdSpotWorkerHarness.Build(Now);
-            harness.Store.AddSpot(1, AdState.Approved, stateChangedAt: Now.UtcDateTime.AddMinutes(-2));
-            harness.Store.AddSpot(2, AdState.Approved, stateChangedAt: Now.UtcDateTime.AddMinutes(-1));
-
-            // When the worker ticks once...
-            await harness.Worker.TickOnceAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
-
-            // Then exactly one rendered — the older one, oldest-first — the second is untouched.
-            Assert.Equal(AdState.Ready, harness.Store.Spots.Single(s => s.Id == 1).State);
-            Assert.Equal(AdState.Approved, harness.Store.Spots.Single(s => s.Id == 2).State);
-
-            // When a second tick runs...
-            await harness.Worker.TickOnceAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
-
-            // Then the second spot renders too — two ticks, two renders, never both in one.
-            Assert.Equal(AdState.Ready, harness.Store.Spots.Single(s => s.Id == 2).State);
-            Assert.Equal(2, harness.Store.MarkReadyCallCount);
-        }
-    }
+    // ScenarioOneSpotPerTick (TwoApprovedSpotsTakeTwoTicks) retired by PLAN T456 / STORY-432 (gh-#745):
+    // the worker now drains every approved spot per tick, so "two approved spots take two ticks" is no
+    // longer true by design — see Story432_DrainApprovedSpots.cs for the replacement facts.
 }

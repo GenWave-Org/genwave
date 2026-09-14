@@ -9,6 +9,7 @@ import {
   AD_SOURCE_LABELS,
   approveAdSpot,
   describeAdMutationFailure,
+  describeApproved,
   retireAdSpot,
   retryAdSpot,
   type AdSpotDto,
@@ -101,7 +102,7 @@ export function AdSpotRow({ spot, onChanged, onEdit }: AdSpotRowProps): ReactNod
         toast.error(describeAdMutationFailure(outcome));
         return;
       }
-      toast.success("Spot approved.");
+      toast.success(describeApproved(outcome.spot));
       onChanged();
     });
   }

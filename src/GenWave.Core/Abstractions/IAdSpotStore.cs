@@ -113,7 +113,8 @@ public interface IAdSpotStore
     /// (<c>state_changed_at</c> ascending) via <c>FOR UPDATE SKIP LOCKED</c>, so two concurrent worker
     /// ticks can never claim the same spot twice (mirrors
     /// <c>AnnouncementRepository.ClaimOldestAsync</c>'s own concurrency shape, narrowed to one row per
-    /// call — this worker renders one spot per tick, PLAN T402's own line). Returns
+    /// call — the caller loops this call up to <c>AdSpotWorker.MaxRendersPerTick</c> times per tick,
+    /// re-checking the on-air gate between claims; STORY-432, PLAN T456, gh-#745). Returns
     /// <see langword="null"/> when nothing is <see cref="AdState.Approved"/> — always a legal answer,
     /// never an error (an empty approval queue is a normal day).
     /// </summary>

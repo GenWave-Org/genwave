@@ -28,7 +28,9 @@ nothing lands on `main` without a PR.
    The repo is public.
 4. **Merge, tag, release, push-main are Dean's.** Open the PR, report the
    URL, stop. A PreToolUse hook (`.claude/hooks/merge-guard.sh`) enforces
-   this for every subagent; if it fires, hand Dean the command instead.
+   this for every subagent; the hook path falls back to `$PWD` when
+   `CLAUDE_PROJECT_DIR` is unset or empty. If the guard blocks you, hand Dean
+   the command instead.
 5. **No `--force` to shared branches, no `--no-verify`, no `--amend` after
    push** unless Dean asks. `--force-with-lease` on your own PR branch
    after a rebase is fine.
