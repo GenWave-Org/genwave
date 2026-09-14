@@ -649,6 +649,10 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	  job_kind         text        CHECK (job_kind IS NULL OR job_kind IN ('write', 'preview')),
 	  job_started_at   timestamptz,
 	  job_error        text,
+	  -- job_failed_kind (STORY-435, gh-#724, PLAN T462): db/47's own ADD COLUMN mirror. job_kind
+	  -- is nulled the instant a job settles (success OR failure), so on a failed job it can no
+	  -- longer say which step blew up — job_failed_kind is the one column that still can.
+	  job_failed_kind  text        CHECK (job_failed_kind IS NULL OR job_failed_kind IN ('write', 'preview')),
 	  -- Both CHECKs mirror db/43-ad-spot-invariants-migration.sh's own ALTER TABLE pair (PLAN T398,
 	  -- SPEC F159.2's "ready requires media_id" / "fail_reason iff failed" invariants) — inline here
 	  -- since a fresh install never sees db/43 (only 01+06 run via docker-entrypoint-initdb.d).

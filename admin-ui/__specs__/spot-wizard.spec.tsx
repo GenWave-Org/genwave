@@ -743,7 +743,8 @@ describe("Feature: New spot is a five-step wizard", () => {
   });
 
   describe("Scenario: a failed job leaves the wizard fully usable, not wedged (SPEC F174.3, F174.4; PLAN T448)", () => {
-    const FAILED_JOB: AdSpotJobDto = { kind: null, startedAt: null, waitingForStation: false, error: "Model timed out" };
+    const FAILED_JOB: AdSpotJobDto = { kind: null, failedKind: "write", startedAt: null, waitingForStation: false, error: "Model timed out" };
+    const FAILED_PREVIEW_JOB: AdSpotJobDto = { ...FAILED_JOB, failedKind: "preview" };
 
     it("keeps the action button, Next, and the script textarea enabled with no progress copy, on both Script and Hear", async () => {
       render(
@@ -771,7 +772,7 @@ describe("Feature: New spot is a five-step wizard", () => {
       await act(async () => {
         render(
           <HearStep
-            spot={adSpot({ job: FAILED_JOB })}
+            spot={adSpot({ job: FAILED_PREVIEW_JOB })}
             onSpotUpdated={jest.fn()}
             onError={jest.fn()}
             onNext={jest.fn()}
@@ -789,7 +790,7 @@ describe("Feature: New spot is a five-step wizard", () => {
   });
 
   describe("Scenario: the write/preview job poll (SPEC F174.3, F174.4; PLAN T441, T442, T448)", () => {
-    const ACTIVE_WRITE_JOB: AdSpotJobDto = { kind: "write", startedAt: "2026-09-01T00:00:05Z", waitingForStation: false, error: null };
+    const ACTIVE_WRITE_JOB: AdSpotJobDto = { kind: "write", failedKind: null, startedAt: "2026-09-01T00:00:05Z", waitingForStation: false, error: null };
 
     beforeEach(() => {
       jest.useFakeTimers({ now: new Date("2026-09-01T00:00:00Z") });
@@ -874,7 +875,7 @@ describe("Feature: New spot is a five-step wizard", () => {
           match: (u) => u.pathname === "/api/ads/55",
           respond: () => ({
             status: 200,
-            body: adSpot({ id: 55, script: null, job: { kind: null, startedAt: null, waitingForStation: false, error: "The write job failed." } }),
+            body: adSpot({ id: 55, script: null, job: { kind: null, failedKind: "write", startedAt: null, waitingForStation: false, error: "The write job failed." } }),
           }),
         },
       ]);
@@ -915,7 +916,7 @@ describe("Feature: New spot is a five-step wizard", () => {
   });
 
   describe("Scenario: every step offers Cancel, and every step after the first offers Back (Dean, 2026-09-11)", () => {
-    const IN_FLIGHT_WRITE: AdSpotJobDto = { kind: "write", startedAt: "2026-09-11T14:06:06Z", waitingForStation: false, error: null };
+    const IN_FLIGHT_WRITE: AdSpotJobDto = { kind: "write", failedKind: null, startedAt: "2026-09-11T14:06:06Z", waitingForStation: false, error: null };
 
     it("the Sponsor step has Cancel but no Back, and Cancel closes the wizard", () => {
       installFetchMock([]);

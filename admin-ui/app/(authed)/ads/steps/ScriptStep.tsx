@@ -78,6 +78,7 @@ export function ScriptStep({ spot, onSpotUpdated, onError, onNext, onWrite, onCa
     <div className="flex flex-col gap-4">
       <JobRunner
         job={job}
+        kind="write"
         actionLabel="Write it for me"
         progressLabel="Writing…"
         onStart={onWrite}

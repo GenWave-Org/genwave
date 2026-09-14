@@ -67,6 +67,7 @@ export function HearStep({ spot, onSpotUpdated, onError, onNext, onPreview, onCa
     <div className="flex flex-col gap-4">
       <JobRunner
         job={job}
+        kind="preview"
         actionLabel="Render preview"
         progressLabel="Rendering…"
         onStart={onPreview}

@@ -37,7 +37,7 @@ sealed class AdSpotRepository(Lazy<NpgsqlDataSource> dataSource) : IAdSpotStore
         "id, sponsor_id, sponsor_name, title, brief, script, source::text as source, pack_slug, " +
         "spot_seconds, voice_plan::text as voice_plan, bed_media_id, state::text as state, fail_reason, " +
         "media_id, generation, created_at, state_changed_at, rendered_at, retired_at, xmin::text as version, " +
-        "preview_path, preview_at, preview_key, job_kind, job_started_at, job_error";
+        "preview_path, preview_at, preview_key, job_kind, job_started_at, job_error, job_failed_kind";
 
     static readonly string SelectColumns = $"select {Columns} from station.ad_spot";
 
@@ -555,8 +555,10 @@ sealed class AdSpotRepository(Lazy<NpgsqlDataSource> dataSource) : IAdSpotStore
     /// <c>job_kind is null</c> rather than on <c>state</c>/<c>xmin</c>, and reporting
     /// <see cref="AdSpotJobStampResult.Busy"/> (row exists, already claimed) instead of
     /// <see cref="AdSpotWriteResult.Conflict"/> for the same "row exists but the guard didn't match"
-    /// case. Clears <c>job_error</c> in the SAME statement — a fresh claim never inherits a previous
-    /// attempt's failure text.
+    /// case. Clears <c>job_error</c> AND <c>job_failed_kind</c> (PLAN T463, db/47) in the SAME
+    /// statement — a fresh claim never inherits a previous attempt's failure text or the kind that
+    /// failed; <see cref="AdSpot.JobFailedKind"/> stays null for the whole lifetime of the job this
+    /// stamps, only ever set again by a <see cref="ClearJobAsync"/> that fails it.
     /// </summary>
     public async Task<AdSpotJobStampOutcome> StampJobAsync(long id, string kind, CancellationToken ct)
     {
@@ -564,7 +566,7 @@ sealed class AdSpotRepository(Lazy<NpgsqlDataSource> dataSource) : IAdSpotStore
         var row = await conn.QuerySingleOrDefaultAsync<AdSpotRow>(new CommandDefinition(
             $"""
             update station.ad_spot
-            set job_kind = @kind, job_started_at = now(), job_error = null
+            set job_kind = @kind, job_started_at = now(), job_error = null, job_failed_kind = null
             where id = @id and job_kind is null
             returning {Columns}
             """,
@@ -582,14 +584,25 @@ sealed class AdSpotRepository(Lazy<NpgsqlDataSource> dataSource) : IAdSpotStore
     /// is a harmless no-op" contract): the <c>WHERE</c> only tests <c>id = @id</c>, so a row with no
     /// claim in place is affected too, harmlessly re-writing the SAME null <c>job_kind</c>/
     /// <c>job_started_at</c> it already carried. Mirrors <see cref="MarkReadyAsync"/>/
-    /// <see cref="MarkFailedAsync"/>'s own total posture.</summary>
+    /// <see cref="MarkFailedAsync"/>'s own total posture.
+    ///
+    /// <para>
+    /// <c>job_failed_kind</c> (PLAN T463, db/47) is stamped from the row's OWN <c>job_kind</c> —
+    /// the kind being cleared — exactly when <paramref name="error"/> is non-null, else nulled: null on
+    /// a clean finish or a no-op clear, else the kind that just failed. Postgres evaluates every
+    /// <c>SET</c> right-hand side against the row's PRE-UPDATE values in the same statement, so
+    /// <c>job_kind</c> on the right of <c>case when</c> below still reads the OLD claim even though the
+    /// SAME statement nulls the column on its left.
+    /// </para>
+    /// </summary>
     public async Task<bool> ClearJobAsync(long id, string? error, CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
         var affected = await conn.ExecuteAsync(new CommandDefinition(
             """
             update station.ad_spot
-            set job_kind = null, job_started_at = null, job_error = @error
+            set job_kind = null, job_started_at = null, job_error = @error,
+                job_failed_kind = case when @error is null then null else job_kind end
             where id = @id
             """,
             new { id, error }, cancellationToken: ct));
@@ -657,10 +670,10 @@ sealed class AdSpotRepository(Lazy<NpgsqlDataSource> dataSource) : IAdSpotStore
     }
 
     /// <summary><see cref="IAdSpotStore.ClearPreviewAsync"/> (SPEC F176.2; STORY-429; PLAN T442) — the
-    /// SAME total-by-id shape <see cref="ClearJobAsync"/> already gives the job stamp trio, applied to
-    /// the preview trio instead: the <c>WHERE</c> only tests <c>id = @id</c>, so a row with no preview
-    /// currently stamped is affected too, harmlessly re-writing the SAME three nulls it already
-    /// carried.</summary>
+    /// SAME total-by-id shape <see cref="ClearJobAsync"/> already gives its own job stamp columns,
+    /// applied to the preview trio instead: the <c>WHERE</c> only tests <c>id = @id</c>, so a row with
+    /// no preview currently stamped is affected too, harmlessly re-writing the SAME three nulls it
+    /// already carried.</summary>
     public async Task<bool> ClearPreviewAsync(long id, CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
@@ -697,7 +710,7 @@ sealed class AdSpotRepository(Lazy<NpgsqlDataSource> dataSource) : IAdSpotStore
         row.PackSlug, row.SpotSeconds, row.VoicePlan, row.BedMediaId, ParseState(row.State), row.FailReason,
         row.MediaId, row.Generation, row.CreatedAt, row.StateChangedAt, row.RenderedAt, row.RetiredAt,
         row.Version, row.PreviewPath, row.PreviewAt, row.PreviewKey, row.JobKind, row.JobStartedAt,
-        row.JobError);
+        row.JobError, row.JobFailedKind);
 
     /// <summary>A row read back from <c>station.ad_state</c> whose text does not round-trip through
     /// <see cref="AdStateTokens"/> is a data-integrity bug, not a caller error — the same throwing

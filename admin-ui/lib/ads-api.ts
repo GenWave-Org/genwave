@@ -74,11 +74,14 @@ export const AD_SOURCE_LABELS: Record<AdSource, string> = {
  * {@link inFlightJob}). */
 export type AdJobKind = "write" | "preview";
 
-/** `AdSpotJobDto`'s exact wire shape (`GenWave.Host.Api.AdSpotJobDto`, PLAN T441, T448) — the row's
- * own write/preview job. `kind: null` with `error` set means the last job failed and none is
- * running; `error` is a ProblemDetails-style human sentence, already complete. */
+/** `AdSpotJobDto`'s exact wire shape (`GenWave.Host.Api.AdSpotJobDto`, PLAN T441, T448, T464) — the
+ * row's own write/preview job. `kind: null` with `error` set means the last job failed and none is
+ * running; `error` is a ProblemDetails-style human sentence, already complete. `failedKind` names the
+ * step (`"write"`/`"preview"`) of that last FAILED job — `null` while a job is running or after a
+ * clean finish (STORY-435, gh-#724) — so a stale error can route back to the step that produced it. */
 export interface AdSpotJobDto {
   kind: AdJobKind | null;
+  failedKind: AdJobKind | null;
   startedAt: string | null;
   waitingForStation: boolean;
   error: string | null;

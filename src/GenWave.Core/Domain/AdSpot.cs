@@ -65,6 +65,12 @@ namespace GenWave.Core.Domain;
 /// <see langword="null"/>.</param>
 /// <param name="JobError">The most recent job's own failure message, or <see langword="null"/> after a
 /// clean finish — cleared alongside every successful <c>ClearJobAsync</c>.</param>
+/// <param name="JobFailedKind">The kind (<c>"write"</c> or <c>"preview"</c>) of the most recent job
+/// that FAILED, or <see langword="null"/> after a clean finish and <see langword="null"/> while a fresh
+/// job runs (db/47's own <c>CHECK</c>) — set by <c>ClearJobAsync</c> when it is given a non-null
+/// <paramref name="JobError"/>, cleared by every <c>StampJobAsync</c> claim. A trailing DEFAULTED
+/// param, the <see cref="PreviewPath"/> precedent, so pre-existing positional construction sites stay
+/// compiling.</param>
 public sealed record AdSpot(
     long Id,
     long SponsorId,
@@ -91,4 +97,5 @@ public sealed record AdSpot(
     string? PreviewKey = null,
     string? JobKind = null,
     DateTime? JobStartedAt = null,
-    string? JobError = null);
+    string? JobError = null,
+    string? JobFailedKind = null);
