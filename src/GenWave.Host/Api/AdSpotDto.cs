@@ -1,4 +1,5 @@
 using GenWave.Ads;
+using GenWave.Core.Domain;
 
 namespace GenWave.Host.Api;
 
@@ -21,6 +22,10 @@ namespace GenWave.Host.Api;
 /// <see cref="AdSpotJobDto"/>'s own remarks for the shape when it is not. <see cref="Preview"/> (SPEC
 /// F174.4; PLAN T442) is <see langword="null"/> exactly when no preview has ever been rendered for
 /// this row — see <see cref="AdSpotPreviewDto"/>'s own remarks for the shape when it is not.
+/// <see cref="RenderWithinMinutes"/> (STORY-433; PLAN T457; gh-#745) is the configured render pass
+/// cadence (<c>Ads:WorkerIntervalMinutes</c>) for a spot in the <see cref="AdState.Approved"/> state,
+/// and <see langword="null"/> for every other state — the UI uses it to tell the operator roughly when
+/// the spot will be picked up, not a guaranteed bound.
 /// </summary>
 public sealed record AdSpotDto(
     long Id,
@@ -44,4 +49,5 @@ public sealed record AdSpotDto(
     DateTime? RetiredAt,
     string Version,
     AdSpotJobDto? Job,
-    AdSpotPreviewDto? Preview);
+    AdSpotPreviewDto? Preview,
+    int? RenderWithinMinutes);

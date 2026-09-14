@@ -111,7 +111,10 @@ export interface AdSpotPreviewDto {
  * change snapshot the wire already carries; `sponsor` is the live {@link SponsorRefDto} cross-
  * reference — a spot references its sponsor by id/name/paused, never a free-text customer label.
  * `job`/`preview` are the SpotWizard's own Script/Hear-step state (PLAN T448's wire-gap fix — these
- * two members were missing here although the C# record has always carried them). */
+ * two members were missing here although the C# record has always carried them).
+ * `renderWithinMinutes` is the configured render pass cadence (`Ads:WorkerIntervalMinutes`) for a spot
+ * in the approved state, and `null` for every other state — it tells the operator roughly when the
+ * spot will be picked up, not a guaranteed bound (STORY-433; PLAN T457). */
 export interface AdSpotDto {
   id: number;
   sponsorId: number;
@@ -135,6 +138,7 @@ export interface AdSpotDto {
   version: string;
   job: AdSpotJobDto | null;
   preview: AdSpotPreviewDto | null;
+  renderWithinMinutes: number | null;
 }
 
 /** `GET /api/ads`'s own `{ items, total }` envelope (`AdsController.List`, the
@@ -230,6 +234,20 @@ export type AdMutationOutcome = { ok: true; spot: AdSpotDto } | AdMutationFailur
  * plus the rule id in parentheses when present, never a second, hand-maintained rule→copy table. */
 export function describeAdMutationFailure(failure: AdMutationFailure): string {
   return failure.ruleId !== undefined ? `${failure.detail} (rule: ${failure.ruleId})` : failure.detail;
+}
+
+/** Renders the approve-success toast for `spot` (STORY-433 AC4–AC7; PLAN T458) — reads
+ * `spot.renderWithinMinutes` off the just-approved spot returned by `approveAdSpot`, never a
+ * caller-supplied number, so the row toast (`AdSpotRow.handleApprove`) and both `ApproveStep`
+ * buttons ("Approve as heard" and "Approve without a preview") say the exact same sentence for the
+ * exact same response. `renderWithinMinutes` is the configured render pass cadence
+ * (`Ads:WorkerIntervalMinutes`), not a guaranteed bound — `null` means the window doesn't apply to
+ * the spot's state, so this falls back to a bare confirmation rather than implying a promise the
+ * response didn't make. */
+export function describeApproved(spot: AdSpotDto): string {
+  if (spot.renderWithinMinutes === null) return "Approved.";
+  const minutes = spot.renderWithinMinutes;
+  return `Approved. The station will render it within ${minutes} minute${minutes === 1 ? "" : "s"}.`;
 }
 
 /** The sparse `AdSpotSaveRequest` wire body shared by create and edit (`AdsController.Create`/

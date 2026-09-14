@@ -141,6 +141,7 @@ public sealed class AdsController(
     IAdSpotStore spotStore,
     ISponsorStore sponsorStore,
     IAdminMediaLookup adminLookup,
+    IAuthoredCatalogWriter catalogWriter,
     IAudiencePostureProvider audiencePosture,
     ICopyBoundsProvider copyBounds,
     IPatterDurationEstimator durationEstimator,
@@ -566,7 +567,20 @@ public sealed class AdsController(
 
     /// <summary>POST /api/ads/{id}/retire (SPEC F159.2's as-built rider — the discard ruling, see the
     /// class remarks) — ready|draft|approved|failed to <see cref="AdState.Retired"/>. Requires
-    /// <c>If-Match</c>.</summary>
+    /// <c>If-Match</c>.
+    ///
+    /// <para>
+    /// <b>This action owns the eligibility flip (gh-#722, STORY-434 AC1–AC3; PLAN T460).</b> When the
+    /// transition actually applies and the pre-retire row named a rendered
+    /// <see cref="AdSpot.MediaId"/>, that <c>library.media</c> row is flipped ineligible in the SAME
+    /// request — mirroring <c>AdSpotWorker.RetireStaleAsync</c>'s own
+    /// <see cref="IAuthoredCatalogWriter.SetEligibleAsync"/> call — so
+    /// <see cref="IMediaCatalog.GetRandomReadyAdSpotAsync"/> stops picking it immediately, not only
+    /// after that worker's next tick. <c>AdSpotWorker.RepairReadyEligibilityAsync</c> only ever lists
+    /// <see cref="AdState.Ready"/> rows, so a row this action just retired is never re-enabled by that
+    /// sweep.
+    /// </para>
+    /// </summary>
     [HttpPost("{id:long}/retire")]
     public async Task<IActionResult> Retire(long id, CancellationToken ct)
     {
@@ -575,7 +589,38 @@ public sealed class AdsController(
             return ifMatchError;
 
         var outcome = await spotStore.RetireAsync(id, expectedVersion, ct);
+        if (outcome is { Result: AdSpotWriteResult.Updated, Spot: { MediaId: { } mediaId } spot })
+            await FlipMediaIneligibleAsync(mediaId, spot, ct);
+
         return await MapTransition(outcome, ct);
+    }
+
+    /// <summary>
+    /// The retire action's own eligibility half (gh-#722, STORY-434; PLAN T460) — mirrors
+    /// <c>AdSpotWorker.RetireStaleAsync</c>'s <see cref="IAuthoredCatalogWriter.SetEligibleAsync"/>
+    /// call for an operator-driven retire. The transition already committed by the time this runs, so
+    /// neither a <see langword="false"/> return (row not found) nor a thrown exception ever fails the
+    /// retire's own 200 — both log Warning and leave the row for a later reconcile, the same
+    /// "never this call alone's problem" posture <c>RetireStaleAsync</c> already holds for its own
+    /// failed writes.
+    /// </summary>
+    async Task FlipMediaIneligibleAsync(long mediaId, AdSpot spot, CancellationToken ct)
+    {
+        try
+        {
+            if (!await catalogWriter.SetEligibleAsync(mediaId, eligible: false, ct))
+            {
+                logger.LogWarning(
+                    "Ad spot {Id} ({Sponsor}) retire could not flip media row {MediaId} ineligible: row not found",
+                    spot.Id, LogSanitize.Strip(spot.SponsorName), mediaId);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex,
+                "Ad spot {Id} ({Sponsor}) retire could not flip media row {MediaId} ineligible",
+                spot.Id, LogSanitize.Strip(spot.SponsorName), mediaId);
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -990,8 +1035,9 @@ public sealed class AdsController(
     /// read (PLAN T441/T464 ruling: <c>job: null</c> exactly when the row carries none of
     /// <see cref="AdSpot.JobKind"/>, <see cref="AdSpot.JobError"/>, or <see cref="AdSpot.JobFailedKind"/>,
     /// otherwise the object — so a failed job's error and its <c>failedKind</c> stay visible with
-    /// <c>kind</c> null). <paramref name="sponsor"/> is the FULL
-    /// row (a single <see cref="ISponsorStore.GetAsync"/> call at every single-row call site, or
+    /// <c>kind</c> null), and now <see cref="RenderWindowFor"/> needs its own <see cref="adsOptions"/>
+    /// read too (PLAN T457) — two instance reads. <paramref name="sponsor"/> is the FULL row (a single
+    /// <see cref="ISponsorStore.GetAsync"/> call at every single-row call site, or
     /// <see cref="List"/>'s own page-wide dictionary), not merely its wire cross-reference —
     /// <see cref="ToPreviewDto"/> needs it to recompute the staleness key. <paramref name="liveSettings"/>
     /// is read ONCE by the caller (PLAN T442 ruling) — never re-read here per row; see
@@ -1001,7 +1047,13 @@ public sealed class AdsController(
         spot.Script, AdSourceTokens.ToToken(spot.Source), spot.PackSlug, spot.SpotSeconds,
         DeserializeVoicePlan(spot.VoicePlan), spot.BedMediaId, AdStateTokens.ToToken(spot.State), spot.FailReason,
         spot.MediaId, spot.CreatedAt, spot.StateChangedAt, spot.RenderedAt, spot.RetiredAt, spot.Version,
-        ToJobDto(spot), ToPreviewDto(spot, sponsor, liveSettings));
+        ToJobDto(spot), ToPreviewDto(spot, sponsor, liveSettings), RenderWindowFor(spot));
+
+    /// <summary>The configured worker interval for an approved spot, else <see langword="null"/>
+    /// (STORY-433; PLAN T457; gh-#745).</summary>
+    int? RenderWindowFor(AdSpot spot) => spot.State == AdState.Approved
+        ? adsOptions.CurrentValue.WorkerIntervalMinutes
+        : null;
 
     AdSpotJobDto? ToJobDto(AdSpot spot) => spot is { JobKind: null, JobError: null, JobFailedKind: null }
         ? null

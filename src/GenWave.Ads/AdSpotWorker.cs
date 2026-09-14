@@ -52,10 +52,11 @@ using GenWave.Tts;
 /// <c>approved</c> per the live <c>Station:Ads:AutoApprove</c> read (SPEC F159.4, STORY-389 AC2/AC3) —
 /// running BEFORE the render pass below means an auto-approved spot can render in the SAME tick it was
 /// generated.</item>
-/// <item><b>Render</b> (SPEC F161.1, STORY-391 AC4/AC6) — claims and renders AT MOST one
-/// <see cref="AdState.Approved"/> spot, gated on <see cref="IOnAirRenderSignal.InFlight"/> and a
+/// <item><b>Render</b> (SPEC F161.1, STORY-391 AC4/AC6; STORY-432, PLAN T456, gh-#745) — drains every
+/// <see cref="AdState.Approved"/> spot this tick, up to <see cref="MaxRendersPerTick"/>, re-checking
+/// <see cref="IOnAirRenderSignal.InFlight"/> before every claim and wrapping each render in a
 /// worker-owned render-budget <see cref="CancellationTokenSource"/>. See
-/// <see cref="RenderOneIfDueAsync"/>'s own remarks for the full cancel-in-flight/budget shape.</item>
+/// <see cref="RenderDueAsync"/>'s own remarks for the full drain/cancel-in-flight/budget shape.</item>
 /// </list>
 ///
 /// <para>
@@ -93,6 +94,17 @@ public sealed class AdSpotWorker(
     /// safest "no stronger signal exists yet" middle ground of the three shipped structures.
     /// </summary>
     const int GeneratedSpotSeconds = 30;
+
+    /// <summary>
+    /// The render drain's own per-tick ceiling (STORY-432, PLAN T456, gh-#745) — a constant, not a
+    /// knob: one tick draining the ENTIRE approved queue with no cap could, on a large backlog, run
+    /// long enough to starve the next tick's repair/retire/refill passes and never yield the render
+    /// budget the on-air chain needs. 25 is generous headroom above any queue this station's own
+    /// <c>Station:Ads:TargetCount</c> stock target is ever expected to build
+    /// (<see cref="AdStockSettingsReader.DefaultTargetCount"/> is 12) while still bounding a single
+    /// tick's worst case.
+    /// </summary>
+    internal const int MaxRendersPerTick = 25;
 
     /// <summary>How often an in-flight render re-checks <see cref="onAirRenderSignal"/> — the SAME
     /// order of magnitude as <c>CrosstalkStockWorker.WatchdogInterval</c>, for the identical reason: the
@@ -133,7 +145,7 @@ public sealed class AdSpotWorker(
             await RepairReadyEligibilityAsync(stoppingToken);
             await RetireStaleAsync(settings.RefreshDays, stoppingToken);
             await RefillIfNeededAsync(settings, stoppingToken);
-            await RenderOneIfDueAsync(liveSettings, stoppingToken);
+            await RenderDueAsync(liveSettings, stoppingToken);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
@@ -361,9 +373,64 @@ public sealed class AdSpotWorker(
     };
 
     /// <summary>
-    /// SPEC F161.1, STORY-391 AC4/AC6: claims and renders AT MOST one <see cref="AdState.Approved"/>
-    /// spot. No render even STARTS while <see cref="onAirRenderSignal"/> already reads in flight
-    /// (STORY-391 AC4's own first fact); once started, a worker-owned linked
+    /// SPEC F161.1, STORY-391 AC4/AC6; STORY-432, PLAN T456 (gh-#745): drains every
+    /// <see cref="AdState.Approved"/> spot this tick, one claim at a time, until the queue is empty, a
+    /// claim conflicts, a render is cancelled by the budget or an on-air break window, or
+    /// <see cref="MaxRendersPerTick"/> renders have landed — whichever comes first.
+    /// <c>tests/GenWave.Ads.Tests/Specs/Story391_AdSpotWorker.cs</c>'s own retired
+    /// <c>ScenarioOneSpotPerTick</c> fact ("two approved spots take two ticks") is exactly what this
+    /// drain replaces: an approved queue no longer waits one tick per spot.
+    ///
+    /// <para>
+    /// <b>The gate is re-checked before every claim, not once per tick (STORY-432 AC4).</b>
+    /// <see cref="onAirRenderSignal"/> can flip to in-flight WHILE this loop is draining a longer
+    /// queue; the loop breaks the instant it does, before the next claim — never merely skipping the
+    /// render call for a spot already claimed.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>A per-spot render failure never stops the drain (STORY-432 AC3).</b>
+    /// <see cref="AdRenderService.RenderAsync"/> already marks a failed spot's own row
+    /// <see cref="AdState.Failed"/> before returning <see cref="AdRenderOutcome.Failed"/> — this loop
+    /// simply claims the next approved spot and keeps going; there is nothing more for this worker to
+    /// do to the failed row. A <see cref="AdRenderOutcome.ClaimConflict"/>, or a genuine render
+    /// cancellation from the budget/break-window (both resolved inside <see cref="RenderClaimedAsync"/>
+    /// before it returns <see langword="null"/>), DOES stop the drain for this tick: a claim conflict
+    /// means the guardian is racing this worker over the SAME row (see
+    /// <see cref="AdRenderOutcome.ClaimConflict"/>'s own remarks — the row is already back to approved,
+    /// the next tick retries it), and a cancelled render means the on-air chain now needs the CPU this
+    /// tick was about to spend rendering.
+    /// </para>
+    /// </summary>
+    async Task RenderDueAsync(AdLiveSettings liveSettings, CancellationToken stoppingToken)
+    {
+        var rendered = 0;
+        for (var i = 0; i < MaxRendersPerTick; i++)
+        {
+            if (onAirRenderSignal.InFlight)
+                break;
+
+            if (await spotStore.ClaimNextApprovedAsync(stoppingToken) is not { } claimed)
+                break;
+
+            var outcome = await RenderClaimedAsync(claimed, liveSettings, stoppingToken);
+            if (outcome is null or AdRenderOutcome.ClaimConflict)
+                break; // cancelled render (budget/break-window) or a claim conflict: stop this tick.
+
+            if (outcome is AdRenderOutcome.Rendered)
+                rendered++;
+            // AdRenderOutcome.Failed: the spot is already marked failed — keep draining (STORY-432 AC3).
+        }
+
+        if (rendered > 0)
+            logger.LogInformation("Ad spot worker rendered {Count} approved spot(s) this tick", rendered);
+    }
+
+    /// <summary>
+    /// Renders exactly one already-claimed spot — <see cref="RenderDueAsync"/>'s own per-claim body,
+    /// extracted at PLAN T456 so the drain loop above can tell a genuine <see cref="AdRenderOutcome"/>
+    /// apart from a cancelled render (<see langword="null"/>) without duplicating the
+    /// <see cref="CancellationTokenSource"/> plumbing per claim. Once started, a worker-owned linked
     /// <see cref="CancellationTokenSource"/> carries TWO independent cancellation sources into
     /// <see cref="AdRenderService.RenderAsync"/>:
     /// <list type="bullet">
@@ -381,7 +448,9 @@ public sealed class AdSpotWorker(
     /// signature) — a genuine budget timeout marks the spot <see cref="AdState.Failed"/> (an operator
     /// retry is the right next step for a systematically wedged backend), while a break-window yield
     /// re-arms it straight back to <see cref="AdState.Approved"/> via <see cref="IAdSpotStore.ReArmAsync"/>
-    /// so the very next tick — no operator required — resumes it (STORY-391 AC4's own third fact).
+    /// so the very next tick — no operator required — resumes it (STORY-391 AC4's own third fact). Either
+    /// way this method returns <see langword="null"/>, telling <see cref="RenderDueAsync"/> to stop the
+    /// drain for this tick rather than claim another spot.
     ///
     /// <para>
     /// <b>Cast pick happens here (SPEC F167; STORY-402; PLAN T415)</b> — between the claim
@@ -400,14 +469,8 @@ public sealed class AdSpotWorker(
     /// second-guessed (SPEC F168.5).
     /// </para>
     /// </summary>
-    async Task RenderOneIfDueAsync(AdLiveSettings liveSettings, CancellationToken stoppingToken)
+    async Task<AdRenderOutcome?> RenderClaimedAsync(AdSpot claimed, AdLiveSettings liveSettings, CancellationToken stoppingToken)
     {
-        if (onAirRenderSignal.InFlight)
-            return;
-
-        if (await spotStore.ClaimNextApprovedAsync(stoppingToken) is not { } claimed)
-            return;
-
         var castStamped = await stamper.StampCastIfNeededAsync(claimed, liveSettings, stoppingToken);
         var spot = await stamper.StampBedIfNeededAsync(castStamped, stoppingToken);
 
@@ -423,10 +486,12 @@ public sealed class AdSpotWorker(
         {
             var outcome = await renderService.RenderAsync(spot, liveSettings, renderCts.Token);
             LogOutcome(spot.Id, outcome);
+            return outcome;
         }
         catch (OperationCanceledException) when (renderCts.IsCancellationRequested && !stoppingToken.IsCancellationRequested)
         {
             await RecoverFromCanceledRenderAsync(spot.Id, breakWindowOpened);
+            return null;
         }
         finally
         {
@@ -454,7 +519,7 @@ public sealed class AdSpotWorker(
     }
 
     /// <summary>
-    /// Best-effort recovery after <see cref="RenderOneIfDueAsync"/>'s own <c>renderCts</c> fired
+    /// Best-effort recovery after <see cref="RenderClaimedAsync"/>'s own <c>renderCts</c> fired
     /// (PLAN T402) — uses <see cref="CancellationToken.None"/> deliberately: the
     /// token that carried this render is already dead, and this bookkeeping write must still land even
     /// if <paramref name="spotId"/>'s own render was cancelled by the very budget/host-shutdown signal

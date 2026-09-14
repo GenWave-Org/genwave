@@ -75,7 +75,9 @@ batched `AskUserQuestion` rounds. Phases that transform (`/plan`, `/spec`,
 Small commands that defer to the `git-workflow` skill — direct, detailed, no
 ceremony. PRs and issues go through the `gh` CLI against `GenWave-Org/genwave`
 (the skill ships body templates for both). Merging, tagging, releasing and
-pushing `main` are Dean's; a PreToolUse hook enforces it.
+pushing `main` are Dean's; a PreToolUse hook enforces it. The hook path falls
+back to `$PWD` when `CLAUDE_PROJECT_DIR` is unset or empty, so the guard still
+fires in sessions started from the project root.
 
 | Command | Purpose |
 |---|---|
