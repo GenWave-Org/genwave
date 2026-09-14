@@ -68,6 +68,7 @@ function adSpot(overrides: Partial<AdSpotDto> = {}): AdSpotDto {
     stateChangedAt: "2026-09-01T00:00:00Z",
     renderedAt: null,
     retiredAt: null,
+    renderWithinMinutes: null,
     version: "100",
     job: null,
     preview: null,
