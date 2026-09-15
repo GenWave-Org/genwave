@@ -295,8 +295,10 @@ public static class FeatureBuildWithoutLaunchPrerequisites
             => Assert.Equal("build-only", Build.Value.EnvSeenBy("docker", "compose").GetValueOrDefault("ICECAST_ADMIN_PASSWORD"));
 
         [Fact]
+        // MEDIA_DIR is a bind-mount SOURCE (`${MEDIA_DIR:?}:/media:ro`): compose reads a bare word
+        // there as a named volume and refuses the project, so its placeholder is path-shaped.
         public static void The_image_build_sees_a_media_dir_placeholder()
-            => Assert.Equal("build-only", Build.Value.EnvSeenBy("docker", "compose").GetValueOrDefault("MEDIA_DIR"));
+            => Assert.Equal("/build-only", Build.Value.EnvSeenBy("docker", "compose").GetValueOrDefault("MEDIA_DIR"));
     }
 
     public static class ScenarioTheParentShellAlreadyHasARealValue
@@ -314,7 +316,7 @@ public static class FeatureBuildWithoutLaunchPrerequisites
 
         [Fact]
         public static void The_other_secrets_still_get_placeholders()
-            => Assert.Equal("build-only", Build.Value.EnvSeenBy("docker", "compose").GetValueOrDefault("MEDIA_DIR"));
+            => Assert.Equal("/build-only", Build.Value.EnvSeenBy("docker", "compose").GetValueOrDefault("MEDIA_DIR"));
     }
 
     public static class ScenarioTheBuildIsRunWithPreflightSkipped

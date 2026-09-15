@@ -112,7 +112,7 @@ preflight_print_report() {
 }
 
 # Rendered on an EXIT trap, not an explicit call at the end of preflight_env_secrets — a caller
-# that only runs preflight_docker (build.sh has no secrets to check), or that hard-fails partway
+# that only runs preflight_docker_build (build.sh checks no secrets, gh-#775), or that hard-fails partway
 # through preflight_env_secrets, still gets every row recorded up to that point printed before
 # the process actually exits. Registered once, here, at source time — fires no matter which
 # function (or preflight_fail's `exit 3`, left byte-identical) ends the process.
@@ -125,8 +125,8 @@ trap preflight_print_report EXIT
 # preflight_docker_build — the BUILD subset (gh-#775, STORY-437): docker present, daemon
 # reachable, compose plugin installed, compose version at/above the floor. Nothing here reads
 # ports/disk/RAM — a compile never touches a socket a launch would need free, or headroom a
-# launch would need available. build.sh switches to this function in T471 (until then it still
-# calls preflight_docker); launch.sh and setup.sh keep calling preflight_docker, unchanged, below.
+# launch would need available. build.sh calls this function; launch.sh and setup.sh keep calling
+# preflight_docker, unchanged, below.
 preflight_docker_build() {
   preflight_enabled || return 0
 

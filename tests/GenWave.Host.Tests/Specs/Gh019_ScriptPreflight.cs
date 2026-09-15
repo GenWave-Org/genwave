@@ -289,8 +289,8 @@ public static class FeatureScriptPreflight
         [Fact]
         public static void WithASuitableSdkTheDockerCheckIsNext()
         {
-            // dotnet passes, docker is absent — proving check ORDER (tooling before daemon
-            // before secrets) and that build.sh gates on docker too.
+            // dotnet passes, docker is absent — proving check ORDER (tooling before daemon)
+            // and that build.sh gates on docker too.
             var bin = MakeBinDir();
             AddStub(bin, "dotnet",
                 """if [ "${1:-}" = "--list-sdks" ]; then echo "10.0.100 [/usr/lib/dotnet/sdk]"; exit 0; fi; exit 0""");

@@ -334,6 +334,13 @@ relaunches until gh-#631 lands (the port check doesn't recognise the stack's own
 ports when docker collapses them into a range). It never touches tests: `SKIP_TESTS=1` is
 the separate knob that skips `build.sh`'s pre-image test run.
 
+**Build.** `./build.sh` needs no `.env`, no music library and no free station ports. It
+checks only the .NET 10 SDK, Docker, the compose plugin and the compose version floor, and exports
+placeholders for the compose secrets in its own process so image builds render (`build-only`
+for the five passwords, `/build-only` for `MEDIA_DIR` — a bind-mount source, so it needs a
+leading slash or compose reads it as a named volume) — a value already set in the shell or
+in `.env` always wins.
+
 Combine with `--with` to also activate compose profiles (e.g. `logging`, `tunnel`) on the
 same launch: `./launch.sh --pinned --with logging,tunnel` merges them into whatever
 `COMPOSE_PROFILES` is already set (env or `.env`).
