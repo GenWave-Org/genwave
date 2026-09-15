@@ -7,71 +7,17 @@
 //
 // Isolation: each scenario runs the script with PATH pointed at a scratch bin directory holding
 // symlinks to the coreutils the scripts need plus (per scenario) a scripted `docker`/`dotnet`
-// stub — "docker not installed" is simply a PATH without one. The six required .env secrets are
-// scrubbed from the child environment and GW_ENV_FILE (a preflight-only test seam) points at a
-// scratch env file, so the developer's real .env and shell exports can never sway an assertion.
+// stub — "docker not installed" is simply a PATH without one. The child starts from
+// ScriptProcess's sanitized environment (gh-#776) and GW_ENV_FILE (a preflight-only test seam)
+// points at a scratch env file, so the developer's real .env and shell exports can never sway
+// an assertion.
 
-using System.Diagnostics;
+using GenWave.Host.Tests.Support;
 
 namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureScriptPreflight
 {
-    static readonly string[] RequiredEnvVars =
-    [
-        "POSTGRES_PASSWORD", "LIBRARY_DB_PASSWORD", "STATION_DB_PASSWORD",
-        "ICECAST_SOURCE_PASSWORD", "ICECAST_ADMIN_PASSWORD", "MEDIA_DIR",
-    ];
-
-    /// <summary>Coreutils the scripts themselves need — everything else is deliberately absent.</summary>
-    static readonly string[] BaseTools =
-        ["bash", "sh", "grep", "tail", "cut", "seq", "sleep", "awk", "dirname", "cat", "paste"];
-
-    static string RepoRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "GenWave.sln")))
-            dir = dir.Parent;
-
-        if (dir is null) throw new InvalidOperationException("repo root (GenWave.sln) not found");
-        return dir.FullName;
-    }
-
-    static string ResolveTool(string tool)
-    {
-        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(':'))
-        {
-            var candidate = Path.Combine(dir, tool);
-            if (File.Exists(candidate))
-                return candidate;
-        }
-        throw new InvalidOperationException($"required tool not on PATH: {tool}");
-    }
-
-    /// <summary>A scratch bin dir with the coreutils symlinked in and nothing else.</summary>
-    static string MakeBinDir()
-    {
-        var dir = Directory.CreateTempSubdirectory("gw-preflight-bin-").FullName;
-        foreach (var tool in BaseTools)
-            File.CreateSymbolicLink(Path.Combine(dir, tool), ResolveTool(tool));
-        return dir;
-    }
-
-    static void AddStub(string binDir, string name, string body)
-    {
-        var path = Path.Combine(binDir, name);
-        File.WriteAllText(path, "#!/usr/bin/env bash\n" + body + "\n");
-        // The scripts under test are bash — these specs only ever run on a Unix host (CI + dev
-        // are both Linux); the guard exists to satisfy CA1416, not to support Windows.
-        if (!OperatingSystem.IsWindows())
-        {
-            File.SetUnixFileMode(path,
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
-                UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
-                UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
-        }
-    }
-
     /// <summary>A docker stub whose `docker info` succeeds (daemon "running"), everything else a no-op.</summary>
     static string HealthyDockerStub => "exit 0";
 
@@ -92,34 +38,8 @@ public static class FeatureScriptPreflight
 
     static (int ExitCode, string StdOut, string StdErr) RunScript(
         string script, string binDir, string? envFile = null,
-        IReadOnlyDictionary<string, string>? extraEnv = null, params string[] args)
-    {
-        var startInfo = new ProcessStartInfo("bash")
-        {
-            WorkingDirectory = RepoRoot(),
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-        startInfo.ArgumentList.Add(Path.Combine(RepoRoot(), script));
-        foreach (var arg in args) startInfo.ArgumentList.Add(arg);
-
-        startInfo.Environment["PATH"] = binDir;
-        foreach (var name in RequiredEnvVars)
-            startInfo.Environment.Remove(name);
-        if (envFile is not null)
-            startInfo.Environment["GW_ENV_FILE"] = envFile;
-        if (extraEnv is not null)
-            foreach (var (key, value) in extraEnv)
-                startInfo.Environment[key] = value;
-
-        using var process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException($"failed to start {script}");
-        var stdOut = process.StandardOutput.ReadToEnd();
-        var stdErr = process.StandardError.ReadToEnd();
-        process.WaitForExit();
-        return (process.ExitCode, stdOut, stdErr);
-    }
+        IReadOnlyDictionary<string, string>? extraEnv = null, params string[] args) =>
+        ScriptProcess.Run(script, binDir, envFile, extraEnv, args);
 
     // ---------------------------------------------------------------------
     // Docker preflight (launch.sh)
@@ -132,7 +52,7 @@ public static class FeatureScriptPreflight
         {
             // --dry-run's "touches nothing" contract (STORY-201) survives the gh-#19 preflight:
             // the plan prints on a machine with no docker at all.
-            var (exitCode, stdOut, _) = RunScript("launch.sh", MakeBinDir(), args: "--dry-run");
+            var (exitCode, stdOut, _) = RunScript("launch.sh", ScriptProcess.MakeBinDir(), args: "--dry-run");
 
             Assert.Equal(0, exitCode);
             Assert.Contains("plan> ", stdOut);
@@ -141,7 +61,7 @@ public static class FeatureScriptPreflight
         [Fact]
         public static void MissingDockerFailsWithInstallGuidance()
         {
-            var (exitCode, _, stdErr) = RunScript("launch.sh", MakeBinDir());
+            var (exitCode, _, stdErr) = RunScript("launch.sh", ScriptProcess.MakeBinDir());
 
             Assert.Equal(3, exitCode);
             Assert.Contains("Docker is not installed", stdErr);
@@ -152,8 +72,8 @@ public static class FeatureScriptPreflight
         [Fact]
         public static void DeadDaemonFailsWithStartGuidance()
         {
-            var bin = MakeBinDir();
-            AddStub(bin, "docker",
+            var bin = ScriptProcess.MakeBinDir();
+            ScriptProcess.AddStub(bin, "docker",
                 """if [ "${1:-}" = "info" ]; then echo "Cannot connect to the Docker daemon" >&2; exit 1; fi; exit 0""");
 
             var (exitCode, _, stdErr) = RunScript("launch.sh", bin);
@@ -166,8 +86,8 @@ public static class FeatureScriptPreflight
         [Fact]
         public static void PermissionDeniedFailsWithDockerGroupGuidance()
         {
-            var bin = MakeBinDir();
-            AddStub(bin, "docker",
+            var bin = ScriptProcess.MakeBinDir();
+            ScriptProcess.AddStub(bin, "docker",
                 """if [ "${1:-}" = "info" ]; then echo "permission denied while trying to connect to the Docker daemon socket" >&2; exit 1; fi; exit 0""");
 
             var (exitCode, _, stdErr) = RunScript("launch.sh", bin);
@@ -184,7 +104,7 @@ public static class FeatureScriptPreflight
             // (and then fails at the first real docker call on this deliberately docker-less
             // PATH — with a non-preflight error).
             var (exitCode, _, stdErr) = RunScript(
-                "launch.sh", MakeBinDir(), extraEnv: new Dictionary<string, string> { ["SKIP_PREFLIGHT"] = "1" });
+                "launch.sh", ScriptProcess.MakeBinDir(), extraEnv: new Dictionary<string, string> { ["SKIP_PREFLIGHT"] = "1" });
 
             Assert.NotEqual(0, exitCode);
             Assert.DoesNotContain("preflight:", stdErr);
@@ -199,8 +119,8 @@ public static class FeatureScriptPreflight
     {
         static string HealthyDockerBin()
         {
-            var bin = MakeBinDir();
-            AddStub(bin, "docker", HealthyDockerStub);
+            var bin = ScriptProcess.MakeBinDir();
+            ScriptProcess.AddStub(bin, "docker", HealthyDockerStub);
             return bin;
         }
 
@@ -265,7 +185,7 @@ public static class FeatureScriptPreflight
         [Fact]
         public static void MissingDotnetSdkFailsWithInstallGuidance()
         {
-            var (exitCode, _, stdErr) = RunScript("build.sh", MakeBinDir());
+            var (exitCode, _, stdErr) = RunScript("build.sh", ScriptProcess.MakeBinDir());
 
             Assert.Equal(3, exitCode);
             Assert.Contains(".NET SDK is not installed", stdErr);
@@ -275,8 +195,8 @@ public static class FeatureScriptPreflight
         [Fact]
         public static void AWrongSdkMajorFailsNamingWhatWasFound()
         {
-            var bin = MakeBinDir();
-            AddStub(bin, "dotnet",
+            var bin = ScriptProcess.MakeBinDir();
+            ScriptProcess.AddStub(bin, "dotnet",
                 """if [ "${1:-}" = "--list-sdks" ]; then echo "8.0.100 [/usr/lib/dotnet/sdk]"; exit 0; fi; exit 0""");
 
             var (exitCode, _, stdErr) = RunScript("build.sh", bin);
@@ -291,8 +211,8 @@ public static class FeatureScriptPreflight
         {
             // dotnet passes, docker is absent — proving check ORDER (tooling before daemon)
             // and that build.sh gates on docker too.
-            var bin = MakeBinDir();
-            AddStub(bin, "dotnet",
+            var bin = ScriptProcess.MakeBinDir();
+            ScriptProcess.AddStub(bin, "dotnet",
                 """if [ "${1:-}" = "--list-sdks" ]; then echo "10.0.100 [/usr/lib/dotnet/sdk]"; exit 0; fi; exit 0""");
 
             var (exitCode, _, stdErr) = RunScript("build.sh", bin);

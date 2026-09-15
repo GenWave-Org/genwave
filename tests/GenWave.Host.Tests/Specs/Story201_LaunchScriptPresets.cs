@@ -8,45 +8,19 @@
 // stack. The sad path (BUILD=1 + --pinned) must error before any docker invocation,
 // dry-run or not. No spec here needs the docker CLI; none carry Category=Integration.
 
-using System.Diagnostics;
+using GenWave.Host.Tests.Support;
 
 namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureLaunchScriptPresets
 {
-    static string RepoRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "GenWave.sln")))
-            dir = dir.Parent;
-
-        if (dir is null) throw new InvalidOperationException("repo root (GenWave.sln) not found");
-        return dir.FullName;
-    }
+    // --dry-run only, driving the real toolchain on the developer's own PATH, not a scratch
+    // bin — ScriptProcess still starts the child from its sanitized environment (gh-#776).
+    static readonly string RealPath = Environment.GetEnvironmentVariable("PATH") ?? "/usr/bin:/bin";
 
     static (int ExitCode, string StdOut, string StdErr) RunLaunch(
-        IReadOnlyDictionary<string, string>? extraEnv, params string[] args)
-    {
-        var startInfo = new ProcessStartInfo("bash")
-        {
-            WorkingDirectory = RepoRoot(),
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-        startInfo.ArgumentList.Add(Path.Combine(RepoRoot(), "launch.sh"));
-        foreach (var arg in args) startInfo.ArgumentList.Add(arg);
-        if (extraEnv is not null)
-            foreach (var (key, value) in extraEnv)
-                startInfo.Environment[key] = value;
-
-        using var process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("failed to start launch.sh");
-        var stdOut = process.StandardOutput.ReadToEnd();
-        var stdErr = process.StandardError.ReadToEnd();
-        process.WaitForExit();
-        return (process.ExitCode, stdOut, stdErr);
-    }
+        IReadOnlyDictionary<string, string>? extraEnv, params string[] args) =>
+        ScriptProcess.Run("launch.sh", RealPath, extraEnv: extraEnv, args: args);
 
     static string[] PlanLines(string stdOut) =>
         stdOut.Split('\n').Where(l => l.StartsWith("plan> ", StringComparison.Ordinal)).ToArray();

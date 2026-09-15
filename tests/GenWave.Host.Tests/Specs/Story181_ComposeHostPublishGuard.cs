@@ -23,49 +23,26 @@
 
 using System.Diagnostics;
 
+using GenWave.Host.Tests.Support;
+
 namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureComposeHostPublishGuard
 {
-    static string RepoRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "GenWave.sln")))
-            dir = dir.Parent;
+    // This guard renders compose itself against the real toolchain on the developer's own PATH,
+    // not a scratch bin — ScriptProcess still starts the child from its sanitized environment
+    // (gh-#776).
+    static readonly string RealPath = Environment.GetEnvironmentVariable("PATH") ?? "/usr/bin:/bin";
 
-        if (dir is null) throw new InvalidOperationException("repo root (GenWave.sln) not found");
-        return dir.FullName;
-    }
-
-    static string ScriptPath => Path.Combine(RepoRoot(), "tools", "check-compose-publish.sh");
-
-    static (int ExitCode, string StdOut, string StdErr) RunGuardScript(params string[] args)
-    {
-        var startInfo = new ProcessStartInfo("bash")
-        {
-            WorkingDirectory = RepoRoot(),
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-        startInfo.ArgumentList.Add(ScriptPath);
-        foreach (var arg in args) startInfo.ArgumentList.Add(arg);
-
-        // gh-#249: the guard's default mode renders compose itself with no --profile flags,
-        // inheriting this process's environment — pin the profile set empty so ambient
-        // COMPOSE_PROFILES / a dev box's .env (e.g. admin -> admin_ui 3000:3000 on the base
-        // file) can never leak extra services into the render it checks.
-        startInfo.Environment["COMPOSE_PROFILES"] = "";
-
-        using var process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("failed to start check-compose-publish.sh");
-
-        var stdOut = process.StandardOutput.ReadToEnd();
-        var stdErr = process.StandardError.ReadToEnd();
-        process.WaitForExit();
-
-        return (process.ExitCode, stdOut, stdErr);
-    }
+    static (int ExitCode, string StdOut, string StdErr) RunGuardScript(params string[] args) =>
+        ScriptProcess.Run(
+            "tools/check-compose-publish.sh", RealPath,
+            // gh-#249: the guard's default mode renders compose itself with no --profile flags,
+            // inheriting this process's environment — pin the profile set empty so ambient
+            // COMPOSE_PROFILES / a dev box's .env (e.g. admin -> admin_ui 3000:3000 on the base
+            // file) can never leak extra services into the render it checks.
+            extraEnv: new Dictionary<string, string> { ["COMPOSE_PROFILES"] = "" },
+            args: args);
 
     public static class ScenarioCurrentOverlayPasses
     {
@@ -96,7 +73,7 @@ public static class FeatureComposeHostPublishGuard
             // When  that render is fed to the guard through --config-file mode
             // Then  it still exits 0 — cloudflared publishes no host ports at all, so activating
             //       its profile can never regress the caddy-80/443-only invariant (F67.1)
-            var configJson = RenderMergedConfigWithTunnelProfile(RepoRoot());
+            var configJson = RenderMergedConfigWithTunnelProfile(RepoRootLocator.Find(AppContext.BaseDirectory));
 
             var fixturePath = Path.Combine(Path.GetTempPath(), $"check-compose-publish-tunnel-profile-{Guid.NewGuid():N}.json");
             File.WriteAllText(fixturePath, configJson);

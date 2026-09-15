@@ -1,14 +1,22 @@
 // STORY-344 — The wizard interview (F132.1–.6)
 //
-// BDD specification — xUnit. Drives the REAL ./setup.sh via Process with scripted stdin
-// answers — the Gh019/Story342 idiom: a scratch-PATH bin dir with coreutils symlinks +
-// scripted docker/dotnet stubs, a scratch GW_ENV_FILE, ambient GW_* scrubbed from the child
-// environment. No daemon, safe anywhere. Most scenarios run with SKIP_PREFLIGHT=1 — the
-// machine/`.env` preflight itself is Story342's suite; ScenarioPreflightRunsAfterTheEnvWrite
+// BDD specification — xUnit. Drives the REAL ./setup.sh via ScriptProcess with scripted stdin
+// answers — the child starts from ScriptProcess's sanitized environment (gh-#776): every
+// ambient GW_*/SKIP_*/COMPOSE_* export and .env secret name is scrubbed before setup.sh ever
+// sees it, on a scratch-PATH bin dir with coreutils symlinks + scripted docker/dotnet stubs and
+// a scratch GW_ENV_FILE. No daemon, safe anywhere. Most scenarios run with SKIP_PREFLIGHT=1 —
+// the machine/`.env` preflight itself is Story342's suite; ScenarioPreflightRunsAfterTheEnvWrite
 // below is the one place this file proves setup.sh actually wires preflight_docker +
 // preflight_env_secrets in after the write, on real (stubbed) machine facts.
+//
+// One fact — ScenarioTheNoMusicLane.TheRecheckLoopProceedsOnceAudioFilesAppear — needs to write
+// a file to disk from THIS process only after observing the child block on its "check again?"
+// read, and to send several more answers as the wizard progresses: a genuinely live stdin/
+// stdout interleave. ScriptProcess.Run only returns once the child has already exited, so that
+// one fact drives setup.sh via ScriptProcess.Start (gh-#776) instead — same sanitized
+// environment, but it hands back the live Process so this method can read its stdout as it
+// arrives and write each answer only once the prompt it depends on has appeared.
 
-using System.Diagnostics;
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -18,6 +26,8 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+
+using GenWave.Host.Tests.Support;
 
 namespace GenWave.Host.Tests.Specs;
 
@@ -84,95 +94,14 @@ public static class FeatureSetupWizardInterview
     // Shared harness
     // ─────────────────────────────────────────────────────────────────────────
 
-    static readonly string[] RequiredEnvVars =
-    [
-        "POSTGRES_PASSWORD", "LIBRARY_DB_PASSWORD", "STATION_DB_PASSWORD",
-        "ICECAST_SOURCE_PASSWORD", "ICECAST_ADMIN_PASSWORD", "MEDIA_DIR",
-    ];
-
-    /// <summary>setup.sh/preflight.sh test seams this suite might otherwise inherit from the
-    /// ambient shell — scrubbed so the developer's real .env/exports can never sway a fact.</summary>
-    static readonly string[] SeamEnvVars =
-    [
-        "ADMIN_PASSWORD", "COMPOSE_PROFILES", "GW_PRESET", "GW_ENV_FILE", "GW_MEMINFO_FILE",
-        "GW_ARCH", "GW_PREFLIGHT_TOPOLOGY", "GW_PREFLIGHT_DEMO", "GW_CMDLINE_FILE",
-        "GW_MOUNTS_FILE", "GW_SS_CMD", "GW_DF_CMD", "GW_FIND_CMD", "GW_DOCKER_ROOT_FALLBACK",
-        // T318/STORY-345 seams — scrubbed here too so an ambient shell's own values can never
-        // sway a fact; ScenarioPreflightRunsAfterTheEnvWrite.AHealthyMachineReachesReadyToLaunch
-        // and ScenarioTheNoMusicLane.TheRecheckLoopProceedsOnceAudioFilesAppear pin all three
-        // explicitly (the wizard now actually launches on its way to "Ready to launch" / a full
-        // exit 0, so both need a real GW_LAUNCH_CMD/GW_STREAM_URL pair to reach it honestly).
-        "GW_LAUNCH_CMD", "GW_STREAM_URL", "GW_ONAIR_TIMEOUT_SECONDS",
-        // T317 review LOW finding: an ambient SKIP_PREFLIGHT=1 (e.g. a developer's own shell)
-        // must never silently sway a fact — ScenarioPreflightRunsAfterTheEnvWrite's two facts
-        // set it deliberately (by omission — neither passes it as extraEnv, both need the real
-        // preflight_docker to actually run against their stubs).
-        "SKIP_PREFLIGHT",
-    ];
-
-    static readonly string[] BaseTools =
-    [
-        "bash", "sh", "grep", "sed", "tail", "head", "cut", "seq", "sleep", "awk", "dirname",
-        "cat", "paste", "find", "tr", "mktemp", "mv", "rm", "uname",
-        // T318/STORY-345: setup.sh's on-air path needs curl (wait_for_on_air), hostname
-        // (print_handoff's admin URL) and date (append_setup_log's ISO timestamp only — the
-        // clock itself runs on bash's builtin $SECONDS, no `date` needed there). Harmless to
-        // every other fact in this file, which never reaches that code path.
-        "curl", "hostname", "date",
-    ];
-
-    static string RepoRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "GenWave.sln")))
-            dir = dir.Parent;
-
-        if (dir is null) throw new InvalidOperationException("repo root (GenWave.sln) not found");
-        return dir.FullName;
-    }
-
-    static string ResolveTool(string tool)
-    {
-        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(':'))
-        {
-            var candidate = Path.Combine(dir, tool);
-            if (File.Exists(candidate))
-                return candidate;
-        }
-        throw new InvalidOperationException($"required tool not on PATH: {tool}");
-    }
-
-    static string MakeBinDir()
-    {
-        var dir = Directory.CreateTempSubdirectory("gw-setup-story344-bin-").FullName;
-        foreach (var tool in BaseTools)
-            File.CreateSymbolicLink(Path.Combine(dir, tool), ResolveTool(tool));
-        return dir;
-    }
-
-    static void AddStub(string binDir, string name, string body)
-    {
-        var path = Path.Combine(binDir, name);
-        File.WriteAllText(path, "#!/usr/bin/env bash\n" + body + "\n");
-        // bash targets only — these specs only ever run on the Linux dev/CI hosts (guard exists
-        // to satisfy CA1416, not to support Windows).
-        if (!OperatingSystem.IsWindows())
-        {
-            File.SetUnixFileMode(path,
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
-                UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
-                UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
-        }
-    }
-
     /// <summary>A bin dir with no `dotnet` at all — Q1's build-your-own path must never be offered.</summary>
-    static string BinWithoutDotnet() => MakeBinDir();
+    static string BinWithoutDotnet() => ScriptProcess.MakeBinDir();
 
     /// <summary>A bin dir whose `dotnet --list-sdks` reports a 10.x SDK — Q1 must offer both options.</summary>
     static string BinWithDotnet10Sdk()
     {
-        var bin = MakeBinDir();
-        AddStub(bin, "dotnet",
+        var bin = ScriptProcess.MakeBinDir();
+        ScriptProcess.AddStub(bin, "dotnet",
             """if [ "${1:-}" = "--list-sdks" ]; then echo "10.0.100 [/usr/lib/dotnet/sdk]"; exit 0; fi; exit 0""");
         return bin;
     }
@@ -182,15 +111,15 @@ public static class FeatureSetupWizardInterview
     static string HealthyPreflightBin()
     {
         var bin = BinWithoutDotnet();
-        AddStub(bin, "docker",
+        ScriptProcess.AddStub(bin, "docker",
             """
             if [ "${1:-}" = "info" ]; then exit 0; fi
             if [ "${1:-}" = "compose" ] && [ "${2:-}" = "version" ]; then echo "Docker Compose version v2.24.5"; exit 0; fi
             exit 0
             """);
-        AddStub(bin, "ss",
+        ScriptProcess.AddStub(bin, "ss",
             """echo "State   Recv-Q  Send-Q   Local Address:Port   Peer Address:Port  Process" """);
-        AddStub(bin, "df",
+        ScriptProcess.AddStub(bin, "df",
             """
             echo "Filesystem     1024-blocks      Used Available Capacity Mounted on"
             echo "tmpfs            50000000   1000000  49000000       3% /"
@@ -198,16 +127,15 @@ public static class FeatureSetupWizardInterview
         return bin;
     }
 
-    /// <summary>Every BaseTool except `mv` symlinked (real binaries), then a stub `mv` that
-    /// always fails — proves the atomic-write's temp-file cleanup path (T317 review LOW
-    /// finding). Building this by omission + AddStub, rather than AddStub-ing over an
-    /// already-symlinked "mv", avoids writing through that symlink into the real system `mv`.</summary>
+    /// <summary>Every ScriptProcess.MakeBinDir tool except `mv` symlinked (real binaries), then a
+    /// stub `mv` that always fails — proves the atomic-write's temp-file cleanup path (T317
+    /// review LOW finding). Deleting the real `mv` symlink before stubbing, rather than AddStub-
+    /// ing straight over it, avoids writing through that symlink into the real system `mv`.</summary>
     static string BinWithFailingMv()
     {
-        var dir = Directory.CreateTempSubdirectory("gw-setup-story344-bin-").FullName;
-        foreach (var tool in BaseTools.Where(t => t != "mv"))
-            File.CreateSymbolicLink(Path.Combine(dir, tool), ResolveTool(tool));
-        AddStub(dir, "mv", "exit 1");
+        var dir = ScriptProcess.MakeBinDir();
+        File.Delete(Path.Combine(dir, "mv"));
+        ScriptProcess.AddStub(dir, "mv", "exit 1");
         return dir;
     }
 
@@ -234,59 +162,26 @@ public static class FeatureSetupWizardInterview
     static readonly IReadOnlyDictionary<string, string> SkipPreflight =
         new Dictionary<string, string> { ["SKIP_PREFLIGHT"] = "1" };
 
-    /// <summary>Runs the real setup.sh, feeding the given text verbatim to stdin (then closing
-    /// it) and returning the whole run's exit code/stdout/stderr — the Gh019/Story342 idiom
-    /// extended with stdin, since the wizard's answer channel IS stdin.</summary>
+    /// <summary>Runs the real setup.sh, feeding the given text verbatim to its stdin — the
+    /// Gh019/Story342 idiom extended with stdin, since the wizard's answer channel IS stdin.
+    /// ScriptProcess.Run (gh-#776) has no stdin parameter, so the answers are spooled to a
+    /// scratch file and what actually runs is a one-line wrapper script (`exec bash setup.sh <
+    /// answers-file`) — bash hitting EOF at the end of that file behaves identically, from
+    /// setup.sh's own `read` calls, to writing the same bytes to a live pipe and then closing
+    /// it (including for the mid-interview-abandonment facts below: the next `read` simply
+    /// fails at end of input either way, so no broken-pipe handling is needed here).</summary>
     static (int ExitCode, string StdOut, string StdErr) RunSetup(
         string binDir, string envFile, string stdinAnswers,
         IReadOnlyDictionary<string, string>? extraEnv = null)
     {
-        var startInfo = new ProcessStartInfo("bash")
-        {
-            WorkingDirectory = RepoRoot(),
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            RedirectStandardInput = true,
-            UseShellExecute = false,
-        };
-        startInfo.ArgumentList.Add(Path.Combine(RepoRoot(), "setup.sh"));
+        var scratchDir = Directory.CreateTempSubdirectory("gw-setup-story344-stdin-").FullName;
+        var answersPath = Path.Combine(scratchDir, "answers.txt");
+        File.WriteAllText(answersPath, stdinAnswers);
 
-        startInfo.Environment["PATH"] = binDir;
-        foreach (var name in RequiredEnvVars) startInfo.Environment.Remove(name);
-        foreach (var name in SeamEnvVars) startInfo.Environment.Remove(name);
-        startInfo.Environment["GW_ENV_FILE"] = envFile;
-        if (extraEnv is not null)
-            foreach (var (key, value) in extraEnv)
-                startInfo.Environment[key] = value;
+        var wrapperPath = Path.Combine(scratchDir, "run-setup.sh");
+        File.WriteAllText(wrapperPath, $"exec bash setup.sh < \"{answersPath}\"\n");
 
-        using var process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("failed to start setup.sh");
-
-        // Concurrent reads, not sequential ReadToEnd() + WaitForExit() (Story343's convention):
-        // a child writing enough to fill both OS pipe buffers at once can deadlock a reader that
-        // drains one stream to completion before starting the other.
-        var stdOutTask = process.StandardOutput.ReadToEndAsync();
-        var stdErrTask = process.StandardError.ReadToEndAsync();
-
-        // A child that routes to adoption mode (or otherwise exits before its next prompt)
-        // closes its stdin read end without ever draining the scripted answers — this write
-        // (and the subsequent Close) racing that exit is a legitimate outcome several facts
-        // rely on (e.g. ScenarioExistingBoxesRouteToAdoption), not a test failure, so a broken
-        // pipe here is swallowed rather than thrown.
-        try
-        {
-            process.StandardInput.Write(stdinAnswers);
-            process.StandardInput.Close();
-        }
-        catch (IOException)
-        {
-            // Child already exited without reading stdin — nothing left to write to.
-        }
-
-        Task.WaitAll(stdOutTask, stdErrTask);
-        process.WaitForExit();
-
-        return (process.ExitCode, stdOutTask.Result, stdErrTask.Result);
+        return ScriptProcess.Run(wrapperPath, binDir, envFile, extraEnv);
     }
 
     /// <summary>Writes a scripted launch.sh stand-in that exits 0 immediately — T318's on-air
@@ -777,26 +672,16 @@ public static class FeatureSetupWizardInterview
             var launchStub = WriteExitZeroLaunchStub();
             using var mount = new ImmediateMountStub();
 
-            var startInfo = new ProcessStartInfo("bash")
+            var extraEnv = new Dictionary<string, string>
             {
-                WorkingDirectory = RepoRoot(),
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                RedirectStandardInput = true,
-                UseShellExecute = false,
+                ["SKIP_PREFLIGHT"] = "1",
+                ["GW_LAUNCH_CMD"] = launchStub,
+                ["GW_STREAM_URL"] = mount.Url,
+                ["GW_ONAIR_TIMEOUT_SECONDS"] = "30",
             };
-            startInfo.ArgumentList.Add(Path.Combine(RepoRoot(), "setup.sh"));
-            startInfo.Environment["PATH"] = BinWithoutDotnet();
-            foreach (var name in RequiredEnvVars) startInfo.Environment.Remove(name);
-            foreach (var name in SeamEnvVars) startInfo.Environment.Remove(name);
-            startInfo.Environment["GW_ENV_FILE"] = envFile;
-            startInfo.Environment["SKIP_PREFLIGHT"] = "1";
-            startInfo.Environment["GW_LAUNCH_CMD"] = launchStub;
-            startInfo.Environment["GW_STREAM_URL"] = mount.Url;
-            startInfo.Environment["GW_ONAIR_TIMEOUT_SECONDS"] = "30";
 
-            using var process = Process.Start(startInfo)
-                ?? throw new InvalidOperationException("failed to start setup.sh");
+            using var process = ScriptProcess.Start(
+                "setup.sh", BinWithoutDotnet(), envFile, extraEnv, redirectStdin: true);
 
             var stdOutBuilder = new StringBuilder();
             var drain = Task.Run(async () =>

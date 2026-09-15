@@ -1,16 +1,19 @@
 // STORY-436 — A failed migration stops the launch (gh-#770 · PLAN T468–T469)
 //
 // Runner: xUnit driving the REAL ./launch.sh dev flow (down → up db → health poll → migrate.sh →
-// up) against a scripted `docker` on PATH — the Gh332 idiom. Every run happens inside a SCRATCH
-// COPY of the repo root (symlinks to every top-level entry except .env/.git, plus a real db/
+// up) against a scripted `docker` on PATH — the Gh332 idiom, via ScriptProcess (gh-#776), which
+// always starts the child from a sanitized environment. Every run happens inside a SCRATCH COPY
+// of the repo root (symlinks to every top-level entry except .env/.git, plus a real db/
 // directory) because the dev flow's tail writes COMPOSE_FILE into `.env` in its working
-// directory: the developer's own .env must never be touched by a spec. The sad path plants one
-// extra migration, db/99-spec-fail-migration.sh, which the docker stub fails on sight.
+// directory: the developer's own .env must never be touched by a spec — ScriptProcess.Run's
+// fixed WorkingDirectory is harmless here since launch.sh self-relocates via
+// `cd "$(dirname "$0")"` as its first meaningful action, so it always operates on the scratch
+// copy the absolute script path actually points into. The sad path plants one extra migration,
+// db/99-spec-fail-migration.sh, which the docker stub fails on sight.
 //
 // RED at plan time: launch.sh runs `./migrate.sh --keep-going "${MIGRATE_ARGS[@]}" || true`, so a
 // failed migration is reported once on stdout and the launch carries on to `compose up` and exit 0.
 
-using System.Diagnostics;
 using GenWave.Host.Tests.Support;
 
 namespace GenWave.Host.Tests.Specs;
@@ -19,21 +22,6 @@ public static class FeatureAFailedMigrationStopsTheLaunch
 {
     const string FailingMigration = "db/99-spec-fail-migration.sh";
     const string PsqlErrorText = "ERROR:  relation \"station.nope\" does not exist";
-
-    /// <summary>Coreutils launch.sh, migrate.sh and tools/preflight.sh need between them.</summary>
-    static readonly string[] BaseTools =
-    [
-        "bash", "sh", "grep", "tail", "cut", "seq", "sleep", "awk", "dirname", "cat", "paste",
-        "mktemp", "sed", "rm", "wc", "touch", "head", "sort", "date",
-    ];
-
-    static readonly string[] ScrubbedEnvVars =
-    [
-        "POSTGRES_PASSWORD", "LIBRARY_DB_PASSWORD", "STATION_DB_PASSWORD",
-        "ICECAST_SOURCE_PASSWORD", "ICECAST_ADMIN_PASSWORD", "MEDIA_DIR",
-        "ADMIN_PASSWORD", "COMPOSE_PROFILES", "COMPOSE_FILE", "GW_PRESET", "GW_PREFLIGHT_TOPOLOGY",
-        "GW_PREFLIGHT_DEMO", "GW_ENV_FILE", "SKIP_PREFLIGHT",
-    ];
 
     // Answers every docker call the dev flow makes and logs each one to $GW_DOCKER_LOG. The
     // migration runner pipes each db/*-migration.sh into `compose exec -T db bash -s`, so the
@@ -65,32 +53,10 @@ public static class FeatureAFailedMigrationStopsTheLaunch
         exit 0
         """;
 
-    static string ResolveTool(string tool)
-    {
-        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(':'))
-        {
-            var candidate = Path.Combine(dir, tool);
-            if (File.Exists(candidate))
-                return candidate;
-        }
-        throw new InvalidOperationException($"required tool not on PATH: {tool}");
-    }
-
     static string MakeBinDir()
     {
-        var dir = Directory.CreateTempSubdirectory("story436-bin-").FullName;
-        foreach (var tool in BaseTools)
-            File.CreateSymbolicLink(Path.Combine(dir, tool), ResolveTool(tool));
-
-        var stub = Path.Combine(dir, "docker");
-        File.WriteAllText(stub, "#!/usr/bin/env bash\n" + DockerStub + "\n");
-        if (!OperatingSystem.IsWindows())
-        {
-            File.SetUnixFileMode(stub,
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
-                UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
-                UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
-        }
+        var dir = ScriptProcess.MakeBinDir();
+        ScriptProcess.AddStub(dir, "docker", DockerStub);
         return dir;
     }
 
@@ -161,34 +127,19 @@ public static class FeatureAFailedMigrationStopsTheLaunch
         var scratch = MakeScratchRepo(plantFailingMigration);
         var log = Path.Combine(Directory.CreateTempSubdirectory("story436-log-").FullName, "docker.log");
 
-        var startInfo = new ProcessStartInfo("bash")
+        var extraEnv = new Dictionary<string, string>
         {
-            WorkingDirectory = scratch,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
+            ["GW_DOCKER_LOG"] = log,
+            // The machine checks (ports, disk, RAM) are Gh019/Story342's subject, not this
+            // story's; the migration step under test sits well past them.
+            ["SKIP_PREFLIGHT"] = "1",
         };
-        startInfo.ArgumentList.Add(Path.Combine(scratch, "launch.sh"));
-        foreach (var arg in args) startInfo.ArgumentList.Add(arg);
 
-        foreach (var name in ScrubbedEnvVars)
-            startInfo.Environment.Remove(name);
-        startInfo.Environment["PATH"] = bin;
-        startInfo.Environment["GW_ENV_FILE"] = WriteEnvFile();
-        startInfo.Environment["GW_DOCKER_LOG"] = log;
-        // The machine checks (ports, disk, RAM) are Gh019/Story342's subject, not this story's;
-        // the migration step under test sits well past them.
-        startInfo.Environment["SKIP_PREFLIGHT"] = "1";
-
-        using var process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("failed to start launch.sh");
-        var stdOutTask = process.StandardOutput.ReadToEndAsync();
-        var stdErrTask = process.StandardError.ReadToEndAsync();
-        Task.WaitAll(stdOutTask, stdErrTask);
-        process.WaitForExit();
+        var (exitCode, stdOut, stdErr) = ScriptProcess.Run(
+            Path.Combine(scratch, "launch.sh"), bin, WriteEnvFile(), extraEnv, args);
 
         var calls = File.Exists(log) ? File.ReadAllLines(log) : [];
-        return new Run(process.ExitCode, stdOutTask.Result, stdErrTask.Result, calls, scratch);
+        return new Run(exitCode, stdOut, stdErr, calls, scratch);
     }
 
     static string[] PlanLines(string stdOut) =>

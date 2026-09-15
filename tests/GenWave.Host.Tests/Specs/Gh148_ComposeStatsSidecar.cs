@@ -12,27 +12,19 @@
 using System.Diagnostics;
 using System.Text.Json;
 
+using GenWave.Host.Tests.Support;
+
 namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureComposeStatsSidecar
 {
     const string PinnedImage = "tecnativa/docker-socket-proxy:v0.4.2";
 
-    static string RepoRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "GenWave.sln")))
-            dir = dir.Parent;
-
-        if (dir is null) throw new InvalidOperationException("repo root (GenWave.sln) not found");
-        return dir.FullName;
-    }
-
     static JsonDocument RenderConfig(bool demoOverlay)
     {
         var startInfo = new ProcessStartInfo("docker")
         {
-            WorkingDirectory = RepoRoot(),
+            WorkingDirectory = RepoRootLocator.Find(AppContext.BaseDirectory),
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -145,29 +137,20 @@ public static class FeatureComposeStatsSidecar
     {
         const string SocketSource = "/var/run/docker.sock";
 
+        // This guard runs against the real toolchain (jq, bash) on the developer's own PATH, not
+        // a scratch bin — ScriptProcess still starts the child from its sanitized environment
+        // (gh-#776).
+        static readonly string RealPath = Environment.GetEnvironmentVariable("PATH") ?? "/usr/bin:/bin";
+
         static (int ExitCode, string Output) RunGuardAgainstFixture(string fixtureJson)
         {
             var fixturePath = Path.Combine(Path.GetTempPath(), $"gh148-socket-{Guid.NewGuid():N}.json");
             File.WriteAllText(fixturePath, fixtureJson);
             try
             {
-                var startInfo = new ProcessStartInfo("bash")
-                {
-                    WorkingDirectory = RepoRoot(),
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                };
-                startInfo.ArgumentList.Add(Path.Combine(RepoRoot(), "tools", "check-compose-socket.sh"));
-                startInfo.ArgumentList.Add("--config-file");
-                startInfo.ArgumentList.Add(fixturePath);
-
-                using var process = Process.Start(startInfo)
-                    ?? throw new InvalidOperationException("failed to start check-compose-socket.sh");
-                var stdOut = process.StandardOutput.ReadToEnd();
-                var stdErr = process.StandardError.ReadToEnd();
-                process.WaitForExit();
-                return (process.ExitCode, stdOut + stdErr);
+                var (exitCode, stdOut, stdErr) = ScriptProcess.Run(
+                    "tools/check-compose-socket.sh", RealPath, args: ["--config-file", fixturePath]);
+                return (exitCode, stdOut + stdErr);
             }
             finally
             {

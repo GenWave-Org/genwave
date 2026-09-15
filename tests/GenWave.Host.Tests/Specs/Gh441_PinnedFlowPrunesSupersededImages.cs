@@ -10,40 +10,20 @@
 // the success-path-only property is structural (every failure bails via preflight_fail before
 // the prune line is reached).
 
-using System.Diagnostics;
+using GenWave.Host.Tests.Support;
 
 namespace GenWave.Host.Tests.Specs;
 
 public static class FeaturePinnedFlowPrunesSupersededImages
 {
-    static string RepoRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "GenWave.sln")))
-            dir = dir.Parent;
-
-        if (dir is null) throw new InvalidOperationException("repo root (GenWave.sln) not found");
-        return dir.FullName;
-    }
+    // These specs drive the real toolchain (docker/bash on the developer's own PATH), not a
+    // scratch bin — ScriptProcess still starts the child from its sanitized environment (gh-#776).
+    static readonly string RealPath = Environment.GetEnvironmentVariable("PATH") ?? "/usr/bin:/bin";
 
     static (int ExitCode, string StdOut) RunLaunch(params string[] args)
     {
-        var startInfo = new ProcessStartInfo("bash")
-        {
-            WorkingDirectory = RepoRoot(),
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-        startInfo.ArgumentList.Add(Path.Combine(RepoRoot(), "launch.sh"));
-        foreach (var arg in args) startInfo.ArgumentList.Add(arg);
-
-        using var process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("failed to start launch.sh");
-        var stdOut = process.StandardOutput.ReadToEnd();
-        process.StandardError.ReadToEnd();
-        process.WaitForExit();
-        return (process.ExitCode, stdOut);
+        var result = ScriptProcess.Run("launch.sh", RealPath, args: args);
+        return (result.ExitCode, result.StdOut);
     }
 
     static string[] PlanLines(string stdOut) =>
