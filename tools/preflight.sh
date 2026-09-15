@@ -122,7 +122,12 @@ preflight_print_report() {
 trap preflight_print_report EXIT
 
 # ---- docker -----------------------------------------------------------------------------
-preflight_docker() {
+# preflight_docker_build — the BUILD subset (gh-#775, STORY-437): docker present, daemon
+# reachable, compose plugin installed, compose version at/above the floor. Nothing here reads
+# ports/disk/RAM — a compile never touches a socket a launch would need free, or headroom a
+# launch would need available. build.sh switches to this function in T471 (until then it still
+# calls preflight_docker); launch.sh and setup.sh keep calling preflight_docker, unchanged, below.
+preflight_docker_build() {
   preflight_enabled || return 0
 
   if ! command -v docker >/dev/null 2>&1; then
@@ -152,6 +157,15 @@ preflight_docker() {
   fi
 
   preflight_compose_version
+}
+
+# preflight_docker — the LAUNCH set (F134.2–F134.4): the build subset above, plus the
+# port/disk/RAM checks a running stack needs and a compile does not. launch.sh and setup.sh
+# call this, unchanged since before STORY-437.
+preflight_docker() {
+  preflight_enabled || return 0
+
+  preflight_docker_build
   preflight_ports
   preflight_resources
 }
