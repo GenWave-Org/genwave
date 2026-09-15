@@ -29,7 +29,7 @@ public static class FeatureDjsHandOffAudibly
     // IStationEventSink (SPEC F92.4).
     // -------------------------------------------------------------------------
 
-    sealed record ProductionChain(
+    internal sealed record ProductionChain(
         Orchestrator Orchestrator,
         SpeechDeferralQueue Queue,
         FakeTimeProvider Time,
@@ -41,10 +41,10 @@ public static class FeatureDjsHandOffAudibly
     // Every unit's own pull-through step (PullUnitsAsync below): small enough that a fixed count of
     // pulls comfortably brackets a 10-minute F74.3 window either side of a boundary, large enough
     // that the whole run stays fast (no real-time waits — FakeTimeProvider drives every due check).
-    static readonly TimeSpan PullStep = TimeSpan.FromSeconds(30);
-    const int PullCount = 60; // 30 minutes of simulated wall clock
+    internal static readonly TimeSpan PullStep = TimeSpan.FromSeconds(30);
+    internal const int PullCount = 60; // 30 minutes of simulated wall clock
 
-    static ProductionChain BuildProductionChain(
+    internal static ProductionChain BuildProductionChain(
         FakePersonaStore personaStore, ScheduleWeekSnapshot snapshot, DateTimeOffset now, TimeSpan lookahead,
         CadenceConfig? cadence = null, TimeSpan? renderBudget = null)
     {
@@ -108,13 +108,13 @@ public static class FeatureDjsHandOffAudibly
 
     // Monday 00:00-12:00 = DJ Alpha (persona 10), 12:00-24:00 = DJ Beta (persona 20) — the same
     // two-DJ arrangement Story241 seeds, boundary at noon.
-    static ScheduleWeekSnapshot TwoDjSchedule() => new(
+    internal static ScheduleWeekSnapshot TwoDjSchedule() => new(
     [
         new ScheduleSegment(Id: 1, Day: Monday, StartMinute: 0, EndMinute: 720, PersonaId: 10, Genres: null, EnergyMin: null, EnergyMax: null),
         new ScheduleSegment(Id: 2, Day: Monday, StartMinute: 720, EndMinute: 1440, PersonaId: 20, Genres: null, EnergyMin: null, EnergyMax: null),
     ]);
 
-    static FakePersonaStore TwoDjStore()
+    internal static FakePersonaStore TwoDjStore()
     {
         var store = new FakePersonaStore();
         store.Add(MakePersona(10, "DJ Alpha", "af_alpha"));
@@ -124,18 +124,18 @@ public static class FeatureDjsHandOffAudibly
 
     // 5 minutes before the noon boundary — inside a 10-minute F74.3 lookahead window from the very
     // first unit planned.
-    static readonly DateTimeOffset JustBeforeNoon = new(2026, 3, 2, 11, 55, 0, TimeSpan.Zero);
+    internal static readonly DateTimeOffset JustBeforeNoon = new(2026, 3, 2, 11, 55, 0, TimeSpan.Zero);
 
-    static bool IsSignOff(MediaItem item) =>
+    internal static bool IsSignOff(MediaItem item) =>
         item.MediaId.StartsWith("tts:signoff", StringComparison.OrdinalIgnoreCase);
 
-    static bool IsSignOn(MediaItem item) =>
+    internal static bool IsSignOn(MediaItem item) =>
         item.MediaId.StartsWith("tts:signon", StringComparison.OrdinalIgnoreCase);
 
     static bool IsMusic(MediaItem item) =>
         !item.MediaId.StartsWith("tts:", StringComparison.Ordinal);
 
-    static async Task<List<MediaItem>> PullUnitsAsync(
+    internal static async Task<List<MediaItem>> PullUnitsAsync(
         Orchestrator orchestrator, FakeTimeProvider time, TimeSpan step, int count)
     {
         var items = new List<MediaItem>();
