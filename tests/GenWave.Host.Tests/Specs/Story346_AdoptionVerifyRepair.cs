@@ -1,20 +1,25 @@
 // STORY-346 — Adopt the existing box (F137)
 //
-// BDD specification — xUnit. Drives the REAL ./setup.sh via Process against scratch checkouts
-// seeded with specific drift (the Gh019 idiom: scratch PATH, a scripted docker stub reporting
-// container/image/schema state via GW_DOCKER_CMD, GW_ENV_FILE seam). The do-no-harm clause's own
-// live-box proof (AC4) is additionally exercised on the real Pi 4 at T321 — the wire, not here;
-// this file's own AC4 facts prove the SCRIPT is read-only by construction (zero file mutation,
-// only read-safe docker subcommands ever invoked), which is what makes that wire attempt safe to
-// run at all.
+// BDD specification — xUnit. Drives the REAL ./setup.sh via ScriptProcess against scratch
+// checkouts seeded with specific drift (the Gh019 idiom: scratch PATH, a scripted docker stub
+// reporting container/image/schema state via GW_DOCKER_CMD, GW_ENV_FILE seam). The do-no-harm
+// clause's own live-box proof (AC4) is additionally exercised on the real Pi 4 at T321 — the
+// wire, not here; this file's own AC4 facts prove the SCRIPT is read-only by construction (zero
+// file mutation, only read-safe docker subcommands ever invoked), which is what makes that wire
+// attempt safe to run at all.
 //
-// Harness: the Story344/345 idiom (scratch PATH bin dir of coreutils symlinks, a scratch
-// GW_ENV_FILE, ambient GW_*/SKIP_PREFLIGHT scrubbed from the child environment) — duplicated here
-// rather than shared (T318's own pinned-for-Dean rider: harness dedup across Story344/345/346 is
-// accepted debt for now). SKIP_PREFLIGHT=1 on every scenario: preflight_docker/preflight_env_secrets
-// are Story342/344's own suite — this file's concern starts at adoption mode's own six drift
-// probes and its repair loop, exercised through a GW_DOCKER_CMD-seamed docker stub (mirrors
-// GW_LAUNCH_CMD's own shape) so no real daemon is ever needed, hard rule 5.
+// Harness (gh-#776): every setup.sh run goes through ScriptProcess.Run, which always starts the
+// child from a sanitized environment (ambient GW_*/SKIP_PREFLIGHT/COMPOSE_*/secrets scrubbed by
+// construction — see ScriptProcess.IsStripped) regardless of what the parent shell happens to
+// export. RunSetupScript spools stdinAnswers to a scratch file and runs a one-line wrapper
+// (`exec bash "<setup.sh>" "$@" < answers.txt`) through ScriptProcess.Run rather than writing to
+// a live pipe — behaviorally identical for every fact in this file, since none of them need to
+// observe live stdout before answering (contrast Story345, which keeps two raw-Process call
+// sites for genuinely live interaction). SKIP_PREFLIGHT=1 on every scenario:
+// preflight_docker/preflight_env_secrets are Story342/344's own suite — this file's concern
+// starts at adoption mode's own six drift probes and its repair loop, exercised through a
+// GW_DOCKER_CMD-seamed docker stub (mirrors GW_LAUNCH_CMD's own shape) so no real daemon is ever
+// needed, hard rule 5.
 //
 // House rule: one assert per Fact — several facts assert one combined boolean via a single
 // Assert.True(...) call where the observation is genuinely one logical fact (several conditions
@@ -23,80 +28,22 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.RegularExpressions;
+using GenWave.Host.Tests.Support;
 
 namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureAdoptionVerifyRepair
 {
     // ─────────────────────────────────────────────────────────────────────────
-    // Shared harness (the Story344/345 idiom, duplicated per T318's pinned rider)
+    // Shared harness (gh-#776: setup.sh runs through ScriptProcess, which owns the scratch PATH
+    // and sanitized-environment construction — see ScriptProcess.cs)
     // ─────────────────────────────────────────────────────────────────────────
 
-    static readonly string[] RequiredEnvVars =
-    [
-        "POSTGRES_PASSWORD", "LIBRARY_DB_PASSWORD", "STATION_DB_PASSWORD",
-        "ICECAST_SOURCE_PASSWORD", "ICECAST_ADMIN_PASSWORD", "MEDIA_DIR",
-    ];
-
-    /// <summary>setup.sh/preflight.sh test seams this suite might otherwise inherit from the
-    /// ambient shell — scrubbed so the developer's real .env/exports can never sway a fact.</summary>
-    static readonly string[] SeamEnvVars =
-    [
-        "ADMIN_PASSWORD", "COMPOSE_PROFILES", "COMPOSE_FILE", "GW_PRESET", "GW_ENV_FILE",
-        "GW_MEMINFO_FILE", "GW_ARCH", "GW_PREFLIGHT_TOPOLOGY", "GW_PREFLIGHT_DEMO",
-        "GW_CMDLINE_FILE", "GW_MOUNTS_FILE", "GW_SS_CMD", "GW_DF_CMD", "GW_FIND_CMD",
-        "GW_DOCKER_ROOT_FALLBACK", "GW_DOCKER_CMD", "SKIP_PREFLIGHT", "GW_LAUNCH_CMD",
-        "GW_STREAM_URL", "GW_ONAIR_TIMEOUT_SECONDS",
-    ];
-
-    static readonly string[] BaseTools =
-    [
-        "bash", "sh", "grep", "sed", "tail", "head", "cut", "seq", "sleep", "awk", "dirname",
-        "cat", "paste", "find", "tr", "mktemp", "mv", "rm", "uname", "date",
-        // N1 (round-2 review): verify_pinned_image_tags mirrors launch.sh's own
-        // print_pinned_image_tags, `sort -u` included — needed once verify_stale_images can
-        // take the pinned branch.
-        "sort",
-    ];
-
-    static string RepoRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "GenWave.sln")))
-            dir = dir.Parent;
-
-        if (dir is null) throw new InvalidOperationException("repo root (GenWave.sln) not found");
-        return dir.FullName;
-    }
-
-    static string ResolveTool(string tool)
-    {
-        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(':'))
-        {
-            var candidate = Path.Combine(dir, tool);
-            if (File.Exists(candidate))
-                return candidate;
-        }
-        throw new InvalidOperationException($"required tool not on PATH: {tool}");
-    }
-
-    static string MakeBinDir()
-    {
-        var dir = Directory.CreateTempSubdirectory("gw-setup-story346-bin-").FullName;
-        foreach (var tool in BaseTools)
-            File.CreateSymbolicLink(Path.Combine(dir, tool), ResolveTool(tool));
-        return dir;
-    }
-
-    /// <summary>A bin dir like <see cref="MakeBinDir"/>, plus the REAL `docker` binary — only
-    /// the B1 real-Postgres fact needs this (GW_DOCKER_CMD is left unset there, so setup.sh
-    /// resolves the literal name `docker` off PATH, same as it would on a real box).</summary>
-    static string MakeBinDirWithDocker()
-    {
-        var dir = MakeBinDir();
-        File.CreateSymbolicLink(Path.Combine(dir, "docker"), ResolveTool("docker"));
-        return dir;
-    }
+    /// <summary>A bin dir like <see cref="ScriptProcess.MakeBinDir"/>, plus the REAL `docker`
+    /// binary — only the B1 real-Postgres fact needs this (GW_DOCKER_CMD is left unset there, so
+    /// setup.sh resolves the literal name `docker` off PATH, same as it would on a real
+    /// box).</summary>
+    static string MakeBinDirWithDocker() => ScriptProcess.MakeBinDir("docker");
 
     /// <summary>A scratch COPY of the real checkout's setup.sh + tools/preflight.sh + the whole
     /// db/ directory + .env.example + every compose*.yaml — B2's own derivation facts need a
@@ -111,7 +58,7 @@ public static class FeatureAdoptionVerifyRepair
     /// probe's write path was covered.</summary>
     static string MakeScratchCheckout()
     {
-        var repoRoot = RepoRoot();
+        var repoRoot = RepoRootLocator.Find(AppContext.BaseDirectory);
         var root = Directory.CreateTempSubdirectory("gw-setup-story346-checkout-").FullName;
 
         File.Copy(Path.Combine(repoRoot, "setup.sh"), Path.Combine(root, "setup.sh"));
@@ -482,16 +429,21 @@ public static class FeatureAdoptionVerifyRepair
             throw new InvalidOperationException($"docker {string.Join(' ', args)} failed:\n{stderr.Result}{stdout.Result}");
     }
 
-    /// <summary>Runs the real setup.sh, feeding the given text verbatim to stdin (then closing
-    /// it) and returning the whole run's exit code/stdout/stderr — the Gh019/Story344/345 idiom,
-    /// extended with a trailing CLI-args array for adoption mode's own surface (--repair[,
-    /// --yes]). SKIP_PREFLIGHT=1 always rides along (extraEnv is applied after it, so a scenario
+    /// <summary>Runs the real setup.sh, feeding the given text verbatim to its stdin — via a
+    /// scratch wrapper script that redirects stdin from a spooled answers file
+    /// (`exec bash "&lt;setup.sh&gt;" "$@" &lt; answers.txt`), since ScriptProcess.Run itself has
+    /// no live-stdin support. Every fact in this file writes its whole answer transcript upfront,
+    /// so a file redirect is behaviorally identical to the old live-pipe write-then-close: bash
+    /// hitting EOF at the end of a redirected file reads the same as a closed pipe, from
+    /// setup.sh's own `read` calls. Returns the whole run's exit code/stdout/stderr — extended
+    /// with a trailing CLI-args array for adoption mode's own surface (--repair[, --yes]).
+    /// SKIP_PREFLIGHT=1 always rides along as a default (extraEnv is merged on top, so a scenario
     /// could still override it, though none here do) — preflight's own checks are Story342/344's
     /// suite. Bare verify calls simply pass no args.</summary>
     static (int ExitCode, string StdOut, string StdErr) RunSetup(
         string binDir, string envFile, string stdinAnswers, IReadOnlyDictionary<string, string> extraEnv,
         params string[] args) =>
-        RunSetupScript(RepoRoot(), Path.Combine(RepoRoot(), "setup.sh"), binDir, envFile, stdinAnswers, extraEnv, args);
+        RunSetupScript(Path.Combine(RepoRootLocator.Find(AppContext.BaseDirectory), "setup.sh"), binDir, envFile, stdinAnswers, extraEnv, args);
 
     /// <summary>Same as <see cref="RunSetup"/>, but against a SCRATCH checkout's own copy of
     /// setup.sh — B2's own derivation facts need this: setup.sh's `cd "$(dirname "$0")"` means
@@ -501,51 +453,24 @@ public static class FeatureAdoptionVerifyRepair
     static (int ExitCode, string StdOut, string StdErr) RunSetupInCheckout(
         string checkoutRoot, string binDir, string envFile, string stdinAnswers, IReadOnlyDictionary<string, string> extraEnv,
         params string[] args) =>
-        RunSetupScript(checkoutRoot, Path.Combine(checkoutRoot, "setup.sh"), binDir, envFile, stdinAnswers, extraEnv, args);
+        RunSetupScript(Path.Combine(checkoutRoot, "setup.sh"), binDir, envFile, stdinAnswers, extraEnv, args);
 
     static (int ExitCode, string StdOut, string StdErr) RunSetupScript(
-        string workingDirectory, string scriptPath, string binDir, string envFile, string stdinAnswers,
+        string scriptPath, string binDir, string envFile, string stdinAnswers,
         IReadOnlyDictionary<string, string> extraEnv, string[] args)
     {
-        var startInfo = new ProcessStartInfo("bash")
-        {
-            WorkingDirectory = workingDirectory,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            RedirectStandardInput = true,
-            UseShellExecute = false,
-        };
-        startInfo.ArgumentList.Add(scriptPath);
-        foreach (var arg in args) startInfo.ArgumentList.Add(arg);
+        var scratchDir = Directory.CreateTempSubdirectory("gw-setup-story346-stdin-").FullName;
+        var answersPath = Path.Combine(scratchDir, "answers.txt");
+        File.WriteAllText(answersPath, stdinAnswers);
 
-        startInfo.Environment["PATH"] = binDir;
-        foreach (var name in RequiredEnvVars) startInfo.Environment.Remove(name);
-        foreach (var name in SeamEnvVars) startInfo.Environment.Remove(name);
-        startInfo.Environment["GW_ENV_FILE"] = envFile;
-        startInfo.Environment["SKIP_PREFLIGHT"] = "1";
+        var wrapperPath = Path.Combine(scratchDir, "run-setup.sh");
+        File.WriteAllText(wrapperPath, $"exec bash \"{scriptPath}\" \"$@\" < \"{answersPath}\"\n");
+
+        var mergedEnv = new Dictionary<string, string> { ["SKIP_PREFLIGHT"] = "1" };
         foreach (var (key, value) in extraEnv)
-            startInfo.Environment[key] = value;
+            mergedEnv[key] = value;
 
-        using var process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("failed to start setup.sh");
-
-        var stdOutTask = process.StandardOutput.ReadToEndAsync();
-        var stdErrTask = process.StandardError.ReadToEndAsync();
-
-        try
-        {
-            process.StandardInput.Write(stdinAnswers);
-            process.StandardInput.Close();
-        }
-        catch (IOException)
-        {
-            // Child already exited without reading stdin — nothing left to write to.
-        }
-
-        Task.WaitAll(stdOutTask, stdErrTask);
-        process.WaitForExit();
-
-        return (process.ExitCode, stdOutTask.Result, stdErrTask.Result);
+        return ScriptProcess.Run(wrapperPath, binDir, envFile, mergedEnv, args);
     }
 
     // ---------------------------------------------------------------------
@@ -569,7 +494,7 @@ public static class FeatureAdoptionVerifyRepair
             WriteEnvFile(envFile, values);
             var docker = WriteDockerStub();
 
-            var (_, stdOut, _) = RunSetup(MakeBinDir(), envFile, "", new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
+            var (_, stdOut, _) = RunSetup(ScriptProcess.MakeBinDir(), envFile, "", new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
 
             Assert.True(
                 stdOut.Contains(".env completeness", StringComparison.Ordinal) &&
@@ -587,7 +512,7 @@ public static class FeatureAdoptionVerifyRepair
             WriteEnvFile(envFile, values);
             var docker = WriteDockerStub();
 
-            var (_, stdOut, _) = RunSetup(MakeBinDir(), envFile, "", new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
+            var (_, stdOut, _) = RunSetup(ScriptProcess.MakeBinDir(), envFile, "", new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
 
             // Key names only, never a value (hard rule 6): the placeholder key is named, but a
             // real secret's own value from elsewhere in the same file never appears anywhere.
@@ -611,7 +536,7 @@ public static class FeatureAdoptionVerifyRepair
             WriteEnvFile(envFile, HealthyEnvValues(Path.GetTempPath(), "compose.yaml"));
             var docker = WriteDockerStub(migrationMarker: "f");
 
-            var (_, stdOut, _) = RunSetup(MakeBinDir(), envFile, "", new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
+            var (_, stdOut, _) = RunSetup(ScriptProcess.MakeBinDir(), envFile, "", new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
 
             Assert.Contains("db/46", stdOut, StringComparison.Ordinal);
         }
@@ -626,7 +551,7 @@ public static class FeatureAdoptionVerifyRepair
                 builtServiceName: "api",
                 builtImage: ("apicid", "imgid", "2020-01-01T00:00:00Z"));
 
-            var (_, stdOut, _) = RunSetup(MakeBinDir(), envFile, "", new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
+            var (_, stdOut, _) = RunSetup(ScriptProcess.MakeBinDir(), envFile, "", new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
 
             Assert.Contains("gh-#351", stdOut, StringComparison.Ordinal);
         }
@@ -645,7 +570,7 @@ public static class FeatureAdoptionVerifyRepair
                 composeConfigBody: "services:\n  api:\n    build: .\n    image: ghcr.io/genwave-org/genwave:home-v5.2.2\n",
                 pinnedImageTags: ["ghcr.io/genwave-org/genwave:home-v5.2.2"]);
 
-            var (_, stdOut, _) = RunSetup(MakeBinDir(), envFile, "",
+            var (_, stdOut, _) = RunSetup(ScriptProcess.MakeBinDir(), envFile, "",
                 new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
 
             Assert.True(
@@ -676,7 +601,7 @@ public static class FeatureAdoptionVerifyRepair
                 composeConfigBody: "services:\n  api:\n    build: .\n    image: ghcr.io/genwave-org/genwave:home-v5.2.1\n",
                 pinnedImageTags: ["ghcr.io/genwave-org/genwave:home-v5.2.1"]);
 
-            var (_, stdOut, _) = RunSetup(MakeBinDir(), envFile, "",
+            var (_, stdOut, _) = RunSetup(ScriptProcess.MakeBinDir(), envFile, "",
                 new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
 
             Assert.True(
@@ -705,7 +630,7 @@ public static class FeatureAdoptionVerifyRepair
                 composeConfigBody: "services:\n  api:\n    build: .\n    image: ghcr.io/genwave-org/genwave:home-v5.2.1\n",
                 pinnedImageTags: ["ghcr.io/genwave-org/genwave:home-v5.2.1"]);
 
-            var (_, stdOut, _) = RunSetup(MakeBinDir(), envFile, "",
+            var (_, stdOut, _) = RunSetup(ScriptProcess.MakeBinDir(), envFile, "",
                 new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
 
             Assert.True(
@@ -731,7 +656,7 @@ public static class FeatureAdoptionVerifyRepair
             var docker = WriteDockerStub(
                 composeArgs: "-f compose.yaml -f compose.demo.yaml.bak -f overlays/compose.demo.yaml.local -f my-compose.demo.yaml");
 
-            var (_, stdOut, _) = RunSetup(MakeBinDir(), envFile, "",
+            var (_, stdOut, _) = RunSetup(ScriptProcess.MakeBinDir(), envFile, "",
                 new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
 
             Assert.True(
@@ -751,7 +676,7 @@ public static class FeatureAdoptionVerifyRepair
                 services: ["db", "api"],
                 actualContainers: [("db", "genwave-db-1"), ("api", "genwave-api-1"), ("kokoro", "genwave-kokoro-1")]);
 
-            var (_, stdOut, _) = RunSetup(MakeBinDir(), envFile, "", new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
+            var (_, stdOut, _) = RunSetup(ScriptProcess.MakeBinDir(), envFile, "", new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
 
             Assert.True(
                 stdOut.Contains("Orphaned container", StringComparison.Ordinal) &&
@@ -804,7 +729,7 @@ public static class FeatureAdoptionVerifyRepair
             File.WriteAllText(envFile, content);
             var docker = WriteDockerStub();
 
-            var (exitCode, stdOut, _) = RunSetup(MakeBinDir(), envFile, "",
+            var (exitCode, stdOut, _) = RunSetup(ScriptProcess.MakeBinDir(), envFile, "",
                 new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
 
             Assert.True(
@@ -826,7 +751,7 @@ public static class FeatureAdoptionVerifyRepair
             WriteEnvFile(envFile, values);
             var docker = WriteDockerStub(composeArgs: "-f compose.yaml -f compose.demo.yaml");
 
-            var (_, stdOut, _) = RunSetup(MakeBinDir(), envFile, "",
+            var (_, stdOut, _) = RunSetup(ScriptProcess.MakeBinDir(), envFile, "",
                 new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
 
             Assert.True(
@@ -875,7 +800,7 @@ public static class FeatureAdoptionVerifyRepair
             var logPath = Path.Combine(Directory.CreateTempSubdirectory("gw-setup-story346-log-").FullName, "argv.log");
             var docker = WriteDockerStub(logPath: logPath);   // every knob at its healthy default
 
-            var (exitCode, stdOut, _) = RunSetupInCheckout(checkoutRoot, MakeBinDir(), envFile, "",
+            var (exitCode, stdOut, _) = RunSetupInCheckout(checkoutRoot, ScriptProcess.MakeBinDir(), envFile, "",
                 new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
 
             var log = File.ReadAllText(logPath);
@@ -980,7 +905,7 @@ public static class FeatureAdoptionVerifyRepair
         [Fact]
         public void TheGatedKeySetIsExactlyPublicHostAndTunnelToken()
         {
-            var setupSh = File.ReadAllText(Path.Combine(RepoRoot(), "setup.sh"));
+            var setupSh = File.ReadAllText(Path.Combine(RepoRootLocator.Find(AppContext.BaseDirectory), "setup.sh"));
             var gatedKeys = ParseGatedKeysFromSetupSh(setupSh);
 
             Assert.True(
@@ -996,7 +921,7 @@ public static class FeatureAdoptionVerifyRepair
             // change moved the reference into compose.yaml itself, or dropped it from
             // compose.demo.yaml entirely, the gate would silently stop matching what actually
             // needs the key.
-            var referencing = ComposeFilesReferencing(RepoRoot(), "PUBLIC_HOST");
+            var referencing = ComposeFilesReferencing(RepoRootLocator.Find(AppContext.BaseDirectory), "PUBLIC_HOST");
 
             Assert.True(
                 referencing.SetEquals(["compose.demo.yaml"]),
@@ -1012,7 +937,7 @@ public static class FeatureAdoptionVerifyRepair
             // compose.yaml, profile-selected rather than overlay-selected. If that reference
             // ever moved into a new overlay file instead, the profile-based gate would need to
             // become a file-based one, and this is what would catch the mismatch.
-            var referencing = ComposeFilesReferencing(RepoRoot(), "TUNNEL_TOKEN");
+            var referencing = ComposeFilesReferencing(RepoRootLocator.Find(AppContext.BaseDirectory), "TUNNEL_TOKEN");
 
             Assert.Contains("compose.yaml", referencing);
         }
@@ -1039,7 +964,7 @@ public static class FeatureAdoptionVerifyRepair
             WriteEnvFile(envFile, values);
             var docker = WriteDockerStub();
 
-            var (_, stdOut, _) = RunSetup(MakeBinDir(), envFile, "",
+            var (_, stdOut, _) = RunSetup(ScriptProcess.MakeBinDir(), envFile, "",
                 new Dictionary<string, string>
                 {
                     ["GW_DOCKER_CMD"] = docker,
@@ -1062,7 +987,7 @@ public static class FeatureAdoptionVerifyRepair
             WriteEnvFile(envFile, HealthyEnvValues(Path.GetTempPath(), "compose.yaml"));
             var docker = WriteDockerStub();
 
-            var (exitCode, stdOut, _) = RunSetup(MakeBinDir(), envFile, "",
+            var (exitCode, stdOut, _) = RunSetup(ScriptProcess.MakeBinDir(), envFile, "",
                 new Dictionary<string, string>
                 {
                     ["GW_DOCKER_CMD"] = docker,
@@ -1093,7 +1018,7 @@ public static class FeatureAdoptionVerifyRepair
             var docker = WriteDockerStub(
                 actualContainers: [("db", "genwave-db-1"), ("api", "genwave-api-1"), ("kokoro", "genwave-kokoro-1")]);
 
-            var (_, stdOut, _) = RunSetup(MakeBinDir(), envFile, "n\n",
+            var (_, stdOut, _) = RunSetup(ScriptProcess.MakeBinDir(), envFile, "n\n",
                 new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker }, "--repair");
 
             var fixIndex = stdOut.IndexOf($"Fix: {docker} rm -f genwave-kokoro-1", StringComparison.Ordinal);
@@ -1121,7 +1046,7 @@ public static class FeatureAdoptionVerifyRepair
                 logPath: logPath);
 
             // First finding (kokoro) declined, second (ollama) accepted.
-            RunSetup(MakeBinDir(), envFile, "n\ny\n",
+            RunSetup(ScriptProcess.MakeBinDir(), envFile, "n\ny\n",
                 new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker }, "--repair");
 
             var log = File.ReadAllText(logPath);
@@ -1146,7 +1071,7 @@ public static class FeatureAdoptionVerifyRepair
                 logPath: logPath);
 
             // Empty stdin: --yes must never block on a prompt for either finding.
-            RunSetup(MakeBinDir(), envFile, "",
+            RunSetup(ScriptProcess.MakeBinDir(), envFile, "",
                 new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker }, "--repair", "--yes");
 
             var log = File.ReadAllText(logPath);
@@ -1164,7 +1089,7 @@ public static class FeatureAdoptionVerifyRepair
             var docker = WriteDockerStub(
                 actualContainers: [("db", "genwave-db-1"), ("api", "genwave-api-1"), ("kokoro", "genwave-kokoro-1")]);
 
-            var (_, stdOut, _) = RunSetup(MakeBinDir(), envFile, "n\n",
+            var (_, stdOut, _) = RunSetup(ScriptProcess.MakeBinDir(), envFile, "n\n",
                 new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker }, "--repair");
 
             var warnIndex = stdOut.IndexOf("stop/restart a running container", StringComparison.Ordinal);
@@ -1187,7 +1112,7 @@ public static class FeatureAdoptionVerifyRepair
                 actualContainers: [("db", "genwave-db-1"), ("api", "genwave-api-1"), ("kokoro", "genwave-kokoro-1")],
                 containerState: "exited");
 
-            var (_, stdOut, _) = RunSetup(MakeBinDir(), envFile, "n\n",
+            var (_, stdOut, _) = RunSetup(ScriptProcess.MakeBinDir(), envFile, "n\n",
                 new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker }, "--repair");
 
             Assert.True(
@@ -1217,7 +1142,7 @@ public static class FeatureAdoptionVerifyRepair
 
             // Only ONE answer for TWO findings — stdin closes before the second item's own
             // confirm read.
-            var (exitCode, stdOut, _) = RunSetup(MakeBinDir(), envFile, "y\n",
+            var (exitCode, stdOut, _) = RunSetup(ScriptProcess.MakeBinDir(), envFile, "y\n",
                 new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker }, "--repair");
 
             var log = File.ReadAllText(logPath);
@@ -1246,7 +1171,7 @@ public static class FeatureAdoptionVerifyRepair
 
             // --repair --yes with nothing repairable: an exit 0 (no outstanding findings) is
             // itself part of the proof this was never offered as a fix.
-            var (exitCode, stdOut, _) = RunSetup(MakeBinDir(), envFile, "",
+            var (exitCode, stdOut, _) = RunSetup(ScriptProcess.MakeBinDir(), envFile, "",
                 new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker }, "--repair", "--yes");
 
             Assert.True(
@@ -1263,7 +1188,7 @@ public static class FeatureAdoptionVerifyRepair
             WriteEnvFile(envFile, HealthyEnvValues(Path.GetTempPath(), "compose.yaml:compose.override.yaml"));
             var docker = WriteDockerStub(composeArgs: "-f compose.yaml -f compose.override.yaml");
 
-            var (exitCode, stdOut, _) = RunSetup(MakeBinDir(), envFile, "",
+            var (exitCode, stdOut, _) = RunSetup(ScriptProcess.MakeBinDir(), envFile, "",
                 new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker }, "--repair", "--yes");
 
             // The unshipped file is named as an INFO-level customization, and — since nothing
@@ -1291,7 +1216,7 @@ public static class FeatureAdoptionVerifyRepair
             WriteEnvFile(envFile, HealthyEnvValues(Path.GetTempPath(), "compose.yaml"));
             var docker = WriteDockerStub();   // every knob at its healthy default
 
-            var (exitCode, _, _) = RunSetup(MakeBinDir(), envFile, "",
+            var (exitCode, _, _) = RunSetup(ScriptProcess.MakeBinDir(), envFile, "",
                 new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
 
             Assert.Equal(0, exitCode);
@@ -1309,7 +1234,7 @@ public static class FeatureAdoptionVerifyRepair
             WriteEnvFile(envFile, HealthyEnvValues(Path.GetTempPath(), "compose.yaml"));
             var docker = WriteDockerStub(reclaimable: "1.2GB");
 
-            var (exitCode, stdOut, _) = RunSetup(MakeBinDir(), envFile, "",
+            var (exitCode, stdOut, _) = RunSetup(ScriptProcess.MakeBinDir(), envFile, "",
                 new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
 
             Assert.True(
@@ -1353,7 +1278,7 @@ public static class FeatureAdoptionVerifyRepair
             var docker = WriteDockerStub(logPath: logPath);
             var before = SnapshotTree(checkoutRoot);
 
-            RunSetupInCheckout(checkoutRoot, MakeBinDir(), envFile, "",
+            RunSetupInCheckout(checkoutRoot, ScriptProcess.MakeBinDir(), envFile, "",
                 new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
 
             var after = SnapshotTree(checkoutRoot);
@@ -1386,7 +1311,7 @@ public static class FeatureAdoptionVerifyRepair
             // suite — an empty stdin's own EOF on the first prompt ends the run harmlessly).
             var envFile = ScratchEnvPath();   // creates the scratch dir only — no .env written
 
-            var (_, stdOut, _) = RunSetup(MakeBinDir(), envFile, "",
+            var (_, stdOut, _) = RunSetup(ScriptProcess.MakeBinDir(), envFile, "",
                 new Dictionary<string, string>(), "--repair");
 
             var honestLineIndex = stdOut.IndexOf("--repair has nothing to fix", StringComparison.Ordinal);
@@ -1458,7 +1383,7 @@ public static class FeatureAdoptionVerifyRepair
             var checkoutRoot = MakeScratchCheckout();
             DeleteMigrationsAbove(checkoutRoot, keepThroughNumber: 46);
 
-            var repoRoot = RepoRoot();
+            var repoRoot = RepoRootLocator.Find(AppContext.BaseDirectory);
             var projectName = $"genwave-hosttest-story346-{Guid.NewGuid():N}";
             var composePath = WriteRealDbCompose(repoRoot, projectName);
 
@@ -1522,7 +1447,7 @@ public static class FeatureAdoptionVerifyRepair
             WriteEnvFile(envFile, HealthyEnvValues(Path.GetTempPath(), "compose.yaml"));
             var docker = WriteDockerStub(migrationMarker: "t", migrationMarkerTable: "station.new_thing");
 
-            var (_, stdOut, _) = RunSetupInCheckout(checkoutRoot, MakeBinDir(), envFile, "",
+            var (_, stdOut, _) = RunSetupInCheckout(checkoutRoot, ScriptProcess.MakeBinDir(), envFile, "",
                 new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
 
             Assert.True(
@@ -1562,7 +1487,7 @@ public static class FeatureAdoptionVerifyRepair
             // verify_migrations before any psql query is ever issued.
             var docker = WriteDockerStub(migrationMarkerTable: "station.station_image");
 
-            var (_, stdOut, _) = RunSetupInCheckout(checkoutRoot, MakeBinDir(), envFile, "",
+            var (_, stdOut, _) = RunSetupInCheckout(checkoutRoot, ScriptProcess.MakeBinDir(), envFile, "",
                 new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
 
             // UNKNOWN, not a fabricated PASS — an honest "Can't verify past db/37" naming

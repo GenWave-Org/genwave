@@ -5,8 +5,9 @@
 // REAL ./launch.sh via Process in --dry-run (exits before any docker call — the
 // Story201 idiom, safe anywhere) for the staged plan and GW_PRESET.
 
-using System.Diagnostics;
 using System.Text.RegularExpressions;
+
+using GenWave.Host.Tests.Support;
 
 namespace GenWave.Host.Tests.Specs;
 
@@ -17,17 +18,7 @@ public static class FeatureStagedStartup
     // ─────────────────────────────────────────────────────────────────────────
 
     /// <summary>Repo root, resolved relative to the test assembly's build output (Story074/102/107's convention).</summary>
-    static string RepoRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "GenWave.sln")))
-            dir = dir.Parent;
-
-        if (dir is null) throw new InvalidOperationException("repo root (GenWave.sln) not found");
-        return dir.FullName;
-    }
-
-    static string ComposeYamlPath => Path.Combine(RepoRoot(), "compose.yaml");
+    static string ComposeYamlPath => Path.Combine(RepoRootLocator.Find(AppContext.BaseDirectory), "compose.yaml");
 
     static string ComposeYamlText => File.ReadAllText(ComposeYamlPath);
 
@@ -90,44 +81,15 @@ public static class FeatureStagedStartup
             "found api's depends_on: kokoro: block but it does not carry 'required: false' (SPEC F136.2)");
     }
 
+    // --dry-run only, driving the real toolchain on the developer's own PATH, not a scratch
+    // bin — ScriptProcess still starts the child from its sanitized environment (gh-#776),
+    // scrubbing GW_PRESET/GW_PREFLIGHT_TOPOLOGY/GW_PREFLIGHT_DEMO before every run so an
+    // ambient shell export can never silently steer a spec's chosen topology.
+    static readonly string RealPath = Environment.GetEnvironmentVariable("PATH") ?? "/usr/bin:/bin";
+
     static (int ExitCode, string StdOut, string StdErr) RunLaunch(
-        string? gwEnvFile, params string[] args)
-    {
-        var startInfo = new ProcessStartInfo("bash")
-        {
-            WorkingDirectory = RepoRoot(),
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-        startInfo.ArgumentList.Add(Path.Combine(RepoRoot(), "launch.sh"));
-        foreach (var arg in args) startInfo.ArgumentList.Add(arg);
-
-        // Scrub ambient topology inputs from the child's environment: a test-runner shell
-        // that happens to export GW_PRESET (or launch.sh's own GW_PREFLIGHT_TOPOLOGY/
-        // GW_PREFLIGHT_DEMO — meant to flow parent-launch.sh -> child-preflight only within a
-        // single real run) must never silently steer a spec's chosen topology out from under
-        // it. ProcessStartInfo.Environment starts as a copy of this process's own environment,
-        // so these need an explicit Remove even though the test never sets them itself.
-        startInfo.Environment.Remove("GW_PRESET");
-        startInfo.Environment.Remove("GW_PREFLIGHT_TOPOLOGY");
-        startInfo.Environment.Remove("GW_PREFLIGHT_DEMO");
-        if (gwEnvFile is not null) startInfo.Environment["GW_ENV_FILE"] = gwEnvFile;
-
-        using var process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("failed to start launch.sh");
-
-        // Concurrent reads, not sequential ReadToEnd() + WaitForExit(): a child writing enough
-        // to fill both OS pipe buffers at once can deadlock a reader that drains one stream to
-        // completion before starting the other, because the child is itself blocked writing to
-        // the stream nobody is draining yet.
-        var stdOutTask = process.StandardOutput.ReadToEndAsync();
-        var stdErrTask = process.StandardError.ReadToEndAsync();
-        Task.WaitAll(stdOutTask, stdErrTask);
-        process.WaitForExit();
-
-        return (process.ExitCode, stdOutTask.Result, stdErrTask.Result);
-    }
+        string? gwEnvFile, params string[] args) =>
+        ScriptProcess.Run("launch.sh", RealPath, gwEnvFile, args: args);
 
     static string[] PlanLines(string stdOut) =>
         stdOut.Split('\n').Where(l => l.StartsWith("plan> ", StringComparison.Ordinal)).ToArray();

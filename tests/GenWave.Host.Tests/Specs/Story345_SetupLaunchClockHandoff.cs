@@ -1,16 +1,15 @@
 // STORY-345 — Launch, the clock, the handoff (F132.7–.8)
 //
-// BDD specification — xUnit. Drives the REAL ./setup.sh via Process; launch.sh and
-// the mount probe are scratch-PATH stubs that record their argv and script their
-// outputs (the Gh019 idiom) — the wizard's orchestration is under spec here, not
-// compose.
+// BDD specification — xUnit. Drives the REAL ./setup.sh, mostly via ScriptProcess (gh-#776) —
+// launch.sh and the mount probe are scratch-PATH stubs that record their argv and script their
+// outputs (the Gh019 idiom) — the wizard's orchestration is under spec here, not compose.
 //
 // Harness: the Story344/Story342 idiom (scratch PATH bin dir of coreutils symlinks, a scratch
-// GW_ENV_FILE, ambient GW_*/SKIP_PREFLIGHT scrubbed from the child environment), extended with
-// two seams the real launch.sh/Icecast can't be run under this harness at all — the T318 task
-// note's own reasoning: the REAL launch.sh would try to talk to a real Docker daemon, and a
-// real Icecast isn't something this harness can stand up either. Chosen pair (both documented
-// in setup.sh's own header):
+// GW_ENV_FILE, ambient GW_*/SKIP_PREFLIGHT scrubbed from the child environment via
+// ScriptProcess's sanitized environment), extended with two seams the real launch.sh/Icecast
+// can't be run under this harness at all — the T318 task note's own reasoning: the REAL
+// launch.sh would try to talk to a real Docker daemon, and a real Icecast isn't something this
+// harness can stand up either. Chosen pair (both documented in setup.sh's own header):
 //   * GW_LAUNCH_CMD — points at a tiny scripted bash stub (WriteLaunchStub) that records its
 //     argv and exits with a scripted code (0 / 4 / anything else) — never a real docker call.
 //   * GW_STREAM_URL — points at a scratch Kestrel instance (MountStub, the same
@@ -19,6 +18,17 @@
 //     service) that scripts which poll attempt first returns HTTP 200 + audio bytes.
 // Every scenario also passes SKIP_PREFLIGHT=1 — preflight itself is Story342/Story344's own
 // suite; this file's concern starts at the "Ready to launch" point.
+//
+// ScenarioTheClockInstrument.TheClockStartsAtTheFirstPromptNotAtLaunch needs to delay its
+// scripted answer well after the child has already started, to prove the clock starts at the
+// first prompt rather than at launch — a plain file-redirected answer (the Story344 idiom every
+// other scenario here uses) has no way to express "not yet." ScriptProcess.Run only returns
+// once the child has exited, so that fact drives setup.sh via ScriptProcess.Start (gh-#776)
+// instead — same sanitized environment, but it hands back the live Process this method writes
+// the delayed answer to directly. RunSetupSendingSigintMidLaunch keeps its own raw Process
+// plumbing regardless — it needs a live handle to deliver a mid-run SIGINT to the child's
+// process GROUP, and spawns `setsid`, not `bash`, so it was never this migration's target in
+// the first place; it calls ScriptProcess.Sanitize to build its environment the same way.
 //
 // House rule: one assert per Fact — a handful of facts assert one combined boolean via a
 // single Assert.True(...) call where the observation is genuinely one logical fact (several
@@ -35,6 +45,8 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+
+using GenWave.Host.Tests.Support;
 
 namespace GenWave.Host.Tests.Specs;
 
@@ -163,38 +175,6 @@ public static class FeatureSetupLaunchClockHandoff
 
     private const int SigInt = 2;
 
-    static readonly string[] RequiredEnvVars =
-    [
-        "POSTGRES_PASSWORD", "LIBRARY_DB_PASSWORD", "STATION_DB_PASSWORD",
-        "ICECAST_SOURCE_PASSWORD", "ICECAST_ADMIN_PASSWORD", "MEDIA_DIR",
-    ];
-
-    /// <summary>setup.sh/preflight.sh test seams this suite might otherwise inherit from the
-    /// ambient shell — scrubbed so the developer's real .env/exports can never sway a fact.</summary>
-    static readonly string[] SeamEnvVars =
-    [
-        "ADMIN_PASSWORD", "COMPOSE_PROFILES", "GW_PRESET", "GW_ENV_FILE", "GW_MEMINFO_FILE",
-        "GW_ARCH", "GW_PREFLIGHT_TOPOLOGY", "GW_PREFLIGHT_DEMO", "GW_CMDLINE_FILE",
-        "GW_MOUNTS_FILE", "GW_SS_CMD", "GW_DF_CMD", "GW_FIND_CMD", "GW_DOCKER_ROOT_FALLBACK",
-        "SKIP_PREFLIGHT", "GW_LAUNCH_CMD", "GW_STREAM_URL", "GW_ONAIR_TIMEOUT_SECONDS",
-    ];
-
-    static readonly string[] BaseTools =
-    [
-        "bash", "sh", "grep", "sed", "tail", "head", "cut", "seq", "sleep", "awk", "dirname",
-        "cat", "paste", "find", "tr", "mktemp", "mv", "rm", "uname", "date", "curl", "hostname",
-    ];
-
-    static string RepoRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "GenWave.sln")))
-            dir = dir.Parent;
-
-        if (dir is null) throw new InvalidOperationException("repo root (GenWave.sln) not found");
-        return dir.FullName;
-    }
-
     static string ResolveTool(string tool)
     {
         foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(':'))
@@ -210,8 +190,9 @@ public static class FeatureSetupLaunchClockHandoff
     /// with `$(hostname)` — asserted here against whatever the REAL `hostname` binary on this
     /// box actually prints, never <see cref="Environment.MachineName"/> or <see
     /// cref="System.Net.Dns"/> (both can differ in case from bash's own `hostname`, which is
-    /// exactly the binary <see cref="BaseTools"/> symlinks into every scenario's scratch PATH
-    /// here). Lazy + cached: every fact in this file that needs it asks for the same value.</summary>
+    /// exactly the binary <see cref="ScriptProcess.MakeBinDir"/> symlinks into every scenario's
+    /// scratch PATH here). Lazy + cached: every fact in this file that needs it asks for the
+    /// same value.</summary>
     static readonly Lazy<string> RealHostname = new(() =>
     {
         var startInfo = new ProcessStartInfo(ResolveTool("hostname"))
@@ -226,14 +207,6 @@ public static class FeatureSetupLaunchClockHandoff
         return output;
     });
 
-    static string MakeBinDir()
-    {
-        var dir = Directory.CreateTempSubdirectory("gw-setup-story345-bin-").FullName;
-        foreach (var tool in BaseTools)
-            File.CreateSymbolicLink(Path.Combine(dir, tool), ResolveTool(tool));
-        return dir;
-    }
-
     static void MakeExecutable(string path)
     {
         if (OperatingSystem.IsWindows()) return;
@@ -245,7 +218,7 @@ public static class FeatureSetupLaunchClockHandoff
 
     /// <summary>A bin dir with no `dotnet` at all — Q1's build-your-own path is never offered,
     /// so a virgin interview needs only three answers (music path, topology, admin).</summary>
-    static string BinWithoutDotnet() => MakeBinDir();
+    static string BinWithoutDotnet() => ScriptProcess.MakeBinDir();
 
     /// <summary>Finding 5 (post-v5.3.0 gate run): unlike every other fact in this file (which
     /// sets SKIP_PREFLIGHT=1 and never touches real preflight_docker/preflight_env_secrets at
@@ -256,7 +229,7 @@ public static class FeatureSetupLaunchClockHandoff
     static string BinWithHealthyDockerAndNoSdk()
     {
         var bin = BinWithoutDotnet();
-        AddStub(bin, "docker",
+        ScriptProcess.AddStub(bin, "docker",
             """
             if [ "${1:-}" = "info" ]; then exit 0; fi
             if [ "${1:-}" = "compose" ] && [ "${2:-}" = "version" ]; then echo "Docker Compose version v2.24.5"; exit 0; fi
@@ -320,8 +293,8 @@ public static class FeatureSetupLaunchClockHandoff
         var path = Path.Combine(
             Directory.CreateTempSubdirectory("gw-setup-story345-launch-").FullName, "launch-stub.sh");
         var remainingSeconds = totalRuntimeSeconds - armAfterSeconds;
-        // `: > markerPath`, not `touch` — a shell builtin, so this never needs `touch` added to
-        // BaseTools' deliberately minimal restricted PATH.
+        // `: > markerPath`, not `touch` — a shell builtin, so this never depends on `touch`
+        // being on the scratch PATH at all.
         File.WriteAllText(path,
             $"#!/usr/bin/env bash\nsleep {armAfterSeconds}\n: > \"{markerPath}\"\nsleep {remainingSeconds}\nexit {exitCode}\n");
         MakeExecutable(path);
@@ -357,16 +330,6 @@ public static class FeatureSetupLaunchClockHandoff
         return path;
     }
 
-    /// <summary>Writes a scripted stub binary <paramref name="name"/> into <paramref
-    /// name="binDir"/> — the Story344 idiom (duplicated here per F10's pinned-for-Dean's-ruling
-    /// three-way harness split, not shared).</summary>
-    static void AddStub(string binDir, string name, string body)
-    {
-        var path = Path.Combine(binDir, name);
-        File.WriteAllText(path, "#!/usr/bin/env bash\n" + body + "\n");
-        MakeExecutable(path);
-    }
-
     /// <summary>A bin dir whose `dotnet --list-sdks` reports a 10.x SDK — offers Q1's
     /// build-from-source option, the only way to drive IMAGES_MODE=dev (and so GW_PRESET=dev)
     /// through the real interview. Needed by the stale-mount-gate facts below: that gate is
@@ -375,8 +338,8 @@ public static class FeatureSetupLaunchClockHandoff
     /// (file-scoped there too — F10's pinned duplication, not shared).</summary>
     static string BinWithDotnet10Sdk()
     {
-        var bin = MakeBinDir();
-        AddStub(bin, "dotnet",
+        var bin = ScriptProcess.MakeBinDir();
+        ScriptProcess.AddStub(bin, "dotnet",
             """if [ "${1:-}" = "--list-sdks" ]; then echo "10.0.100 [/usr/lib/dotnet/sdk]"; exit 0; fi; exit 0""");
         return bin;
     }
@@ -384,12 +347,12 @@ public static class FeatureSetupLaunchClockHandoff
     /// <summary>B1 (round-3 review): a `hostname` that exists on PATH (so `command -v hostname`
     /// succeeds) but exits nonzero on any invocation — the busybox/Alpine/macOS shape of
     /// `hostname -I` not being a thing. Overwrites the real symlinked `hostname` from
-    /// <see cref="BinWithoutDotnet"/>'s underlying <see cref="MakeBinDir"/> bin dir.</summary>
+    /// <see cref="ScriptProcess.MakeBinDir"/>'s default bin dir.</summary>
     static string BinWithBrokenHostname()
     {
-        var bin = MakeBinDir();
+        var bin = ScriptProcess.MakeBinDir();
         File.Delete(Path.Combine(bin, "hostname"));
-        AddStub(bin, "hostname", "exit 1");
+        ScriptProcess.AddStub(bin, "hostname", "exit 1");
         return bin;
     }
 
@@ -401,9 +364,9 @@ public static class FeatureSetupLaunchClockHandoff
     /// address is unavailable.</summary>
     static string BinWithHostnameButBrokenLanAddress()
     {
-        var bin = MakeBinDir();
+        var bin = ScriptProcess.MakeBinDir();
         File.Delete(Path.Combine(bin, "hostname"));
-        AddStub(bin, "hostname",
+        ScriptProcess.AddStub(bin, "hostname",
             """if [ "${1:-}" = "-I" ]; then exit 1; fi; echo "fixture-station"; exit 0""");
         return bin;
     }
@@ -415,22 +378,22 @@ public static class FeatureSetupLaunchClockHandoff
     /// for the LAN line and primary_hostname originally did not for the hostname line.</summary>
     static string BinWithHostnameReturningUsageText()
     {
-        var bin = MakeBinDir();
+        var bin = ScriptProcess.MakeBinDir();
         File.Delete(Path.Combine(bin, "hostname"));
-        AddStub(bin, "hostname",
+        ScriptProcess.AddStub(bin, "hostname",
             """if [ "${1:-}" = "-I" ]; then echo "192.168.9.9"; exit 0; fi; echo "usage: hostname [-v]"; exit 0""");
         return bin;
     }
 
-    /// <summary>N4 (round-3 review): a bin dir with every <see cref="BaseTools"/> entry except
-    /// curl — the "no prober available at all" shape wait_for_on_air_bg must degrade honestly
-    /// under, per this file's own note that the specs already control PATH via
-    /// <see cref="MakeBinDir"/>.</summary>
+    /// <summary>N4 (round-3 review): a bin dir with no curl at all — the "no prober available at
+    /// all" shape wait_for_on_air_bg must degrade honestly under. ScriptProcess.MakeBinDir's
+    /// default toolset includes curl (gh-#776's shared superset across every migrated spec), so
+    /// this fixture deletes the symlink after building rather than omitting it during
+    /// construction.</summary>
     static string BinWithoutCurl()
     {
-        var bin = Directory.CreateTempSubdirectory("gw-setup-story345-bin-").FullName;
-        foreach (var tool in BaseTools.Where(tool => tool != "curl"))
-            File.CreateSymbolicLink(Path.Combine(bin, tool), ResolveTool(tool));
+        var bin = ScriptProcess.MakeBinDir();
+        File.Delete(Path.Combine(bin, "curl"));
         return bin;
     }
 
@@ -445,58 +408,26 @@ public static class FeatureSetupLaunchClockHandoff
             ["GW_ONAIR_TIMEOUT_SECONDS"] = onAirTimeoutSeconds.ToString(CultureInfo.InvariantCulture),
         };
 
-    /// <summary>Runs the real setup.sh, feeding the given text verbatim to stdin (then closing
-    /// it) and returning the whole run's exit code/stdout/stderr — the Gh019/Story344 idiom.
-    /// <paramref name="extraEnv"/> is mandatory (not optional/nullable) here on purpose: every
-    /// scenario in this file reaches the launch stage, so GW_LAUNCH_CMD must always be pinned
-    /// at a stub — an accidental unset would exec the REAL ./launch.sh against a fake PATH.</summary>
+    /// <summary>Runs the real setup.sh, feeding the given text verbatim to its stdin — the
+    /// Gh019/Story344 idiom. <paramref name="extraEnv"/> is mandatory (not optional/nullable)
+    /// here on purpose: every scenario in this file reaches the launch stage, so GW_LAUNCH_CMD
+    /// must always be pinned at a stub — an accidental unset would exec the REAL ./launch.sh
+    /// against a fake PATH. ScriptProcess.Run (gh-#776) has no stdin parameter, so the answers
+    /// are spooled to a scratch file and what actually runs is a one-line wrapper script (`exec
+    /// bash setup.sh < answers-file`) — bash hitting EOF at the end of that file behaves
+    /// identically, from setup.sh's own `read` calls, to writing the same bytes to a live pipe
+    /// and then closing it.</summary>
     static (int ExitCode, string StdOut, string StdErr) RunSetup(
         string binDir, string envFile, string stdinAnswers, IReadOnlyDictionary<string, string> extraEnv)
     {
-        var startInfo = new ProcessStartInfo("bash")
-        {
-            WorkingDirectory = RepoRoot(),
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            RedirectStandardInput = true,
-            UseShellExecute = false,
-        };
-        startInfo.ArgumentList.Add(Path.Combine(RepoRoot(), "setup.sh"));
+        var scratchDir = Directory.CreateTempSubdirectory("gw-setup-story345-stdin-").FullName;
+        var answersPath = Path.Combine(scratchDir, "answers.txt");
+        File.WriteAllText(answersPath, stdinAnswers);
 
-        startInfo.Environment["PATH"] = binDir;
-        foreach (var name in RequiredEnvVars) startInfo.Environment.Remove(name);
-        foreach (var name in SeamEnvVars) startInfo.Environment.Remove(name);
-        startInfo.Environment["GW_ENV_FILE"] = envFile;
-        foreach (var (key, value) in extraEnv)
-            startInfo.Environment[key] = value;
+        var wrapperPath = Path.Combine(scratchDir, "run-setup.sh");
+        File.WriteAllText(wrapperPath, $"exec bash setup.sh < \"{answersPath}\"\n");
 
-        using var process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("failed to start setup.sh");
-
-        // Concurrent reads, not sequential ReadToEnd() + WaitForExit() (Story343's convention):
-        // a child writing enough to fill both OS pipe buffers at once can deadlock a reader that
-        // drains one stream to completion before starting the other.
-        var stdOutTask = process.StandardOutput.ReadToEndAsync();
-        var stdErrTask = process.StandardError.ReadToEndAsync();
-
-        // A child that exits before ever reading its next prompt closes its stdin read end
-        // without draining the scripted answers — this write racing that exit is a legitimate
-        // outcome some facts rely on, not a test failure (the Story344 flake lesson), so a
-        // broken pipe here is swallowed rather than thrown.
-        try
-        {
-            process.StandardInput.Write(stdinAnswers);
-            process.StandardInput.Close();
-        }
-        catch (IOException)
-        {
-            // Child already exited without reading stdin — nothing left to write to.
-        }
-
-        Task.WaitAll(stdOutTask, stdErrTask);
-        process.WaitForExit();
-
-        return (process.ExitCode, stdOutTask.Result, stdErrTask.Result);
+        return ScriptProcess.Run(wrapperPath, binDir, envFile, extraEnv);
     }
 
     /// <summary>F1 item 4 (round-4 review) — the reviewer's exact repro shape: setup.sh (and
@@ -513,21 +444,26 @@ public static class FeatureSetupLaunchClockHandoff
     {
         var workDir = Directory.CreateTempSubdirectory("gw-setup-story345-sigint-").FullName;
         var pgidFile = Path.Combine(workDir, "pgid");
+        var answersPath = Path.Combine(workDir, "answers.txt");
+        File.WriteAllText(answersPath, stdinAnswers);
         var wrapperPath = Path.Combine(workDir, "wrapper.sh");
-        // The wrapper reports its OWN pid to a file, then `exec`s into setup.sh — `exec` replaces
-        // the process image in place (no further fork), so the pid stays the one just reported
-        // for the rest of the run. By the time this runs, `setsid` has already made this process
-        // a new session/process-group leader (pid == pgid), so the reported value IS the pgid.
+        // The wrapper reports its OWN pid to a file, then `exec`s into setup.sh with its scripted
+        // answers redirected from a file rather than a live pipe (ScriptProcess.Run has no stdin
+        // parameter, gh-#776, and this call still needs its own Process handle for the mid-run
+        // signal below regardless — see RunSetup's own comment for why a file redirect behaves
+        // identically here to a write-then-close) — `exec` replaces the process image in place
+        // (no further fork), so the pid stays the one just reported for the rest of the run. By
+        // the time this runs, `setsid` has already made this process a new session/process-group
+        // leader (pid == pgid), so the reported value IS the pgid.
         File.WriteAllText(wrapperPath,
-            $"#!/usr/bin/env bash\necho $$ > \"{pgidFile}\"\nexec bash \"{Path.Combine(RepoRoot(), "setup.sh")}\"\n");
+            $"#!/usr/bin/env bash\necho $$ > \"{pgidFile}\"\nexec bash \"{Path.Combine(RepoRootLocator.Find(AppContext.BaseDirectory), "setup.sh")}\" < \"{answersPath}\"\n");
         MakeExecutable(wrapperPath);
 
         var startInfo = new ProcessStartInfo("setsid")
         {
-            WorkingDirectory = RepoRoot(),
+            WorkingDirectory = RepoRootLocator.Find(AppContext.BaseDirectory),
             RedirectStandardOutput = true,
             RedirectStandardError = true,
-            RedirectStandardInput = true,
             UseShellExecute = false,
         };
         // `setsid`'s own default behavior — fork only if ITS caller is already a process group
@@ -544,28 +480,13 @@ public static class FeatureSetupLaunchClockHandoff
         startInfo.ArgumentList.Add("bash");
         startInfo.ArgumentList.Add(wrapperPath);
 
-        startInfo.Environment["PATH"] = binDir;
-        foreach (var name in RequiredEnvVars) startInfo.Environment.Remove(name);
-        foreach (var name in SeamEnvVars) startInfo.Environment.Remove(name);
-        startInfo.Environment["GW_ENV_FILE"] = envFile;
-        foreach (var (key, value) in extraEnv)
-            startInfo.Environment[key] = value;
+        ScriptProcess.Sanitize(startInfo, binDir, envFile, extraEnv);
 
         using var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("failed to start setup.sh under setsid");
 
         var stdOutTask = process.StandardOutput.ReadToEndAsync();
         var stdErrTask = process.StandardError.ReadToEndAsync();
-
-        try
-        {
-            process.StandardInput.Write(stdinAnswers);
-            process.StandardInput.Close();
-        }
-        catch (IOException)
-        {
-            // Child already exited without reading stdin — nothing left to write to.
-        }
 
         var pgid = ReadPgidFileOnceWritten(pgidFile);
 
@@ -730,24 +651,8 @@ public static class FeatureSetupLaunchClockHandoff
             var mediaDir = MakeMediaDir(flacCount: 1);
             var envFile = ScratchEnvPath();
 
-            var startInfo = new ProcessStartInfo("bash")
-            {
-                WorkingDirectory = RepoRoot(),
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                RedirectStandardInput = true,
-                UseShellExecute = false,
-            };
-            startInfo.ArgumentList.Add(Path.Combine(RepoRoot(), "setup.sh"));
-            startInfo.Environment["PATH"] = BinWithoutDotnet();
-            foreach (var name in RequiredEnvVars) startInfo.Environment.Remove(name);
-            foreach (var name in SeamEnvVars) startInfo.Environment.Remove(name);
-            startInfo.Environment["GW_ENV_FILE"] = envFile;
-            foreach (var (key, value) in BaseEnv(launchStub, mount.Url, 30))
-                startInfo.Environment[key] = value;
-
-            using var process = Process.Start(startInfo)
-                ?? throw new InvalidOperationException("failed to start setup.sh");
+            using var process = ScriptProcess.Start(
+                "setup.sh", BinWithoutDotnet(), envFile, BaseEnv(launchStub, mount.Url, 30), redirectStdin: true);
 
             var stdOutTask = process.StandardOutput.ReadToEndAsync();
             var stdErrTask = process.StandardError.ReadToEndAsync();
@@ -1010,9 +915,10 @@ public static class FeatureSetupLaunchClockHandoff
             // T318 review BLOCKING finding F2: the old code read ADMIN_PASSWORD back off .env
             // via preflight_env_value, whose precedence is process-env-wins — an ambient
             // ADMIN_PASSWORD exported in the CALLER's shell would print instead of the one this
-            // run actually generated and wrote. SeamEnvVars scrubs ADMIN_PASSWORD from every
-            // other fact in this file; this one sets it back on purpose (extraEnv is applied
-            // AFTER the scrub in RunSetup) to prove the ambient value never wins.
+            // run actually generated and wrote. ScriptProcess.IsStripped scrubs ADMIN_PASSWORD
+            // from every other fact in this file; this one sets it back on purpose (extraEnv is
+            // applied AFTER the scrub, both in RunSetup and in ScriptProcess.Run itself) to
+            // prove the ambient value never wins.
             const string ambientPassword = "AMBIENT-VALUE-MUST-NEVER-APPEAR";
             var launchStub = WriteLaunchStub(exitCode: 0);
             // B2 (round-3 review): the stale-mount gate is now universal — a genuine happy-path

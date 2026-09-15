@@ -12,25 +12,12 @@
 // a stale network id, and `compose ps` reported all seven OTHER containers Up/healthy under a
 // "failed part-way" verdict. The operator was told to inspect a service the output never named.
 
-using System.Diagnostics;
+using GenWave.Host.Tests.Support;
 
 namespace GenWave.Host.Tests.Specs;
 
 public static class FeaturePinnedFailurePathShowsStoppedContainers
 {
-    /// <summary>Coreutils launch.sh, migrate.sh and tools/preflight.sh need between them.</summary>
-    static readonly string[] BaseTools =
-    [
-        "bash", "sh", "grep", "tail", "cut", "seq", "sleep", "awk", "dirname", "cat", "paste",
-        "mktemp", "sed", "rm", "wc", "touch",
-    ];
-
-    static readonly string[] RequiredEnvVars =
-    [
-        "POSTGRES_PASSWORD", "LIBRARY_DB_PASSWORD", "STATION_DB_PASSWORD",
-        "ICECAST_SOURCE_PASSWORD", "ICECAST_ADMIN_PASSWORD", "MEDIA_DIR",
-    ];
-
     // The stub answers every docker call the --pinned flow makes, logs each one to
     // $GW_DOCKER_LOG, and fails the FULL `up -d` the way the daemon did on the Pi. Ordering in
     // the case matters: `up -d --no-recreate db` (launch.sh's db-first step) must be matched
@@ -58,44 +45,10 @@ public static class FeaturePinnedFailurePathShowsStoppedContainers
         exit 0
         """;
 
-    static string RepoRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "GenWave.sln")))
-            dir = dir.Parent;
-
-        if (dir is null) throw new InvalidOperationException("repo root (GenWave.sln) not found");
-        return dir.FullName;
-    }
-
-    static string ResolveTool(string tool)
-    {
-        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(':'))
-        {
-            var candidate = Path.Combine(dir, tool);
-            if (File.Exists(candidate))
-                return candidate;
-        }
-        throw new InvalidOperationException($"required tool not on PATH: {tool}");
-    }
-
     static string MakeBinDirWithDockerStub()
     {
-        var dir = Directory.CreateTempSubdirectory("gh332-bin-").FullName;
-        foreach (var tool in BaseTools)
-            File.CreateSymbolicLink(Path.Combine(dir, tool), ResolveTool(tool));
-
-        var stub = Path.Combine(dir, "docker");
-        File.WriteAllText(stub, "#!/usr/bin/env bash\n" + DockerStub + "\n");
-        // These specs only ever run on a Unix host (CI + dev are both Linux); the guard exists
-        // to satisfy CA1416, not to support Windows.
-        if (!OperatingSystem.IsWindows())
-        {
-            File.SetUnixFileMode(stub,
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
-                UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
-                UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
-        }
+        var dir = ScriptProcess.MakeBinDir();
+        ScriptProcess.AddStub(dir, "docker", DockerStub);
         return dir;
     }
 
@@ -121,30 +74,12 @@ public static class FeaturePinnedFailurePathShowsStoppedContainers
         var bin = MakeBinDirWithDockerStub();
         var log = Path.Combine(Directory.CreateTempSubdirectory("gh332-log-").FullName, "docker.log");
 
-        var startInfo = new ProcessStartInfo("bash")
-        {
-            WorkingDirectory = RepoRoot(),
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-        startInfo.ArgumentList.Add(Path.Combine(RepoRoot(), "launch.sh"));
-        startInfo.ArgumentList.Add("--pinned");
-
-        startInfo.Environment["PATH"] = bin;
-        startInfo.Environment["GW_ENV_FILE"] = WriteEnvFile();
-        startInfo.Environment["GW_DOCKER_LOG"] = log;
-        foreach (var name in RequiredEnvVars)
-            startInfo.Environment.Remove(name);
-
-        using var process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("failed to start launch.sh");
-        var stdOut = process.StandardOutput.ReadToEnd();
-        var stdErr = process.StandardError.ReadToEnd();
-        process.WaitForExit();
+        var (exitCode, stdOut, stdErr) = ScriptProcess.Run(
+            "launch.sh", bin, envFile: WriteEnvFile(),
+            extraEnv: new Dictionary<string, string> { ["GW_DOCKER_LOG"] = log }, args: "--pinned");
 
         var calls = File.Exists(log) ? File.ReadAllLines(log) : [];
-        return new Run(process.ExitCode, stdOut, stdErr, calls);
+        return new Run(exitCode, stdOut, stdErr, calls);
     }
 
     static readonly Lazy<Run> PartialUp = new(RunPinnedLaunch);

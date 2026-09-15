@@ -18,25 +18,17 @@
 using System.Diagnostics;
 using System.Text.Json;
 
+using GenWave.Host.Tests.Support;
+
 namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureComposePiperOnlyDropsTheLlm
 {
-    static string RepoRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "GenWave.sln")))
-            dir = dir.Parent;
-
-        if (dir is null) throw new InvalidOperationException("repo root (GenWave.sln) not found");
-        return dir.FullName;
-    }
-
     static JsonDocument RenderConfig(bool demoOverlay, bool piperOnlyOverlay)
     {
         var startInfo = new ProcessStartInfo("docker")
         {
-            WorkingDirectory = RepoRoot(),
+            WorkingDirectory = RepoRootLocator.Find(AppContext.BaseDirectory),
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -153,25 +145,12 @@ public static class FeatureComposePiperOnlyDropsTheLlm
 
     public static class ScenarioBareComposeCommandsMatchTheLaunch
     {
-        static string DryRunPlan(params string[] args)
-        {
-            var startInfo = new ProcessStartInfo("bash")
-            {
-                WorkingDirectory = RepoRoot(),
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-            };
-            startInfo.ArgumentList.Add(Path.Combine(RepoRoot(), "launch.sh"));
-            foreach (var arg in args) startInfo.ArgumentList.Add(arg);
-            startInfo.ArgumentList.Add("--dry-run");
+        // --dry-run only, driving the real toolchain on the developer's own PATH, not a scratch
+        // bin — ScriptProcess still starts the child from its sanitized environment (gh-#776).
+        static readonly string RealPath = Environment.GetEnvironmentVariable("PATH") ?? "/usr/bin:/bin";
 
-            using var process = Process.Start(startInfo)
-                ?? throw new InvalidOperationException("failed to start launch.sh");
-            var stdOut = process.StandardOutput.ReadToEnd();
-            process.WaitForExit();
-            return stdOut;
-        }
+        static string DryRunPlan(params string[] args) =>
+            ScriptProcess.Run("launch.sh", RealPath, args: [.. args, "--dry-run"]).StdOut;
 
         [Fact]
         public static void The_appliance_flow_records_both_overlay_files()

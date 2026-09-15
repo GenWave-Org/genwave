@@ -16,25 +16,17 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
+using GenWave.Host.Tests.Support;
+
 namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureAlloyLoggingProfile
 {
-    static string RepoRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "GenWave.sln")))
-            dir = dir.Parent;
-
-        if (dir is null) throw new InvalidOperationException("repo root (GenWave.sln) not found");
-        return dir.FullName;
-    }
-
     static JsonDocument RenderConfig(bool loggingProfile, bool demoOverlay)
     {
         var startInfo = new ProcessStartInfo("docker")
         {
-            WorkingDirectory = RepoRoot(),
+            WorkingDirectory = RepoRootLocator.Find(AppContext.BaseDirectory),
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -168,22 +160,14 @@ public static class FeatureAlloyLoggingProfile
             File.WriteAllText(fixturePath, render.RootElement.GetRawText());
             try
             {
-                var startInfo = new ProcessStartInfo("bash")
-                {
-                    WorkingDirectory = RepoRoot(),
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                };
-                startInfo.ArgumentList.Add(Path.Combine(RepoRoot(), "tools", "check-compose-publish.sh"));
-                startInfo.ArgumentList.Add("--config-file");
-                startInfo.ArgumentList.Add(fixturePath);
-                using var process = Process.Start(startInfo)!;
-                var stdOut = process.StandardOutput.ReadToEnd();
-                var stdErr = process.StandardError.ReadToEnd();
-                process.WaitForExit();
+                // This guard runs against the real toolchain on the developer's own PATH, not a
+                // scratch bin — ScriptProcess still starts the child from its sanitized
+                // environment (gh-#776).
+                var realPath = Environment.GetEnvironmentVariable("PATH") ?? "/usr/bin:/bin";
+                var (exitCode, stdOut, stdErr) = ScriptProcess.Run(
+                    "tools/check-compose-publish.sh", realPath, args: ["--config-file", fixturePath]);
 
-                Assert.True(process.ExitCode == 0, $"expected exit 0\nstdout:\n{stdOut}\nstderr:\n{stdErr}");
+                Assert.True(exitCode == 0, $"expected exit 0\nstdout:\n{stdOut}\nstderr:\n{stdErr}");
             }
             finally
             {
@@ -200,7 +184,7 @@ public static class FeatureAlloyLoggingProfile
         public static void Labels_doc_declares_exactly_the_contract_labels()
         {
             // observability/LABELS.md lists indexed labels as `- \`<name>\`` bullets
-            var labelsDoc = File.ReadAllText(Path.Combine(RepoRoot(), "observability", "LABELS.md"));
+            var labelsDoc = File.ReadAllText(Path.Combine(RepoRootLocator.Find(AppContext.BaseDirectory), "observability", "LABELS.md"));
             var declared = Regex.Matches(labelsDoc, @"^- `([a-z_]+)`", RegexOptions.Multiline)
                 .Select(m => m.Groups[1].Value).Order().ToArray();
             Assert.Equal(ContractLabels.Order().ToArray(), declared);
@@ -212,7 +196,7 @@ public static class FeatureAlloyLoggingProfile
             // The delivery-side label block in config.alloy is delimited by the markers
             // `// labels:begin` / `// labels:end` (part of the T49 contract) so the indexed
             // set is extractable without an Alloy parser.
-            var config = File.ReadAllText(Path.Combine(RepoRoot(), "observability", "alloy", "config.alloy"));
+            var config = File.ReadAllText(Path.Combine(RepoRootLocator.Find(AppContext.BaseDirectory), "observability", "alloy", "config.alloy"));
             var block = Regex.Match(config, @"// labels:begin(.*?)// labels:end", RegexOptions.Singleline).Groups[1].Value;
             var indexed = Regex.Matches(block, @"^\s*""?([a-z_]+)""?\s*=", RegexOptions.Multiline)
                 .Select(m => m.Groups[1].Value).Distinct().Order().ToArray();
@@ -230,7 +214,7 @@ public static class FeatureAlloyLoggingProfile
     {
         static string DropExpression()
         {
-            var config = File.ReadAllText(Path.Combine(RepoRoot(), "observability", "alloy", "config.alloy"));
+            var config = File.ReadAllText(Path.Combine(RepoRootLocator.Find(AppContext.BaseDirectory), "observability", "alloy", "config.alloy"));
             var block = Regex.Match(config, @"// drop:begin(.*?)// drop:end", RegexOptions.Singleline).Groups[1].Value;
             var expression = Regex.Match(block, "expression = \"(.*)\"").Groups[1].Value;
             Assert.False(string.IsNullOrWhiteSpace(expression), "drop:begin/end block with an expression must exist in config.alloy");
@@ -280,7 +264,7 @@ public static class FeatureAlloyLoggingProfile
         {
             // The stage.match selector fences the drop to icecast — every other service's lines
             // must never pass through the drop expression at all.
-            var config = File.ReadAllText(Path.Combine(RepoRoot(), "observability", "alloy", "config.alloy"));
+            var config = File.ReadAllText(Path.Combine(RepoRootLocator.Find(AppContext.BaseDirectory), "observability", "alloy", "config.alloy"));
             var match = Regex.Match(config, @"stage\.match\s*\{(.*?)stage\.drop", RegexOptions.Singleline).Groups[1].Value;
             Assert.Contains("selector = \"{service=\\\"icecast\\\"}\"", match, StringComparison.Ordinal);
         }
@@ -298,7 +282,7 @@ public static class FeatureAlloyLoggingProfile
             // T49 verifies the pinned image's actual behavior empirically before unskipping.
             var startInfo = new ProcessStartInfo("docker")
             {
-                WorkingDirectory = RepoRoot(),
+                WorkingDirectory = RepoRootLocator.Find(AppContext.BaseDirectory),
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,

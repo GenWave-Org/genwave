@@ -1,43 +1,28 @@
 // STORY-437 — build.sh builds on a box that cannot launch (gh-#775 · PLAN T470–T472)
 //
 // Runner: xUnit driving the REAL ./build.sh (and tools/preflight.sh directly) with scripted
-// `dotnet`, `docker`, `git` and `ss` on PATH — the Gh019 scratch-bin idiom. Every run happens
+// `dotnet`, `docker`, `git` and `ss` on PATH — the Gh019 scratch-bin idiom, via ScriptProcess
+// (gh-#776), which always starts the child from a sanitized environment. Every run happens
 // in a SCRATCH COPY of the repo root (symlinks, minus .env/.git) so "a fresh clone with no
 // .env" is literally true on a dev box that has one, and a build can never create one in the
-// tree. The stubs log their argv and a snapshot of their environment so the specs can read
-// what build.sh handed each tool.
+// tree. ScriptProcess.Run's fixed WorkingDirectory is harmless for RunScript since build.sh and
+// launch.sh both self-relocate via `cd "$(dirname "$0")"` as their first meaningful action;
+// CallPreflight sources tools/preflight.sh directly rather than running a script file, so it
+// writes a scratch wrapper carrying the identical `cd "$(dirname "$0")"` self-relocation before
+// sourcing, which reproduces the old WorkingDirectory=scratch behaviour without needing
+// ScriptProcess.Run to support a custom working directory at all. The stubs log their argv and
+// a snapshot of their environment so the specs can read what build.sh handed each tool.
 //
 // RED at plan time: build.sh runs the launch-grade `preflight_docker` (ports + disk + RAM) and
 // `preflight_env_secrets`, so a clone without .env stops at "No .env file found" and a held
 // port 8080 stops it before a single compile; `preflight_docker_build` does not exist yet.
 
-using System.Diagnostics;
 using GenWave.Host.Tests.Support;
 
 namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureBuildWithoutLaunchPrerequisites
 {
-    static readonly string[] BaseTools =
-    [
-        "bash", "sh", "grep", "tail", "cut", "seq", "sleep", "awk", "dirname", "cat", "paste",
-        "mktemp", "sed", "rm", "wc", "touch", "head", "sort", "date", "env",
-    ];
-
-    static readonly string[] SecretVars =
-    [
-        "POSTGRES_PASSWORD", "LIBRARY_DB_PASSWORD", "STATION_DB_PASSWORD",
-        "ICECAST_SOURCE_PASSWORD", "ICECAST_ADMIN_PASSWORD", "MEDIA_DIR",
-    ];
-
-    static readonly string[] ScrubbedEnvVars =
-    [
-        .. SecretVars,
-        "ADMIN_PASSWORD", "COMPOSE_PROFILES", "COMPOSE_FILE", "GW_PRESET", "GW_PREFLIGHT_TOPOLOGY",
-        "GW_PREFLIGHT_DEMO", "GW_ENV_FILE", "GW_SS_CMD", "GW_DF_CMD", "SKIP_PREFLIGHT", "SKIP_TESTS",
-        "CONFIG", "BUILD",
-    ];
-
     // Each stub appends its argv to $GW_TOOL_LOG and dumps its environment to
     // $GW_TOOL_LOG.<tool>.<first-arg>.env — `docker compose build ...` lands in
     // docker.compose.env, `dotnet test ...` in dotnet.test.env.
@@ -88,40 +73,13 @@ public static class FeatureBuildWithoutLaunchPrerequisites
         OUT
         """;
 
-    static string ResolveTool(string tool)
-    {
-        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(':'))
-        {
-            var candidate = Path.Combine(dir, tool);
-            if (File.Exists(candidate))
-                return candidate;
-        }
-        throw new InvalidOperationException($"required tool not on PATH: {tool}");
-    }
-
-    static void AddStub(string bin, string name, string body)
-    {
-        var path = Path.Combine(bin, name);
-        File.WriteAllText(path, "#!/usr/bin/env bash\n" + body + "\n");
-        if (!OperatingSystem.IsWindows())
-        {
-            File.SetUnixFileMode(path,
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
-                UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
-                UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
-        }
-    }
-
     static string MakeBinDir(string dockerStub = DockerStubHealthy, bool withDocker = true)
     {
-        var dir = Directory.CreateTempSubdirectory("story437-bin-").FullName;
-        foreach (var tool in BaseTools)
-            File.CreateSymbolicLink(Path.Combine(dir, tool), ResolveTool(tool));
-        File.CreateSymbolicLink(Path.Combine(dir, "basename"), ResolveTool("basename"));
-        AddStub(dir, "dotnet", DotnetStub);
-        AddStub(dir, "git", GitStub);
-        AddStub(dir, "ss", SsHolding8080);
-        if (withDocker) AddStub(dir, "docker", dockerStub);
+        var dir = ScriptProcess.MakeBinDir("basename");
+        ScriptProcess.AddStub(dir, "dotnet", DotnetStub);
+        ScriptProcess.AddStub(dir, "git", GitStub);
+        ScriptProcess.AddStub(dir, "ss", SsHolding8080);
+        if (withDocker) ScriptProcess.AddStub(dir, "docker", dockerStub);
         return dir;
     }
 
@@ -165,61 +123,41 @@ public static class FeatureBuildWithoutLaunchPrerequisites
         var scratch = MakeScratchRepo();
         var log = Path.Combine(Directory.CreateTempSubdirectory("story437-log-").FullName, "tools.log");
 
-        var startInfo = new ProcessStartInfo("bash")
-        {
-            WorkingDirectory = scratch,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-        startInfo.ArgumentList.Add(Path.Combine(scratch, script));
-        foreach (var arg in args) startInfo.ArgumentList.Add(arg);
-
-        foreach (var name in ScrubbedEnvVars)
-            startInfo.Environment.Remove(name);
-        startInfo.Environment["PATH"] = bin;
-        startInfo.Environment["GW_TOOL_LOG"] = log;
+        var mergedEnv = new Dictionary<string, string> { ["GW_TOOL_LOG"] = log };
         if (extraEnv is not null)
             foreach (var (name, value) in extraEnv)
-                startInfo.Environment[name] = value;
+                mergedEnv[name] = value;
 
-        using var process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException($"failed to start {script}");
-        var stdOutTask = process.StandardOutput.ReadToEndAsync();
-        var stdErrTask = process.StandardError.ReadToEndAsync();
-        Task.WaitAll(stdOutTask, stdErrTask);
-        process.WaitForExit();
+        var (exitCode, stdOut, stdErr) = ScriptProcess.Run(
+            Path.Combine(scratch, script), bin, extraEnv: mergedEnv, args: args);
 
-        return new Run(process.ExitCode, stdOutTask.Result, stdErrTask.Result, scratch, log);
+        return new Run(exitCode, stdOut, stdErr, scratch, log);
     }
 
-    /// <summary>Sources tools/preflight.sh in the scratch repo and calls one function — the Story342 idiom.</summary>
+    /// <summary>Sources tools/preflight.sh in the scratch repo and calls one function — the
+    /// Story342 idiom. ScriptProcess.Run only knows how to run a script FILE, not `bash -c`, so
+    /// this writes a one-line-longer scratch wrapper carrying the same self-relocating
+    /// `cd "$(dirname "$0")"` every real script in this repo opens with — sourcing
+    /// tools/preflight.sh through it reaches the scratch repo's own copy exactly as the old
+    /// WorkingDirectory=scratch invocation did.</summary>
     static Run CallPreflight(string function, string bin)
     {
         var scratch = MakeScratchRepo();
-        var startInfo = new ProcessStartInfo("bash")
-        {
-            WorkingDirectory = scratch,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-        startInfo.ArgumentList.Add("-c");
-        startInfo.ArgumentList.Add($"set -euo pipefail; . tools/preflight.sh; {function}");
+        var log = Path.Combine(scratch, "tools.log");
 
-        foreach (var name in ScrubbedEnvVars)
-            startInfo.Environment.Remove(name);
-        startInfo.Environment["PATH"] = bin;
-        startInfo.Environment["GW_TOOL_LOG"] = Path.Combine(scratch, "tools.log");
+        var wrapperPath = Path.Combine(scratch, "call-preflight.sh");
+        File.WriteAllText(wrapperPath, $$"""
+            #!/usr/bin/env bash
+            set -euo pipefail
+            cd "$(dirname "$0")"
+            . tools/preflight.sh
+            {{function}}
+            """);
 
-        using var process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("failed to start bash");
-        var stdOutTask = process.StandardOutput.ReadToEndAsync();
-        var stdErrTask = process.StandardError.ReadToEndAsync();
-        Task.WaitAll(stdOutTask, stdErrTask);
-        process.WaitForExit();
+        var (exitCode, stdOut, stdErr) = ScriptProcess.Run(
+            wrapperPath, bin, extraEnv: new Dictionary<string, string> { ["GW_TOOL_LOG"] = log });
 
-        return new Run(process.ExitCode, stdOutTask.Result, stdErrTask.Result, scratch, Path.Combine(scratch, "tools.log"));
+        return new Run(exitCode, stdOut, stdErr, scratch, log);
     }
 
     static string WriteEnvFile()

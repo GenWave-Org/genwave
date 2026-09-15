@@ -10,47 +10,26 @@
 // else. The guard lands (T48) BEFORE the carve-out exists (T49) — it first passes proving the
 // trivial no-socket case.
 
-using System.Diagnostics;
+using GenWave.Host.Tests.Support;
 
 namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureComposeSocketGuard
 {
-    static string RepoRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "GenWave.sln")))
-            dir = dir.Parent;
+    // This guard renders compose itself against the real toolchain on the developer's own PATH,
+    // not a scratch bin — ScriptProcess still starts the child from its sanitized environment
+    // (gh-#776).
+    static readonly string RealPath = Environment.GetEnvironmentVariable("PATH") ?? "/usr/bin:/bin";
 
-        if (dir is null) throw new InvalidOperationException("repo root (GenWave.sln) not found");
-        return dir.FullName;
-    }
-
-    static (int ExitCode, string StdOut, string StdErr) RunGuardScript(params string[] args)
-    {
-        var startInfo = new ProcessStartInfo("bash")
-        {
-            WorkingDirectory = RepoRoot(),
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-        startInfo.ArgumentList.Add(Path.Combine(RepoRoot(), "tools", "check-compose-socket.sh"));
-        foreach (var arg in args) startInfo.ArgumentList.Add(arg);
-
-        // gh-#249: the guard's "none:" profile combo renders with no --profile flags and
-        // inherits this process's environment — pin the profile set empty so ambient
-        // COMPOSE_PROFILES / a dev box's .env can't leak services into that render. The
-        // explicit --profile combos are unaffected (flag precedence).
-        startInfo.Environment["COMPOSE_PROFILES"] = "";
-
-        using var process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("failed to start check-compose-socket.sh");
-        var stdOut = process.StandardOutput.ReadToEnd();
-        var stdErr = process.StandardError.ReadToEnd();
-        process.WaitForExit();
-        return (process.ExitCode, stdOut, stdErr);
-    }
+    static (int ExitCode, string StdOut, string StdErr) RunGuardScript(params string[] args) =>
+        ScriptProcess.Run(
+            "tools/check-compose-socket.sh", RealPath,
+            // gh-#249: the guard's "none:" profile combo renders with no --profile flags and
+            // inherits this process's environment — pin the profile set empty so ambient
+            // COMPOSE_PROFILES / a dev box's .env can't leak services into that render. The
+            // explicit --profile combos are unaffected (flag precedence).
+            extraEnv: new Dictionary<string, string> { ["COMPOSE_PROFILES"] = "" },
+            args: args);
 
     public static class ScenarioCurrentConfigPasses
     {

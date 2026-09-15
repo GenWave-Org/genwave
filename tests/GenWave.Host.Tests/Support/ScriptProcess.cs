@@ -66,31 +66,7 @@ public static class ScriptProcess
         string script, string binDir, string? envFile = null,
         IReadOnlyDictionary<string, string>? extraEnv = null, params string[] args)
     {
-        var repoRoot = RepoRootLocator.Find(AppContext.BaseDirectory);
-
-        var startInfo = new ProcessStartInfo("bash")
-        {
-            WorkingDirectory = repoRoot,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-        startInfo.ArgumentList.Add(Path.Combine(repoRoot, script));
-        foreach (var arg in args)
-            startInfo.ArgumentList.Add(arg);
-
-        foreach (var name in startInfo.Environment.Keys.ToList())
-        {
-            if (IsStripped(name))
-                startInfo.Environment.Remove(name);
-        }
-
-        startInfo.Environment["PATH"] = binDir;
-        if (envFile is not null)
-            startInfo.Environment["GW_ENV_FILE"] = envFile;
-        if (extraEnv is not null)
-            foreach (var (key, value) in extraEnv)
-                startInfo.Environment[key] = value;
+        var startInfo = BuildStartInfo(script, binDir, envFile, extraEnv, redirectStdin: false, args);
 
         using var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException($"failed to start {script}");
@@ -103,6 +79,74 @@ public static class ScriptProcess
         Task.WaitAll(stdOutTask, stdErrTask);
 
         return (process.ExitCode, stdOutTask.Result, stdErrTask.Result);
+    }
+
+    /// <summary>
+    /// Starts <paramref name="script"/> under the same sanitized environment as <see cref="Run"/>
+    /// but returns the live, still-running <see cref="Process"/> instead of waiting for it to
+    /// exit — for the handful of facts that need to interleave with a script while it runs (send
+    /// an answer only after a prompt appears, drop a file on disk mid-run, ...). The caller owns
+    /// the returned <see cref="Process"/>: it must drain StandardOutput/StandardError itself
+    /// (concurrently, not one after the other — see <see cref="Run"/>'s own remarks, the same
+    /// deadlock risk applies here), wait for exit, and dispose it. Pass <paramref
+    /// name="redirectStdin"/> true to write scripted answers to the child as it runs; false
+    /// behaves like <see cref="Run"/>, whose stdin is left connected to the test process's own.
+    /// </summary>
+    public static Process Start(string script, string binDir, string? envFile = null,
+        IReadOnlyDictionary<string, string>? extraEnv = null, bool redirectStdin = false, params string[] args)
+    {
+        var startInfo = BuildStartInfo(script, binDir, envFile, extraEnv, redirectStdin, args);
+
+        return Process.Start(startInfo)
+            ?? throw new InvalidOperationException($"failed to start {script}");
+    }
+
+    static ProcessStartInfo BuildStartInfo(string script, string binDir, string? envFile,
+        IReadOnlyDictionary<string, string>? extraEnv, bool redirectStdin, string[] args)
+    {
+        var repoRoot = RepoRootLocator.Find(AppContext.BaseDirectory);
+
+        var startInfo = new ProcessStartInfo("bash")
+        {
+            WorkingDirectory = repoRoot,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            RedirectStandardInput = redirectStdin,
+            UseShellExecute = false,
+        };
+        startInfo.ArgumentList.Add(Path.Combine(repoRoot, script));
+        foreach (var arg in args)
+            startInfo.ArgumentList.Add(arg);
+
+        Sanitize(startInfo, binDir, envFile, extraEnv);
+        return startInfo;
+    }
+
+    /// <summary>
+    /// The sanitize step <see cref="Run"/>/<see cref="Start"/> apply to every child they build,
+    /// exposed for the one spec that still starts a repo script through its own <see cref="ProcessStartInfo"/>
+    /// directly (Story345's <c>RunSetupSendingSigintMidLaunch</c>, which spawns <c>setsid</c>
+    /// rather than <c>bash</c> to get a process-group leader it can signal — never this type's
+    /// target). Strips every <see cref="IsStripped"/> name from <paramref name="startInfo"/>'s
+    /// environment, then sets <c>PATH</c> to <paramref name="binDir"/>, then <c>GW_ENV_FILE</c>
+    /// from <paramref name="envFile"/> when given, then applies <paramref name="extraEnv"/> on
+    /// top — the same order, and the same effect, as <see cref="Run"/>.
+    /// </summary>
+    public static void Sanitize(ProcessStartInfo startInfo, string binDir, string? envFile,
+        IReadOnlyDictionary<string, string>? extraEnv)
+    {
+        foreach (var name in startInfo.Environment.Keys.ToList())
+        {
+            if (IsStripped(name))
+                startInfo.Environment.Remove(name);
+        }
+
+        startInfo.Environment["PATH"] = binDir;
+        if (envFile is not null)
+            startInfo.Environment["GW_ENV_FILE"] = envFile;
+        if (extraEnv is not null)
+            foreach (var (key, value) in extraEnv)
+                startInfo.Environment[key] = value;
     }
 
     static string ResolveTool(string tool)

@@ -7,82 +7,20 @@
 // itself and calls its two entry points directly — the exact functions launch.sh and
 // build.sh already call, so what's proven here is proven on their real call path too.
 
-using System.Diagnostics;
 using System.Text.RegularExpressions;
+
+using GenWave.Host.Tests.Support;
 
 namespace GenWave.Host.Tests.Specs;
 
 public static class FeaturePreflightExpansion
 {
-    static readonly string[] RequiredEnvVars =
-    [
-        "POSTGRES_PASSWORD", "LIBRARY_DB_PASSWORD", "STATION_DB_PASSWORD",
-        "ICECAST_SOURCE_PASSWORD", "ICECAST_ADMIN_PASSWORD", "MEDIA_DIR",
-    ];
-
-    /// <summary>Preflight-only seams this suite might otherwise inherit from the ambient shell.</summary>
-    static readonly string[] SeamEnvVars =
-    [
-        "ADMIN_PASSWORD", "COMPOSE_PROFILES", "GW_PREFLIGHT_TOPOLOGY", "GW_PREFLIGHT_DEMO", "GW_ENV_FILE",
-        "GW_CMDLINE_FILE", "GW_MEMINFO_FILE", "GW_MOUNTS_FILE", "GW_SS_CMD", "GW_DF_CMD", "GW_FIND_CMD",
-        "GW_DOCKER_ROOT_FALLBACK",
-    ];
-
-    /// <summary>Coreutils tools/preflight.sh itself needs — everything else is deliberately absent
-    /// so each scenario's ss/df/find stub (or lack of one) is the only thing driving that check.</summary>
-    static readonly string[] BaseTools =
-        ["bash", "sh", "grep", "sed", "tail", "head", "cut", "seq", "sleep", "awk", "dirname", "cat", "paste", "find"];
-
-    static string RepoRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "GenWave.sln")))
-            dir = dir.Parent;
-
-        if (dir is null) throw new InvalidOperationException("repo root (GenWave.sln) not found");
-        return dir.FullName;
-    }
-
-    static string ResolveTool(string tool)
-    {
-        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(':'))
-        {
-            var candidate = Path.Combine(dir, tool);
-            if (File.Exists(candidate))
-                return candidate;
-        }
-        throw new InvalidOperationException($"required tool not on PATH: {tool}");
-    }
-
-    static string MakeBinDir()
-    {
-        var dir = Directory.CreateTempSubdirectory("gw-preflight-story342-bin-").FullName;
-        foreach (var tool in BaseTools)
-            File.CreateSymbolicLink(Path.Combine(dir, tool), ResolveTool(tool));
-        return dir;
-    }
-
-    static void AddStub(string binDir, string name, string body)
-    {
-        var path = Path.Combine(binDir, name);
-        File.WriteAllText(path, "#!/usr/bin/env bash\n" + body + "\n");
-        // bash targets only — these specs only ever run on the Linux dev/CI hosts (guard exists
-        // to satisfy CA1416, not to support Windows).
-        if (!OperatingSystem.IsWindows())
-        {
-            File.SetUnixFileMode(path,
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
-                UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
-                UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
-        }
-    }
-
     /// <summary>docker info succeeds and `docker compose version` reports a floor-clearing version —
     /// the default "nothing to complain about" stub every scenario starts from.</summary>
     static string HealthyDockerBin()
     {
-        var bin = MakeBinDir();
-        AddStub(bin, "docker",
+        var bin = ScriptProcess.MakeBinDir();
+        ScriptProcess.AddStub(bin, "docker",
             """
             if [ "${1:-}" = "info" ]; then exit 0; fi
             if [ "${1:-}" = "compose" ] && [ "${2:-}" = "version" ]; then echo "Docker Compose version v2.24.5"; exit 0; fi
@@ -128,36 +66,18 @@ public static class FeaturePreflightExpansion
         "set -euo pipefail; . tools/preflight.sh; preflight_docker; preflight_env_secrets";
 
     /// <summary>Sources the real tools/preflight.sh and calls the exact two entry points launch.sh
-    /// and build.sh call, under the caller's own set -euo pipefail discipline.</summary>
+    /// and build.sh call, under the caller's own set -euo pipefail discipline. ScriptProcess.Run
+    /// only takes a script FILE (gh-#776), so the (usually one-line, semicolon-joined) script
+    /// text is spooled to a scratch file first — bash treats that identically to `-c script`.</summary>
     static (int ExitCode, string StdOut, string StdErr) RunPreflight(
         string binDir, string? envFile = null, IReadOnlyDictionary<string, string>? extraEnv = null,
         string script = DefaultPreflightScript)
     {
-        var startInfo = new ProcessStartInfo("bash")
-        {
-            WorkingDirectory = RepoRoot(),
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-        startInfo.ArgumentList.Add("-c");
-        startInfo.ArgumentList.Add(script);
+        var scriptPath = Path.Combine(
+            Directory.CreateTempSubdirectory("gw-preflight-story342-script-").FullName, "run.sh");
+        File.WriteAllText(scriptPath, script);
 
-        startInfo.Environment["PATH"] = binDir;
-        foreach (var name in RequiredEnvVars) startInfo.Environment.Remove(name);
-        foreach (var name in SeamEnvVars) startInfo.Environment.Remove(name);
-        if (envFile is not null)
-            startInfo.Environment["GW_ENV_FILE"] = envFile;
-        if (extraEnv is not null)
-            foreach (var (key, value) in extraEnv)
-                startInfo.Environment[key] = value;
-
-        using var process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("failed to start tools/preflight.sh");
-        var stdOut = process.StandardOutput.ReadToEnd();
-        var stdErr = process.StandardError.ReadToEnd();
-        process.WaitForExit();
-        return (process.ExitCode, stdOut, stdErr);
+        return ScriptProcess.Run(scriptPath, binDir, envFile, extraEnv);
     }
 
     // ---------------------------------------------------------------------
@@ -249,8 +169,8 @@ public static class FeaturePreflightExpansion
         [Fact]
         public void ComposeOlderThan224HardFailsCitingTheOverrideResetFloor()
         {
-            var bin = MakeBinDir();
-            AddStub(bin, "docker",
+            var bin = ScriptProcess.MakeBinDir();
+            ScriptProcess.AddStub(bin, "docker",
                 """
                 if [ "${1:-}" = "info" ]; then exit 0; fi
                 if [ "${1:-}" = "compose" ] && [ "${2:-}" = "version" ]; then echo "Docker Compose version v2.20.0"; exit 0; fi
@@ -291,7 +211,7 @@ public static class FeaturePreflightExpansion
         static string BinWithPort8080Bound()
         {
             var bin = HealthyDockerBin();
-            AddStub(bin, "ss", SsBoundPort8080);
+            ScriptProcess.AddStub(bin, "ss", SsBoundPort8080);
             return bin;
         }
 
@@ -299,15 +219,15 @@ public static class FeaturePreflightExpansion
         /// exact port — the F134.3b "restart/upgrade on a broadcasting box" case.</summary>
         static string BinWithOwnPort8000Bound()
         {
-            var bin = MakeBinDir();
-            AddStub(bin, "docker",
+            var bin = ScriptProcess.MakeBinDir();
+            ScriptProcess.AddStub(bin, "docker",
                 """
                 if [ "${1:-}" = "info" ]; then exit 0; fi
                 if [ "${1:-}" = "compose" ] && [ "${2:-}" = "version" ]; then echo "Docker Compose version v2.24.5"; exit 0; fi
                 if [ "${1:-}" = "ps" ]; then echo "0.0.0.0:8000->8000/tcp, :::8000->8000/tcp"; exit 0; fi
                 exit 0
                 """);
-            AddStub(bin, "ss",
+            ScriptProcess.AddStub(bin, "ss",
                 """
                 cat <<'OUT'
                 State   Recv-Q  Send-Q   Local Address:Port   Peer Address:Port  Process
@@ -362,7 +282,7 @@ public static class FeaturePreflightExpansion
             // piper-only (no admin profile) doesn't check the admin-ui port (3000) — a stub
             // that binds ONLY 3000, with no COMPOSE_PROFILES=admin in play, must still pass.
             var bin = HealthyDockerBin();
-            AddStub(bin, "ss",
+            ScriptProcess.AddStub(bin, "ss",
                 """
                 cat <<'OUT'
                 State   Recv-Q  Send-Q   Local Address:Port   Peer Address:Port  Process
@@ -388,7 +308,7 @@ public static class FeaturePreflightExpansion
             // host running this suite has no `ss` on PATH, which would otherwise degrade to the
             // (unrelated) "not checked" WARN this fact isn't about.
             var bin = HealthyDockerBin();
-            AddStub(bin, "ss",
+            ScriptProcess.AddStub(bin, "ss",
                 """
                 cat <<'OUT'
                 State   Recv-Q  Send-Q   Local Address:Port   Peer Address:Port  Process
@@ -416,7 +336,7 @@ public static class FeaturePreflightExpansion
         public void DiskUnderTheTopologyConstantReportsTheThreshold()
         {
             var bin = HealthyDockerBin();
-            AddStub(bin, "df",
+            ScriptProcess.AddStub(bin, "df",
                 """
                 echo "Filesystem     1024-blocks      Used Available Capacity Mounted on"
                 echo "tmpfs             2000000    1000000    900000       53% /"
@@ -436,7 +356,7 @@ public static class FeaturePreflightExpansion
             // GW_PREFLIGHT_TOPOLOGY=piper-only — the caller-resolved input (F134.3a) — must
             // drive the lighter (~4 GiB) constant instead of the full-stack one.
             var bin = HealthyDockerBin();
-            AddStub(bin, "df",
+            ScriptProcess.AddStub(bin, "df",
                 """
                 echo "Filesystem     1024-blocks      Used Available Capacity Mounted on"
                 echo "tmpfs              500000     300000    200000       60% /"
@@ -460,15 +380,15 @@ public static class FeaturePreflightExpansion
             // here by failing BOTH `docker info --format` and the conventional /var/lib/docker
             // fallback (GW_DOCKER_ROOT_FALLBACK points at a path that does not exist) — the WARN
             // must still reach the rendered summary table.
-            var bin = MakeBinDir();
-            AddStub(bin, "docker",
+            var bin = ScriptProcess.MakeBinDir();
+            ScriptProcess.AddStub(bin, "docker",
                 """
                 if [ "${1:-}" = "info" ] && [ "${2:-}" = "--format" ]; then exit 1; fi
                 if [ "${1:-}" = "info" ]; then exit 0; fi
                 if [ "${1:-}" = "compose" ] && [ "${2:-}" = "version" ]; then echo "Docker Compose version v2.24.5"; exit 0; fi
                 exit 0
                 """);
-            AddStub(bin, "df",
+            ScriptProcess.AddStub(bin, "df",
                 """
                 echo "Filesystem     1024-blocks      Used Available Capacity Mounted on"
                 echo "tmpfs             2000000    1000000    900000       53% /"
@@ -644,7 +564,7 @@ public static class FeaturePreflightExpansion
             // No docker anywhere on PATH — with every check bypassed, the two entry points
             // return cleanly instead of ever reaching a check that would fail on its absence.
             var (exitCode, _, _) = RunPreflight(
-                MakeBinDir(), extraEnv: new Dictionary<string, string> { ["SKIP_PREFLIGHT"] = "1" });
+                ScriptProcess.MakeBinDir(), extraEnv: new Dictionary<string, string> { ["SKIP_PREFLIGHT"] = "1" });
 
             Assert.Equal(0, exitCode);
         }

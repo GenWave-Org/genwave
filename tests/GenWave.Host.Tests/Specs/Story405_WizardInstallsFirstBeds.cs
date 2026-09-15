@@ -1,29 +1,31 @@
 // STORY-405 — The wizard installs the first background-music pack (SPEC F165.7 · PLAN T428)
 //
-// BDD specification — xUnit. Drives the REAL ./setup.sh via Process (the Story344/345/346
-// idiom). Seam choice (R2's own open question, ruled here): the "local api" install_first_beds
-// talks to is a scratch Kestrel loopback instance (ApiStub, below), never a stubbed `curl`
-// binary — curl itself stays the REAL binary on every scenario's PATH throughout this file.
-// Chosen over stubbing curl because that is the idiom every sibling wizard-spec file already
-// uses for "the wizard calls out to a local HTTP service it doesn't own" — Story345's own
+// BDD specification — xUnit. Drives the REAL ./setup.sh via ScriptProcess (gh-#776), which
+// always starts the child from a sanitized environment (ambient GW_*/SKIP_PREFLIGHT/COMPOSE_*/
+// secrets scrubbed by construction — see ScriptProcess.IsStripped) regardless of what the parent
+// shell happens to export. Seam choice (R2's own open question, ruled here): the "local api"
+// install_first_beds talks to is a scratch Kestrel loopback instance (ApiStub, below), never a
+// stubbed `curl` binary — curl itself stays the REAL binary on every scenario's PATH throughout
+// this file. Chosen over stubbing curl because that is the idiom every sibling wizard-spec file
+// already uses for "the wizard calls out to a local HTTP service it doesn't own" — Story345's own
 // MountStub/ArmableMountStub play the identical role for the icecast mount poll, and setup.sh's
 // own header already documents GW_API_URL as this step's ONE seam (curl is never swapped out).
 // Pointing that seam at a real loopback server proves the ACTUAL curl invocations setup.sh
 // emits reach the right method/path/body, rather than merely proving a stub's own argv shape.
 //
-// Harness: the Story344/345/346 idiom (scratch PATH bin dir of coreutils symlinks, a scratch
-// GW_ENV_FILE, ambient GW_*/SKIP_PREFLIGHT/ADMIN_PASSWORD scrubbed from the child environment) —
-// duplicated here rather than shared, per T318's own pinned-for-Dean rider (harness dedup across
-// these wizard-spec files is accepted debt for now).
+// Harness: RunSetup spools stdinAnswers to a scratch file and runs a one-line wrapper
+// (`exec bash setup.sh "$@" < answers.txt`) through ScriptProcess.Run rather than writing to a
+// live pipe — behaviorally identical here since every fact writes its whole answer transcript
+// upfront (bash hitting EOF at the end of a redirected file reads the same as a closed pipe).
 //
 // House rule: one assert per Fact — a couple of facts assert one combined boolean via a single
 // Assert.True(...) call where the observation is genuinely one logical fact (several conditions
 // that only mean something together), the same idiom Story344/345/346 already use.
 
-using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Text.Json;
+using GenWave.Host.Tests.Support;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -170,104 +172,47 @@ file sealed class ApiStub : IDisposable
 public static class FeatureTheWizardInstallsTheFirstBeds
 {
     // ─────────────────────────────────────────────────────────────────────────
-    // Shared harness (the Story344/345/346 idiom, duplicated per T318's pinned rider)
+    // Shared harness (gh-#776: setup.sh runs through ScriptProcess, which owns the scratch PATH
+    // and sanitized-environment construction — see ScriptProcess.cs)
     // ─────────────────────────────────────────────────────────────────────────
 
-    static readonly string[] RequiredEnvVars =
-    [
-        "POSTGRES_PASSWORD", "LIBRARY_DB_PASSWORD", "STATION_DB_PASSWORD",
-        "ICECAST_SOURCE_PASSWORD", "ICECAST_ADMIN_PASSWORD", "MEDIA_DIR",
-    ];
-
-    /// <summary>setup.sh test seams this suite might otherwise inherit from the ambient shell —
-    /// scrubbed so the developer's real .env/exports can never sway a fact. GW_API_URL (this
-    /// story's own new seam) is included so an ambient copy can never leak in either; each fact
-    /// that needs the real ApiStub sets it explicitly via extraEnv.</summary>
-    static readonly string[] SeamEnvVars =
-    [
-        "ADMIN_PASSWORD", "COMPOSE_PROFILES", "GW_PRESET", "GW_ENV_FILE", "GW_MEMINFO_FILE",
-        "GW_ARCH", "GW_PREFLIGHT_TOPOLOGY", "GW_PREFLIGHT_DEMO", "GW_CMDLINE_FILE",
-        "GW_MOUNTS_FILE", "GW_SS_CMD", "GW_DF_CMD", "GW_FIND_CMD", "GW_DOCKER_ROOT_FALLBACK",
-        "GW_DOCKER_CMD", "SKIP_PREFLIGHT", "GW_LAUNCH_CMD", "GW_STREAM_URL",
-        "GW_ONAIR_TIMEOUT_SECONDS", "GW_API_URL",
-    ];
-
-    static readonly string[] BaseTools =
-    [
-        "bash", "sh", "grep", "sed", "tail", "head", "cut", "seq", "sleep", "awk", "dirname",
-        "cat", "paste", "find", "tr", "mktemp", "mv", "rm", "uname", "date", "curl", "hostname",
-        // wc: install_first_beds's own file-count readout (grep -o '"file"' | wc -l | tr -d ' ')
-        // needs it — absent from Story345/346's own BaseTools lists only because neither of
-        // those files' scripts-under-test ever call it.
-        "wc",
-    ];
-
-    static string RepoRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "GenWave.sln")))
-            dir = dir.Parent;
-
-        if (dir is null) throw new InvalidOperationException("repo root (GenWave.sln) not found");
-        return dir.FullName;
-    }
-
-    static string ResolveTool(string tool)
-    {
-        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(':'))
-        {
-            var candidate = Path.Combine(dir, tool);
-            if (File.Exists(candidate))
-                return candidate;
-        }
-        throw new InvalidOperationException($"required tool not on PATH: {tool}");
-    }
-
-    static string MakeBinDir()
-    {
-        var dir = Directory.CreateTempSubdirectory("gw-setup-story405-bin-").FullName;
-        foreach (var tool in BaseTools)
-            File.CreateSymbolicLink(Path.Combine(dir, tool), ResolveTool(tool));
-        return dir;
-    }
-
-    /// <summary>A bin dir with every <see cref="BaseTools"/> entry except curl — the "curl
-    /// missing from this machine entirely" shape fact (e) needs. Also drives
+    /// <summary>A bin dir with every <see cref="ScriptProcess.MakeBinDir"/> default tool except
+    /// curl — the "curl missing from this machine entirely" shape fact (e) needs. Also drives
     /// wait_for_on_air_bg's own no-prober (poller_exit 2) degrade, which — per Story345's own
     /// N4 fact — still falls through to main()'s tail rather than exiting early, which is
-    /// exactly the path this file's fact (e) needs to reach install_first_beds at all.</summary>
+    /// exactly the path this file's fact (e) needs to reach install_first_beds at all.
+    /// ScriptProcess.MakeBinDir's default toolset includes curl (gh-#776's shared superset
+    /// across every migrated spec), so this fixture deletes the symlink after building rather
+    /// than omitting it during construction.</summary>
     static string BinWithoutCurl()
     {
-        var dir = Directory.CreateTempSubdirectory("gw-setup-story405-bin-").FullName;
-        foreach (var tool in BaseTools.Where(tool => tool != "curl"))
-            File.CreateSymbolicLink(Path.Combine(dir, tool), ResolveTool(tool));
+        var dir = ScriptProcess.MakeBinDir();
+        File.Delete(Path.Combine(dir, "curl"));
         return dir;
     }
 
     /// <summary>A bin dir whose `curl` is a wrapper script (round-2 review F1's own pin, fact
     /// (g)): it appends its own argv, one arg per line, to the file named by the TEST-ONLY
     /// env var GW_TEST_CURL_ARGV_LOG — read by the wrapper alone, never by setup.sh itself —
-    /// and then `exec`s the REAL curl binary resolved off the ambient PATH, so the ApiStub
-    /// loopback below still receives every call for real. Every other tool is the same
-    /// real-binary symlink <see cref="MakeBinDir"/> uses.</summary>
+    /// and then `exec`s the REAL curl binary (its path captured off the default bin dir's own
+    /// curl symlink before replacing it), so the ApiStub loopback below still receives every
+    /// call for real. Every other tool is <see cref="ScriptProcess.MakeBinDir"/>'s usual
+    /// real-binary symlink.</summary>
     static string MakeBinDirWithCurlArgvLogger()
     {
-        var dir = Directory.CreateTempSubdirectory("gw-setup-story405-bin-").FullName;
-        foreach (var tool in BaseTools.Where(tool => tool != "curl"))
-            File.CreateSymbolicLink(Path.Combine(dir, tool), ResolveTool(tool));
+        var dir = ScriptProcess.MakeBinDir();
+        var curlLink = Path.Combine(dir, "curl");
+        var realCurl = File.ResolveLinkTarget(curlLink, returnFinalTarget: true)?.FullName
+            ?? throw new InvalidOperationException("curl symlink target not found");
+        File.Delete(curlLink);
 
-        var wrapperPath = Path.Combine(dir, "curl");
-        var script = """
-            #!/usr/bin/env bash
+        ScriptProcess.AddStub(dir, "curl", $$"""
             if [ -n "${GW_TEST_CURL_ARGV_LOG:-}" ]; then
               for arg in "$@"; do printf '%s\n' "$arg" >> "$GW_TEST_CURL_ARGV_LOG"; done
               printf -- '---\n' >> "$GW_TEST_CURL_ARGV_LOG"
             fi
-            exec "__REAL_CURL__" "$@"
-
-            """.Replace("__REAL_CURL__", ResolveTool("curl"));
-        File.WriteAllText(wrapperPath, script);
-        MakeExecutable(wrapperPath);
+            exec "{{realCurl}}" "$@"
+            """);
         return dir;
     }
 
@@ -280,21 +225,18 @@ public static class FeatureTheWizardInstallsTheFirstBeds
     /// marker and fails.</summary>
     static string MakeBinDirWithFailingMktemp(string markerFile)
     {
-        var dir = Directory.CreateTempSubdirectory("gw-setup-story405-bin-").FullName;
-        foreach (var tool in BaseTools.Where(tool => tool != "mktemp"))
-            File.CreateSymbolicLink(Path.Combine(dir, tool), ResolveTool(tool));
+        var dir = ScriptProcess.MakeBinDir();
+        var mktempLink = Path.Combine(dir, "mktemp");
+        var realMktemp = File.ResolveLinkTarget(mktempLink, returnFinalTarget: true)?.FullName
+            ?? throw new InvalidOperationException("mktemp symlink target not found");
+        File.Delete(mktempLink);
 
-        var wrapperPath = Path.Combine(dir, "mktemp");
-        var script = """
-            #!/usr/bin/env bash
-            if [ -f "__MARKER__" ]; then
+        ScriptProcess.AddStub(dir, "mktemp", $$"""
+            if [ -f "{{markerFile}}" ]; then
               exit 1
             fi
-            exec "__REAL_MKTEMP__" "$@"
-
-            """.Replace("__MARKER__", markerFile).Replace("__REAL_MKTEMP__", ResolveTool("mktemp"));
-        File.WriteAllText(wrapperPath, script);
-        MakeExecutable(wrapperPath);
+            exec "{{realMktemp}}" "$@"
+            """);
         return dir;
     }
 
@@ -350,8 +292,9 @@ public static class FeatureTheWizardInstallsTheFirstBeds
     {
         var path = Path.Combine(
             Directory.CreateTempSubdirectory("gw-setup-story405-launch-").FullName, "launch-stub.sh");
-        // `: > "$file"` (a no-op builtin plus a redirect), not `touch` — this script's own PATH
-        // is the caller's overridden one (BaseTools only), which never includes `touch`.
+        // `: > "$file"` (a no-op builtin plus a redirect), not `touch` — kept even though
+        // ScriptProcess.MakeBinDir's default toolset now includes touch, since this form needs
+        // no PATH lookup at all.
         File.WriteAllText(path, $"#!/usr/bin/env bash\n: > \"{markerFile}\"\nexit {exitCode}\n");
         MakeExecutable(path);
         return path;
@@ -368,56 +311,31 @@ public static class FeatureTheWizardInstallsTheFirstBeds
             ["GW_ONAIR_TIMEOUT_SECONDS"] = onAirTimeoutSeconds.ToString(CultureInfo.InvariantCulture),
         };
 
-    /// <summary>Runs the real setup.sh, feeding the given text verbatim to stdin (then closing
-    /// it) and returning the whole run's exit code/stdout/stderr — the Gh019/Story344/345/346
-    /// idiom, with Story346's own trailing CLI-args array (fact (d) needs `--offline`).
-    /// SKIP_PREFLIGHT=1 always rides along — preflight itself is Story342/344's own suite.</summary>
+    /// <summary>Runs the real setup.sh, feeding the given text verbatim to its stdin — via a
+    /// scratch wrapper script that redirects stdin from a spooled answers file (gh-#776:
+    /// ScriptProcess.Run has no live-stdin support, but every fact here writes its whole answer
+    /// transcript upfront, so a file redirect is behaviorally identical to the old live-pipe
+    /// write-then-close), with Story346's own trailing CLI-args array (fact (d) needs
+    /// `--offline`). SKIP_PREFLIGHT=1 always rides along as a default (extraEnv is merged on
+    /// top, so a scenario could still override it, though none here do) — preflight itself is
+    /// Story342/344's own suite.</summary>
     static (int ExitCode, string StdOut, string StdErr) RunSetup(
         string binDir, string envFile, string stdinAnswers, IReadOnlyDictionary<string, string> extraEnv,
         params string[] args)
     {
-        var startInfo = new ProcessStartInfo("bash")
-        {
-            WorkingDirectory = RepoRoot(),
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            RedirectStandardInput = true,
-            UseShellExecute = false,
-        };
-        startInfo.ArgumentList.Add(Path.Combine(RepoRoot(), "setup.sh"));
-        foreach (var arg in args) startInfo.ArgumentList.Add(arg);
+        var scratchDir = Directory.CreateTempSubdirectory("gw-setup-story405-stdin-").FullName;
+        var answersPath = Path.Combine(scratchDir, "answers.txt");
+        File.WriteAllText(answersPath, stdinAnswers);
 
-        startInfo.Environment["PATH"] = binDir;
-        foreach (var name in RequiredEnvVars) startInfo.Environment.Remove(name);
-        foreach (var name in SeamEnvVars) startInfo.Environment.Remove(name);
-        startInfo.Environment["GW_ENV_FILE"] = envFile;
-        startInfo.Environment["SKIP_PREFLIGHT"] = "1";
+        var wrapperPath = Path.Combine(scratchDir, "run-setup.sh");
+        File.WriteAllText(wrapperPath, $"exec bash setup.sh \"$@\" < \"{answersPath}\"\n");
+        MakeExecutable(wrapperPath);
+
+        var mergedEnv = new Dictionary<string, string> { ["SKIP_PREFLIGHT"] = "1" };
         foreach (var (key, value) in extraEnv)
-            startInfo.Environment[key] = value;
+            mergedEnv[key] = value;
 
-        using var process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("failed to start setup.sh");
-
-        // Concurrent reads, not sequential ReadToEnd() + WaitForExit() (Story343's convention):
-        // a child writing enough to fill both OS pipe buffers at once can deadlock a reader that
-        // drains one stream to completion before starting the other.
-        var stdOutTask = process.StandardOutput.ReadToEndAsync();
-        var stdErrTask = process.StandardError.ReadToEndAsync();
-
-        try
-        {
-            process.StandardInput.Write(stdinAnswers);
-            process.StandardInput.Close();
-        }
-        catch (IOException)
-        {
-            // Child already exited without reading stdin — nothing left to write to.
-        }
-
-        Task.WaitAll(stdOutTask, stdErrTask);
-        process.WaitForExit();
-
-        return (process.ExitCode, stdOutTask.Result, stdErrTask.Result);
+        return ScriptProcess.Run(wrapperPath, binDir, envFile, mergedEnv, args);
     }
 
     // ---------------------------------------------------------------------
@@ -446,7 +364,7 @@ public static class FeatureTheWizardInstallsTheFirstBeds
             // stub would capture "wrong" rather than the real generated secret.
             env["ADMIN_PASSWORD"] = "wrong";
 
-            var (exitCode, stdOut, _) = RunSetup(MakeBinDir(), envFile, $"{mediaDir}\n1\ny\n", env);
+            var (exitCode, stdOut, _) = RunSetup(ScriptProcess.MakeBinDir(), envFile, $"{mediaDir}\n1\ny\n", env);
 
             var filePassword = ReadEnvValue(File.ReadAllText(envFile), "ADMIN_PASSWORD");
 
@@ -498,7 +416,7 @@ public static class FeatureTheWizardInstallsTheFirstBeds
             var env = BaseEnv(launchStub, mount.Url, onAirTimeoutSeconds: 30);
             env["GW_API_URL"] = api.Url;
 
-            var (exitCode, stdOut, _) = RunSetup(MakeBinDir(), envFile, $"{mediaDir}\n1\ny\n", env);
+            var (exitCode, stdOut, _) = RunSetup(ScriptProcess.MakeBinDir(), envFile, $"{mediaDir}\n1\ny\n", env);
 
             Assert.True(
                 exitCode == 0 &&
@@ -535,7 +453,7 @@ public static class FeatureTheWizardInstallsTheFirstBeds
             var env = BaseEnv(launchStub, mount.Url, onAirTimeoutSeconds: 30);
             env["GW_API_URL"] = api.Url;
 
-            var (_, stdOut, _) = RunSetup(MakeBinDir(), envFile, $"{mediaDir}\n1\ny\n", env);
+            var (_, stdOut, _) = RunSetup(ScriptProcess.MakeBinDir(), envFile, $"{mediaDir}\n1\ny\n", env);
 
             Assert.Contains(
                 "Background music pack not installed (404: the pack is not in the catalog yet, or the admin surface is off). Install it later from the catalog page.",
@@ -563,7 +481,7 @@ public static class FeatureTheWizardInstallsTheFirstBeds
             env["GW_API_URL"] = api.Url;
 
             var (exitCode, stdOut, _) = RunSetup(
-                MakeBinDir(), envFile, $"{mediaDir}\n1\ny\n", env, "--offline");
+                ScriptProcess.MakeBinDir(), envFile, $"{mediaDir}\n1\ny\n", env, "--offline");
 
             Assert.True(
                 exitCode == 0 &&
@@ -627,7 +545,7 @@ public static class FeatureTheWizardInstallsTheFirstBeds
             File.WriteAllText(envFile, "MEDIA_DIR=/tmp\n");
 
             var (_, stdOut, _) = RunSetup(
-                MakeBinDir(), envFile, "", new Dictionary<string, string> { ["GW_API_URL"] = api.Url });
+                ScriptProcess.MakeBinDir(), envFile, "", new Dictionary<string, string> { ["GW_API_URL"] = api.Url });
 
             Assert.True(
                 api.Calls.Count == 0 &&
@@ -711,7 +629,7 @@ public static class FeatureTheWizardInstallsTheFirstBeds
             env["https_proxy"] = deadProxy;
             env["ALL_PROXY"] = deadProxy;
 
-            var (exitCode, stdOut, _) = RunSetup(MakeBinDir(), envFile, $"{mediaDir}\n1\ny\n", env);
+            var (exitCode, stdOut, _) = RunSetup(ScriptProcess.MakeBinDir(), envFile, $"{mediaDir}\n1\ny\n", env);
 
             Assert.True(
                 exitCode == 0 &&
@@ -779,7 +697,7 @@ public static class FeatureTheWizardInstallsTheFirstBeds
             // `--bogus` did. -h/--help exits main() before any interview/launch machinery runs,
             // so no launch stub, media dir, or api stub is needed here at all.
             var (exitCode, stdOut, _) = RunSetup(
-                MakeBinDir(), ScratchEnvPath(), "", new Dictionary<string, string>(), "--help");
+                ScriptProcess.MakeBinDir(), ScratchEnvPath(), "", new Dictionary<string, string>(), "--help");
 
             Assert.True(
                 exitCode == 0 && stdOut.Contains("--offline", StringComparison.Ordinal),
