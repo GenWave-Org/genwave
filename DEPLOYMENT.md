@@ -340,6 +340,13 @@ never started against the incomplete schema. The db container is left up for ins
 (`docker compose logs db`); migrations are idempotent, so fix the cause and re-run
 `./migrate.sh` (or simply `./launch.sh` again).
 
+**Build.** `./build.sh` needs no `.env`, no music library and no free station ports. It
+checks only the .NET 10 SDK, Docker, the compose plugin and the compose version floor, and exports
+placeholders for the compose secrets in its own process so image builds render (`build-only`
+for the five passwords, `/build-only` for `MEDIA_DIR` — a bind-mount source, so it needs a
+leading slash or compose reads it as a named volume) — a value already set in the shell or
+in `.env` always wins.
+
 Combine with `--with` to also activate compose profiles (e.g. `logging`, `tunnel`) on the
 same launch: `./launch.sh --pinned --with logging,tunnel` merges them into whatever
 `COMPOSE_PROFILES` is already set (env or `.env`).
