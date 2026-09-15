@@ -3,7 +3,7 @@
 // Runner: xUnit. The subject is a test-support type that does not exist yet —
 // GenWave.Host.Tests.Support.ScriptProcess, the ONE way a spec may start a bash script — so
 // this file reaches it by reflection: the Host.Tests project keeps compiling, and every fact
-// below fails with `pending: T473` until the helper lands. Once it exists the same facts pin
+// below fails with the helper-missing message until the helper lands. Once it exists the same facts pin
 // its contract: a strip rule (IsStripped) that names the launch seams, a Run that applies it,
 // and a repo-wide grep proving no spec bypasses it.
 //
@@ -25,7 +25,7 @@ namespace GenWave.Host.Tests.Specs;
 public static class FeatureScriptSpecsDoNotInheritTheDevelopersShell
 {
     const string HelperTypeName = "GenWave.Host.Tests.Support.ScriptProcess";
-    const string Pending = "pending: T473 — tests/GenWave.Host.Tests/Support/ScriptProcess.cs does not exist yet";
+    const string Pending = "ScriptProcess helper missing — tests/GenWave.Host.Tests/Support/ScriptProcess.cs (T473, gh-#776)";
 
     static readonly Lazy<Type> Helper = new(() =>
         typeof(FeatureScriptSpecsDoNotInheritTheDevelopersShell).Assembly.GetType(HelperTypeName)
