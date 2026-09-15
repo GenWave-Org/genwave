@@ -30,21 +30,23 @@
 #   --dry-run     List which db/*-migration.sh scripts would run, sorted, and exit 0.
 #                 Pure local glob — touches no docker/compose state, so it works even
 #                 against a stack that isn't up yet.
-#   --keep-going  Run every migration even after one fails, matching launch.sh's
-#                 historical behaviour (see "Failure handling" below). Without this
-#                 flag (the default), the run stops at the first failing migration.
+#   --keep-going  Run every migration even after one fails (see "Failure handling" below).
+#                 Without this flag (the default), the run stops at the first failing
+#                 migration.
 #
 # Failure handling:
-#   Before launch.sh extracted this loop, a failing migration printed "FAILED" and the
-#   script carried on to the next one — nothing ever stopped, and launch.sh's overall
-#   exit code was unaffected. That is preserved exactly via --keep-going, which is how
-#   launch.sh invokes this script (byte-identical dev-flow output/behaviour).
+#   The default (no --keep-going) is fail-fast: the first failing migration stops the run,
+#   prints its own captured output to stderr, and migrate.sh exits non-zero. Silently
+#   limping past a schema migration failure is worse than stopping loudly.
 #
-#   Run standalone (the demo-box case this script exists for), the default is now
-#   fail-fast: the first failing migration stops the run and migrate.sh exits non-zero.
-#   A conscious improvement over the old always-continue behaviour — silently limping
-#   past a schema migration failure on a box nobody is watching interactively is worse
-#   than stopping loudly. --keep-going is there for anyone who wants the old behaviour.
+#   gh-#770/STORY-436: this is also how launch.sh calls this script now — both the pinned
+#   flow and the dev flow run it fail-fast, and a failing migration stops the launch itself
+#   (see launch.sh's own comment above its call), leaving the db up for inspection instead
+#   of carrying on regardless.
+#
+#   --keep-going restores the old always-continue behaviour (every migration runs even
+#   after an earlier one fails, and failures are reported but never stop the run) — it
+#   remains available for anyone invoking migrate.sh standalone who wants that.
 #
 # Exit: 0 — every migration ran (or --dry-run listed what would have)
 #       1 — a migration failed (fail-fast: the first one; --keep-going: any of them),
@@ -182,9 +184,11 @@ if [ "$any_failed" = "1" ]; then
   exit 1
 fi
 
-# Keep launch.sh's dev-flow output byte-identical: with --keep-going (how launch.sh calls
-# this script) there was never a closing line here — the next output launch.sh itself
-# prints is "==> Bringing the rest of the stack up". Only announce completion standalone.
+# This closing line is suppressed only under --keep-going. gh-#770/STORY-436: launch.sh
+# (both flows) now calls migrate.sh WITHOUT that flag, so "==> Schema migrations up to
+# date" prints there too, just before launch.sh's next "==> Bringing …" banner —
+# that's fine, not something to guard against. --keep-going (standalone use only, now that
+# launch.sh no longer passes it) is the one case that still wants this line skipped.
 if [ "$KEEP_GOING" != "1" ]; then
   echo "==> Schema migrations up to date"
 fi
