@@ -334,6 +334,12 @@ relaunches until gh-#631 lands (the port check doesn't recognise the stack's own
 ports when docker collapses them into a range). It never touches tests: `SKIP_TESTS=1` is
 the separate knob that skips `build.sh`'s pre-image test run.
 
+On the plain dev flow (bare `./launch.sh`, no `--pinned`), a failed migration stops the
+launch with the verdict "Schema migration failed" (gh-#770/STORY-436) — the application is
+never started against the incomplete schema. The db container is left up for inspection
+(`docker compose logs db`); migrations are idempotent, so fix the cause and re-run
+`./migrate.sh` (or simply `./launch.sh` again).
+
 Combine with `--with` to also activate compose profiles (e.g. `logging`, `tunnel`) on the
 same launch: `./launch.sh --pinned --with logging,tunnel` merges them into whatever
 `COMPOSE_PROFILES` is already set (env or `.env`).

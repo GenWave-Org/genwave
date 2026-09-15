@@ -596,14 +596,21 @@ public static class Story414_MigrationToSponsors
         [Fact]
         public void DevFlowRunsMigrateBeforeBringingUpTheApi()
         {
-            // Dev flow: compose up db -> migrate.sh --keep-going -> compose up (full stack, incl. api).
+            // Dev flow (gh-#770/STORY-436): compose up db -> migrate.sh (fail-fast) -> compose up
+            // (full stack, incl. api). The pinned flow above uses this same
+            // `if ! ./migrate.sh "${MIGRATE_ARGS[@]}"; then` text, so the search here starts at the
+            // dev-flow marker comment to land on the second (dev-flow) occurrence unambiguously.
             var launchText = File.ReadAllText(
                 Path.Combine(RepoRootLocator.Find(AppContext.BaseDirectory), "launch.sh"));
 
+            var devFlowMarker = launchText.IndexOf(
+                "# --- dev flow (default)", StringComparison.Ordinal);
+            Assert.True(devFlowMarker >= 0, "dev-flow marker comment not found in launch.sh");
+
             var migrateIndex = launchText.IndexOf(
-                "./migrate.sh --keep-going \"${MIGRATE_ARGS[@]}\" || true", StringComparison.Ordinal);
+                "if ! ./migrate.sh \"${MIGRATE_ARGS[@]}\"; then", devFlowMarker, StringComparison.Ordinal);
             var apiUpIndex = launchText.IndexOf(
-                "if ! compose up \"${UP_ARGS[@]}\"; then", StringComparison.Ordinal);
+                "if ! compose up \"${UP_ARGS[@]}\"; then", devFlowMarker, StringComparison.Ordinal);
 
             Assert.True(migrateIndex >= 0, "dev-flow migrate.sh invocation not found in launch.sh");
             Assert.True(apiUpIndex >= 0, "dev-flow compose up (full stack, brings up api) not found in launch.sh");
