@@ -17,8 +17,10 @@
 # flag-only).
 #
 # Presets (STORY-201 / SPEC F78.10, vocabulary v2 SPEC F132.5/F136.5):
-#   ./launch.sh              dev flow (default, unchanged): teardown, db-first up, wait for
-#                             db healthy, ./migrate.sh --keep-going, full up, status.
+#   ./launch.sh              dev flow (default): teardown, db-first up, wait for db healthy,
+#                             ./migrate.sh (fail-fast — a failed migration stops the launch
+#                             and leaves the db up for inspection, gh-#770/STORY-436), full
+#                             up, status.
 #   ./launch.sh --pinned     demo/appliance flow, STAGED (SPEC F136, STORY-343): base +
 #                             compose.pinned.yaml + compose.demo.yaml. Pull the core images
 #                             (db, icecast, engine, api, +piper when the fallback profile is
@@ -714,11 +716,12 @@ if [ "$DRY_RUN" = "1" ]; then
   plan_line "$(compose_display) ps -q db"
   plan_line "docker inspect <db container> --format {{.State.Health.Status}} (poll until healthy, up to 30x2s)"
   # Same no-dangling-space discipline as compose_display: MIGRATE_ARGS is empty on the
-  # plain dev flow, populated under --piper-only.
+  # plain dev flow, populated under --piper-only. gh-#770/STORY-436: the dev flow now runs
+  # migrate.sh fail-fast, same as the pinned flow.
   if [ "${#MIGRATE_ARGS[@]}" -eq 0 ]; then
-    plan_line "./migrate.sh --keep-going"
+    plan_line "./migrate.sh"
   else
-    plan_line "./migrate.sh --keep-going ${MIGRATE_ARGS[*]}"
+    plan_line "./migrate.sh ${MIGRATE_ARGS[*]}"
   fi
   plan_line "$(compose_display) up ${UP_ARGS[*]}"
   plan_line "record COMPOSE_FILE=$(compose_file_value) in .env (gh-#309)"
@@ -769,12 +772,17 @@ if ! wait_db_healthy; then
     "The stack is fully down — fix the cause and re-run: ./launch.sh"
 fi
 # The migration loop itself now lives in ./migrate.sh (also usable standalone against a
-# running stack that isn't being launched — see its header). --keep-going preserves this
-# script's historical behaviour exactly: a failing migration is reported but never stops
-# the launch, so `|| true` keeps that true here too. MIGRATE_ARGS is empty on the plain
-# dev flow (compose project auto-detection, byte-identical behaviour) and carries the
-# overlay file selection under --piper-only.
-./migrate.sh --keep-going "${MIGRATE_ARGS[@]}" || true
+# running stack that isn't being launched — see its header). gh-#770/STORY-436: the dev
+# flow now runs it fail-fast, same as the pinned flow above — a failing migration stops the
+# launch here, before the api can ever start against an incomplete schema, and the db is
+# deliberately left up (no `compose down`) for inspection. MIGRATE_ARGS is empty on the
+# plain dev flow (compose project auto-detection) and carries the overlay file selection
+# under --piper-only.
+if ! ./migrate.sh "${MIGRATE_ARGS[@]}"; then
+  preflight_fail "Schema migration failed — the application was NOT started against the incomplete schema." \
+    "The database is still up for inspection: $(compose_display) logs db" \
+    "Migrations are idempotent — fix the cause, then re-run: ./migrate.sh   (or simply: ./launch.sh)"
+fi
 
 echo "==> Bringing the rest of the stack up"
 if ! compose up "${UP_ARGS[@]}"; then
