@@ -23,6 +23,17 @@ sealed class FakeTtsSegmentSource : ITtsSegmentSource
     public TimeSpan? RenderDelay { get; set; }
 
     /// <summary>
+    /// The clock <see cref="RenderDelay"/> waits on (STORY-442, PLAN T483). Defaults to
+    /// <see cref="TimeProvider.System"/> so every pre-existing caller (a bare
+    /// <c>new FakeTtsSegmentSource()</c>, wired against a real orchestrator that also uses
+    /// <see cref="TimeProvider.System"/>) keeps its current wall-clock-racing behavior unchanged.
+    /// A caller that wants the render delay to race a per-unit render budget deterministically
+    /// (rather than on wall-clock timer scheduling, which full-suite load contention can skew) sets
+    /// this to the SAME <c>FakeTimeProvider</c> the rest of that production chain already shares.
+    /// </summary>
+    public TimeProvider TimeProvider { get; set; } = TimeProvider.System;
+
+    /// <summary>
     /// When non-null, every rendered segment carries this measured <see cref="MediaItem.DurationMs"/>
     /// (gh-#253) — stands in for the real <c>TtsSegmentSource</c>'s cue-derived F66.1 stamp so specs
     /// can drive the Orchestrator's ObserveRendered feed. The default (<see langword="null"/>)
@@ -54,7 +65,7 @@ sealed class FakeTtsSegmentSource : ITtsSegmentSource
         Requests.Add(request);
 
         if (RenderDelay is { } delay)
-            await Task.Delay(delay, ct);
+            await Task.Delay(delay, TimeProvider, ct);
 
         if (ShouldThrow?.Invoke(request) ?? false)
             throw new InvalidOperationException("Simulated TTS render fault (test double).");

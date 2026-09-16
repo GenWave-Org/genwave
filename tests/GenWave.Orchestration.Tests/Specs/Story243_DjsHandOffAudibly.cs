@@ -66,7 +66,10 @@ public static class FeatureDjsHandOffAudibly
         });
         var rotationProvider = new FakeRotationSettingsProvider(new RotationSettings());
         var logger = new CapturingLogger<Orchestrator>();
-        var tts = new FakeTtsSegmentSource();
+        // The render double's own RenderDelay rides the SAME fake clock as the render budget below
+        // (STORY-442, PLAN T483) — a spec drives both off due order on chain.Time, never wall-clock
+        // timer scheduling.
+        var tts = new FakeTtsSegmentSource { TimeProvider = time };
         var events = new CapturingStationEventSink();
         var queue = new SpeechDeferralQueue(time);
         var catalog = new FakeMediaCatalog(MakeTrackRef("t1"));
@@ -143,6 +146,52 @@ public static class FeatureDjsHandOffAudibly
         for (var i = 0; i < count; i++)
         {
             var item = await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
+            Assert.NotNull(item);
+            items.Add(item);
+            time.Advance(step);
+        }
+
+        return items;
+    }
+
+    /// <summary>
+    /// <see cref="PullUnitsAsync"/> for a boundary unit whose handoff renders race their render budget
+    /// on the same fake clock (STORY-442, PLAN T483). Orchestrator awaits each pending render in turn
+    /// and creates that render's <c>Task.Delay(renderBudget, timeProvider, ct)</c> only when its turn
+    /// comes, so each budget needs its own advance rather than one made before the pull starts.
+    /// <para>
+    /// Every advance moves the clock by exactly one of {<paramref name="renderDelay"/>,
+    /// <paramref name="renderBudget"/>}, so at most one budget-vs-render pair becomes due per call.
+    /// Microsoft's <c>FakeTimeProvider</c> completes due timers in due order inside <c>Advance</c>, but
+    /// their continuations are posted to xunit's synchronization context, so two racing timers due in
+    /// the same call would leave <c>Task.WhenAny</c> with two candidates. The spin yields (never sleeps)
+    /// until the posted continuation has run. A non-boundary pull is complete on creation, so the loop
+    /// never runs for it.
+    /// </para>
+    /// </summary>
+    internal static async Task<List<MediaItem>> PullUnitsRacingTheRenderBudgetAsync(
+        Orchestrator orchestrator, FakeTimeProvider time, TimeSpan step, int count,
+        TimeSpan renderDelay, TimeSpan renderBudget)
+    {
+        var firstRoundAdvance = renderDelay < renderBudget ? renderDelay : renderBudget;
+        var items = new List<MediaItem>();
+
+        for (var i = 0; i < count; i++)
+        {
+            var pull = orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
+
+            // At most two handoff pieces (SignOff + SignOn) are ever pending on one boundary unit
+            // (SPEC F92.6's accepted one-unit skew) — a few rounds of margin beyond that cost
+            // nothing, since this loop never even starts on every other unit.
+            for (var round = 0; round < 6 && !pull.IsCompleted; round++)
+            {
+                time.Advance(round == 0 ? firstRoundAdvance : renderBudget);
+
+                for (var spin = 0; spin < 50 && !pull.IsCompleted; spin++)
+                    await Task.Yield();
+            }
+
+            var item = await pull;
             Assert.NotNull(item);
             items.Add(item);
             time.Advance(step);
@@ -493,22 +542,18 @@ public static class FeatureDjsHandOffAudibly
         [Fact]
         public async Task RendersRideThePerUnitBudget()
         {
+            var renderBudget = TimeSpan.FromMilliseconds(10);
+            var renderDelay = TimeSpan.FromMilliseconds(200); // comfortably exceeds the 10ms budget
             var chain = BuildProductionChain(
                 TwoDjStore(), TwoDjSchedule(), JustBeforeNoon, TimeSpan.FromMinutes(10),
-                renderBudget: TimeSpan.FromMilliseconds(10));
-            chain.Tts.RenderDelay = TimeSpan.FromMilliseconds(200); // comfortably exceeds the 10ms budget
+                renderBudget: renderBudget);
+            chain.Tts.RenderDelay = renderDelay;
 
-            // Interim shape (T482): the render BUDGET rides the fake clock now (Microsoft's fake implements
-            // CreateTimer), but FakeTtsSegmentSource.RenderDelay is still real wall time until T483. See
-            // PullPumpingTheBudgetAsync for why one upfront Advance is not enough. T483 deletes the pump.
-            var items = new List<MediaItem>();
-            for (var i = 0; i < PullCount; i++)
-            {
-                var item = await PullPumpingTheBudgetAsync(chain.Orchestrator, chain.Time, renderBudget: TimeSpan.FromMilliseconds(10));
-                Assert.NotNull(item);
-                items.Add(item);
-                chain.Time.Advance(PullStep);
-            }
+            // The render double's RenderDelay rides the SAME fake clock as the render budget
+            // (STORY-442, PLAN T483) — PullUnitsRacingTheRenderBudgetAsync drives chain.Time in the
+            // small, single-timer-at-a-time steps that race needs; no real wait anywhere.
+            var items = await PullUnitsRacingTheRenderBudgetAsync(
+                chain.Orchestrator, chain.Time, PullStep, PullCount, renderDelay, renderBudget);
 
             // Both pieces were ATTEMPTED (rendered, just too slowly)...
             Assert.Contains(chain.Tts.Requests, r => r.Kind == SegmentKind.SignOff);
@@ -517,31 +562,6 @@ public static class FeatureDjsHandOffAudibly
             // already rides (SPEC F44.2) dropped both.
             Assert.DoesNotContain(items, IsSignOff);
             Assert.DoesNotContain(items, IsSignOn);
-        }
-
-        /// <summary>
-        /// Pulls once while pumping <paramref name="time"/> past <paramref name="renderBudget"/> for as
-        /// long as the pull is still in flight. A single pull can enqueue MORE THAN ONE render-budget
-        /// race (this scenario's boundary unit enqueues both SignOff and SignOn), and Orchestrator awaits
-        /// them one at a time — each race's own budget delay is only created once its turn in that
-        /// sequence is reached, so it needs its own Advance to fire rather than one advance made before
-        /// the pull even started. The short real wait between nudges is not a timing budget on the
-        /// segments under test (their delays are all virtual-clock or comfortably real-fast); it only
-        /// gives the just-advanced fake timer's queued continuation a chance to actually run before the
-        /// next check.
-        /// </summary>
-        static async Task<MediaItem?> PullPumpingTheBudgetAsync(
-            Orchestrator orchestrator, FakeTimeProvider time, TimeSpan renderBudget)
-        {
-            const int MaxPumps = 20;
-            var pull = orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
-            for (var pump = 0; pump < MaxPumps && !pull.IsCompleted; pump++)
-            {
-                time.Advance(renderBudget);
-                await Task.Delay(TimeSpan.FromMilliseconds(5));
-            }
-
-            return await pull;
         }
     }
 

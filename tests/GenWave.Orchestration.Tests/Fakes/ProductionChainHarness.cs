@@ -74,7 +74,10 @@ static class ProductionChainHarness
         });
         var rotationProvider = new FakeRotationSettingsProvider(new RotationSettings());
         var logger = new CapturingLogger<Orchestrator>();
-        var tts = new FakeTtsSegmentSource();
+        // The render double's own RenderDelay rides the SAME fake clock as the render budget below
+        // (STORY-442, PLAN T483) — a spec drives both off due order on chain.Time, never wall-clock
+        // timer scheduling.
+        var tts = new FakeTtsSegmentSource { TimeProvider = time };
         var events = new CapturingStationEventSink();
         var queue = new SpeechDeferralQueue(time);
         var mediaCatalog = catalog ?? new FakeMediaCatalog(MakeTrackRef("t1"));
