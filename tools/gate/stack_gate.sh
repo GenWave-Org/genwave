@@ -8,18 +8,21 @@
 #   --fresh          a clean install from nothing (setup.sh --yes, bare launch.sh — the
 #                     wizard's own .env picks the pinned piper-only topology — health/on-air
 #                     waits)
-#   --upgrade        an existing station upgraded onto the tag (T491+)
-#   --capture        captures stream audio during the leg for a loudness/crossfade check
-#                     (T491+; requires --fresh)
-#   --chaos          fault injection during the leg (T491+; requires --capture)
-#   --from <vX.Y.Z>  the tag the upgrade leg starts from (validated, stored; unused until T491)
+#   --upgrade        an existing station upgraded onto the tag (T493)
+#   --capture        records CAPTURE_SECS of the fresh leg's own live stream and measures it: no
+#                     silent gaps, loudness within TOL_LU of the station's own configured target,
+#                     speech aired through the booth log (requires --fresh)
+#   --chaos          fault injection during the leg (T496; requires --capture)
+#   --from <vX.Y.Z>  the tag the upgrade leg starts from (validated, stored; unused until T493)
 #   --report <dir>   write gate-report.md + gate-report.json there (default: .)
 #
 # This file started as PLAN T486's skeleton: arg parsing, the prerequisite probe, isolation, the
 # scratch + compose.gate.yaml generator, the PROJECTS/trap teardown, and the report writer. PLAN
-# T487 fills in the fresh leg's own orchestration (media synth, setup.sh --yes, launch.sh,
-# health, on-air — see run_fresh_leg). `--upgrade`/`--capture`/`--chaos` are still report-only
-# "skipped" rows until T491+.
+# T487 filled in the fresh leg's own orchestration (media synth, setup.sh --yes, launch.sh,
+# health, on-air — see run_fresh_leg). PLAN T491 filled in the capture leg (run_capture_leg):
+# admin login, the station's own loudness target, the recording, measure_audio.sh, and the
+# booth-log speech check. `--upgrade`/`--chaos` are still report-only "skipped" rows until
+# T493/T496.
 #
 # Usage: tools/gate/stack_gate.sh --tag <vX.Y.Z> [--fresh] [--upgrade] [--capture] [--chaos]
 #                                  [--from <vX.Y.Z>] [--report <dir>]
@@ -29,14 +32,20 @@
 #
 # Isolation (F178.1): never reads the caller's .env; strips GW_*/COMPOSE_*/the six .env secret
 # names from its own exported environment before any docker call, so a developer's shell leaking
-# a real ADMIN_PASSWORD or a stray GW_* override can never reach the stack under test.
+# a real ADMIN_PASSWORD or a stray GW_* override can never reach the stack under test. The
+# capture leg's own admin login (below) reads the scratch's ADMIN_PASSWORD straight off the
+# scratch's `.env` on disk for the same reason — never `source`d, never exported.
 #
-# Knobs (env, all optional — the fresh leg's own; --upgrade/--capture/--chaos add more at
-# T491+): GATE_API_BASE (default http://localhost:8080) the api base URL /health is probed
-# against; GATE_STREAM_URL (default http://localhost:8000/stream) threaded into the real
-# setup.sh's own on-air poll target; GATE_HEALTH_SECS (default 180) and GATE_ONAIR_SECS (default
-# 300) the wall-clock budgets for the health and on-air waits below; GATE_POLL_SECS (default 5,
-# must be a positive integer) how often each wait re-probes.
+# Knobs (env, all optional — the fresh leg's own; --upgrade/--chaos add more at T493/T496):
+# GATE_API_BASE (default http://localhost:8080) the api base URL /health is probed against, and
+# — with --capture — /api/auth/login + /api/settings too; GATE_STREAM_URL (default
+# http://localhost:8000/stream) threaded into the real setup.sh's own on-air poll target and, with
+# --capture, the URL ffmpeg records from; GATE_HEALTH_SECS (default 180) and GATE_ONAIR_SECS
+# (default 300) the wall-clock budgets for the health and on-air waits below; GATE_POLL_SECS
+# (default 5, must be a positive integer) how often each wait re-probes; CAPTURE_SECS (default
+# 360, must be a positive integer) how long --capture records; TOL_LU, SILENCE_FLOOR,
+# SILENCE_SECS — measure_audio.sh's own tolerance knobs, passed through untouched (see
+# tools/gate/measure_audio.sh).
 
 set -euo pipefail
 
@@ -75,6 +84,23 @@ COMPOSE_FILE_LIST="compose.yaml:compose.piper-only.yaml:compose.gate.yaml"
 # run_fresh_leg sets them, read by write_report below.
 FRESH_HEALTH_SECS=""
 FRESH_ONAIR_SECS=""
+
+# The fresh leg's own scratch + compose project name, set by run_fresh_leg as soon as each exists
+# — run_capture_leg (T491) reuses this SAME stack rather than standing up a second one, since
+# SPEC F178.5 measures the fresh leg's own live stream.
+FRESH_SCRATCH=""
+FRESH_PROJECT=""
+
+# Capture leg measurements (T491) — empty until run_capture_leg sets them, one field at a time,
+# as each step completes; a step never reached stays empty (rendered as `null` in the JSON
+# report, never a string) so a failing leg still reports every number it actually measured
+# (SPEC F178.5: "every number into the report").
+CAPTURE_SECS_VALUE=""
+CAPTURE_TARGET_LUFS=""
+CAPTURE_SILENCE_EVENTS=""
+CAPTURE_INTEGRATED_LUFS=""
+CAPTURE_BOOTH_LOG=""
+CAPTURE_FFMPEG_TAIL=""
 
 # shellcheck disable=SC2317 # false positive: only called indirectly via `trap cleanup EXIT`,
 # which shellcheck's reachability analysis doesn't follow (documented SC2317 caveat).
@@ -146,6 +172,9 @@ fi
 if [ -n "${GATE_POLL_SECS:-}" ] && ! [[ "$GATE_POLL_SECS" =~ ^[1-9][0-9]*$ ]]; then
   usage_error "GATE_POLL_SECS must be a positive integer: $GATE_POLL_SECS"
 fi
+if [ -n "${CAPTURE_SECS:-}" ] && ! [[ "$CAPTURE_SECS" =~ ^[1-9][0-9]*$ ]]; then
+  usage_error "CAPTURE_SECS must be a positive integer: $CAPTURE_SECS"
+fi
 
 # ---------------------------------------------------------------------------------------------
 # Prerequisite probe — binaries on THIS host; docker compose's v2-ness is checked per leg, inside
@@ -184,6 +213,15 @@ strip_isolation_vars
 declare -A LEG_STATUS=([fresh]="" [upgrade]="" [capture]="" [chaos]="")
 declare -A LEG_DETAIL=([fresh]="" [upgrade]="" [capture]="" [chaos]="")
 
+# gate_api_base — GATE_API_BASE (default http://localhost:8080) with any trailing slash trimmed;
+# every caller appends its own leading slash, so a caller-supplied trailing slash (the test
+# harness's fake station URL carries one) never doubles up. Shared by the fresh leg's /health
+# probe and the capture leg's /api/auth/login + /api/settings calls.
+gate_api_base() {
+  local base="${GATE_API_BASE:-http://localhost:8080}"
+  printf '%s' "${base%/}"
+}
+
 # Exactly five `image:` lines, one per repo-built service, nothing else under them — matches
 # compose.pinned.yaml's naming (api's image is bare `genwave`; the other four are `genwave-<svc>`).
 write_compose_gate_overlay() {
@@ -207,21 +245,6 @@ EOF
 # (both are always on PATH) rather than `openssl rand -hex 4`.
 gate_project_name() {
   printf 'gw-gate-%s-%s' "$1" "$(tr -dc 'a-f0-9' < /dev/urandom | head -c 8)"
-}
-
-# make_gate_media <dir> — SPEC F178.3's run-time half (T489 later moves this into its own
-# tools/gate/make_media.sh): two 45-second tracks at -12 and -30 integrated LUFS, tone mixed with
-# shaped noise (so loudnorm has real dynamics to normalize, not a bare sine) rather than pure
-# tone, tagged genre=music so setup.sh's own Q2 .flac/.mp3 count sees a populated library.
-make_gate_media() {
-  local dir="$1" i lufs
-  mkdir -p "$dir"
-  for i in 1 2; do
-    case "$i" in 1) lufs=-12 ;; *) lufs=-30 ;; esac
-    ffmpeg -nostats -hide_banner -loglevel error -y -f lavfi -i \
-      "sine=frequency=440:duration=45[tone];anoisesrc=color=pink:duration=45[noise];[tone][noise]amix=inputs=2:duration=shortest,loudnorm=I=${lufs}:TP=-1:LRA=7" \
-      -metadata genre=music -ar 44100 -ac 2 "$dir/gate-track-${i}.flac"
-  done
 }
 
 # gate_setup_answers <media_dir> — the interview's stdin, in question order (setup.sh F132.2).
@@ -288,6 +311,7 @@ run_fresh_leg() {
   local scratch project version_output major
   scratch="$(mktemp -d)"
   SCRATCH_DIRS+=("$scratch")
+  FRESH_SCRATCH="$scratch"
 
   rsync -a --exclude .env --exclude .git --exclude node_modules --exclude bin --exclude obj \
     "$root/" "$scratch/"
@@ -317,9 +341,10 @@ run_fresh_leg() {
   write_compose_gate_overlay "$scratch" "$TAG"
   stage_pinned_overlay_for_launch "$scratch"
 
-  # SPEC F178.3 (run-time half) — the wizard's Q2 needs files on disk before it asks for them.
+  # SPEC F178.3 (run-time half) — the wizard's Q2 needs files on disk before it asks for them;
+  # tools/gate/make_media.sh (T489) renders the tones and copies the committed CC0 clips in.
   local media_dir="$scratch/media"
-  make_gate_media "$media_dir"
+  "$root/tools/gate/make_media.sh" "$media_dir"
 
   # Registered BEFORE setup.sh ever runs, not after: setup.sh's own wizard launches the stack
   # itself (invoke_launch -> a bare ./launch.sh) as part of --yes, and that child launch.sh reads
@@ -331,6 +356,7 @@ run_fresh_leg() {
   # cleanup()'s down -v is guarded on $scratch/.env existing, so registering this early is safe
   # even when setup.sh fails before ever writing one (T486 teardown-noise finding).
   project="$(gate_project_name fresh)"
+  FRESH_PROJECT="$project"
   PROJECTS+=("$scratch|$project")
 
   # SPEC F178.2 — setup.sh --yes, answers on stdin, .env landing inside the scratch.
@@ -387,8 +413,7 @@ run_fresh_leg() {
   # sleep counter, so curl's own probe time (health) and the `docker compose exec` round-trip
   # (on-air) both count against the budget instead of running for free between sleeps; `--max-time
   # 5` keeps a single hung probe from eating the whole budget by itself.
-  local api_base="${GATE_API_BASE:-http://localhost:8080}"
-  api_base="${api_base%/}"
+  local api_base; api_base="$(gate_api_base)"
   local health_budget="${GATE_HEALTH_SECS:-180}" poll_secs="${GATE_POLL_SECS:-5}"
   local health_start=$SECONDS health_ok=0 elapsed=0
   while :; do
@@ -435,19 +460,147 @@ else
 fi
 
 if [ "$DO_UPGRADE" = 1 ]; then
-  LEG_STATUS[upgrade]="skipped"; LEG_DETAIL[upgrade]="not implemented until T491"
+  LEG_STATUS[upgrade]="skipped"; LEG_DETAIL[upgrade]="not implemented until T493"
 else
   LEG_STATUS[upgrade]="skipped"; LEG_DETAIL[upgrade]="--upgrade not given"
 fi
 
+# capture_booth_log_count <scratch> <project> — the same compose invocation shape (project, -f
+# list, cwd) fresh_onair_frame (above) uses for its own `exec -T engine` metadata poll, read
+# against the db service instead: how many station.booth_log rows carry a non-null segment_kind
+# (speech aired through piper) in the last 7 minutes (SPEC F178.5's own fixed window — NOT derived
+# from CAPTURE_SECS, which is a knob above defaulting to 360s and is not clamped: the SQL window
+# stays 7 minutes whatever CAPTURE_SECS is, so a value above 420 undercounts speech aired early).
+# Prints the trimmed count on success; a failed exec prints nothing and returns 1, which the
+# caller treats as an unreadable count.
+capture_booth_log_count() {
+  local scratch="$1" project="$2" raw
+  if ! raw="$(cd "$scratch" && docker compose -p "$project" "${COMPOSE_FILES[@]}" \
+      exec -T db psql -U genwave -d genwave -tA -c \
+      "select count(*) from station.booth_log where segment_kind is not null and occurred_at > now() - interval '7 minutes'" \
+      < /dev/null)"; then
+    return 1
+  fi
+  printf '%s' "$raw" | tr -d '[:space:]'
+}
+
+# run_capture_leg — SPEC F178.5 / STORY-445 (T491): records CAPTURE_SECS of the fresh leg's own
+# live stream and measures it — against the SAME stack run_fresh_leg just brought up
+# (FRESH_SCRATCH/FRESH_PROJECT), never a second one. Every CAPTURE_* value below is set as soon
+# as that step completes, even on a later failure, so the report always shows as much as was
+# actually measured.
+run_capture_leg() {
+  local scratch="$FRESH_SCRATCH" project="$FRESH_PROJECT"
+  local capture_secs="${CAPTURE_SECS:-360}"
+  CAPTURE_SECS_VALUE="$capture_secs"
+
+  local api_base; api_base="$(gate_api_base)"
+
+  # Login (F178.5): the admin password THIS leg's own setup.sh --yes generated, read off the
+  # scratch's `.env` with grep + cut (setup.sh writes the value unquoted) — never `source`d
+  # (F178.1 isolation).
+  local pw
+  if ! pw="$(grep '^ADMIN_PASSWORD=' "$scratch/.env" | cut -d= -f2-)"; then
+    pw=""
+  fi
+  if [ -z "$pw" ]; then
+    LEG_STATUS[capture]="failed"; LEG_DETAIL[capture]="login"
+    return
+  fi
+
+  # The password travels to curl over stdin (`-d @-`), never as an argv — an argv is readable by
+  # any other process on the box via /proc/*/cmdline for as long as the process runs.
+  local login_code
+  if ! login_code="$(printf '%s' "$pw" | jq -Rc '{password:.}' | \
+      curl -sS --max-time 10 -c "$scratch/cookies" \
+      -H 'Content-Type: application/json' \
+      -d @- \
+      -o /dev/null -w '%{http_code}' "$api_base/api/auth/login")"; then
+    LEG_STATUS[capture]="failed"; LEG_DETAIL[capture]="login"
+    return
+  fi
+  if [ "$login_code" != "204" ]; then
+    LEG_STATUS[capture]="failed"; LEG_DETAIL[capture]="login"
+    return
+  fi
+
+  # Target (F178.5): the station's OWN configured loudness target, read back through the same
+  # admin API a human would use, cookie-authenticated from the login above — never a gate default.
+  local target
+  if ! target="$(curl -sS --max-time 10 -b "$scratch/cookies" "$api_base/api/settings" \
+      | jq -r '.[] | select(.key=="Loudness:TargetLufs") | .value')"; then
+    LEG_STATUS[capture]="failed"; LEG_DETAIL[capture]="target"
+    return
+  fi
+  if ! [[ "$target" =~ ^-?[0-9]+(\.[0-9]+)?$ ]]; then
+    LEG_STATUS[capture]="failed"; LEG_DETAIL[capture]="target"
+    return
+  fi
+  CAPTURE_TARGET_LUFS="$target"
+
+  # Record (F178.5): CAPTURE_SECS of the live stream to a local WAV. -reconnect 1 rides out a
+  # source hang-up the same way it would ride out a real Icecast reconnect.
+  local stream_url="${GATE_STREAM_URL:-http://localhost:8000/stream}"
+  local ffmpeg_log ffmpeg_status=0
+  ffmpeg_log="$(ffmpeg -nostats -hide_banner -loglevel error -y -reconnect 1 \
+      -i "$stream_url" -t "$capture_secs" -ar 48000 -ac 1 "$scratch/capture.wav" 2>&1)" || ffmpeg_status=$?
+  if [ "$ffmpeg_status" -ne 0 ] || [ ! -s "$scratch/capture.wav" ]; then
+    LEG_STATUS[capture]="failed"; LEG_DETAIL[capture]="capture"
+    CAPTURE_FFMPEG_TAIL="$(printf '%s\n' "$ffmpeg_log" | tail -5)"
+    return
+  fi
+
+  # Measure (F178.5): silencedetect + ebur128, both always on measure_audio.sh's own stdout line
+  # — parsed here regardless of its exit code, so a failing measurement still lands in the report.
+  local measure_out measure_status=0
+  measure_out="$("$root/tools/gate/measure_audio.sh" "$scratch/capture.wav" \
+      --target "$target")" || measure_status=$?
+  CAPTURE_SILENCE_EVENTS="$(printf '%s\n' "$measure_out" | sed -n 's/.*silence_events=\([0-9]*\).*/\1/p')"
+  CAPTURE_INTEGRATED_LUFS="$(printf '%s\n' "$measure_out" | sed -n 's/.*integrated_lufs=\(-\{0,1\}[0-9.]*\).*/\1/p')"
+  case "$measure_status" in
+    0) : ;;
+    1)
+      if [ -n "$CAPTURE_SILENCE_EVENTS" ] && [ "$CAPTURE_SILENCE_EVENTS" -gt 0 ]; then
+        LEG_STATUS[capture]="failed"; LEG_DETAIL[capture]="silence"
+      else
+        LEG_STATUS[capture]="failed"; LEG_DETAIL[capture]="loudness"
+      fi
+      ;;
+    *)
+      LEG_STATUS[capture]="failed"; LEG_DETAIL[capture]="measure"
+      ;;
+  esac
+
+  # Speech aired (F178.5): run AFTER the measure so the query window covers the capture, but
+  # recorded even when the measure above already failed — every number into the report.
+  local booth_count
+  if ! booth_count="$(capture_booth_log_count "$scratch" "$project")"; then
+    booth_count=""
+  fi
+  CAPTURE_BOOTH_LOG="$booth_count"
+  if [ "${LEG_STATUS[capture]}" != "failed" ]; then
+    if ! [[ "$booth_count" =~ ^[0-9]+$ ]] || [ "$booth_count" -lt 1 ]; then
+      LEG_STATUS[capture]="failed"; LEG_DETAIL[capture]="booth_log"
+    fi
+  fi
+
+  if [ "${LEG_STATUS[capture]}" != "failed" ]; then
+    LEG_STATUS[capture]="passed"; LEG_DETAIL[capture]=""
+  fi
+}
+
 if [ "$DO_CAPTURE" = 1 ]; then
-  LEG_STATUS[capture]="skipped"; LEG_DETAIL[capture]="not implemented until T491"
+  if [ "${LEG_STATUS[fresh]}" = "passed" ]; then
+    run_capture_leg
+  else
+    LEG_STATUS[capture]="skipped"; LEG_DETAIL[capture]="fresh leg did not pass"
+  fi
 else
   LEG_STATUS[capture]="skipped"; LEG_DETAIL[capture]="--capture not given"
 fi
 
 if [ "$DO_CHAOS" = 1 ]; then
-  LEG_STATUS[chaos]="skipped"; LEG_DETAIL[chaos]="not implemented until T491"
+  LEG_STATUS[chaos]="skipped"; LEG_DETAIL[chaos]="not implemented until T496"
 else
   LEG_STATUS[chaos]="skipped"; LEG_DETAIL[chaos]="--chaos not given"
 fi
@@ -510,6 +663,42 @@ fresh_measurements_md() {
   [ -n "$FRESH_ONAIR_SECS" ] && printf 'fresh onair_secs: %s\n' "$FRESH_ONAIR_SECS"
 }
 
+# capture_measurements_json — every CAPTURE_* value as a jq NUMBER, or `null` for a step the
+# capture leg never reached (CAPTURE_SECS_VALUE empty means the leg never ran at all, so every
+# field is null in that case too).
+capture_measurements_json() {
+  jq -n \
+    --arg secs "$CAPTURE_SECS_VALUE" \
+    --arg target "$CAPTURE_TARGET_LUFS" \
+    --arg silence "$CAPTURE_SILENCE_EVENTS" \
+    --arg integrated "$CAPTURE_INTEGRATED_LUFS" \
+    --arg booth "$CAPTURE_BOOTH_LOG" \
+    '{
+      capture_secs: (if $secs == "" then null else ($secs | tonumber) end),
+      target_lufs: (if $target == "" then null else ($target | tonumber) end),
+      silence_events: (if $silence == "" then null else ($silence | tonumber) end),
+      integrated_lufs: (if $integrated == "" then null else ($integrated | tonumber) end),
+      booth_log: (if $booth == "" then null else ($booth | tonumber) end)
+    }'
+}
+
+# capture_measurements_md — the same facts as capture_measurements_json, rendered as report
+# lines; "none" when the capture leg never ran. A ffmpeg failure's stderr tail (CAPTURE_FFMPEG_TAIL)
+# is appended as a diagnostic line when the recording step itself failed.
+capture_measurements_md() {
+  if [ -z "$CAPTURE_SECS_VALUE" ]; then
+    printf 'none\n'
+    return
+  fi
+  printf 'capture secs: %s\n' "$CAPTURE_SECS_VALUE"
+  [ -n "$CAPTURE_TARGET_LUFS" ] && printf 'target: %s LUFS\n' "$CAPTURE_TARGET_LUFS"
+  [ -n "$CAPTURE_SILENCE_EVENTS" ] && printf 'silence events: %s\n' "$CAPTURE_SILENCE_EVENTS"
+  [ -n "$CAPTURE_INTEGRATED_LUFS" ] && printf 'integrated: %s LUFS\n' "$CAPTURE_INTEGRATED_LUFS"
+  [ -n "$CAPTURE_BOOTH_LOG" ] && printf 'booth_log: %s\n' "$CAPTURE_BOOTH_LOG"
+  [ -n "$CAPTURE_FFMPEG_TAIL" ] && printf 'capture error: %s\n' "$CAPTURE_FFMPEG_TAIL"
+  return 0
+}
+
 first_failure_across_legs() {
   local leg
   for leg in fresh upgrade capture chaos; do
@@ -532,16 +721,20 @@ write_report() {
     for leg in fresh upgrade capture chaos; do
       leg_row_md "$leg" "${LEG_STATUS[$leg]}" "${LEG_DETAIL[$leg]}"
     done
-    printf '\n## Measurements\n\n%s\n\n' "$(fresh_measurements_md)"
+    printf '\n## Measurements\n\n%s\n' "$(fresh_measurements_md)"
+    printf '%s\n\n' "$(capture_measurements_md)"
     printf 'Needs manual evidence: the LLL ear — %s facts are manual\n' "$manual_facts"
   } > "$out_dir/gate-report.md"
 
-  local first_failure fresh_json upgrade_json capture_json chaos_json
+  local first_failure fresh_json upgrade_json capture_json chaos_json capture_top_json
   first_failure="$(first_failure_across_legs)"
   fresh_json="$(leg_json "${LEG_STATUS[fresh]}" "${LEG_DETAIL[fresh]}" "$(fresh_measurements_json)")"
   upgrade_json="$(leg_json "${LEG_STATUS[upgrade]}" "${LEG_DETAIL[upgrade]}")"
-  capture_json="$(leg_json "${LEG_STATUS[capture]}" "${LEG_DETAIL[capture]}")"
+  capture_json="$(leg_json "${LEG_STATUS[capture]}" "${LEG_DETAIL[capture]}" "$(capture_measurements_json)")"
   chaos_json="$(leg_json "${LEG_STATUS[chaos]}" "${LEG_DETAIL[chaos]}")"
+  # A top-level twin of the capture leg's own target/silence/integrated/booth_log — SPEC F178.5's
+  # consumer reads `.capture.target_lufs` directly, not `.legs.capture.measurements.target_lufs`.
+  capture_top_json="$(capture_measurements_json | jq 'del(.capture_secs)')"
 
   jq -n \
     --arg tag "$TAG" \
@@ -549,11 +742,13 @@ write_report() {
     --argjson upgrade "$upgrade_json" \
     --argjson capture "$capture_json" \
     --argjson chaos "$chaos_json" \
+    --argjson capture_top "$capture_top_json" \
     --arg first_failure "$first_failure" \
     --argjson manual_facts "$manual_facts" \
     '{
       tag: $tag,
       legs: { fresh: $fresh, upgrade: $upgrade, capture: $capture, chaos: $chaos },
+      capture: $capture_top,
       first_failure: (if $first_failure == "" then null else $first_failure end),
       manual_facts: $manual_facts
     }' > "$out_dir/gate-report.json"
