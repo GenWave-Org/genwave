@@ -5,6 +5,7 @@
 using System.Net;
 using GenWave.Tts.Tests.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Xunit;
 
 namespace GenWave.Tts.Tests.Specs;

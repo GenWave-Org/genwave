@@ -9,6 +9,7 @@
 
 namespace GenWave.Orchestration.Tests.Specs;
 
+using Microsoft.Extensions.Time.Testing;
 using GenWave.Abstractions.Playout;
 using GenWave.Core.Domain;
 using GenWave.Orchestration.Tests.Fakes;

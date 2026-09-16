@@ -11,6 +11,7 @@
 // FeatureRequestFulfillmentProvider drives the REAL RequestFulfillmentProvider alone to prove its own
 // one-shot/TTL/override/veto logic.
 
+using Microsoft.Extensions.Time.Testing;
 using GenWave.Abstractions.Playout;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;

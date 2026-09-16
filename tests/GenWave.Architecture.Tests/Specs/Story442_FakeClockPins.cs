@@ -4,7 +4,8 @@
 // projects that used one (Orchestration, Tts, Ads) reference Microsoft.Extensions.TimeProvider.Testing
 // instead. AC3–AC6 live in GenWave.Orchestration.Tests / GenWave.Ads.Tests (Story442_*.cs there).
 //
-// RED at plan time: two hand-rolled fakes exist; Orchestration.Tests has no package reference.
+// GREEN at T482: both hand-rolled fakes are deleted and Orchestration.Tests now references the
+// package too.
 
 using GenWave.Architecture.Tests.Support;
 
@@ -12,8 +13,6 @@ namespace GenWave.Architecture.Tests.Specs;
 
 public static class FeatureFakeClockPins
 {
-    const string Pending = "pending: T482 — Microsoft's FakeTimeProvider replaces the hand-rolled ones (STORY-442)";
-
     static string TestsRoot => Path.Combine(SolutionLocator.Root(), "tests");
 
     // ---------------------------------------------------------------------
@@ -22,11 +21,15 @@ public static class FeatureFakeClockPins
 
     public sealed class ScenarioNoHandRolledFakeClockRemains
     {
+        // Split so this pin's own source text doesn't contain the literal it scans for — otherwise the
+        // scan below would match itself.
+        const string HandRolledDeclaration = "class Fake" + "TimeProvider";
+
         readonly string[] hits = Directory.EnumerateFiles(TestsRoot, "*.cs", SearchOption.AllDirectories)
-            .Where(f => File.ReadAllText(f).Contains("class FakeTimeProvider", StringComparison.Ordinal))
+            .Where(f => File.ReadAllText(f).Contains(HandRolledDeclaration, StringComparison.Ordinal))
             .ToArray();
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void ZeroFilesDeclareOne() => Assert.Empty(hits);
     }
 
@@ -35,7 +38,7 @@ public static class FeatureFakeClockPins
         static string Csproj(string project) =>
             File.ReadAllText(Path.Combine(TestsRoot, project, project + ".csproj"));
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void OrchestrationTestsReferencesIt() =>
             Assert.Contains("Microsoft.Extensions.TimeProvider.Testing", Csproj("GenWave.Orchestration.Tests"), StringComparison.Ordinal);
 
