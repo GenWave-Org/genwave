@@ -17,7 +17,6 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureCapturedAudioProvesNoDeadAirAndLevel
 {
-    const string PendingMedia = "pending: T489 — make_media.sh + tools/gate/media/ (STORY-445)";
     const string PendingMeasure = "pending: T490 — measure_audio.sh: silencedetect + ebur128 (STORY-445)";
     const string PendingCapture = "pending: T491 — the capture leg (STORY-445)";
 
@@ -52,14 +51,14 @@ public static class FeatureCapturedAudioProvesNoDeadAirAndLevel
         public ScenarioTheSynthesisedTracksHitTheirTargets() =>
             exitCode = ScriptProcess.Run(Path.Combine(Repo, "tools", "gate", "make_media.sh"), RealPath, null, null, outDir).ExitCode;
 
-        [Fact(Skip = PendingMedia)]
+        [Fact]
         public void TheScriptSucceeds() => Assert.Equal(0, exitCode);
 
-        [Fact(Skip = PendingMedia)]
+        [Fact]
         public void TheLoudTrackIsAtMinusTwelve() =>
             Assert.InRange(IntegratedLufs(Path.Combine(outDir, "tone-loud.mp3")), -13, -11);
 
-        [Fact(Skip = PendingMedia)]
+        [Fact]
         public void TheQuietTrackIsAtMinusThirty() =>
             Assert.InRange(IntegratedLufs(Path.Combine(outDir, "tone-quiet.mp3")), -31, -29);
     }
@@ -71,18 +70,18 @@ public static class FeatureCapturedAudioProvesNoDeadAirAndLevel
             : [];
         readonly string sources = File.Exists(Path.Combine(MediaDir, "SOURCES.md")) ? File.ReadAllText(Path.Combine(MediaDir, "SOURCES.md")) : "";
 
-        [Fact(Skip = PendingMedia)]
+        [Fact]
         public void ThereAreClips() => Assert.NotEmpty(audio);
 
-        [Fact(Skip = PendingMedia)]
+        [Fact]
         public void EveryClipIsAtMostOneMegabyte() =>
             Assert.Empty(audio.Where(f => new FileInfo(f).Length > 1024 * 1024).Select(Path.GetFileName));
 
-        [Fact(Skip = PendingMedia)]
+        [Fact]
         public void EveryClipIsNamedInSources() =>
             Assert.DoesNotContain(audio.Select(Path.GetFileName), n => !sources.Contains(n!, StringComparison.Ordinal));
 
-        [Fact(Skip = PendingMedia)]
+        [Fact]
         public void EveryClipHasAUrl() =>
             Assert.Equal(audio.Length, Regex.Matches(sources, @"https?://\S+").Count);
     }
