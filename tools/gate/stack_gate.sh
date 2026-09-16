@@ -8,13 +8,6 @@
 #   --fresh          a clean install from nothing (setup.sh --yes, bare launch.sh — the
 #                     wizard's own .env picks the pinned piper-only topology — health/on-air
 #                     waits)
-#   --upgrade        an existing station on the previous release, upgraded onto the tag: a
-#                     `git worktree` of the previous release stands up its own pinned stack,
-#                     waits on-air, then `compose stop api`, swaps in the CURRENT tag's db/ +
-#                     migrate.sh, runs the migration, checks the role boundary (station_svc/
-#                     library_svc each locked out of the other's schema, SPEC F178.7), brings api
-#                     back on the CURRENT tag, and waits health/on-air again (SPEC F178.6/F178.7;
-#                     see run_upgrade_leg)
 #   --capture        records CAPTURE_SECS of the fresh leg's own live stream and measures it: no
 #                     silent gaps, loudness within TOL_LU of the station's own configured target,
 #                     speech aired through the booth log (requires --fresh)
@@ -32,6 +25,15 @@
 #                     "engine-reconnect on-air"; then a FRESH
 #                     60-second capture measured for silence only, else "engine-reconnect silence"
 #                     (see run_engine_reconnect_scenario).
+#   --upgrade        an existing station on the previous release, upgraded onto the tag: a
+#                     `git worktree` of the previous release stands up its own pinned stack,
+#                     waits on-air, then `compose stop api`, swaps in the CURRENT tag's db/ +
+#                     migrate.sh, runs the migration, checks the role boundary (station_svc/
+#                     library_svc each locked out of the other's schema, SPEC F178.7), brings api
+#                     back on the CURRENT tag, and waits health/on-air again (SPEC F178.6/F178.7;
+#                     see run_upgrade_leg). Runs LAST, after capture/chaos, because the fresh
+#                     stack holds the fixed host ports until it is measured — see the upgrade
+#                     call site at the bottom of this file (T503).
 #   --from <vX.Y.Z>  the previous release the upgrade leg starts from — overrides the newest
 #                     other `v*` GitHub release otherwise resolved via `gh release list`
 #   --report <dir>   write gate-report.md + gate-report.json there (default: .)
@@ -51,9 +53,10 @@
 # seconds, no cap on the event count (a real nightly run against v5.8.3 saw two events, 7.1s +
 # 24.4s, during one outage): measure_audio.sh's own SILENCE_MAX_SECS knob, passed
 # SILENCE_MAX_SECS=GATE_OUTAGE_SILENCE_MAX_SECS only for the capture leg's own measure call when
-# --chaos is given (see run_capture_leg).
+# --chaos is given (see run_capture_leg). PLAN T503 (gh-#777) moved the upgrade leg's call site
+# to run LAST and added teardown_project — see the call site at the bottom of this file.
 #
-# Usage: tools/gate/stack_gate.sh --tag <vX.Y.Z> [--fresh] [--upgrade] [--capture] [--chaos]
+# Usage: tools/gate/stack_gate.sh --tag <vX.Y.Z> [--fresh] [--capture] [--chaos] [--upgrade]
 #                                  [--from <vX.Y.Z>] [--report <dir>]
 # Exit codes: 0 = every requested leg passed (or none were requested); 1 = a leg failed (see the
 #             report); 2 = usage error or a missing prerequisite (docker, ffmpeg, jq, curl; gh
@@ -232,6 +235,22 @@ cleanup() {
   done
 }
 trap cleanup EXIT
+
+# teardown_project <scratch> <project> — runs cleanup()'s per-entry `down -v` for ONE entry now
+# (same $scratch/.env guard), then drops it from PROJECTS so the EXIT trap does not repeat it. The
+# scratch DIRECTORY stays for cleanup() to remove at EXIT; the report has already copied capture.wav
+# out. Used by the upgrade call site (T503) to free the fresh stack's host ports.
+teardown_project() {
+  local scratch="$1" project="$2" kept=() e
+  local entry="$scratch|$project"
+  if [ -f "$scratch/.env" ]; then
+    ( cd "$scratch" && docker compose -p "$project" "${COMPOSE_FILES[@]}" down -v ) || true
+  fi
+  for e in "${PROJECTS[@]}"; do
+    [ "$e" = "$entry" ] || kept+=("$e")
+  done
+  PROJECTS=("${kept[@]}")
+}
 
 # ---------------------------------------------------------------------------------------------
 # Arg parsing — usage errors exit 2 with a one-line reason on stderr.
@@ -838,12 +857,6 @@ run_upgrade_leg() {
   LEG_DETAIL[upgrade]=""
 }
 
-if [ "$DO_UPGRADE" = 1 ]; then
-  run_upgrade_leg
-else
-  LEG_STATUS[upgrade]="skipped"; LEG_DETAIL[upgrade]="--upgrade not given"
-fi
-
 # capture_booth_log_count <scratch> <project> — the same compose invocation shape (project, -f
 # list, cwd) fresh_onair_frame (above) uses for its own `exec -T engine` metadata poll, read
 # against the db service instead: how many station.booth_log rows carry a non-null segment_kind
@@ -1186,6 +1199,23 @@ if [ "$DO_CHAOS" = 1 ]; then
   fi
 else
   LEG_STATUS[chaos]="skipped"; LEG_DETAIL[chaos]="--chaos not given"
+fi
+
+# The upgrade leg runs LAST — after fresh/capture/chaos — because compose.yaml publishes FIXED host
+# ports (8000/8080/8081/3000) and the capture leg records the FRESH stack's live stream (SPEC
+# F178.5), so that stack has to stay up through capture and chaos. Run upgrade any earlier and the
+# previous release's setup.sh preflight inside run_upgrade_leg finds those ports bound: observed on
+# a real box 2026-09-16 against v5.8.3, the first replay of release.yml's `--fresh --upgrade
+# --capture` combination ("Port 8080 is already in use", the leg failing at "setup" with an empty
+# compose-upgrade.log). T495 only ever ran --upgrade alone and the nightly runs --fresh --capture
+# --chaos (gh-#777/T503). teardown_project brings the fresh stack down and drops its PROJECTS entry
+# first so cleanup()'s EXIT trap does not run a second `down -v`; a run without --upgrade never
+# calls it, so the fresh stack stays up until EXIT as before.
+if [ "$DO_UPGRADE" = 1 ]; then
+  [ "$DO_FRESH" = 1 ] && teardown_project "$FRESH_SCRATCH" "$FRESH_PROJECT"
+  run_upgrade_leg
+else
+  LEG_STATUS[upgrade]="skipped"; LEG_DETAIL[upgrade]="--upgrade not given"
 fi
 
 # ---------------------------------------------------------------------------------------------
