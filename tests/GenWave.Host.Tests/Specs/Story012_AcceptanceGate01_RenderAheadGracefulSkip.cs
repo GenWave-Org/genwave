@@ -13,6 +13,7 @@ using Microsoft.Extensions.Options;
 using GenWave.Core.Domain;
 using GenWave.Core.Playout;
 using GenWave.Host.Tests.Fakes;
+using GenWave.Host.Tests.Support;
 using GenWave.Orchestration;
 using GenWave.Tts;
 
@@ -199,16 +200,16 @@ public static class FeatureAcceptanceGate01RenderAheadGracefulSkipToMusic
         : IAsyncLifetime
     {
         KokoroStubServer stub = null!;
-        DirectoryInfo cacheDir = null!;
+        TempDir cacheDir = null!;
         Orchestrator orchestrator = null!;
 
         public async Task InitializeAsync()
         {
             stub     = await KokoroStubServer.StartAsync(KokoroStubMode.Fail500);
-            cacheDir = System.IO.Directory.CreateTempSubdirectory("genwave-t015-fail-");
+            cacheDir = new TempDir();
             orchestrator = BuildOrchestrator(
                 stub.BaseUri,
-                cacheDir.FullName,
+                cacheDir.Path,
                 voice:        $"voice-{Guid.NewGuid():N}",
                 renderBudget: TimeSpan.FromSeconds(2),
                 catalog:      new MultiTrackCatalog());
@@ -217,7 +218,7 @@ public static class FeatureAcceptanceGate01RenderAheadGracefulSkipToMusic
         public async Task DisposeAsync()
         {
             await stub.DisposeAsync();
-            if (cacheDir.Exists) cacheDir.Delete(recursive: true);
+            cacheDir.Dispose();
         }
 
         [Fact]
@@ -284,7 +285,7 @@ public static class FeatureAcceptanceGate01RenderAheadGracefulSkipToMusic
         : IAsyncLifetime
     {
         KokoroStubServer stub = null!;
-        DirectoryInfo cacheDir = null!;
+        TempDir cacheDir = null!;
         Orchestrator orchestrator = null!;
 
         // Budget is 200 ms — well under the 30-second delay the stub introduces.
@@ -293,10 +294,10 @@ public static class FeatureAcceptanceGate01RenderAheadGracefulSkipToMusic
         public async Task InitializeAsync()
         {
             stub     = await KokoroStubServer.StartAsync(KokoroStubMode.DelayPastBudget);
-            cacheDir = System.IO.Directory.CreateTempSubdirectory("genwave-t015-timeout-");
+            cacheDir = new TempDir();
             orchestrator = BuildOrchestrator(
                 stub.BaseUri,
-                cacheDir.FullName,
+                cacheDir.Path,
                 voice:        $"voice-{Guid.NewGuid():N}",
                 renderBudget: RenderBudget,
                 catalog:      new MultiTrackCatalog());
@@ -305,7 +306,7 @@ public static class FeatureAcceptanceGate01RenderAheadGracefulSkipToMusic
         public async Task DisposeAsync()
         {
             await stub.DisposeAsync();
-            if (cacheDir.Exists) cacheDir.Delete(recursive: true);
+            cacheDir.Dispose();
         }
 
         [Fact]
@@ -395,16 +396,16 @@ public static class FeatureAcceptanceGate01RenderAheadGracefulSkipToMusic
         : IAsyncLifetime
     {
         KokoroStubServer stub = null!;
-        DirectoryInfo cacheDir = null!;
+        TempDir cacheDir = null!;
         Orchestrator orchestrator = null!;
 
         public async Task InitializeAsync()
         {
             stub     = await KokoroStubServer.StartAsync(KokoroStubMode.Fail500);
-            cacheDir = System.IO.Directory.CreateTempSubdirectory("genwave-t015-recovery-");
+            cacheDir = new TempDir();
             orchestrator = BuildOrchestrator(
                 stub.BaseUri,
-                cacheDir.FullName,
+                cacheDir.Path,
                 // Unique voice ensures no stale cache hits from the Fail500 window.
                 voice:        $"voice-{Guid.NewGuid():N}",
                 renderBudget: TimeSpan.FromSeconds(2),
@@ -414,7 +415,7 @@ public static class FeatureAcceptanceGate01RenderAheadGracefulSkipToMusic
         public async Task DisposeAsync()
         {
             await stub.DisposeAsync();
-            if (cacheDir.Exists) cacheDir.Delete(recursive: true);
+            cacheDir.Dispose();
         }
 
         [Fact]

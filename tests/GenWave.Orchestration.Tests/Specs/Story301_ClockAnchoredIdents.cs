@@ -1,6 +1,7 @@
 // STORY-301 — Top-of-hour idents from the imaging pool (F110.1, F110.2, gh-#381)
 
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using GenWave.Core.Domain;
 using GenWave.Orchestration.Tests.Fakes;
 

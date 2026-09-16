@@ -87,7 +87,7 @@ public static class FeatureBuildWithoutLaunchPrerequisites
     static string MakeScratchRepo()
     {
         var root = RepoRootLocator.Find(AppContext.BaseDirectory);
-        var scratch = Directory.CreateTempSubdirectory("story437-repo-").FullName;
+        var scratch = TempDir.CreateForProcessLifetime();
         foreach (var entry in Directory.EnumerateFileSystemEntries(root))
         {
             var name = Path.GetFileName(entry);
@@ -121,7 +121,7 @@ public static class FeatureBuildWithoutLaunchPrerequisites
     static Run RunScript(string script, string bin, IReadOnlyDictionary<string, string>? extraEnv = null, params string[] args)
     {
         var scratch = MakeScratchRepo();
-        var log = Path.Combine(Directory.CreateTempSubdirectory("story437-log-").FullName, "tools.log");
+        var log = Path.Combine(TempDir.CreateForProcessLifetime(), "tools.log");
 
         var mergedEnv = new Dictionary<string, string> { ["GW_TOOL_LOG"] = log };
         if (extraEnv is not null)
@@ -162,7 +162,7 @@ public static class FeatureBuildWithoutLaunchPrerequisites
 
     static string WriteEnvFile()
     {
-        var path = Path.Combine(Directory.CreateTempSubdirectory("story437-env-").FullName, "test.env");
+        var path = Path.Combine(TempDir.CreateForProcessLifetime(), "test.env");
         File.WriteAllLines(path,
         [
             "POSTGRES_PASSWORD=x", "LIBRARY_DB_PASSWORD=x", "STATION_DB_PASSWORD=x",

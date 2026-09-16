@@ -29,6 +29,7 @@ using GenWave.Core.Domain;
 using GenWave.Orchestration.Tests.Fakes;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 
 namespace GenWave.Orchestration.Tests.Specs;
 

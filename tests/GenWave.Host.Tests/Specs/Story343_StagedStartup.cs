@@ -97,7 +97,7 @@ public static class FeatureStagedStartup
     /// <summary>Writes a scratch env file (the Gh332 GW_ENV_FILE idiom) — never the real .env.</summary>
     static string WriteEnvFile(params string[] assignments)
     {
-        var path = Path.Combine(Directory.CreateTempSubdirectory("story343-env-").FullName, "test.env");
+        var path = Path.Combine(TempDir.CreateForProcessLifetime(), "test.env");
         File.WriteAllLines(path, assignments);
         return path;
     }

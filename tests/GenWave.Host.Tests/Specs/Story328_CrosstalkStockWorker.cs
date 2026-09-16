@@ -255,21 +255,15 @@ public static class FeatureCrosstalkStockWorker
             // Given a crosstalk cache directory holding an asset an earlier, crashed/restarted
             // process assembled but never vended (SPEC F127.7's own "the stock survives nothing" —
             // PLAN T285's recorded rider: crosstalk/ has no other sweeper)
-            var dir = Directory.CreateTempSubdirectory("crosstalk-purge-test-").FullName;
-            try
-            {
-                var orphan = Path.Combine(dir, "orphan.wav");
-                File.WriteAllBytes(orphan, [0]);
+            using var tmp = new TempDir();
+            var dir = tmp.Path;
+            var orphan = Path.Combine(dir, "orphan.wav");
+            File.WriteAllBytes(orphan, [0]);
 
-                CrosstalkStockWorker.PurgeStaleAssets(dir, NullLogger.Instance);
+            CrosstalkStockWorker.PurgeStaleAssets(dir, NullLogger.Instance);
 
-                // Then the orphaned asset is gone
-                Assert.False(File.Exists(orphan));
-            }
-            finally
-            {
-                Directory.Delete(dir, recursive: true);
-            }
+            // Then the orphaned asset is gone
+            Assert.False(File.Exists(orphan));
         }
 
         [Fact]

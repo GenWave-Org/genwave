@@ -303,7 +303,7 @@ public sealed class Story424Collection : ICollectionFixture<Story424Arc>
 /// </summary>
 public sealed class Story424Arc : IAsyncLifetime
 {
-    string? authoredRoot;
+    TempDir? authoredRootDir;
 
     public HttpStatusCode PreviewEnqueueStatus { get; private set; }
 
@@ -354,12 +354,12 @@ public sealed class Story424Arc : IAsyncLifetime
         // A local, not a field — Story424Database is file-local (CS9051), the Story423Database
         // precedent one story over.
         await using var database = await Story424Database.StartAsync();
-        authoredRoot = Directory.CreateTempSubdirectory("t442-story424-preview-").FullName;
+        authoredRootDir = new TempDir();
 
         var adsLibraryId = await SeedAdsLibraryAsync(database.LibraryConnectionString);
         await SeedReadyBedRowAsync(database.LibraryConnectionString, adsLibraryId);
 
-        await using var factory = new Story424WebFactory(database, authoredRoot);
+        await using var factory = new Story424WebFactory(database, authoredRootDir.Path);
         var client = factory.CreateClient();
         var login = await client.PostAsJsonAsync("/api/auth/login", new { password = Story424WebFactory.Password });
         if (login.StatusCode != HttpStatusCode.NoContent)
@@ -399,7 +399,7 @@ public sealed class Story424Arc : IAsyncLifetime
         SettledPreviewPathFromSql = await AdSpotJobTestHelpers.ReadAdSpotPreviewPathAsync(database.StationConnectionString, spotId);
         ExpectedPreviewPath = SettledPreviewKey is null
             ? null
-            : Path.Combine(authoredRoot, "preview", $"{spotId}-{SettledPreviewKey}.wav");
+            : Path.Combine(authoredRootDir.Path, "preview", $"{spotId}-{SettledPreviewKey}.wav");
 
         var mediaCountAfter = await AdSpotJobTestHelpers.CountLibraryMediaRowsAsync(database.LibraryConnectionString);
         MediaRowCountUnchanged = mediaCountBefore == mediaCountAfter;
@@ -499,8 +499,8 @@ public sealed class Story424Arc : IAsyncLifetime
         EscapedPathArrangementSettled = escapedSettled;
         if (escapedSettled)
         {
-            var outsideDirectory = Directory.CreateTempSubdirectory("t442-preview-outside-").FullName;
-            var outsidePath = Path.Combine(outsideDirectory, "escape.wav");
+            using var outsideDirectoryDir = new TempDir();
+            var outsidePath = Path.Combine(outsideDirectoryDir.Path, "escape.wav");
             await File.WriteAllBytesAsync(outsidePath, [1, 2, 3, 4]);
             await AdSpotJobTestHelpers.SetAdSpotPreviewPathAsync(database.StationConnectionString, escapedSpotId, outsidePath);
 
@@ -509,7 +509,6 @@ public sealed class Story424Arc : IAsyncLifetime
             var escapedWarning = factory.Logs.Messages.FirstOrDefault(m => m.Contains($"spot {escapedSpotId}", StringComparison.Ordinal));
             EscapedPathWarningNamesTheSpotId = escapedWarning is not null;
             EscapedPathWarningOmitsTheRawPath = escapedWarning is not null && !escapedWarning.Contains(outsidePath, StringComparison.Ordinal);
-            Directory.Delete(outsideDirectory, recursive: true);
         }
 
         // ── A preview that rendered fine, streamed 200 once, then had its file
@@ -534,8 +533,7 @@ public sealed class Story424Arc : IAsyncLifetime
 
     public Task DisposeAsync()
     {
-        if (authoredRoot is not null && Directory.Exists(authoredRoot))
-            Directory.Delete(authoredRoot, recursive: true);
+        authoredRootDir?.Dispose();
         return Task.CompletedTask;
     }
 

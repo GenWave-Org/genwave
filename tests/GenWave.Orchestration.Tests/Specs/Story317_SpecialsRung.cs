@@ -17,6 +17,7 @@
 // block's own boundary) and to prove the boundary-peek fix for real (a midnight-adjacent special is no
 // longer invisible to BoundaryAt/NextSegment).
 
+using Microsoft.Extensions.Time.Testing;
 using GenWave.Abstractions.Playout;
 using GenWave.Core.Domain;
 using GenWave.Orchestration.Tests.Fakes;

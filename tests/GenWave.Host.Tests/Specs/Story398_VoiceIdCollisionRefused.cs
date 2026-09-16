@@ -22,6 +22,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using GenWave.Core.Abstractions;
 using GenWave.Host.Tests.Fakes;
+using GenWave.Host.Tests.Support;
 
 namespace GenWave.Host.Tests.Specs;
 
@@ -192,8 +193,9 @@ file sealed class VoicePackCollisionWebFactory : WebApplicationFactory<Program>
 
     readonly FakeVoicePackStore store;
     readonly FakeHttpMessageHandler handler;
+    readonly TempDir voicesRootDir = new();
 
-    public string VoicesRoot { get; } = Directory.CreateTempSubdirectory("t413-story398-voices-").FullName;
+    public string VoicesRoot => voicesRootDir.Path;
 
     public VoicePackCollisionWebFactory(FakeVoicePackStore store)
     {
@@ -224,9 +226,7 @@ file sealed class VoicePackCollisionWebFactory : WebApplicationFactory<Program>
     {
         if (disposing)
         {
-            try { Directory.Delete(VoicesRoot, recursive: true); }
-            catch (IOException) { /* best-effort cleanup */ }
-            catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
+            voicesRootDir.Dispose();
         }
 
         base.Dispose(disposing);

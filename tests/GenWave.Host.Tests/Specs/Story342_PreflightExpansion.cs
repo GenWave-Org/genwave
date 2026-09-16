@@ -31,7 +31,7 @@ public static class FeaturePreflightExpansion
 
     static string WriteEnvFile(params string[] assignments)
     {
-        var path = Path.Combine(Directory.CreateTempSubdirectory("gw-preflight-story342-env-").FullName, "test.env");
+        var path = Path.Combine(TempDir.CreateForProcessLifetime(), "test.env");
         File.WriteAllLines(path, assignments);
         return path;
     }
@@ -51,7 +51,7 @@ public static class FeaturePreflightExpansion
     /// <summary>A fresh scratch directory holding the given count of .flac/.mp3 files (and nothing else).</summary>
     static string MakeMediaDir(int flacCount = 0, int mp3Count = 0)
     {
-        var dir = Directory.CreateTempSubdirectory("gw-preflight-story342-media-").FullName;
+        var dir = TempDir.CreateForProcessLifetime();
         for (var i = 0; i < flacCount; i++) File.WriteAllText(Path.Combine(dir, $"track{i}.flac"), "");
         for (var i = 0; i < mp3Count; i++) File.WriteAllText(Path.Combine(dir, $"track{i}.mp3"), "");
         return dir;
@@ -73,8 +73,7 @@ public static class FeaturePreflightExpansion
         string binDir, string? envFile = null, IReadOnlyDictionary<string, string>? extraEnv = null,
         string script = DefaultPreflightScript)
     {
-        var scriptPath = Path.Combine(
-            Directory.CreateTempSubdirectory("gw-preflight-story342-script-").FullName, "run.sh");
+        var scriptPath = Path.Combine(TempDir.CreateForProcessLifetime(), "run.sh");
         File.WriteAllText(scriptPath, script);
 
         return ScriptProcess.Run(scriptPath, binDir, envFile, extraEnv);
@@ -393,8 +392,8 @@ public static class FeaturePreflightExpansion
                 echo "Filesystem     1024-blocks      Used Available Capacity Mounted on"
                 echo "tmpfs             2000000    1000000    900000       53% /"
                 """);
-            var missingFallback = Path.Combine(
-                Directory.CreateTempSubdirectory("gw-preflight-story342-nodockerroot-").FullName, "does-not-exist");
+            using var missingFallbackDir = new TempDir();
+            var missingFallback = Path.Combine(missingFallbackDir.Path, "does-not-exist");
             var envFile = CompleteEnvFile(MakeMediaDir(flacCount: 1));
 
             var (_, stdOut, _) = RunPreflight(
@@ -407,7 +406,8 @@ public static class FeaturePreflightExpansion
         [Fact]
         public void RamUnderTheFullTopologyConstantSuggestsPiperOnly()
         {
-            var meminfo = Path.Combine(Directory.CreateTempSubdirectory("gw-preflight-story342-ram-").FullName, "meminfo");
+            using var meminfoDir = new TempDir();
+            var meminfo = Path.Combine(meminfoDir.Path, "meminfo");
             File.WriteAllText(meminfo, "MemTotal:        3945000 kB\nMemFree:          100000 kB\n");
             var envFile = CompleteEnvFile(MakeMediaDir(flacCount: 1));
 
@@ -423,7 +423,8 @@ public static class FeaturePreflightExpansion
         {
             // cmdline.txt probe (test seam points at a scratch file) missing
             // cgroup_enable=memory → WARN with the HARDWARE.md pointer.
-            var cmdline = Path.Combine(Directory.CreateTempSubdirectory("gw-preflight-story342-cmdline-").FullName, "cmdline.txt");
+            using var cmdlineDir = new TempDir();
+            var cmdline = Path.Combine(cmdlineDir.Path, "cmdline.txt");
             File.WriteAllText(cmdline, "console=serial0,115200 root=PARTUUID=xyz rootfstype=ext4 rootwait\n");
             var envFile = CompleteEnvFile(MakeMediaDir(flacCount: 1));
 
@@ -485,7 +486,8 @@ public static class FeaturePreflightExpansion
         public void AnNfsMediaDirPrintsTheStaleInodeAndCaseNotes()
         {
             var mediaDir = MakeMediaDir(flacCount: 1);
-            var mounts = Path.Combine(Directory.CreateTempSubdirectory("gw-preflight-story342-mounts-").FullName, "mounts");
+            using var mountsDir = new TempDir();
+            var mounts = Path.Combine(mountsDir.Path, "mounts");
             File.WriteAllLines(mounts,
             [
                 "/dev/sda1 / ext4 rw 0 0",
@@ -508,7 +510,8 @@ public static class FeaturePreflightExpansion
             // determined (see the next fact). Capitalized and reworded to "Local disk (...)"
             // either way, matching the neighboring "NFS-mounted (...)" row's own capitalization.
             var mediaDir = MakeMediaDir(flacCount: 1);
-            var mounts = Path.Combine(Directory.CreateTempSubdirectory("gw-preflight-story342-mounts-").FullName, "mounts");
+            using var mountsDir = new TempDir();
+            var mounts = Path.Combine(mountsDir.Path, "mounts");
             File.WriteAllLines(mounts, [$"/dev/sda1 {mediaDir} ext4 rw 0 0"]);
             var envFile = CompleteEnvFile(mediaDir);
 
@@ -526,7 +529,8 @@ public static class FeaturePreflightExpansion
             // "local" itself read as though IT were unverified, when only the TYPE is. Honest
             // wording now, and the parenthetical stays reserved for an actual detected type.
             var mediaDir = MakeMediaDir(flacCount: 1);
-            var mounts = Path.Combine(Directory.CreateTempSubdirectory("gw-preflight-story342-mounts-").FullName, "mounts");
+            using var mountsDir = new TempDir();
+            var mounts = Path.Combine(mountsDir.Path, "mounts");
             File.WriteAllLines(mounts, ["/dev/sda1 / ext4 rw 0 0"]);   // no entry matching mediaDir
             var envFile = CompleteEnvFile(mediaDir);
 

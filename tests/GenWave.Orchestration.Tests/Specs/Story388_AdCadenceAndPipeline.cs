@@ -15,6 +15,7 @@
 
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using GenWave.Core.Domain;
 using GenWave.Orchestration.Tests.Fakes;
 

@@ -227,65 +227,57 @@ public sealed class VoicePackUninstallArc : IAsyncLifetime
     public async Task InitializeAsync()
     {
         await using var database = await VoicePackUninstallDatabase.StartAsync();
-        var voicesRoot = Directory.CreateTempSubdirectory("t413-story401-voices-").FullName;
-        try
+        using var voicesRootDir = new TempDir();
+        var voicesRoot = voicesRootDir.Path;
+        await using var factory = new VoicePackUninstallWebFactory(database, voicesRoot);
+        var client = await VoicePackUninstallWebFactory.LoggedInClientAsync(factory);
+
+        foreach (var slug in VoicePackUninstallFixtures.AllSlugs)
         {
-            await using var factory = new VoicePackUninstallWebFactory(database, voicesRoot);
-            var client = await VoicePackUninstallWebFactory.LoggedInClientAsync(factory);
-
-            foreach (var slug in VoicePackUninstallFixtures.AllSlugs)
-            {
-                var install = await client.PostAsync($"/api/voice-packs/{slug}/install", null);
-                if (!install.IsSuccessStatusCode)
-                    throw new InvalidOperationException(
-                        $"fixture install of '{slug}' failed: {await install.Content.ReadAsStringAsync()}");
-            }
-
-            // ── AC1 — an approved spot's own voice_plan blocks the guard pack ──
-            SpotGuardAdSpotId = await InsertAdSpotAsync(
-                database.StationConnectionString, state: "approved", voiceId: "af_spotguard", failReason: null);
-
-            var spotGuardResponse = await client.DeleteAsync("/api/voice-packs/spot-guard-pack");
-            SpotGuardDeleteStatus = spotGuardResponse.StatusCode;
-            SpotGuardDeleteBody = await spotGuardResponse.Content.ReadAsStringAsync();
-            SpotGuardPackRowSurvivesRefusal = await PackRowExistsAsync(database.StationConnectionString, "spot-guard-pack");
-
-            // ── AC2 — a persona's own voice blocks the guard pack ──
-            await InsertPersonaAsync(database.StationConnectionString, PersonaGuardPersonaName, "af_personaguard");
-
-            var personaGuardResponse = await client.DeleteAsync("/api/voice-packs/persona-guard-pack");
-            PersonaGuardDeleteStatus = personaGuardResponse.StatusCode;
-            PersonaGuardDeleteBody = await personaGuardResponse.Content.ReadAsStringAsync();
-
-            // ── AC6 — the guard runs INSIDE the delete, never against an earlier, now-stale check ──
-            RaceAdvisoryCheckCountBeforeInsert =
-                await CountReferencingAdSpotsAsync(database.StationConnectionString, "af_raceguard");
-            await InsertAdSpotAsync(database.StationConnectionString, state: "approved", voiceId: "af_raceguard", failReason: null);
-
-            var raceResponse = await client.DeleteAsync("/api/voice-packs/race-pack");
-            RaceDeleteStatus = raceResponse.StatusCode;
-
-            // ── AC3 — retired/failed references never block ──
-            await InsertAdSpotAsync(database.StationConnectionString, state: "retired", voiceId: "af_cleanone", failReason: null);
-            await InsertAdSpotAsync(database.StationConnectionString, state: "failed", voiceId: "af_cleantwo", failReason: "render error");
-
-            var cleanResponse = await client.DeleteAsync("/api/voice-packs/clean-pack");
-            CleanDeleteStatus = cleanResponse.StatusCode;
-            CleanPtFilesSurviveDelete =
-                File.Exists(Path.Combine(voicesRoot, "af_cleanone.pt")) || File.Exists(Path.Combine(voicesRoot, "af_cleantwo.pt"));
-            CleanPackAndVoiceRowsGone = !await PackRowExistsAsync(database.StationConnectionString, "clean-pack");
-
-            // ── L2 — a slug that was never installed refuses 404, never a 204 "deleted" ──
-            var unknownSlugResponse = await client.DeleteAsync("/api/voice-packs/never-installed-pack");
-            UnknownSlugDeleteStatus = unknownSlugResponse.StatusCode;
-            UnknownSlugDeleteBody = await unknownSlugResponse.Content.ReadAsStringAsync();
+            var install = await client.PostAsync($"/api/voice-packs/{slug}/install", null);
+            if (!install.IsSuccessStatusCode)
+                throw new InvalidOperationException(
+                    $"fixture install of '{slug}' failed: {await install.Content.ReadAsStringAsync()}");
         }
-        finally
-        {
-            try { Directory.Delete(voicesRoot, recursive: true); }
-            catch (IOException) { /* best-effort cleanup */ }
-            catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
-        }
+
+        // ── AC1 — an approved spot's own voice_plan blocks the guard pack ──
+        SpotGuardAdSpotId = await InsertAdSpotAsync(
+            database.StationConnectionString, state: "approved", voiceId: "af_spotguard", failReason: null);
+
+        var spotGuardResponse = await client.DeleteAsync("/api/voice-packs/spot-guard-pack");
+        SpotGuardDeleteStatus = spotGuardResponse.StatusCode;
+        SpotGuardDeleteBody = await spotGuardResponse.Content.ReadAsStringAsync();
+        SpotGuardPackRowSurvivesRefusal = await PackRowExistsAsync(database.StationConnectionString, "spot-guard-pack");
+
+        // ── AC2 — a persona's own voice blocks the guard pack ──
+        await InsertPersonaAsync(database.StationConnectionString, PersonaGuardPersonaName, "af_personaguard");
+
+        var personaGuardResponse = await client.DeleteAsync("/api/voice-packs/persona-guard-pack");
+        PersonaGuardDeleteStatus = personaGuardResponse.StatusCode;
+        PersonaGuardDeleteBody = await personaGuardResponse.Content.ReadAsStringAsync();
+
+        // ── AC6 — the guard runs INSIDE the delete, never against an earlier, now-stale check ──
+        RaceAdvisoryCheckCountBeforeInsert =
+            await CountReferencingAdSpotsAsync(database.StationConnectionString, "af_raceguard");
+        await InsertAdSpotAsync(database.StationConnectionString, state: "approved", voiceId: "af_raceguard", failReason: null);
+
+        var raceResponse = await client.DeleteAsync("/api/voice-packs/race-pack");
+        RaceDeleteStatus = raceResponse.StatusCode;
+
+        // ── AC3 — retired/failed references never block ──
+        await InsertAdSpotAsync(database.StationConnectionString, state: "retired", voiceId: "af_cleanone", failReason: null);
+        await InsertAdSpotAsync(database.StationConnectionString, state: "failed", voiceId: "af_cleantwo", failReason: "render error");
+
+        var cleanResponse = await client.DeleteAsync("/api/voice-packs/clean-pack");
+        CleanDeleteStatus = cleanResponse.StatusCode;
+        CleanPtFilesSurviveDelete =
+            File.Exists(Path.Combine(voicesRoot, "af_cleanone.pt")) || File.Exists(Path.Combine(voicesRoot, "af_cleantwo.pt"));
+        CleanPackAndVoiceRowsGone = !await PackRowExistsAsync(database.StationConnectionString, "clean-pack");
+
+        // ── L2 — a slug that was never installed refuses 404, never a 204 "deleted" ──
+        var unknownSlugResponse = await client.DeleteAsync("/api/voice-packs/never-installed-pack");
+        UnknownSlugDeleteStatus = unknownSlugResponse.StatusCode;
+        UnknownSlugDeleteBody = await unknownSlugResponse.Content.ReadAsStringAsync();
     }
 
     static async Task<long> InsertAdSpotAsync(string stationConnectionString, string state, string voiceId, string? failReason)
@@ -552,60 +544,52 @@ public sealed class JinglePackUninstallArc : IAsyncLifetime
     public async Task InitializeAsync()
     {
         await using var database = await JinglePackUninstallDatabase.StartAsync();
-        var jingleRoot = Directory.CreateTempSubdirectory("t414-story401-jingle-").FullName;
-        try
+        using var jingleRootDir = new TempDir();
+        var jingleRoot = jingleRootDir.Path;
+        await SeedAdsLibraryAsync(database.LibraryConnectionString);
+
+        await using var factory = new JinglePackUninstallWebFactory(database, jingleRoot);
+
+        // F6.7 (T414 review round 2) — install/uninstall both sit behind
+        // [Authorize(Policy = AuthorizationPolicies.Settings)]; a client that never logged in must
+        // be turned away before either route runs. A slug that was never installed is fine here —
+        // auth denial happens in ASP.NET Core's own middleware, before the action (and so before
+        // any 404 the controller itself would answer) ever runs.
+        var unauthenticatedClient = factory.CreateClient();
+        var unauthenticatedInstall = await unauthenticatedClient.PostAsync("/api/jingle-packs/never-installed-jingle-pack/install", null);
+        UnauthenticatedInstallStatus = unauthenticatedInstall.StatusCode;
+        var unauthenticatedDelete = await unauthenticatedClient.DeleteAsync("/api/jingle-packs/never-installed-jingle-pack");
+        UnauthenticatedDeleteStatus = unauthenticatedDelete.StatusCode;
+
+        var client = await JinglePackUninstallWebFactory.LoggedInClientAsync(factory);
+
+        foreach (var slug in JinglePackUninstallFixtures.AllSlugs)
         {
-            await SeedAdsLibraryAsync(database.LibraryConnectionString);
-
-            await using var factory = new JinglePackUninstallWebFactory(database, jingleRoot);
-
-            // F6.7 (T414 review round 2) — install/uninstall both sit behind
-            // [Authorize(Policy = AuthorizationPolicies.Settings)]; a client that never logged in must
-            // be turned away before either route runs. A slug that was never installed is fine here —
-            // auth denial happens in ASP.NET Core's own middleware, before the action (and so before
-            // any 404 the controller itself would answer) ever runs.
-            var unauthenticatedClient = factory.CreateClient();
-            var unauthenticatedInstall = await unauthenticatedClient.PostAsync("/api/jingle-packs/never-installed-jingle-pack/install", null);
-            UnauthenticatedInstallStatus = unauthenticatedInstall.StatusCode;
-            var unauthenticatedDelete = await unauthenticatedClient.DeleteAsync("/api/jingle-packs/never-installed-jingle-pack");
-            UnauthenticatedDeleteStatus = unauthenticatedDelete.StatusCode;
-
-            var client = await JinglePackUninstallWebFactory.LoggedInClientAsync(factory);
-
-            foreach (var slug in JinglePackUninstallFixtures.AllSlugs)
-            {
-                var install = await client.PostAsync($"/api/jingle-packs/{slug}/install", null);
-                if (!install.IsSuccessStatusCode)
-                    throw new InvalidOperationException(
-                        $"fixture install of '{slug}' failed: {await install.Content.ReadAsStringAsync()}");
-            }
-
-            // ── AC4 — an active ad_spot's own bed_media_id blocks the guard pack ──
-            var bedMediaId = await ReadMediaIdAsync(
-                database.LibraryConnectionString, JinglePackUninstallFixtures.BedGuardSlug, JinglePackUninstallFixtures.BedGuardTitle);
-            BedGuardAdSpotId = await InsertAdSpotAsync(database.StationConnectionString, state: "approved", bedMediaId: bedMediaId);
-
-            var bedGuardResponse = await client.DeleteAsync($"/api/jingle-packs/{JinglePackUninstallFixtures.BedGuardSlug}");
-            BedGuardDeleteStatus = bedGuardResponse.StatusCode;
-            BedGuardDeleteBody = await bedGuardResponse.Content.ReadAsStringAsync();
-
-            // ── AC5 — no active reference uninstalls cleanly ──
-            var cleanResponse = await client.DeleteAsync($"/api/jingle-packs/{JinglePackUninstallFixtures.CleanSlug}");
-            CleanDeleteStatus = cleanResponse.StatusCode;
-            CleanSlugFolderGone = !Directory.Exists(Path.Combine(jingleRoot, JinglePackUninstallFixtures.CleanSlug));
-            CleanMediaRowsGone = await CountMediaRowsAsync(database.LibraryConnectionString, JinglePackUninstallFixtures.CleanSlug) == 0;
-
-            // F7 (T414 review round 2) — a slug that was never installed refuses 404, never a 204.
-            var unknownSlugResponse = await client.DeleteAsync("/api/jingle-packs/never-installed-jingle-pack");
-            UnknownSlugDeleteStatus = unknownSlugResponse.StatusCode;
-            UnknownSlugDeleteBody = await unknownSlugResponse.Content.ReadAsStringAsync();
+            var install = await client.PostAsync($"/api/jingle-packs/{slug}/install", null);
+            if (!install.IsSuccessStatusCode)
+                throw new InvalidOperationException(
+                    $"fixture install of '{slug}' failed: {await install.Content.ReadAsStringAsync()}");
         }
-        finally
-        {
-            try { Directory.Delete(jingleRoot, recursive: true); }
-            catch (IOException) { /* best-effort cleanup */ }
-            catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
-        }
+
+        // ── AC4 — an active ad_spot's own bed_media_id blocks the guard pack ──
+        var bedMediaId = await ReadMediaIdAsync(
+            database.LibraryConnectionString, JinglePackUninstallFixtures.BedGuardSlug, JinglePackUninstallFixtures.BedGuardTitle);
+        BedGuardAdSpotId = await InsertAdSpotAsync(database.StationConnectionString, state: "approved", bedMediaId: bedMediaId);
+
+        var bedGuardResponse = await client.DeleteAsync($"/api/jingle-packs/{JinglePackUninstallFixtures.BedGuardSlug}");
+        BedGuardDeleteStatus = bedGuardResponse.StatusCode;
+        BedGuardDeleteBody = await bedGuardResponse.Content.ReadAsStringAsync();
+
+        // ── AC5 — no active reference uninstalls cleanly ──
+        var cleanResponse = await client.DeleteAsync($"/api/jingle-packs/{JinglePackUninstallFixtures.CleanSlug}");
+        CleanDeleteStatus = cleanResponse.StatusCode;
+        CleanSlugFolderGone = !Directory.Exists(Path.Combine(jingleRoot, JinglePackUninstallFixtures.CleanSlug));
+        CleanMediaRowsGone = await CountMediaRowsAsync(database.LibraryConnectionString, JinglePackUninstallFixtures.CleanSlug) == 0;
+
+        // F7 (T414 review round 2) — a slug that was never installed refuses 404, never a 204.
+        var unknownSlugResponse = await client.DeleteAsync("/api/jingle-packs/never-installed-jingle-pack");
+        UnknownSlugDeleteStatus = unknownSlugResponse.StatusCode;
+        UnknownSlugDeleteBody = await unknownSlugResponse.Content.ReadAsStringAsync();
     }
 
     static async Task SeedAdsLibraryAsync(string libraryConnectionString)
