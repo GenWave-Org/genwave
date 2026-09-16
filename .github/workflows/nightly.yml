@@ -1,0 +1,108 @@
+permissions:
+  contents: read
+
+name: nightly
+
+# Tier 2 (SPEC F180, STORY-449, PLAN T499). ci.yml's `build-test` job only ever runs
+# Category!=Integration against main's own tree — the tests that need a real Postgres/Kokoro
+# fixture (`integration`, below) and the chaos legs that prove a *published* release still
+# survives an api outage / engine restart (`chaos`, below) run here instead, once a night.
+# `chaos` deliberately targets the newest published release's images
+# (tools/gate/stack_gate.sh --tag <tag>), not main's tree: main's tree is already proven by tier 1
+# (ci.yml) and by the release gate (release.yml) — the nightly's job is to prove the shipped
+# appliance keeps holding up over time, on the same bits a box actually runs.
+#
+# `report` turns any red into exactly one open `nightly-red` issue (comments on it if it's
+# already open; comments + closes it the next time both jobs are green) — see
+# tools/gate/nightly_report.sh for the four outcomes.
+#
+# NOTE: GitHub auto-disables scheduled workflows after 60 days without repo activity (same note
+# as demo-health.yml carries); any commit re-arms it.
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    # SPEC F180.2: the Kokoro fixture's own image pull + warmup is budgeted inside this 60 min,
+    # on top of restore/build/test — ci.yml's build-test job needs none of that and stays at 30.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - name: Restore
+        run: dotnet restore GenWave.sln
+      - name: Build (Release)
+        run: dotnet build GenWave.sln --no-restore --configuration Release
+      - name: Install ffmpeg (integration specs drive the real binary)
+        uses: ./.github/actions/install-ffmpeg
+      - name: Test (Category=Integration — needs Docker + ffmpeg, on-demand here, never in ci.yml)
+        run: dotnet test GenWave.sln --no-build --configuration Release --filter "Category=Integration" --logger trx
+      # SPEC F180.2 says "Artifacts: trx + fixture logs"; only the trx is uploaded below — the
+      # fixtures print to the test output that the trx already captures, so no separate log
+      # artifact exists to upload.
+      - name: Upload trx
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: integration-trx
+          path: "**/*.trx"
+
+  chaos:
+    runs-on: ubuntu-latest
+    # SPEC F180.3: --fresh --capture --chaos against the latest published release — a whole
+    # stack boot + a live-stream capture + the two chaos scenarios (see stack_gate.sh's own
+    # header for what each leg/scenario does).
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install ffmpeg (stack_gate.sh's own capture leg needs the real binary)
+        uses: ./.github/actions/install-ffmpeg
+      - name: Resolve the newest published release tag
+        run: |
+          TAG="$(gh release list --exclude-drafts --exclude-pre-releases --limit 20 --json tagName -q '[.[] | select(.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))][0].tagName')"
+          if [ -z "$TAG" ]; then
+            echo "no published vX.Y.Z release found" >&2
+            exit 1
+          fi
+          echo "resolved tag: $TAG"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+      - name: Fresh + capture + chaos gate against the resolved tag
+        run: tools/gate/stack_gate.sh --tag "$TAG" --fresh --capture --chaos --report gate-report
+      - name: Upload gate report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gate-report
+          # stack_gate.sh copies capture.wav / capture-reconnect.wav into gate-report/ itself
+          # (the mktemp scratch dir they're recorded into is removed by its own EXIT trap).
+          path: gate-report/
+          retention-days: 7
+
+  report:
+    needs: [integration, chaos]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Report the nightly result (opens/comments/closes the one nightly-red issue)
+        # ${{ }} values go through env: and are referenced as shell variables below, never
+        # interpolated straight into the run: line (the GitHub-hardening idiom — an untrusted
+        # ${{ }} value inlined into a script is a script-injection vector).
+        run: tools/gate/nightly_report.sh integration="$INTEGRATION_RESULT" chaos="$CHAOS_RESULT" run="$RUN_URL"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INTEGRATION_RESULT: ${{ needs.integration.result }}
+          CHAOS_RESULT: ${{ needs.chaos.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

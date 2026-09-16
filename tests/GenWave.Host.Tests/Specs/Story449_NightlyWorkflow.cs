@@ -14,7 +14,6 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureTheNightlyKeepsOneRedIssue
 {
-    const string PendingWorkflow = "pending: T499 — nightly.yml + tools/gate/nightly_report.sh (STORY-449)";
     const string PendingBadge = "pending: T500 — the README nightly badge (STORY-449)";
 
     static string Repo => RepoRootLocator.Find(AppContext.BaseDirectory);
@@ -67,22 +66,22 @@ public static class FeatureTheNightlyKeepsOneRedIssue
 
     public sealed class ScenarioBothTriggers
     {
-        [Fact(Skip = PendingWorkflow)]
+        [Fact]
         public void TheWorkflowExists() => Assert.True(File.Exists(Path.Combine(Repo, ".github", "workflows", "nightly.yml")));
 
-        [Fact(Skip = PendingWorkflow)]
+        [Fact]
         public void ItRunsAtThreeUtc() => Assert.Matches(@"cron:\s*[""']0 3 \* \* \*[""']", Workflow);
 
-        [Fact(Skip = PendingWorkflow)]
+        [Fact]
         public void ItCanBeDispatched() => Assert.Contains("workflow_dispatch", Workflow, StringComparison.Ordinal);
     }
 
     public sealed class ScenarioLeastPermissions
     {
-        [Fact(Skip = PendingWorkflow)]
+        [Fact]
         public void TopLevelIsContentsRead() => Assert.Matches(@"^permissions:\n  contents: read\n", Workflow);
 
-        [Fact(Skip = PendingWorkflow)]
+        [Fact]
         public void OnlyTheReportJobWritesIssues() =>
             Assert.Equal(["report"], new[] { "integration", "chaos", "report" }.Where(j => Job(j).Contains("issues: write", StringComparison.Ordinal)));
     }
@@ -91,13 +90,13 @@ public static class FeatureTheNightlyKeepsOneRedIssue
     {
         readonly string job = Job("integration");
 
-        [Fact(Skip = PendingWorkflow)]
+        [Fact]
         public void ItHasASixtyMinuteBudget() => Assert.Matches(@"timeout-minutes:\s*60", job);
 
-        [Fact(Skip = PendingWorkflow)]
+        [Fact]
         public void ItFiltersTheIntegrationCategory() => Assert.Contains("--filter \"Category=Integration\"", job, StringComparison.Ordinal);
 
-        [Fact(Skip = PendingWorkflow)]
+        [Fact]
         public void ItLogsTrx() => Assert.Contains("--logger trx", job, StringComparison.Ordinal);
     }
 
@@ -105,13 +104,13 @@ public static class FeatureTheNightlyKeepsOneRedIssue
     {
         readonly string job = Job("chaos");
 
-        [Fact(Skip = PendingWorkflow)]
+        [Fact]
         public void ItHasAThirtyMinuteBudget() => Assert.Matches(@"timeout-minutes:\s*30", job);
 
-        [Fact(Skip = PendingWorkflow)]
+        [Fact]
         public void ItResolvesTheTagFromTheReleaseList() => Assert.Contains("gh release list", job, StringComparison.Ordinal);
 
-        [Fact(Skip = PendingWorkflow)]
+        [Fact]
         public void ItRunsFreshCaptureChaos() => Assert.Matches(@"stack_gate\.sh .*--fresh .*--capture .*--chaos", job);
     }
 
@@ -119,10 +118,10 @@ public static class FeatureTheNightlyKeepsOneRedIssue
     {
         readonly string job = Job("report");
 
-        [Fact(Skip = PendingWorkflow)]
+        [Fact]
         public void ItNeedsBothJobs() => Assert.Matches(@"needs:\s*\[\s*integration,\s*chaos\s*\]", job);
 
-        [Fact(Skip = PendingWorkflow)]
+        [Fact]
         public void ItRunsEvenWhenTheyFail() => Assert.Matches(@"if:\s*always\(\)", job);
     }
 
@@ -134,13 +133,13 @@ public static class FeatureTheNightlyKeepsOneRedIssue
     {
         readonly string[] calls = Report("failure", "success", openIssue: null);
 
-        [Fact(Skip = PendingWorkflow)]
+        [Fact]
         public void ItCreatesOneIssue() => Assert.Single(calls, c => c.StartsWith("gh issue create", StringComparison.Ordinal));
 
-        [Fact(Skip = PendingWorkflow)]
+        [Fact]
         public void TheTitleStartsWithNightlyRedSince() => Assert.Matches(@"gh issue create .*--title ""?Nightly red since ", string.Join("\n", calls));
 
-        [Fact(Skip = PendingWorkflow)]
+        [Fact]
         public void TheLabelIsNightlyRed() => Assert.Matches(@"gh issue create .*--label ""?nightly-red", string.Join("\n", calls));
     }
 
@@ -148,10 +147,10 @@ public static class FeatureTheNightlyKeepsOneRedIssue
     {
         readonly string[] calls = Report("failure", "success", openIssue: "900");
 
-        [Fact(Skip = PendingWorkflow)]
+        [Fact]
         public void ItCommentsOnTheOpenIssue() => Assert.Contains(calls, c => c.StartsWith("gh issue comment 900", StringComparison.Ordinal));
 
-        [Fact(Skip = PendingWorkflow)]
+        [Fact]
         public void ItCreatesNothing() => Assert.DoesNotContain(calls, c => c.StartsWith("gh issue create", StringComparison.Ordinal));
     }
 
@@ -159,10 +158,10 @@ public static class FeatureTheNightlyKeepsOneRedIssue
     {
         readonly string[] calls = Report("success", "success", openIssue: "900");
 
-        [Fact(Skip = PendingWorkflow)]
+        [Fact]
         public void ItSaysGreen() => Assert.Matches(@"gh issue comment 900 .*green", string.Join("\n", calls));
 
-        [Fact(Skip = PendingWorkflow)]
+        [Fact]
         public void ItClosesAfterTheComment() =>
             Assert.True(Array.FindIndex(calls, c => c.StartsWith("gh issue comment 900", StringComparison.Ordinal))
                 < Array.FindIndex(calls, c => c.StartsWith("gh issue close 900", StringComparison.Ordinal)), string.Join("\n", calls));
@@ -172,7 +171,7 @@ public static class FeatureTheNightlyKeepsOneRedIssue
     {
         readonly string[] calls = Report("success", "success", openIssue: null);
 
-        [Fact(Skip = PendingWorkflow)]
+        [Fact]
         public void NoIssueCommandRuns() =>
             Assert.DoesNotContain(calls, c => c.StartsWith("gh issue ", StringComparison.Ordinal) && !c.StartsWith("gh issue list", StringComparison.Ordinal));
     }
