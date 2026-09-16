@@ -61,6 +61,7 @@ internal abstract class EphemeralStationDatabase : IAsyncDisposable
     {
         var project = $"{projectPrefix}-{Guid.NewGuid():N}"[..24];
         var composeFile = LocateComposeFile();
+        TestNetwork.Ensure();
         Compose(project, composeFile, "up", "-d", "--wait");
 
         var port = DiscoverHostPort(project, composeFile);

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using GenWave.Host.Tests.Support;
 
 namespace GenWave.Host.Tests;
 
@@ -38,6 +39,7 @@ public sealed class KokoroFixture : IAsyncLifetime
     public async Task InitializeAsync()
     {
         composeFile = LocateComposeFile();
+        TestNetwork.Ensure();
         Compose("up", "-d", "--wait");
         BaseUrl = $"http://127.0.0.1:{DiscoverHostPort()}";
         await WaitForModelAsync();
