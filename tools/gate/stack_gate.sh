@@ -11,8 +11,10 @@
 #   --upgrade        an existing station on the previous release, upgraded onto the tag: a
 #                     `git worktree` of the previous release stands up its own pinned stack,
 #                     waits on-air, then `compose stop api`, swaps in the CURRENT tag's db/ +
-#                     migrate.sh, runs the migration, brings api back on the CURRENT tag, and
-#                     waits health/on-air again (SPEC F178.6; see run_upgrade_leg)
+#                     migrate.sh, runs the migration, checks the role boundary (station_svc/
+#                     library_svc each locked out of the other's schema, SPEC F178.7), brings api
+#                     back on the CURRENT tag, and waits health/on-air again (SPEC F178.6/F178.7;
+#                     see run_upgrade_leg)
 #   --capture        records CAPTURE_SECS of the fresh leg's own live stream and measures it: no
 #                     silent gaps, loudness within TOL_LU of the station's own configured target,
 #                     speech aired through the booth log (requires --fresh)
@@ -27,7 +29,8 @@
 # health, on-air — see run_fresh_leg). PLAN T491 filled in the capture leg (run_capture_leg):
 # admin login, the station's own loudness target, the recording, measure_audio.sh, and the
 # booth-log speech check. PLAN T493 filled in the upgrade leg (run_upgrade_leg): previous-release
-# resolution, the worktree, and the stop/migrate/restart sequence. `--chaos` is still a
+# resolution, the worktree, and the stop/migrate/restart sequence. PLAN T494 added the role-
+# boundary check (SPEC F178.7) between the migration and the api restart. `--chaos` is still a
 # report-only "skipped" row until T496.
 #
 # Usage: tools/gate/stack_gate.sh --tag <vX.Y.Z> [--fresh] [--upgrade] [--capture] [--chaos]
@@ -109,6 +112,16 @@ UPGRADE_PREVIOUS=""
 UPGRADE_HEALTH_SECS=""
 UPGRADE_ONAIR_SECS=""
 UPGRADE_MIGRATE_TAIL=""
+
+# UPGRADE_BOUNDARY (T494, SPEC F178.7) — "ok" once BOTH cross-schema probes below come back
+# "permission denied", "failed" the moment either one doesn't; empty when the role-boundary check
+# is never reached at all (a leg that failed earlier, e.g. at migrate). Rendered into the report
+# as its own "role boundary | <value>" line/JSON field, twin-style with the other UPGRADE_* facts.
+# UPGRADE_BOUNDARY_TAIL is the first non-matching probe's own output, set only on a failed check,
+# for the report's diagnostic line — never part of the JSON measurements (mirrors
+# UPGRADE_MIGRATE_TAIL above).
+UPGRADE_BOUNDARY=""
+UPGRADE_BOUNDARY_TAIL=""
 
 # The fresh leg's own scratch + compose project name, set by run_fresh_leg as soon as each exists
 # — run_capture_leg (T491) reuses this SAME stack rather than standing up a second one, since
@@ -562,11 +575,29 @@ fail_upgrade_leg() {
   attach_fresh_compose_logs "$worktree" "$project" "compose-upgrade.log"
 }
 
-# run_upgrade_leg — SPEC F178.6 / STORY-446 (T493): a `git worktree` of the previous release
-# stands up its OWN pinned stack (setup.sh --yes + the gate's own `up -d`, exactly the fresh leg's
-# own shape — see below), waits health/on-air, then `compose stop api`, swaps the CURRENT tag's
-# db/ + migrate.sh into the worktree, runs that migration, brings api back up on the CURRENT tag,
-# and waits health/on-air again.
+# upgrade_boundary_query <worktree> <project> <role> <query> — SPEC F178.7 / STORY-446 (T494): one
+# cross-schema probe of the role boundary, run as <role> via the same compose invocation shape
+# capture_booth_log_count (above) uses against the db service — the db is up throughout the leg,
+# api still stopped at this point (see run_upgrade_leg's own call site, between migrate and the
+# api restart). The real db container's socket connection is `trust`, so no password is needed for
+# either role.
+#
+# A real psql exits 1 on the very outcome we want (permission denied) and the stub always exits 0;
+# the text is the only signal both share, so the status is ignored. Prints that text verbatim.
+upgrade_boundary_query() {
+  local worktree="$1" project="$2" role="$3" query="$4" out
+  out="$(cd "$worktree" && docker compose -p "$project" "${COMPOSE_FILES[@]}" \
+      exec -T db psql -U "$role" -d genwave -tA -c "$query" < /dev/null 2>&1)" || true
+  printf '%s' "$out"
+}
+
+# run_upgrade_leg — SPEC F178.6/F178.7 / STORY-446 (T493/T494): a `git worktree` of the previous
+# release stands up its OWN pinned stack (setup.sh --yes + the gate's own `up -d`, exactly the
+# fresh leg's own shape — see below), waits health/on-air, then `compose stop api`, swaps the
+# CURRENT tag's db/ + migrate.sh into the worktree, runs that migration, checks the role boundary
+# (station_svc locked out of library.media, library_svc locked out of station.settings —
+# upgrade_boundary_query above), brings api back up on the CURRENT tag, and waits health/on-air
+# again.
 run_upgrade_leg() {
   local scratch worktree project previous
   scratch="$(mktemp -d)"
@@ -681,6 +712,29 @@ run_upgrade_leg() {
   if [ "$s" -ne 0 ]; then
     UPGRADE_MIGRATE_TAIL="$(printf '%s\n' "$out" | tail -5)"
     fail_upgrade_leg "migrate"
+    return
+  fi
+
+  # --- Role boundary (SPEC F178.7) ------------------------------------------------------------
+  # After migration, while api is still stopped and the db is up: station_svc must be unable to
+  # read library.media, and library_svc must be unable to read station.settings. Anything other
+  # than "permission denied" on either side fails the leg; a row count means the migration granted
+  # a role more than its own schema.
+  local station_boundary library_boundary
+  station_boundary="$(upgrade_boundary_query "$worktree" "$project" station_svc \
+      "select count(*) from library.media")"
+  library_boundary="$(upgrade_boundary_query "$worktree" "$project" library_svc \
+      "select count(*) from station.settings")"
+  if [[ "$station_boundary" == *"permission denied"* ]] && [[ "$library_boundary" == *"permission denied"* ]]; then
+    UPGRADE_BOUNDARY="ok"
+  else
+    UPGRADE_BOUNDARY="failed"
+    if [[ "$station_boundary" != *"permission denied"* ]]; then
+      UPGRADE_BOUNDARY_TAIL="$(printf '%s\n' "$station_boundary" | tail -3)"
+    else
+      UPGRADE_BOUNDARY_TAIL="$(printf '%s\n' "$library_boundary" | tail -3)"
+    fi
+    fail_upgrade_leg "role boundary"
     return
   fi
 
@@ -947,21 +1001,24 @@ capture_measurements_md() {
   return 0
 }
 
-# upgrade_measurements_json — every UPGRADE_* value as a jq NUMBER (or STRING for previous), or
-# `null` for a value the upgrade leg never reached (UPGRADE_PREVIOUS empty means the leg never
-# resolved a previous release at all, so every field is null in that case too). health_secs/
-# onair_secs hold whichever wait cleared last — the leg waits on both twice, once against the
-# previous release and once again after the cutover, and the second measurement describes the tag
-# actually being gated, so it is the one worth keeping.
+# upgrade_measurements_json — every UPGRADE_* value as a jq NUMBER (or STRING for previous/role
+# boundary), or `null` for a value the upgrade leg never reached (UPGRADE_PREVIOUS empty means the
+# leg never resolved a previous release at all, so every field is null in that case too).
+# health_secs/onair_secs hold whichever wait cleared last — the leg waits on both twice, once
+# against the previous release and once again after the cutover, and the second measurement
+# describes the tag actually being gated, so it is the one worth keeping. role_boundary (T494,
+# SPEC F178.7) is "ok"/"failed"/null — a twin of the "role boundary | <value>" report-md line.
 upgrade_measurements_json() {
   jq -n \
     --arg previous "$UPGRADE_PREVIOUS" \
     --arg h "$UPGRADE_HEALTH_SECS" \
     --arg o "$UPGRADE_ONAIR_SECS" \
+    --arg boundary "$UPGRADE_BOUNDARY" \
     '{
       previous: (if $previous == "" then null else $previous end),
       health_secs: (if $h == "" then null else ($h | tonumber) end),
-      onair_secs: (if $o == "" then null else ($o | tonumber) end)
+      onair_secs: (if $o == "" then null else ($o | tonumber) end),
+      role_boundary: (if $boundary == "" then null else $boundary end)
     }'
 }
 
@@ -976,6 +1033,8 @@ upgrade_measurements_md() {
   printf 'upgrade previous: %s\n' "$UPGRADE_PREVIOUS"
   [ -n "$UPGRADE_HEALTH_SECS" ] && printf 'upgrade health_secs: %s\n' "$UPGRADE_HEALTH_SECS"
   [ -n "$UPGRADE_ONAIR_SECS" ] && printf 'upgrade onair_secs: %s\n' "$UPGRADE_ONAIR_SECS"
+  [ -n "$UPGRADE_BOUNDARY" ] && printf 'role boundary | %s\n' "$UPGRADE_BOUNDARY"
+  [ -n "$UPGRADE_BOUNDARY_TAIL" ] && printf 'role boundary error: %s\n' "$UPGRADE_BOUNDARY_TAIL"
   [ -n "$UPGRADE_MIGRATE_TAIL" ] && printf 'migrate error: %s\n' "$UPGRADE_MIGRATE_TAIL"
   return 0
 }

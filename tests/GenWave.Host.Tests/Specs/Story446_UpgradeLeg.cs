@@ -15,8 +15,6 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureTheUpgradeLegMigratesThePreviousReleaseForward
 {
-    const string PendingBoundary = "pending: T494 — the role boundary inside the upgrade leg (STORY-446)";
-
     const string GhStub = """
         printf 'gh %s\n' "$*" >> "$GATE_STUB_LOG"
         case "$*" in
@@ -90,7 +88,7 @@ public static class FeatureTheUpgradeLegMigratesThePreviousReleaseForward
         [Fact]
         public void TheWorktreeIsRemovedOnExit() => Assert.Contains(run.Calls, c => c.StartsWith("git worktree remove", StringComparison.Ordinal));
 
-        [Fact(Skip = PendingBoundary)]
+        [Fact]
         public void TheBoundaryRowIsOk() => Assert.Contains("role boundary | ok", run.ReportMd, StringComparison.Ordinal);
     }
 
@@ -144,10 +142,10 @@ public static class FeatureTheUpgradeLegMigratesThePreviousReleaseForward
 
         public void Dispose() => station.Dispose();
 
-        [Fact(Skip = PendingBoundary)]
+        [Fact]
         public void ExitIsOne() => Assert.Equal(1, run.ExitCode);
 
-        [Fact(Skip = PendingBoundary)]
+        [Fact]
         public void RoleBoundaryIsTheFirstFailingAssertion() => Assert.Equal("role boundary", run.FirstFailure);
     }
 }
