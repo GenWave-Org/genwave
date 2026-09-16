@@ -12,7 +12,6 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureTestTempDirectoriesCleanUpAfterThemselves
 {
-    const string PendingType = "pending: T479 — TempDir + TempSweep + the once-per-process sweep (STORY-441)";
     const string PendingCallSites = "pending: T480 — every CreateTempSubdirectory call site moves onto TempDir (STORY-441)";
 
     static string HostTestsDir =>
@@ -32,7 +31,7 @@ public static class FeatureTestTempDirectoriesCleanUpAfterThemselves
             path = dir.Path;
         }
 
-        [Fact(Skip = PendingType)]
+        [Fact]
         public void StartsWithTheTempRootAndPrefix() =>
             Assert.StartsWith(Path.Combine(Path.GetTempPath(), TempDir.Prefix), path, StringComparison.Ordinal);
     }
@@ -50,7 +49,7 @@ public static class FeatureTestTempDirectoriesCleanUpAfterThemselves
             dir.Dispose();
         }
 
-        [Fact(Skip = PendingType)]
+        [Fact]
         public void TheDirectoryIsGone() => Assert.False(Directory.Exists(path));
     }
 
@@ -76,22 +75,22 @@ public static class FeatureTestTempDirectoriesCleanUpAfterThemselves
             TempSweep.Run(root, olderThan: TimeSpan.FromHours(1));
         }
 
-        [Fact(Skip = PendingType)]
+        [Fact]
         public void GwStaleIsGone() => Assert.False(Directory.Exists(Path.Combine(root, "gw-stale")));
 
-        [Fact(Skip = PendingType)]
+        [Fact]
         public void GwFreshRemains() => Assert.True(Directory.Exists(Path.Combine(root, "gw-fresh")));
 
-        [Fact(Skip = PendingType)]
+        [Fact]
         public void PawireIsGone() => Assert.False(Directory.Exists(Path.Combine(root, "genwave-pawire-x")));
 
-        [Fact(Skip = PendingType)]
+        [Fact]
         public void Story343EnvIsGone() => Assert.False(Directory.Exists(Path.Combine(root, "story343-env-x")));
 
-        [Fact(Skip = PendingType)]
+        [Fact]
         public void Gh332IsGone() => Assert.False(Directory.Exists(Path.Combine(root, "gh332-x")));
 
-        [Fact(Skip = PendingType)]
+        [Fact]
         public void UnrelatedRemains() => Assert.True(Directory.Exists(Path.Combine(root, "unrelated-x")));
     }
 
@@ -105,7 +104,7 @@ public static class FeatureTestTempDirectoriesCleanUpAfterThemselves
             .Where(f => File.ReadAllText(f).Contains("TempSweep.Run(Path.GetTempPath()", StringComparison.Ordinal))
             .ToArray();
 
-        [Fact(Skip = PendingType)]
+        [Fact]
         public void ExactlyOneInitializerCallsTheSweep() => Assert.Single(callers);
     }
 
@@ -136,7 +135,7 @@ public static class FeatureTestTempDirectoriesCleanUpAfterThemselves
             caught = Record.Exception(dir.Dispose);
         }
 
-        [Fact(Skip = PendingType)]
+        [Fact]
         public void NoExceptionEscapes() => Assert.Null(caught);
     }
 }
