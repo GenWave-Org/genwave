@@ -13,8 +13,6 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureTestFixturesShareOneDockerNetwork
 {
-    const string Pending = "pending: T477 — TestNetwork.Ensure + external gw-test network in both fixture compose files (STORY-440)";
-
     static string RepoRoot => RepoRootLocator.Find(AppContext.BaseDirectory);
     static string ReadRepoFile(params string[] parts) => File.ReadAllText(Path.Combine([RepoRoot, .. parts]));
 
@@ -48,7 +46,7 @@ public static class FeatureTestFixturesShareOneDockerNetwork
             calls = File.ReadAllLines(log);
         }
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void RunsExactlyOneNetworkCreate() =>
             Assert.Single(calls, c => c == $"network create {TestNetwork.Name}");
     }
@@ -64,7 +62,7 @@ public static class FeatureTestFixturesShareOneDockerNetwork
             caught = Record.Exception(() => TestNetwork.Ensure(docker));
         }
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void ReturnsWithoutThrowing() => Assert.Null(caught);
     }
 
@@ -73,11 +71,11 @@ public static class FeatureTestFixturesShareOneDockerNetwork
         readonly string db = ReadRepoFile("tests", "GenWave.MediaLibrary.Tests", "db-compose.yaml");
         readonly string kokoro = ReadRepoFile("tests", "GenWave.Host.Tests", "kokoro-compose.yaml");
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void DbComposeDeclaresGwTestExternal() =>
             Assert.Matches(@"networks:\s*\n\s*default:\s*\n(\s+(name: gw-test|external: true)\s*\n){2}", db);
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void KokoroComposeDeclaresGwTestExternal() =>
             Assert.Matches(@"networks:\s*\n\s*default:\s*\n(\s+(name: gw-test|external: true)\s*\n){2}", kokoro);
     }
@@ -94,10 +92,10 @@ public static class FeatureTestFixturesShareOneDockerNetwork
             return ensure >= 0 && up >= 0 && ensure < up;
         }
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void DatabaseFixtureEnsuresFirst() => Assert.True(EnsurePrecedesUp(databaseFixture));
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void KokoroFixtureEnsuresFirst() => Assert.True(EnsurePrecedesUp(kokoroFixture));
     }
 
@@ -116,7 +114,7 @@ public static class FeatureTestFixturesShareOneDockerNetwork
             caught = Record.Exception(() => TestNetwork.Ensure(docker));
         }
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void ThrowsWithTheStderrText() =>
             Assert.Contains("permission denied", caught?.Message ?? "", StringComparison.Ordinal);
     }

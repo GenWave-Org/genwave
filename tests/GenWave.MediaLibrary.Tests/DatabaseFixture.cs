@@ -1,6 +1,7 @@
 using System.Collections.Frozen;
 using System.Diagnostics;
 using Dapper;
+using GenWave.Host.Tests.Support;
 using GenWave.MediaLibrary.Station;
 using Npgsql;
 
@@ -78,6 +79,7 @@ public sealed class DatabaseFixture : IAsyncLifetime
 
         composeFile = LocateComposeFile(out var repoRoot);
         RepoRoot = repoRoot;
+        TestNetwork.Ensure();
         Compose("up", "-d", "--wait");
 
         var port = DiscoverHostPort("testdb", 5432);

@@ -28,4 +28,11 @@
     <ProjectReference Include="..\..\src\GenWave.MediaLibrary\GenWave.MediaLibrary.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- gh-#649, STORY-440, PLAN T477: TestNetwork.Ensure is shared with GenWave.Host.Tests as a
+         linked compile item rather than a ProjectReference — there is no Host.Tests→MediaLibrary.Tests
+         reference, and one file shared by two assemblies is cheaper than a cross-test-project edge. -->
+    <Compile Include="..\GenWave.Host.Tests\Support\TestNetwork.cs" Link="Support\TestNetwork.cs" />
+  </ItemGroup>
+
 </Project>

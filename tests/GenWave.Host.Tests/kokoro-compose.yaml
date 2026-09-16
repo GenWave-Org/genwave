@@ -15,3 +15,10 @@ services:
       timeout: 5s
       retries: 36
       start_period: 30s
+
+# gh-#649: joins the one shared "gw-test" network every fixture container uses, instead of letting
+# compose allocate a fresh project network per run — TestNetwork.Ensure creates it before `up`.
+networks:
+  default:
+    name: gw-test
+    external: true
