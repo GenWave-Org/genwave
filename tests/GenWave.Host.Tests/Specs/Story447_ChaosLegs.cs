@@ -16,7 +16,6 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureTheStreamSurvivesAnApiOutageAndAnEngineRestart
 {
-    const string PendingApiDown = "pending: T496 — the api-down scenario: stop/start, outage silence, recovery (STORY-447)";
     const string PendingEngine = "pending: T497 — the engine-reconnect scenario: restart, first frame, clean capture (STORY-447)";
 
     static Run Chaos(FakeStation station, IReadOnlyDictionary<string, string>? env = null) =>
@@ -36,21 +35,21 @@ public static class FeatureTheStreamSurvivesAnApiOutageAndAnEngineRestart
 
         public void Dispose() => station.Dispose();
 
-        [Fact(Skip = PendingApiDown)]
+        [Fact]
         public void TheLegPasses() => Assert.Equal(0, run.ExitCode);
 
-        [Fact(Skip = PendingApiDown)]
+        [Fact]
         public void TheApiIsStopped() => Assert.Contains(run.Calls, c => c.EndsWith("stop api", StringComparison.Ordinal));
 
-        [Fact(Skip = PendingApiDown)]
+        [Fact]
         public void TheApiIsStartedAfterTheStop() =>
             Assert.True(run.IndexOf("stop api") < run.IndexOf("start api"), string.Join("\n", run.Calls));
 
-        [Fact(Skip = PendingApiDown)]
+        [Fact]
         public void RecoveryIsMeasuredInSeconds() =>
             Assert.InRange(run.ReportJson?.RootElement.GetProperty("chaos").GetProperty("api_down_recovery_seconds").GetInt32() ?? -1, 0, 4);
 
-        [Fact(Skip = PendingApiDown)]
+        [Fact]
         public void RecoveryIsPrinted() => Assert.Matches(@"api-down recovery: \d+ s", run.ReportMd);
 
         [Fact(Skip = PendingEngine)]
@@ -78,10 +77,10 @@ public static class FeatureTheStreamSurvivesAnApiOutageAndAnEngineRestart
 
         public void Dispose() => station.Dispose();
 
-        [Fact(Skip = PendingApiDown)]
+        [Fact]
         public void ExitIsOne() => Assert.Equal(1, run.ExitCode);
 
-        [Fact(Skip = PendingApiDown)]
+        [Fact]
         public void ApiDownSilenceIsTheFirstFailingAssertion() => Assert.Equal("api-down silence", run.FirstFailure);
     }
 
@@ -96,10 +95,10 @@ public static class FeatureTheStreamSurvivesAnApiOutageAndAnEngineRestart
 
         public void Dispose() => station.Dispose();
 
-        [Fact(Skip = PendingApiDown)]
+        [Fact]
         public void ExitIsOne() => Assert.Equal(1, run.ExitCode);
 
-        [Fact(Skip = PendingApiDown)]
+        [Fact]
         public void ApiDownRecoveryIsTheFirstFailingAssertion() => Assert.Equal("api-down recovery", run.FirstFailure);
     }
 
@@ -112,7 +111,7 @@ public static class FeatureTheStreamSurvivesAnApiOutageAndAnEngineRestart
 
         public void Dispose() => station.Dispose();
 
-        [Fact(Skip = PendingApiDown)]
+        [Fact]
         public void ExitIsTwo() => Assert.Equal(2, run.ExitCode);
     }
 

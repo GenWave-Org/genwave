@@ -18,7 +18,13 @@
 #   --capture        records CAPTURE_SECS of the fresh leg's own live stream and measures it: no
 #                     silent gaps, loudness within TOL_LU of the station's own configured target,
 #                     speech aired through the booth log (requires --fresh)
-#   --chaos          fault injection during the leg (T496; requires --capture)
+#   --chaos          fault injection INSIDE the capture leg's own recording (SPEC F178.8; requires
+#                     --capture): api-down (T496) — `compose stop api`, sleep GATE_OUTAGE_SECS,
+#                     `compose start api`, then poll for a non-safe track_id within
+#                     GATE_RECOVERY_SECS; zero silence events during the outage, else the gate
+#                     leg fails "api-down silence" (not the capture leg's own "silence" — see
+#                     run_capture_leg's post-measure attribution). Engine-reconnect (T497) is not
+#                     yet implemented.
 #   --from <vX.Y.Z>  the previous release the upgrade leg starts from — overrides the newest
 #                     other `v*` GitHub release otherwise resolved via `gh release list`
 #   --report <dir>   write gate-report.md + gate-report.json there (default: .)
@@ -30,8 +36,9 @@
 # admin login, the station's own loudness target, the recording, measure_audio.sh, and the
 # booth-log speech check. PLAN T493 filled in the upgrade leg (run_upgrade_leg): previous-release
 # resolution, the worktree, and the stop/migrate/restart sequence. PLAN T494 added the role-
-# boundary check (SPEC F178.7) between the migration and the api restart. `--chaos` is still a
-# report-only "skipped" row until T496.
+# boundary check (SPEC F178.7) between the migration and the api restart. PLAN T496 added the
+# api-down chaos scenario (SPEC F178.8(a)) inside run_capture_leg's own recording (see
+# run_api_down_scenario). Engine-reconnect (SPEC F178.8(b)) is still pending, PLAN T497.
 #
 # Usage: tools/gate/stack_gate.sh --tag <vX.Y.Z> [--fresh] [--upgrade] [--capture] [--chaos]
 #                                  [--from <vX.Y.Z>] [--report <dir>]
@@ -46,8 +53,7 @@
 # capture leg's own admin login (below) reads the scratch's ADMIN_PASSWORD straight off the
 # scratch's `.env` on disk for the same reason — never `source`d, never exported.
 #
-# Knobs (env, all optional — the fresh and upgrade legs share the same ones; --chaos adds more at
-# T496):
+# Knobs (env, all optional — the fresh, upgrade and chaos legs share the same ones):
 # GATE_API_BASE (default http://localhost:8080) the api base URL /health is probed against, and
 # — with --capture — /api/auth/login + /api/settings too; GATE_STREAM_URL (default
 # http://localhost:8000/stream) threaded into the real setup.sh's own on-air poll target and, with
@@ -55,7 +61,10 @@
 # (default 300) the wall-clock budgets for the health and on-air waits below (the upgrade leg
 # runs both waits twice — before and after the cutover — against the same budgets); GATE_POLL_SECS
 # (default 5, must be a positive integer) how often each wait re-probes; CAPTURE_SECS (default
-# 360, must be a positive integer) how long --capture records; TOL_LU, SILENCE_FLOOR,
+# 360, must be a positive integer) how long --capture records; GATE_OUTAGE_SECS (default 90, must
+# be a positive integer) how long --chaos's api-down scenario holds `api` stopped; GATE_RECOVERY_SECS
+# (default 120, must be a positive integer) the wall-clock budget the same scenario allows for a
+# non-safe track_id to reappear after `compose start api`; TOL_LU, SILENCE_FLOOR,
 # SILENCE_SECS — measure_audio.sh's own tolerance knobs, passed through untouched (see
 # tools/gate/measure_audio.sh).
 
@@ -140,6 +149,21 @@ CAPTURE_INTEGRATED_LUFS=""
 CAPTURE_BOOTH_LOG=""
 CAPTURE_FFMPEG_TAIL=""
 
+# Chaos leg measurements (T496, SPEC F178.8(a)) — the api-down scenario runs INSIDE run_capture_leg
+# itself (see run_api_down_scenario), never a leg of its own, so these are set there rather than
+# by a run_chaos_leg. CHAOS_API_DOWN_RAN flips to 1 the moment `compose stop api` is attempted —
+# it, not DO_CHAOS, is what the post-capture placeholder below reads to tell "the scenario really
+# ran" apart from "capture never got that far" (e.g. login/target failed first). CHAOS_OUTAGE_SECS
+# is the GATE_OUTAGE_SECS value once the outage actually happened; CHAOS_RECOVERY_SECS is the
+# elapsed seconds from `start api` to the first non-safe frame, empty if recovery never happened
+# within GATE_RECOVERY_SECS. T497 adds its own ENGINE_* twins alongside these, same pattern.
+CHAOS_API_DOWN_RAN=0
+CHAOS_OUTAGE_SECS=""
+CHAOS_RECOVERY_SECS=""
+CHAOS_RECOVERY_OK=0
+
+# A background ffmpeg still recording on an abort (Ctrl-C, set -e) is not killed here on purpose:
+# it is bounded by `-t CAPTURE_SECS` and its source dies with the stack's `down -v` below.
 # shellcheck disable=SC2317 # false positive: only called indirectly via `trap cleanup EXIT`,
 # which shellcheck's reachability analysis doesn't follow (documented SC2317 caveat).
 cleanup() {
@@ -221,6 +245,12 @@ if [ -n "${GATE_POLL_SECS:-}" ] && ! [[ "$GATE_POLL_SECS" =~ ^[1-9][0-9]*$ ]]; t
 fi
 if [ -n "${CAPTURE_SECS:-}" ] && ! [[ "$CAPTURE_SECS" =~ ^[1-9][0-9]*$ ]]; then
   usage_error "CAPTURE_SECS must be a positive integer: $CAPTURE_SECS"
+fi
+if [ -n "${GATE_OUTAGE_SECS:-}" ] && ! [[ "$GATE_OUTAGE_SECS" =~ ^[1-9][0-9]*$ ]]; then
+  usage_error "GATE_OUTAGE_SECS must be a positive integer: $GATE_OUTAGE_SECS"
+fi
+if [ -n "${GATE_RECOVERY_SECS:-}" ] && ! [[ "$GATE_RECOVERY_SECS" =~ ^[1-9][0-9]*$ ]]; then
+  usage_error "GATE_RECOVERY_SECS must be a positive integer: $GATE_RECOVERY_SECS"
 fi
 
 # ---------------------------------------------------------------------------------------------
@@ -405,12 +435,14 @@ ONAIR_CMD
   fi
 }
 
-# wait_for_onair <scratch> <project> — SPEC F178.4: output.icecast.metadata frame 1 must carry a
-# track_id within GATE_ONAIR_SECS (default 300) of up. Same budget shape and output contract as
-# wait_for_health.
+# wait_for_onair <scratch> <project> [budget_secs] — SPEC F178.4: output.icecast.metadata frame 1
+# must carry a track_id within GATE_ONAIR_SECS (default 300) of up. Same budget shape and output
+# contract as wait_for_health. [budget_secs] overrides GATE_ONAIR_SECS for a caller polling
+# against a DIFFERENT budget against the exact same frame — run_api_down_scenario (T496) reuses
+# this poll loop verbatim against GATE_RECOVERY_SECS rather than duplicating it.
 wait_for_onair() {
   local scratch="$1" project="$2"
-  local budget="${GATE_ONAIR_SECS:-300}" poll_secs="${GATE_POLL_SECS:-5}"
+  local budget="${3:-${GATE_ONAIR_SECS:-300}}" poll_secs="${GATE_POLL_SECS:-5}"
   local start=$SECONDS ok=0 elapsed=0 frame
   while :; do
     frame="$(fresh_onair_frame "$scratch" "$project")"
@@ -786,6 +818,44 @@ capture_booth_log_count() {
   printf '%s' "$raw" | tr -d '[:space:]'
 }
 
+# run_api_down_scenario <scratch> <project> — SPEC F178.8(a) / STORY-447 (T496): fault injection
+# that runs WHILE run_capture_leg's own recording is in flight (its caller backgrounds ffmpeg
+# first — see run_capture_leg), so the outage lands inside the SAME capture the F178.5
+# measurements are taken from, never a second recording. `compose stop api` (the same invocation
+# shape run_upgrade_leg's own cutover uses: cd into the scratch, -p project, COMPOSE_FILES, then
+# the verb — so both the docker stub's `*" stop api"*` case and a caller's own `EndsWith("stop
+# api")` check match), sleep GATE_OUTAGE_SECS (default 90), `compose start api`, then reuse
+# wait_for_onair's own poll loop — budgeted against GATE_RECOVERY_SECS (default 120) instead of
+# GATE_ONAIR_SECS — until a frame carries a non-safe track_id.
+#
+# Sets the CHAOS_* globals only; never touches LEG_STATUS/LEG_DETAIL directly. run_capture_leg
+# decides chaos's pass/fail once its own recording's silence count is known too (silence during
+# the outage is the outage's own verdict and wins over a slow recovery — see run_capture_leg's
+# post-measure attribution below). A `stop api`/`start api` that itself fails returns early with
+# no recovery measured, so the leg reports "api-down recovery" — the spec's only recovery-side
+# name — with the compose error on stderr above it.
+run_api_down_scenario() {
+  local scratch="$1" project="$2"
+  local outage="${GATE_OUTAGE_SECS:-90}" recovery_budget="${GATE_RECOVERY_SECS:-120}"
+
+  CHAOS_API_DOWN_RAN=1
+  if ! (cd "$scratch" && docker compose -p "$project" "${COMPOSE_FILES[@]}" stop api); then
+    return
+  fi
+  CHAOS_OUTAGE_SECS="$outage"
+  sleep "$outage"
+  if ! (cd "$scratch" && docker compose -p "$project" "${COMPOSE_FILES[@]}" start api); then
+    return
+  fi
+
+  local recovery_ok recovery_elapsed
+  read -r recovery_ok recovery_elapsed < <(wait_for_onair "$scratch" "$project" "$recovery_budget")
+  if [ "$recovery_ok" = "1" ]; then
+    CHAOS_RECOVERY_OK=1
+    CHAOS_RECOVERY_SECS="$recovery_elapsed"
+  fi
+}
+
 # run_capture_leg — SPEC F178.5 / STORY-445 (T491): records CAPTURE_SECS of the fresh leg's own
 # live stream and measures it — against the SAME stack run_fresh_leg just brought up
 # (FRESH_SCRATCH/FRESH_PROJECT), never a second one. Every CAPTURE_* value below is set as soon
@@ -841,11 +911,38 @@ run_capture_leg() {
   CAPTURE_TARGET_LUFS="$target"
 
   # Record (F178.5): CAPTURE_SECS of the live stream to a local WAV. -reconnect 1 rides out a
-  # source hang-up the same way it would ride out a real Icecast reconnect.
+  # source hang-up the same way it would ride out a real Icecast reconnect. Always backgrounded
+  # and `wait`ed on, --chaos or not, so the SAME recording is what the api-down scenario below
+  # (SPEC F178.8(a): "with capture running") runs against — a foreground/background split would
+  # be the one difference between the two code paths worth avoiding.
   local stream_url="${GATE_STREAM_URL:-http://localhost:8000/stream}"
-  local ffmpeg_log ffmpeg_status=0
-  ffmpeg_log="$(ffmpeg -nostats -hide_banner -loglevel error -y -reconnect 1 \
-      -i "$stream_url" -t "$capture_secs" -ar 48000 -ac 1 "$scratch/capture.wav" 2>&1)" || ffmpeg_status=$?
+  local ffmpeg_log_file="$scratch/ffmpeg-capture.log" ffmpeg_pid
+  ffmpeg -nostats -hide_banner -loglevel error -y -reconnect 1 \
+      -i "$stream_url" -t "$capture_secs" -ar 48000 -ac 1 "$scratch/capture.wav" \
+      > "$ffmpeg_log_file" 2>&1 &
+  ffmpeg_pid=$!
+
+  if [ "$DO_CHAOS" = 1 ]; then
+    run_api_down_scenario "$scratch" "$project"
+  fi
+
+  local ffmpeg_status=0
+  wait "$ffmpeg_pid" || ffmpeg_status=$?
+  local ffmpeg_log; ffmpeg_log="$(cat "$ffmpeg_log_file" 2>/dev/null || true)"
+
+  # The api-down verdict is resolved here — BEFORE the recording-failure check below returns —
+  # so a chaos scenario that ran is always given a verdict even when the recording itself later
+  # fails. Silence, measured further down once the recording succeeds, can still override a
+  # "passed" here to "api-down silence" (silence is the outage's own verdict and wins over a slow
+  # recovery — see the measure case below).
+  if [ "$CHAOS_API_DOWN_RAN" = 1 ]; then
+    if [ "$CHAOS_RECOVERY_OK" = 1 ]; then
+      LEG_STATUS[chaos]="passed"; LEG_DETAIL[chaos]=""
+    else
+      LEG_STATUS[chaos]="failed"; LEG_DETAIL[chaos]="api-down recovery"
+    fi
+  fi
+
   if [ "$ffmpeg_status" -ne 0 ] || [ ! -s "$scratch/capture.wav" ]; then
     LEG_STATUS[capture]="failed"; LEG_DETAIL[capture]="capture"
     CAPTURE_FFMPEG_TAIL="$(printf '%s\n' "$ffmpeg_log" | tail -5)"
@@ -863,7 +960,19 @@ run_capture_leg() {
     0) : ;;
     1)
       if [ -n "$CAPTURE_SILENCE_EVENTS" ] && [ "$CAPTURE_SILENCE_EVENTS" -gt 0 ]; then
-        LEG_STATUS[capture]="failed"; LEG_DETAIL[capture]="silence"
+        # Silence decided first, before loudness — and, with --chaos, attributed to the chaos
+        # leg's "api-down silence" rather than the capture leg's own "silence" (SPEC F178.8(a):
+        # "zero silence events across the outage"), overriding the recovery-only verdict set
+        # above. The capture leg itself stays whatever it already was (untouched here) so its own
+        # booth_log/measure verdicts below are still reached. measure_audio.sh's exit 1 covers
+        # silence OR loudness, so under --chaos a silent capture skips the loudness verdict: the
+        # capture leg can read passed with out-of-tolerance loudness while chaos carries the red
+        # (the integrated value still lands in the report, and the gate still exits 1).
+        if [ "$CHAOS_API_DOWN_RAN" = 1 ]; then
+          LEG_STATUS[chaos]="failed"; LEG_DETAIL[chaos]="api-down silence"
+        else
+          LEG_STATUS[capture]="failed"; LEG_DETAIL[capture]="silence"
+        fi
       else
         LEG_STATUS[capture]="failed"; LEG_DETAIL[capture]="loudness"
       fi
@@ -901,8 +1010,18 @@ else
   LEG_STATUS[capture]="skipped"; LEG_DETAIL[capture]="--capture not given"
 fi
 
+# The api-down scenario (T496) runs INSIDE run_capture_leg itself (SPEC F178.8(a): "with capture
+# running") and resolves LEG_STATUS[chaos]/LEG_DETAIL[chaos] there before run_capture_leg
+# returns. `--chaos` without `--capture` already exits 2 at the usage check above, so the only
+# gap left here is "capture never got far enough to record at all" (e.g. its own login/target
+# call failed before the recording — or before this leg, --fresh itself never passed) — chaos
+# never ran in that case, and LEG_STATUS[chaos] is still empty.
+# T497 will add the engine-reconnect scenario here, right after the api-down one, still inside
+# run_capture_leg's own recording.
 if [ "$DO_CHAOS" = 1 ]; then
-  LEG_STATUS[chaos]="skipped"; LEG_DETAIL[chaos]="not implemented until T496"
+  if [ -z "${LEG_STATUS[chaos]}" ]; then
+    LEG_STATUS[chaos]="skipped"; LEG_DETAIL[chaos]="capture leg did not record"
+  fi
 else
   LEG_STATUS[chaos]="skipped"; LEG_DETAIL[chaos]="--chaos not given"
 fi
@@ -1039,6 +1158,30 @@ upgrade_measurements_md() {
   return 0
 }
 
+# chaos_measurements_json — CHAOS_OUTAGE_SECS/CHAOS_RECOVERY_SECS as jq NUMBERs, or `null` for a
+# value the api-down scenario never reached (CHAOS_API_DOWN_RAN staying 0 means both are null).
+chaos_measurements_json() {
+  jq -n \
+    --arg outage "$CHAOS_OUTAGE_SECS" \
+    --arg recovery "$CHAOS_RECOVERY_SECS" \
+    '{
+      api_down_outage_secs: (if $outage == "" then null else ($outage | tonumber) end),
+      api_down_recovery_seconds: (if $recovery == "" then null else ($recovery | tonumber) end)
+    }'
+}
+
+# chaos_measurements_md — the same facts as chaos_measurements_json, rendered as report lines;
+# "none" when the api-down scenario never ran at all.
+chaos_measurements_md() {
+  if [ "$CHAOS_API_DOWN_RAN" != 1 ]; then
+    printf 'none\n'
+    return
+  fi
+  [ -n "$CHAOS_OUTAGE_SECS" ] && printf 'api-down outage: %s s\n' "$CHAOS_OUTAGE_SECS"
+  [ -n "$CHAOS_RECOVERY_SECS" ] && printf 'api-down recovery: %s s\n' "$CHAOS_RECOVERY_SECS"
+  return 0
+}
+
 first_failure_across_legs() {
   local leg
   for leg in fresh upgrade capture chaos; do
@@ -1063,19 +1206,22 @@ write_report() {
     done
     printf '\n## Measurements\n\n%s\n' "$(fresh_measurements_md)"
     printf '%s\n' "$(upgrade_measurements_md)"
-    printf '%s\n\n' "$(capture_measurements_md)"
+    printf '%s\n' "$(capture_measurements_md)"
+    printf '%s\n\n' "$(chaos_measurements_md)"
     printf 'Needs manual evidence: the LLL ear — %s facts are manual\n' "$manual_facts"
   } > "$out_dir/gate-report.md"
 
-  local first_failure fresh_json upgrade_json capture_json chaos_json capture_top_json
+  local first_failure fresh_json upgrade_json capture_json chaos_json capture_top_json chaos_top_json
   first_failure="$(first_failure_across_legs)"
   fresh_json="$(leg_json "${LEG_STATUS[fresh]}" "${LEG_DETAIL[fresh]}" "$(fresh_measurements_json)")"
   upgrade_json="$(leg_json "${LEG_STATUS[upgrade]}" "${LEG_DETAIL[upgrade]}" "$(upgrade_measurements_json)")"
   capture_json="$(leg_json "${LEG_STATUS[capture]}" "${LEG_DETAIL[capture]}" "$(capture_measurements_json)")"
-  chaos_json="$(leg_json "${LEG_STATUS[chaos]}" "${LEG_DETAIL[chaos]}")"
-  # A top-level twin of the capture leg's own target/silence/integrated/booth_log — SPEC F178.5's
-  # consumer reads `.capture.target_lufs` directly, not `.legs.capture.measurements.target_lufs`.
+  chaos_json="$(leg_json "${LEG_STATUS[chaos]}" "${LEG_DETAIL[chaos]}" "$(chaos_measurements_json)")"
+  # Top-level twins of each leg's own numbers — SPEC F178.5's/F178.8's own consumers read
+  # `.capture.target_lufs`/`.chaos.api_down_recovery_seconds` directly, not
+  # `.legs.capture.measurements.target_lufs`/`.legs.chaos.measurements.api_down_recovery_seconds`.
   capture_top_json="$(capture_measurements_json | jq 'del(.capture_secs)')"
+  chaos_top_json="$(chaos_measurements_json)"
 
   jq -n \
     --arg tag "$TAG" \
@@ -1084,12 +1230,14 @@ write_report() {
     --argjson capture "$capture_json" \
     --argjson chaos "$chaos_json" \
     --argjson capture_top "$capture_top_json" \
+    --argjson chaos_top "$chaos_top_json" \
     --arg first_failure "$first_failure" \
     --argjson manual_facts "$manual_facts" \
     '{
       tag: $tag,
       legs: { fresh: $fresh, upgrade: $upgrade, capture: $capture, chaos: $chaos },
       capture: $capture_top,
+      chaos: $chaos_top,
       first_failure: (if $first_failure == "" then null else $first_failure end),
       manual_facts: $manual_facts
     }' > "$out_dir/gate-report.json"
