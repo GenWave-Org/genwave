@@ -17,7 +17,6 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureCapturedAudioProvesNoDeadAirAndLevel
 {
-    const string PendingMeasure = "pending: T490 — measure_audio.sh: silencedetect + ebur128 (STORY-445)";
     const string PendingCapture = "pending: T491 — the capture leg (STORY-445)";
 
     static string Repo => RepoRootLocator.Find(AppContext.BaseDirectory);
@@ -94,7 +93,7 @@ public static class FeatureCapturedAudioProvesNoDeadAirAndLevel
     {
         readonly int exitCode = Measure(MakeWav(-14, seconds: 30), -14).ExitCode;
 
-        [Fact(Skip = PendingMeasure)]
+        [Fact]
         public void ExitIsZero() => Assert.Equal(0, exitCode);
     }
 
@@ -102,7 +101,7 @@ public static class FeatureCapturedAudioProvesNoDeadAirAndLevel
     {
         readonly int exitCode = Measure(MakeWav(-22, seconds: 10), -14, new Dictionary<string, string> { ["TOL_LU"] = "9" }).ExitCode;
 
-        [Fact(Skip = PendingMeasure)]
+        [Fact]
         public void ExitIsZeroUnderAWideTolerance() => Assert.Equal(0, exitCode);
     }
 
@@ -145,10 +144,10 @@ public static class FeatureCapturedAudioProvesNoDeadAirAndLevel
     {
         readonly (int ExitCode, string StdOut, string StdErr) result = Measure(MakeWav(-14, seconds: 10, withGap: true), -14);
 
-        [Fact(Skip = PendingMeasure)]
+        [Fact]
         public void ExitIsOne() => Assert.Equal(1, result.ExitCode);
 
-        [Fact(Skip = PendingMeasure)]
+        [Fact]
         public void OneSilenceEventIsNamed() => Assert.Contains("silence_events=1", result.StdOut, StringComparison.Ordinal);
     }
 
@@ -156,10 +155,10 @@ public static class FeatureCapturedAudioProvesNoDeadAirAndLevel
     {
         readonly (int ExitCode, string StdOut, string StdErr) result = Measure(MakeWav(-22, seconds: 10), -14, new Dictionary<string, string> { ["TOL_LU"] = "5" });
 
-        [Fact(Skip = PendingMeasure)]
+        [Fact]
         public void ExitIsOne() => Assert.Equal(1, result.ExitCode);
 
-        [Fact(Skip = PendingMeasure)]
+        [Fact]
         public void TheMeasuredLoudnessIsNamed() => Assert.Matches(@"integrated_lufs=-2[123](\.\d+)?", result.StdOut);
     }
 
