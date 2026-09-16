@@ -5,6 +5,7 @@
 [![NuGet](https://badgen.net/nuget/v/GenWave.Abstractions)](https://www.nuget.org/packages/GenWave.Abstractions)
 [![License](https://badgen.net/github/license/GenWave-Org/genwave)](LICENSE)
 [![Demo on-air](https://github.com/GenWave-Org/genwave/actions/workflows/demo-health.yml/badge.svg)](https://demo.genwaveradio.com/)
+[![Nightly](https://github.com/GenWave-Org/genwave/actions/workflows/nightly.yml/badge.svg)](https://github.com/GenWave-Org/genwave/actions/workflows/nightly.yml)
 
 A self-hosted internet radio station: one shared broadcast stream, **equal-power crossfades**, and **loudness level-matching** so quiet and loud tracks play back at a consistent volume. The stream stays up: a safe rotation covers any gap in the main feed while the api and database are reachable, and the engine's final guard keeps the mount alive even with nothing playable, at the cost of silence (logged as a degraded mode, never a crash). Deployed entirely via Docker.
 

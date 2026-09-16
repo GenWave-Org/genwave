@@ -14,8 +14,6 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureTheNightlyKeepsOneRedIssue
 {
-    const string PendingBadge = "pending: T500 — the README nightly badge (STORY-449)";
-
     static string Repo => RepoRootLocator.Find(AppContext.BaseDirectory);
     static string Workflow => File.ReadAllText(Path.Combine(Repo, ".github", "workflows", "nightly.yml"));
 
@@ -185,11 +183,11 @@ public static class FeatureTheNightlyKeepsOneRedIssue
         readonly string[] badges = File.ReadLines(Path.Combine(Repo, "README.md")).Take(12)
             .Where(l => l.StartsWith("[![", StringComparison.Ordinal)).ToArray();
 
-        [Fact(Skip = PendingBadge)]
+        [Fact]
         public void ItLinksTheNightlyBadge() =>
             Assert.Contains(badges, b => b.Contains("actions/workflows/nightly.yml/badge.svg", StringComparison.Ordinal));
 
-        [Fact(Skip = PendingBadge)]
+        [Fact]
         public void ItSitsBesideTheDemoBadge() =>
             Assert.Equal(1, Math.Abs(
                 Array.FindIndex(badges, b => b.Contains("nightly.yml/badge.svg", StringComparison.Ordinal))
