@@ -76,7 +76,7 @@ internal static class GateHarness
 
     const string SetupStub = """
         printf 'setup.sh %s GW_ENV_FILE=%s MEDIA_DIR=%s\n' "$*" "${GW_ENV_FILE:-}" "${MEDIA_DIR:-}" >> "$GATE_STUB_LOG"
-        printf 'ADMIN_PASSWORD=stub\nPOSTGRES_PASSWORD=stub\nICECAST_SOURCE_PASSWORD=stub\nMEDIA_DIR=%s\n' "${MEDIA_DIR:-/tmp/media}" > "${GW_ENV_FILE:?}"
+        printf 'ADMIN_PASSWORD=gate-pass\nPOSTGRES_PASSWORD=stub\nICECAST_SOURCE_PASSWORD=stub\nMEDIA_DIR=%s\n' "${MEDIA_DIR:-/tmp/media}" > "${GW_ENV_FILE:?}"
         """;
 
     const string LaunchStub = """
@@ -186,16 +186,25 @@ internal static class GateHarness
             copy, report);
     }
 
-    /// <summary>Loopback stand-in for the api and the stream: <c>/health</c> answers
-    /// <see cref="HealthStatus"/>, <c>/api/settings</c> carries <see cref="LoudnessTargetLufs"/>,
-    /// <c>/stream</c> serves <see cref="StreamWav"/> bytes (a real ffmpeg reads it as a WAV).</summary>
+    /// <summary>Loopback stand-in for the api and the stream, matching the real admin API's own
+    /// shape (verified on the dev station): <c>/health</c> answers <see cref="HealthStatus"/>;
+    /// <c>POST /api/auth/login</c> with a JSON <c>{"password":...}</c> body matching
+    /// <see cref="AdminPassword"/> answers 204 with a <c>genwave-auth</c> session cookie, else
+    /// 401; <c>GET /api/settings</c> without that cookie answers 401, with it answers a JSON
+    /// array carrying a <c>{"key":"Loudness:TargetLufs","value":"&lt;<see cref="LoudnessTargetLufs"/>&gt;"}</c>
+    /// entry (value as a STRING, same as the real DTO); <c>/stream</c> serves
+    /// <see cref="StreamWav"/> bytes (a real ffmpeg reads it as a WAV).</summary>
     public sealed class FakeStation : IDisposable
     {
+        const string CookieName = "genwave-auth";
+        const string CookieValue = "fake-session";
+
         readonly HttpListener listener = new();
         readonly CancellationTokenSource stop = new();
 
         public int HealthStatus { get; set; } = 200;
         public double LoudnessTargetLufs { get; set; } = -14;
+        public string AdminPassword { get; set; } = "gate-pass";
         public string? StreamWav { get; set; }
         public string? RestartMarker { get; set; }
         public string? StreamAfterRestart { get; set; }
@@ -230,16 +239,19 @@ internal static class GateHarness
             var res = ctx.Response;
             try
             {
-                switch (ctx.Request.Url?.AbsolutePath)
+                switch (ctx.Request.Url?.AbsolutePath, ctx.Request.HttpMethod)
                 {
-                    case "/health":
+                    case ("/health", _):
                         res.StatusCode = HealthStatus;
                         Write(res, "{\"status\":\"ok\"}", "application/json");
                         break;
-                    case "/api/settings":
-                        Write(res, $"{{\"loudnessTargetLufs\":{LoudnessTargetLufs}}}", "application/json");
+                    case ("/api/auth/login", "POST"):
+                        AnswerLogin(ctx);
                         break;
-                    case "/stream" when CurrentStream is not null:
+                    case ("/api/settings", "GET"):
+                        AnswerSettings(ctx);
+                        break;
+                    case ("/stream", _) when CurrentStream is not null:
                         var bytes = File.ReadAllBytes(CurrentStream!);
                         res.ContentType = "audio/wav";
                         res.ContentLength64 = bytes.Length;
@@ -258,6 +270,56 @@ internal static class GateHarness
             {
                 try { res.Close(); } catch (Exception) { }
             }
+        }
+
+        /// <summary>Mirrors the real <c>POST /api/auth/login</c>: a JSON <c>{"password":...}</c>
+        /// body matching <see cref="AdminPassword"/> gets a session cookie + 204, anything else
+        /// (missing/wrong password, unparsable body) gets 401.</summary>
+        void AnswerLogin(HttpListenerContext ctx)
+        {
+            var res = ctx.Response;
+            using var reader = new StreamReader(ctx.Request.InputStream, ctx.Request.ContentEncoding);
+            var body = reader.ReadToEnd();
+
+            string? password = null;
+            try
+            {
+                using var doc = JsonDocument.Parse(body);
+                if (doc.RootElement.TryGetProperty("password", out var passwordElement))
+                    password = passwordElement.GetString();
+            }
+            catch (JsonException)
+            {
+                // Falls through to the 401 below — an unparsable body is just a failed login.
+            }
+
+            if (password == AdminPassword)
+            {
+                res.StatusCode = 204;
+                res.Headers.Add("Set-Cookie", $"{CookieName}={CookieValue}; Path=/");
+            }
+            else
+            {
+                res.StatusCode = 401;
+            }
+        }
+
+        /// <summary>Mirrors the real <c>GET /api/settings</c>: 401 without the session cookie
+        /// <see cref="AnswerLogin"/> hands out, otherwise the settings array carrying
+        /// <see cref="LoudnessTargetLufs"/> under the real DTO's key/value shape.</summary>
+        void AnswerSettings(HttpListenerContext ctx)
+        {
+            var res = ctx.Response;
+            var cookie = ctx.Request.Headers["Cookie"] ?? "";
+            if (!cookie.Contains($"{CookieName}={CookieValue}", StringComparison.Ordinal))
+            {
+                res.StatusCode = 401;
+                return;
+            }
+
+            var target = LoudnessTargetLufs.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var body = $$"""[{"key":"Loudness:TargetLufs","value":"{{target}}"},{"key":"Station:Name","value":"Gate"}]""";
+            Write(res, body, "application/json");
         }
 
         static void Write(HttpListenerResponse res, string body, string contentType)

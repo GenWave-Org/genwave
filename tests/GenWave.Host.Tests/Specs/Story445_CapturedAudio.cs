@@ -17,8 +17,6 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureCapturedAudioProvesNoDeadAirAndLevel
 {
-    const string PendingCapture = "pending: T491 — the capture leg (STORY-445)";
-
     static string Repo => RepoRootLocator.Find(AppContext.BaseDirectory);
     static string MediaDir => Path.Combine(Repo, "tools", "gate", "media");
 
@@ -119,20 +117,20 @@ public static class FeatureCapturedAudioProvesNoDeadAirAndLevel
 
         public void Dispose() => station.Dispose();
 
-        [Fact(Skip = PendingCapture)]
+        [Fact]
         public void TheLegPasses() => Assert.Equal(0, run.ExitCode);
 
-        [Fact(Skip = PendingCapture)]
+        [Fact]
         public void TheTargetComesFromTheStation() =>
             Assert.Equal(-16, run.ReportJson?.RootElement.GetProperty("capture").GetProperty("target_lufs").GetDouble());
 
-        [Fact(Skip = PendingCapture)]
+        [Fact]
         public void SilenceEventsAreListed() => Assert.Contains("silence events: 0", run.ReportMd, StringComparison.Ordinal);
 
-        [Fact(Skip = PendingCapture)]
+        [Fact]
         public void IntegratedLoudnessIsListed() => Assert.Matches(@"integrated: -?\d+(\.\d+)? LUFS", run.ReportMd);
 
-        [Fact(Skip = PendingCapture)]
+        [Fact]
         public void TheBoothLogCountIsListed() => Assert.Contains("booth_log: 3", run.ReportMd, StringComparison.Ordinal);
     }
 
@@ -175,10 +173,10 @@ public static class FeatureCapturedAudioProvesNoDeadAirAndLevel
 
         public void Dispose() => station.Dispose();
 
-        [Fact(Skip = PendingCapture)]
+        [Fact]
         public void ExitIsTwo() => Assert.Equal(2, run.ExitCode);
 
-        [Fact(Skip = PendingCapture)]
+        [Fact]
         public void StderrSaysCaptureRequiresFresh() => Assert.Contains("--capture requires --fresh", run.StdErr, StringComparison.Ordinal);
     }
 
@@ -192,10 +190,52 @@ public static class FeatureCapturedAudioProvesNoDeadAirAndLevel
 
         public void Dispose() => station.Dispose();
 
-        [Fact(Skip = PendingCapture)]
+        [Fact]
         public void ExitIsOne() => Assert.Equal(1, run.ExitCode);
 
-        [Fact(Skip = PendingCapture)]
+        [Fact]
         public void BoothLogIsTheFailingAssertion() => Assert.Equal("booth_log", run.FirstFailure);
+    }
+
+    public sealed class ScenarioAnOffLevelCaptureFails : IDisposable
+    {
+        readonly FakeStation station = new() { LoudnessTargetLufs = -16, StreamWav = MakeWav(-30, seconds: 6) };
+        readonly Run run;
+
+        public ScenarioAnOffLevelCaptureFails() =>
+            run = Execute(station, env: new Dictionary<string, string> { ["CAPTURE_SECS"] = "10" },
+                args: ["--tag", "v9.9.9", "--fresh", "--capture"]);
+
+        public void Dispose() => station.Dispose();
+
+        [Fact]
+        public void ExitIsOne() => Assert.Equal(1, run.ExitCode);
+
+        [Fact]
+        public void LoudnessIsTheFailingAssertion() => Assert.Equal("loudness", run.FirstFailure);
+
+        [Fact]
+        public void TheMeasuredLoudnessIsStillListed() => Assert.Matches(@"integrated: -?\d+(\.\d+)? LUFS", run.ReportMd);
+    }
+
+    public sealed class ScenarioASilentGapInTheCaptureFails : IDisposable
+    {
+        readonly FakeStation station = new() { StreamWav = MakeWav(-16, seconds: 6, withGap: true) };
+        readonly Run run;
+
+        public ScenarioASilentGapInTheCaptureFails() =>
+            run = Execute(station, env: new Dictionary<string, string> { ["CAPTURE_SECS"] = "10" },
+                args: ["--tag", "v9.9.9", "--fresh", "--capture"]);
+
+        public void Dispose() => station.Dispose();
+
+        [Fact]
+        public void ExitIsOne() => Assert.Equal(1, run.ExitCode);
+
+        [Fact]
+        public void SilenceIsTheFailingAssertion() => Assert.Equal("silence", run.FirstFailure);
+
+        [Fact]
+        public void TheEventCountIsListed() => Assert.Contains("silence events: 1", run.ReportMd, StringComparison.Ordinal);
     }
 }
