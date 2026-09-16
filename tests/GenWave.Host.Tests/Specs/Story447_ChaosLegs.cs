@@ -1,4 +1,4 @@
-// STORY-447 — Chaos: the stream survives an API outage and an engine restart (gh-#777 · SPEC F178.8 · PLAN T496/T497)
+// STORY-447 — Chaos: the stream survives an API outage and an engine restart (gh-#777 · SPEC F178.8 · PLAN T496/T497/T498)
 //
 // BDD specification — xUnit. The chaos leg of tools/gate/stack_gate.sh through GateHarness with
 // the outage/recovery/capture budgets shortened (GATE_OUTAGE_SECS=1, GATE_RECOVERY_SECS=4,
@@ -6,6 +6,15 @@
 // GATE_STUB_ONAIR_AFTER seconds after its first call (or never, with GATE_STUB_NEVER_ONAIR), so
 // recovery is measured, not assumed; the fake station's /stream decides whether a capture has a
 // silence event.
+//
+// PLAN T498 (amended 2026-09-16, gh-#791) bounds F178.8(a) from "zero silence events" to a bound
+// on TOTAL silence seconds summed across every event, with no cap on the event count (a real
+// nightly run against v5.8.3 saw two events, 7.1s + 24.4s, during one outage — a per-event cap
+// would still have failed that real case) — AC2/AC2b below. The bound only ever reaches the
+// api-down window's own capture (run_capture_leg's measure call); the engine-reconnect scenario's
+// own post-restart capture is unaffected and stays zero-tolerance, so AC2b's passing scenario
+// gives that second capture a CLEAN stream via GATE_STUB_STREAM_AFTER_RESTART — the same knob
+// ScenarioADirtyPostRestartCaptureFails uses, with the clean/gapped roles reversed.
 //
 // RED at plan time: tools/gate/stack_gate.sh does not exist.
 
@@ -65,13 +74,22 @@ public static class FeatureTheStreamSurvivesAnApiOutageAndAnEngineRestart
     // SAD PATH — the api-down scenario
     // ---------------------------------------------------------------------
 
-    public sealed class ScenarioSilenceDuringTheOutageFails : IDisposable
+    // AC2 — silence beyond the bound still fails. GATE_OUTAGE_SILENCE_MAX_SECS is set explicitly
+    // (rather than relying on the harness's own GATE_OUTAGE_SECS=1 default) so this scenario's
+    // intent — a 3-second gap breaching a 1-second bound — survives a future change to that
+    // default.
+    public sealed class ScenarioSilenceBeyondTheBoundFails : IDisposable
     {
         readonly FakeStation station = new() { StreamWav = MakeWav(-14, seconds: 6, withGap: true) };
         readonly Run run;
 
-        public ScenarioSilenceDuringTheOutageFails() =>
-            run = Chaos(station, new Dictionary<string, string> { ["GATE_STUB_ONAIR_AFTER"] = "0", ["CAPTURE_SECS"] = "8" });
+        public ScenarioSilenceBeyondTheBoundFails() =>
+            run = Chaos(station, new Dictionary<string, string>
+            {
+                ["GATE_STUB_ONAIR_AFTER"] = "0",
+                ["CAPTURE_SECS"] = "8",
+                ["GATE_OUTAGE_SILENCE_MAX_SECS"] = "1",
+            });
 
         public void Dispose() => station.Dispose();
 
@@ -80,6 +98,47 @@ public static class FeatureTheStreamSurvivesAnApiOutageAndAnEngineRestart
 
         [Fact]
         public void ApiDownSilenceIsTheFirstFailingAssertion() => Assert.Equal("api-down silence", run.FirstFailure);
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — AC2b: bounded silence is tolerated and reported
+    // ---------------------------------------------------------------------
+
+    // The api-down window's own capture carries the one gap; the post-restart capture
+    // (engine-reconnect's own scenario, unaffected by T498's bound — see the file header) gets a
+    // clean stream via GATE_STUB_STREAM_AFTER_RESTART so its own zero-tolerance silence check
+    // still passes, isolating this scenario's assertions to the api-down facts alone.
+    public sealed class ScenarioBoundedSilencePasses : IDisposable
+    {
+        readonly FakeStation station = new() { StreamWav = MakeWav(-14, seconds: 6, withGap: true) };
+        readonly Run run;
+
+        public ScenarioBoundedSilencePasses()
+        {
+            var clean = MakeWav(-14, seconds: 6);
+            run = Chaos(station, new Dictionary<string, string>
+            {
+                ["GATE_OUTAGE_SILENCE_MAX_SECS"] = "10",
+                ["GATE_STUB_ONAIR_AFTER"] = "1",
+                ["CAPTURE_SECS"] = "8",
+                ["GATE_STUB_STREAM_AFTER_RESTART"] = clean,
+            });
+        }
+
+        public void Dispose() => station.Dispose();
+
+        [Fact]
+        public void ExitIsZero() => Assert.Equal(0, run.ExitCode);
+
+        [Fact]
+        public void TheEventCountIsPrinted() => Assert.Contains("api-down silence events: 1", run.ReportMd, StringComparison.Ordinal);
+
+        [Fact]
+        public void TheTotalIsPrinted() => Assert.Matches(@"api-down silence total: \d+(\.\d+)? s", run.ReportMd);
+
+        [Fact]
+        public void TheJsonCarriesTheCount() =>
+            Assert.Equal(1, run.ReportJson?.RootElement.GetProperty("chaos").GetProperty("api_down_silence_events").GetInt32());
     }
 
     public sealed class ScenarioSlowRecoveryFails : IDisposable
