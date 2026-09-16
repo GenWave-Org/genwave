@@ -15,7 +15,6 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureTheStackGateRunsAFreshInstallInAScratch
 {
-    const string PendingSkeleton = "pending: T486 — stack_gate.sh skeleton: flags, prerequisites, isolation, report (STORY-444)";
     const string PendingFreshLeg = "pending: T487 — the fresh leg: setup --yes, launch --pinned, health, on-air, trap (STORY-444)";
 
     // ---------------------------------------------------------------------
@@ -80,27 +79,27 @@ public static class FeatureTheStackGateRunsAFreshInstallInAScratch
         public void TheStackIsTornDownWithVolumes() =>
             Assert.Contains(run.Calls, c => c.Contains("compose", StringComparison.Ordinal) && c.EndsWith("down -v", StringComparison.Ordinal));
 
-        [Fact(Skip = PendingSkeleton)]
+        [Fact]
         public void BothReportFilesExist() =>
             Assert.True(File.Exists(Path.Combine(run.ReportDir, "gate-report.md")) && File.Exists(Path.Combine(run.ReportDir, "gate-report.json")));
 
-        [Fact(Skip = PendingSkeleton)]
+        [Fact]
         public void UpgradeIsReportedSkipped() =>
             Assert.Contains("upgrade | skipped (--upgrade not given)", run.ReportMd, StringComparison.Ordinal);
 
-        [Fact(Skip = PendingSkeleton)]
+        [Fact]
         public void CaptureIsReportedSkipped() =>
             Assert.Contains("capture | skipped (--capture not given)", run.ReportMd, StringComparison.Ordinal);
 
-        [Fact(Skip = PendingSkeleton)]
+        [Fact]
         public void ChaosIsReportedSkipped() =>
             Assert.Contains("chaos | skipped (--chaos not given)", run.ReportMd, StringComparison.Ordinal);
 
-        [Fact(Skip = PendingSkeleton)]
+        [Fact]
         public void TheManualEvidenceLineIsFixedText() =>
             Assert.Contains("Needs manual evidence: the LLL ear", run.ReportMd, StringComparison.Ordinal);
 
-        [Fact(Skip = PendingSkeleton)]
+        [Fact]
         public void TheManualFactCountComesFromTheCheckout()
         {
             var expected = Directory.EnumerateFiles(Path.Combine(RepoRootLocator.Find(AppContext.BaseDirectory), "tests"), "*.cs", SearchOption.AllDirectories)
@@ -122,10 +121,10 @@ public static class FeatureTheStackGateRunsAFreshInstallInAScratch
 
         public void Dispose() => station.Dispose();
 
-        [Fact(Skip = PendingSkeleton)]
+        [Fact]
         public void ExitIsTwo() => Assert.Equal(2, run.ExitCode);
 
-        [Fact(Skip = PendingSkeleton)]
+        [Fact]
         public void StderrNamesTheFlag() => Assert.Contains("--tag", run.StdErr, StringComparison.Ordinal);
     }
 
@@ -138,7 +137,7 @@ public static class FeatureTheStackGateRunsAFreshInstallInAScratch
 
         public void Dispose() => station.Dispose();
 
-        [Fact(Skip = PendingSkeleton)]
+        [Fact]
         public void ExitIsTwo() => Assert.Equal(2, run.ExitCode);
     }
 
@@ -156,10 +155,10 @@ public static class FeatureTheStackGateRunsAFreshInstallInAScratch
 
         public void Dispose() => station.Dispose();
 
-        [Fact(Skip = PendingSkeleton)]
+        [Fact]
         public void ExitIsTwo() => Assert.Equal(2, run.ExitCode);
 
-        [Fact(Skip = PendingSkeleton)]
+        [Fact]
         public void StderrNamesFfmpeg() => Assert.Contains("ffmpeg", run.StdErr, StringComparison.Ordinal);
     }
 
