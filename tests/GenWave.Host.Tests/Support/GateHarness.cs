@@ -13,7 +13,8 @@ namespace GenWave.Host.Tests.Support;
 /// <para>
 /// Knobs the gate honours (all read from the environment, all optional in production):
 /// <c>GATE_API_BASE</c>, <c>GATE_STREAM_URL</c>, <c>GATE_HEALTH_SECS</c>, <c>GATE_ONAIR_SECS</c>,
-/// <c>GATE_OUTAGE_SECS</c>, <c>GATE_RECOVERY_SECS</c>, <c>GATE_POLL_SECS</c>, <c>CAPTURE_SECS</c>.
+/// <c>GATE_OUTAGE_SECS</c>, <c>GATE_RECOVERY_SECS</c>, <c>GATE_RECONNECT_SECS</c>,
+/// <c>GATE_POLL_SECS</c>, <c>CAPTURE_SECS</c>.
 /// The stubs' own knobs are <c>GATE_STUB_*</c>: <c>UP_EXIT</c>, <c>MIGRATE_EXIT</c>,
 /// <c>BOOTH_COUNT</c>, <c>BOUNDARY</c>, <c>ONAIR_AFTER</c> (seconds from the reader's first
 /// call, reset by <c>stop api</c>/<c>restart engine</c>), <c>NEVER_ONAIR</c>,
@@ -166,6 +167,7 @@ internal static class GateHarness
             ["GATE_ONAIR_SECS"] = "4",
             ["GATE_OUTAGE_SECS"] = "1",
             ["GATE_RECOVERY_SECS"] = "4",
+            ["GATE_RECONNECT_SECS"] = "4",
             ["GATE_POLL_SECS"] = "1",
             ["CAPTURE_SECS"] = "1",
         };
