@@ -971,6 +971,10 @@ run_capture_leg() {
     return
   fi
 
+  # The recording is evidence the report should carry (nightly.yml uploads the report dir as an
+  # artifact; release.yml will after T502; SPEC F180.3).
+  mkdir -p "$REPORT_DIR" && cp "$scratch/capture.wav" "$REPORT_DIR/capture.wav"
+
   # Measure (F178.5): silencedetect + ebur128, both always on measure_audio.sh's own stdout line
   # — parsed here regardless of its exit code, so a failing measurement still lands in the report.
   local measure_out measure_status=0
@@ -1083,6 +1087,10 @@ run_engine_reconnect_scenario() {
     ENGINE_CAPTURE_FFMPEG_TAIL="$(tail -5 "$ffmpeg_log_file" 2>/dev/null || true)"
     return
   fi
+
+  # The recording is evidence the report should carry (nightly.yml uploads the report dir as an
+  # artifact; release.yml will after T502; SPEC F180.3).
+  mkdir -p "$REPORT_DIR" && cp "$scratch/capture-reconnect.wav" "$REPORT_DIR/capture-reconnect.wav"
 
   # Silence only (SPEC F178.5(a), via F178.8(b): "passes F178.5(a)") — loudness is F178.5(b) and
   # is deliberately NOT judged here, so measure_audio.sh's own exit code (which covers silence OR
