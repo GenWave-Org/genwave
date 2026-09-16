@@ -17,7 +17,17 @@ name: Release
 # stitches the digests into one manifest list per image with `docker buildx imagetools create`.
 # The release FAILS if either arch fails: merge-manifests `needs` the whole build matrix, the
 # merge script demands exactly two digests, and the inspect step asserts both platforms are in
-# the pushed index. `home-latest` and the Release object only move after every merge succeeds.
+# the pushed index. merge-manifests tags `home-<tag>` only (SPEC F179.1) -- nothing is called
+# "latest" yet.
+#
+# Stack gate before promotion (SPEC F179, STORY-448, gh-#777):
+# `home-latest` and the Release move only after `stack-gate` goes green (SPEC F179.2-F179.5).
+# `stack-gate` boots the just-published tag fresh AND upgraded-from-the-previous-release, records
+# the live stream, and proves the appliance actually holds up before anything downstream moves. A
+# red gate leaves `home-<tag>` published and nothing else -- the promote and Release steps never
+# run, and no pins PR follows. `gh run rerun --failed` re-enters at the gate (merge-manifests's
+# images are already pushed, so nothing upstream needs to re-run). This workflow never deletes a
+# tag.
 #
 # Pushing the tag is the ONLY manual act: this workflow never commits or pushes back to the repo.
 
@@ -171,8 +181,9 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # One manifest list per image: stitch the two per-arch digests into
-  # `home-<tag>` + `home-latest`. Runs only when EVERY build-images leg succeeded.
+  # One manifest list per image: stitch the two per-arch digests into `home-<tag>` (SPEC F179.1
+  # -- `home-latest` moves later, in `promote`, only once `stack-gate` proves the tag boots).
+  # Runs only when EVERY build-images leg succeeded.
   merge-manifests:
     needs: build-images
     runs-on: ubuntu-latest
@@ -241,7 +252,6 @@ jobs:
             --annotation "index:org.opencontainers.image.licenses=AGPL-3.0-only" \
             --annotation "index:org.opencontainers.image.version=$GW_TAG" \
             -t "$REGISTRY_IMAGE:home-$GW_TAG" \
-            -t "$REGISTRY_IMAGE:home-latest" \
             "${digests[@]}"
       - name: Verify both architectures shipped
         env:
@@ -253,8 +263,143 @@ jobs:
           echo "$inspect_output" | grep -q 'linux/amd64'
           echo "$inspect_output" | grep -q 'linux/arm64'
 
-  create-release:
+  # New job (SPEC F179.2, F183.2, STORY-448, gh-#777): proves the tag merge-manifests just
+  # published actually boots -- a fresh install AND an upgrade from the previous release -- before
+  # anything downstream promotes it. `promote` and `create-release` both need this (transitively).
+  stack-gate:
     needs: merge-manifests
+    runs-on: ubuntu-latest
+    # gh-#777 STORY-448: --fresh + --upgrade + --capture run four legs end to end (setup, the
+    # upgrade-worktree checkout, a live boot, a recorded stream) -- 40 min budgets real headroom
+    # over the ~10-15 min observed on tools/gate/stack_gate.sh's own dev-box runs. SPEC F179.5: a
+    # red leg here leaves the tag published and nothing else -- `gh run rerun --failed` re-enters
+    # exactly here, since merge-manifests's images are already pushed.
+    timeout-minutes: 40
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # --upgrade's `gh release list` needs it
+      GW_TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # --upgrade does `git worktree add` of the previous v* tag: needs the full tag
+          # history, not the default single-commit shallow clone.
+          fetch-depth: 0
+      - name: Install ffmpeg (stack_gate.sh's own capture leg needs the real binary)
+        uses: ./.github/actions/install-ffmpeg
+      - name: Fresh + upgrade + capture gate against the just-published tag
+        run: tools/gate/stack_gate.sh --tag "$GW_TAG" --fresh --upgrade --capture --report gate-report
+      # gate-report/ carries gate-report.md + gate-report.json (the pass/fail verdict per leg),
+      # capture.wav (the recorded stream), and, on any failed leg, the compose-fresh.log /
+      # compose-upgrade.log dumps stack_gate.sh attaches for debugging.
+      - name: Upload gate report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gate-report
+          path: gate-report/
+          retention-days: 7
+
+  # New job (SPEC F179.3): now that stack-gate has proven $GW_TAG boots fresh and upgraded, move
+  # the floating `home-latest` tag onto the images that just proved themselves. Five explicit
+  # retag+verify pairs, not a matrix: STORY-448's ItRetagsFiveImagesToHomeLatest /
+  # EachRetagSourcesTheTaggedImage pins count literal `-t …:home-latest` / source lines in this
+  # file's own YAML text, which a matrix's single parameterized step body would only satisfy once.
+  promote:
+    needs: stack-gate
+    runs-on: ubuntu-latest
+    # gh-#581 N1 ballpark: five retag+inspect pairs against ghcr.io, each well under a minute in
+    # merge-manifests's own timing; 10 min is large headroom below the 360-min default.
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write   # ghcr.io retag
+    env:
+      GW_TAG: ${{ github.ref_name }}
+    steps:
+      - uses: docker/login-action@v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v4
+      - name: Retag api -> home-latest
+        env:
+          REGISTRY_IMAGE: ghcr.io/genwave-org/genwave
+        run: |
+          docker buildx imagetools create \
+            -t "$REGISTRY_IMAGE:home-latest" \
+            "$REGISTRY_IMAGE:home-$GW_TAG"
+      - name: Verify api home-latest ships both architectures
+        env:
+          REGISTRY_IMAGE: ghcr.io/genwave-org/genwave
+        run: |
+          inspect_output="$(docker buildx imagetools inspect "$REGISTRY_IMAGE:home-latest")"
+          echo "$inspect_output"
+          echo "$inspect_output" | grep -q 'linux/amd64'
+          echo "$inspect_output" | grep -q 'linux/arm64'
+      - name: Retag icecast -> home-latest
+        env:
+          REGISTRY_IMAGE: ghcr.io/genwave-org/genwave-icecast
+        run: |
+          docker buildx imagetools create \
+            -t "$REGISTRY_IMAGE:home-latest" \
+            "$REGISTRY_IMAGE:home-$GW_TAG"
+      - name: Verify icecast home-latest ships both architectures
+        env:
+          REGISTRY_IMAGE: ghcr.io/genwave-org/genwave-icecast
+        run: |
+          inspect_output="$(docker buildx imagetools inspect "$REGISTRY_IMAGE:home-latest")"
+          echo "$inspect_output"
+          echo "$inspect_output" | grep -q 'linux/amd64'
+          echo "$inspect_output" | grep -q 'linux/arm64'
+      - name: Retag admin-ui -> home-latest
+        env:
+          REGISTRY_IMAGE: ghcr.io/genwave-org/genwave-admin-ui
+        run: |
+          docker buildx imagetools create \
+            -t "$REGISTRY_IMAGE:home-latest" \
+            "$REGISTRY_IMAGE:home-$GW_TAG"
+      - name: Verify admin-ui home-latest ships both architectures
+        env:
+          REGISTRY_IMAGE: ghcr.io/genwave-org/genwave-admin-ui
+        run: |
+          inspect_output="$(docker buildx imagetools inspect "$REGISTRY_IMAGE:home-latest")"
+          echo "$inspect_output"
+          echo "$inspect_output" | grep -q 'linux/amd64'
+          echo "$inspect_output" | grep -q 'linux/arm64'
+      - name: Retag engine -> home-latest
+        env:
+          REGISTRY_IMAGE: ghcr.io/genwave-org/genwave-engine
+        run: |
+          docker buildx imagetools create \
+            -t "$REGISTRY_IMAGE:home-latest" \
+            "$REGISTRY_IMAGE:home-$GW_TAG"
+      - name: Verify engine home-latest ships both architectures
+        env:
+          REGISTRY_IMAGE: ghcr.io/genwave-org/genwave-engine
+        run: |
+          inspect_output="$(docker buildx imagetools inspect "$REGISTRY_IMAGE:home-latest")"
+          echo "$inspect_output"
+          echo "$inspect_output" | grep -q 'linux/amd64'
+          echo "$inspect_output" | grep -q 'linux/arm64'
+      - name: Retag piper -> home-latest
+        env:
+          REGISTRY_IMAGE: ghcr.io/genwave-org/genwave-piper
+        run: |
+          docker buildx imagetools create \
+            -t "$REGISTRY_IMAGE:home-latest" \
+            "$REGISTRY_IMAGE:home-$GW_TAG"
+      - name: Verify piper home-latest ships both architectures
+        env:
+          REGISTRY_IMAGE: ghcr.io/genwave-org/genwave-piper
+        run: |
+          inspect_output="$(docker buildx imagetools inspect "$REGISTRY_IMAGE:home-latest")"
+          echo "$inspect_output"
+          echo "$inspect_output" | grep -q 'linux/amd64'
+          echo "$inspect_output" | grep -q 'linux/arm64'
+
+  create-release:
+    needs: promote
     runs-on: ubuntu-latest
     # gh-#581 N1: observed 7-40s (a single `gh release` call); 5 min is large headroom below
     # the 360-min default.
@@ -263,12 +408,27 @@ jobs:
       contents: write   # gh release create
     steps:
       - uses: actions/checkout@v7
+      # SPEC F179.4: pull the stack-gate's own report so the Release notes can carry its proof
+      # verbatim, instead of asserting a second time what stack-gate already asserted.
+      - name: Download the stack-gate report
+        uses: actions/download-artifact@v8
+        with:
+          name: gate-report
+          path: gate-report
+      - name: Build release notes (generated notes + the stack-gate's own proof)
+        run: |
+          {
+            echo "## ✅ What this release proved"
+            cat gate-report/gate-report.md
+          } > notes.md
       # gh CLI over a third-party action -- it's preinstalled on the runner and needs only the
       # default token. No repo write beyond the Release object itself (not a commit, not a push).
       # Idempotent: a release created through the GitHub UI ("Draft a new release") creates the
       # tag AND the Release together, so this workflow still fires on the tag push and must not
       # 422 on the already-existing Release (observed on v2.0.0). Bare-tag pushes still get their
-      # Release created here.
+      # Release created here. `--generate-notes` composes with `--notes-file`: gh sends the file
+      # as the body with generate_release_notes on, and GitHub prepends a supplied body to its
+      # generated notes -- so the proof section above comes first, the generated notes after.
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -277,5 +437,5 @@ jobs:
           if gh release view "$GW_TAG" --json name >/dev/null 2>&1; then
             echo "Release $GW_TAG already exists (UI-created) -- skipping creation."
           else
-            gh release create "$GW_TAG" --generate-notes --title "$GW_TAG"
+            gh release create "$GW_TAG" --generate-notes --notes-file notes.md --title "$GW_TAG"
           fi

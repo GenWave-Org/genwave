@@ -14,8 +14,6 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureReleasePromotionWaitsForTheStackGate
 {
-    const string Pending = "pending: T502 — release.yml: stack-gate + promote, home-latest after the gate, notes from the report (STORY-448)";
-
     static string Workflow => File.ReadAllText(Path.Combine(
         RepoRootLocator.Find(AppContext.BaseDirectory), ".github", "workflows", "release.yml"));
 
@@ -34,7 +32,7 @@ public static class FeatureReleasePromotionWaitsForTheStackGate
 
     public sealed class ScenarioMergeManifestsNoLongerTagsHomeLatest
     {
-        [Fact(Skip = Pending)]
+        [Fact]
         public void NoHomeLatestInTheMergeJob() => Assert.DoesNotContain("home-latest", Job("merge-manifests"), StringComparison.Ordinal);
     }
 
@@ -42,32 +40,32 @@ public static class FeatureReleasePromotionWaitsForTheStackGate
     {
         readonly string job = Job("stack-gate");
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void TheJobExists() => Assert.NotEqual("", job);
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void ItNeedsMergeManifests() => Assert.Matches(@"needs:\s*merge-manifests", job);
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void ItHasAFortyMinuteBudget() => Assert.Matches(@"timeout-minutes:\s*40", job);
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void ItRunsTheFourLegs() =>
             Assert.Matches(@"tools/gate/stack_gate\.sh .*--fresh .*--upgrade .*--capture .*--report", job);
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void ItUploadsTheReportMarkdown() => Assert.Contains("gate-report.md", job, StringComparison.Ordinal);
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void ItUploadsTheReportJson() => Assert.Contains("gate-report.json", job, StringComparison.Ordinal);
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void ItUploadsTheCapture() => Assert.Contains("capture.wav", job, StringComparison.Ordinal);
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void ItUploadsTheComposeLogs() => Assert.Contains("compose-", job, StringComparison.Ordinal);
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void TheArtifactsKeepForSevenDays() => Assert.Matches(@"retention-days:\s*7", job);
     }
 
@@ -75,16 +73,16 @@ public static class FeatureReleasePromotionWaitsForTheStackGate
     {
         readonly string job = Job("promote");
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void ItNeedsStackGate() => Assert.Matches(@"needs:\s*stack-gate", job);
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void ItUsesImagetoolsCreate() => Assert.Contains("imagetools create", job, StringComparison.Ordinal);
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void ItRetagsFiveImagesToHomeLatest() => Assert.Equal(5, Regex.Matches(job, @"-t\s+""?\S*:home-latest").Count);
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void EachRetagSourcesTheTaggedImage() => Assert.Equal(5, Regex.Matches(job, @"\S*:home-\$\{?GW_TAG\}?""?\s*$", RegexOptions.Multiline).Count);
     }
 
@@ -92,28 +90,28 @@ public static class FeatureReleasePromotionWaitsForTheStackGate
     {
         readonly string job = Job("create-release");
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void ItNeedsPromote() => Assert.Matches(@"needs:\s*promote", job);
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void ItGeneratesNotes() => Assert.Contains("--generate-notes", job, StringComparison.Ordinal);
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void ItAppendsTheNotesFile() => Assert.Contains("--notes-file", job, StringComparison.Ordinal);
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void TheNotesAreBuiltFromTheReport() => Assert.Contains("gate-report.md", job, StringComparison.Ordinal);
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void TheNotesCarryTheProofHeading() => Assert.Contains("## ✅ What this release proved", job, StringComparison.Ordinal);
     }
 
     public sealed class ScenarioTheHeaderTellsTheNewTruth
     {
-        [Fact(Skip = Pending)]
+        [Fact]
         public void HomeLatestMovesAfterStackGate() => Assert.Matches(@"home-latest[^\n]*(after|behind)[^\n]*stack-gate", Header);
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void TheOldPromiseIsGone() => Assert.DoesNotContain("only move after every merge succeeds", Header, StringComparison.Ordinal);
     }
 }
