@@ -6,6 +6,7 @@
 // gh-#253 only exposes numbers; the boundary-fit consumer is gh-#254's spec.
 
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Orchestration.Tests.Fakes;

@@ -9,6 +9,7 @@
 // loaded ScheduleWeekSnapshot is unaffected) lives in GenWave.MediaLibrary.Tests'
 // Story240_ScheduleStore.cs instead, where it can be real.
 
+using Microsoft.Extensions.Time.Testing;
 using GenWave.Abstractions.Playout;
 using GenWave.Core.Domain;
 using GenWave.Orchestration.Tests.Fakes;

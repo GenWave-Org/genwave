@@ -8,6 +8,7 @@
 // probe SQL itself is MediaLibrary.Tests' Gh131_GenreRequestCatalog.cs; the parse/match/intake side
 // is Host.Tests' Gh131_GenreRequestPredicates.cs — same three-file split STORY-226/227 established.
 
+using Microsoft.Extensions.Time.Testing;
 using GenWave.Abstractions.Playout;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;

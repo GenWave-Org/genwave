@@ -8,8 +8,10 @@
 // AC1/AC2 (no hand-rolled fake, the package is referenced) are pins in GenWave.Architecture.Tests
 // (Story442_FakeClockPins.cs); AC5/AC6 are GenWave.Ads.Tests' (Story442_AdReaskBudgetOnAFakeClock.cs).
 //
-// RED at plan time: FakeTtsSegmentSource.RenderDelay is a wall-clock Task.Delay, and the
-// orchestrator's render budget is a wall-clock CancelAfter — AC4 races the runner.
+// GREEN as of T483: FakeTtsSegmentSource.RenderDelay now takes the same TimeProvider as
+// Orchestrator's per-unit render budget (both ride chain.Time, wired in
+// FeatureDjsHandOffAudibly.BuildProductionChain) — the race between them is decided purely by fake
+// clock due order, never by which wall-clock timer happens to fire first on a cold runner.
 
 using System.Diagnostics;
 using GenWave.Core.Domain;
@@ -19,8 +21,6 @@ namespace GenWave.Orchestration.Tests.Specs;
 
 public static class FeatureHandoffBudgetOnAFakeClock
 {
-    const string Pending = "pending: T483 — Story243's render double and the per-unit budget ride the fake clock (STORY-442)";
-
     static readonly TimeSpan WallClockCeiling = TimeSpan.FromMilliseconds(500);
 
     // ---------------------------------------------------------------------
@@ -34,25 +34,28 @@ public static class FeatureHandoffBudgetOnAFakeClock
 
         public async Task InitializeAsync()
         {
+            var renderBudget = TimeSpan.FromMilliseconds(10);
+            var renderDelay = TimeSpan.FromMilliseconds(5); // due before the 10 ms budget
             var chain = BuildProductionChain(
                 TwoDjStore(), TwoDjSchedule(), JustBeforeNoon, TimeSpan.FromMinutes(10),
-                renderBudget: TimeSpan.FromMilliseconds(10));
-            chain.Tts.RenderDelay = TimeSpan.FromMilliseconds(5); // due before the 10 ms budget
+                renderBudget: renderBudget);
+            chain.Tts.RenderDelay = renderDelay;
 
             var clock = Stopwatch.StartNew();
-            items = await PullUnitsAsync(chain.Orchestrator, chain.Time, PullStep, PullCount);
+            items = await PullUnitsRacingTheRenderBudgetAsync(
+                chain.Orchestrator, chain.Time, PullStep, PullCount, renderDelay, renderBudget);
             elapsed = clock.Elapsed;
         }
 
         public Task DisposeAsync() => Task.CompletedTask;
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void TheSignOffAirs() => Assert.Contains(items, IsSignOff);
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void TheSignOnAirs() => Assert.Contains(items, IsSignOn);
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void NoWallClockWaitHappened() => Assert.True(elapsed < WallClockCeiling, $"took {elapsed}");
     }
 
@@ -67,25 +70,28 @@ public static class FeatureHandoffBudgetOnAFakeClock
 
         public async Task InitializeAsync()
         {
+            var renderBudget = TimeSpan.FromMilliseconds(10);
+            var renderDelay = TimeSpan.FromMilliseconds(200); // due long after the 10 ms budget
             var chain = BuildProductionChain(
                 TwoDjStore(), TwoDjSchedule(), JustBeforeNoon, TimeSpan.FromMinutes(10),
-                renderBudget: TimeSpan.FromMilliseconds(10));
-            chain.Tts.RenderDelay = TimeSpan.FromMilliseconds(200); // due long after the 10 ms budget
+                renderBudget: renderBudget);
+            chain.Tts.RenderDelay = renderDelay;
 
             var clock = Stopwatch.StartNew();
-            items = await PullUnitsAsync(chain.Orchestrator, chain.Time, PullStep, PullCount);
+            items = await PullUnitsRacingTheRenderBudgetAsync(
+                chain.Orchestrator, chain.Time, PullStep, PullCount, renderDelay, renderBudget);
             elapsed = clock.Elapsed;
         }
 
         public Task DisposeAsync() => Task.CompletedTask;
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void TheSignOffIsDropped() => Assert.DoesNotContain(items, IsSignOff);
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void TheSignOnIsDropped() => Assert.DoesNotContain(items, IsSignOn);
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void NoWallClockWaitHappened() => Assert.True(elapsed < WallClockCeiling, $"took {elapsed}");
     }
 }
