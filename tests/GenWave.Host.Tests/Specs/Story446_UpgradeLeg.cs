@@ -15,7 +15,6 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureTheUpgradeLegMigratesThePreviousReleaseForward
 {
-    const string PendingLeg = "pending: T493 — previous-release resolution, worktree, the migrate sequence (STORY-446)";
     const string PendingBoundary = "pending: T494 — the role boundary inside the upgrade leg (STORY-446)";
 
     const string GhStub = """
@@ -47,6 +46,14 @@ public static class FeatureTheUpgradeLegMigratesThePreviousReleaseForward
     static Run Upgrade(FakeStation station, IReadOnlyDictionary<string, string>? env = null, params string[] extra) =>
         Execute(station, Bin(), env, ["--tag", "v5.9.0", "--upgrade", .. extra]);
 
+    // The docker stub logs a `cwd=… entries=<ls -A>` diagnostic line on every call ahead of the
+    // argv line itself, so `run.IndexOf("migrate.sh")` (a plain substring search) can match a
+    // directory listing that merely contains a migrate.sh file, not the actual migrate.sh CALL.
+    // The migrate.sh stub's own log line always starts with "migrate.sh " (its own argv), which no
+    // docker diagnostic line ever does — so this finds the real call.
+    static int MigrateCallIndex(Run run) =>
+        Array.FindIndex(run.Calls, c => c.StartsWith("migrate.sh", StringComparison.Ordinal));
+
     // ---------------------------------------------------------------------
     // HAPPY PATH
     // ---------------------------------------------------------------------
@@ -60,27 +67,27 @@ public static class FeatureTheUpgradeLegMigratesThePreviousReleaseForward
 
         public void Dispose() => station.Dispose();
 
-        [Fact(Skip = PendingLeg)]
+        [Fact]
         public void TheLegPasses() => Assert.Equal(0, run.ExitCode);
 
-        [Fact(Skip = PendingLeg)]
+        [Fact]
         public void PreviousIsV583() => Assert.Contains(run.Calls, c => c.StartsWith("git worktree add ", StringComparison.Ordinal) && c.EndsWith(" v5.8.3", StringComparison.Ordinal));
 
-        [Fact(Skip = PendingLeg)]
+        [Fact]
         public void UpComesFirst() => Assert.True(run.IndexOf("up files=") >= 0 && run.IndexOf("up files=") < run.IndexOf("stop api"), string.Join("\n", run.Calls));
 
-        [Fact(Skip = PendingLeg)]
-        public void StopApiPrecedesMigrate() => Assert.True(run.IndexOf("stop api") < run.IndexOf("migrate.sh"), string.Join("\n", run.Calls));
+        [Fact]
+        public void StopApiPrecedesMigrate() => Assert.True(run.IndexOf("stop api") < MigrateCallIndex(run), string.Join("\n", run.Calls));
 
-        [Fact(Skip = PendingLeg)]
+        [Fact]
         public void MigratePrecedesTheApiRestart() =>
-            Assert.True(run.IndexOf("migrate.sh") < Array.FindLastIndex(run.Calls, c => c.Contains("up", StringComparison.Ordinal) && c.EndsWith(" api", StringComparison.Ordinal)), string.Join("\n", run.Calls));
+            Assert.True(MigrateCallIndex(run) < Array.FindLastIndex(run.Calls, c => c.Contains("up", StringComparison.Ordinal) && c.EndsWith(" api", StringComparison.Ordinal)), string.Join("\n", run.Calls));
 
-        [Fact(Skip = PendingLeg)]
+        [Fact]
         public void TheFirstUpPinsThePreviousTag() =>
             Assert.Contains(":home-v5.8.3", run.Overlay.Split("services:")[1], StringComparison.Ordinal);
 
-        [Fact(Skip = PendingLeg)]
+        [Fact]
         public void TheWorktreeIsRemovedOnExit() => Assert.Contains(run.Calls, c => c.StartsWith("git worktree remove", StringComparison.Ordinal));
 
         [Fact(Skip = PendingBoundary)]
@@ -96,10 +103,10 @@ public static class FeatureTheUpgradeLegMigratesThePreviousReleaseForward
 
         public void Dispose() => station.Dispose();
 
-        [Fact(Skip = PendingLeg)]
+        [Fact]
         public void PreviousIsV581() => Assert.Contains(run.Calls, c => c.StartsWith("git worktree add ", StringComparison.Ordinal) && c.EndsWith(" v5.8.1", StringComparison.Ordinal));
 
-        [Fact(Skip = PendingLeg)]
+        [Fact]
         public void GhIsNotConsulted() => Assert.DoesNotContain(run.Calls, c => c.StartsWith("gh release list", StringComparison.Ordinal));
     }
 
@@ -117,13 +124,13 @@ public static class FeatureTheUpgradeLegMigratesThePreviousReleaseForward
 
         public void Dispose() => station.Dispose();
 
-        [Fact(Skip = PendingLeg)]
+        [Fact]
         public void ExitIsOne() => Assert.Equal(1, run.ExitCode);
 
-        [Fact(Skip = PendingLeg)]
+        [Fact]
         public void MigrateIsTheFirstFailingAssertion() => Assert.Equal("migrate", run.FirstFailure);
 
-        [Fact(Skip = PendingLeg)]
+        [Fact]
         public void TheWorktreeIsStillRemoved() => Assert.Contains(run.Calls, c => c.StartsWith("git worktree remove", StringComparison.Ordinal));
     }
 
