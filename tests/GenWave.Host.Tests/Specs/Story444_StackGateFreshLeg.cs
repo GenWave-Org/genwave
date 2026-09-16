@@ -15,7 +15,6 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureTheStackGateRunsAFreshInstallInAScratch
 {
-    const string PendingFreshLeg = "pending: T487 — the fresh leg: setup --yes, launch --pinned, health, on-air, trap (STORY-444)";
 
     // ---------------------------------------------------------------------
     // HAPPY PATH — the fresh leg against a healthy stub stack
@@ -31,43 +30,50 @@ public static class FeatureTheStackGateRunsAFreshInstallInAScratch
 
         public void Dispose() => station.Dispose();
 
-        [Fact(Skip = PendingFreshLeg)]
+        [Fact]
         public void TheLegPasses() => Assert.Equal(0, run.ExitCode);
 
-        [Fact(Skip = PendingFreshLeg)]
+        [Fact]
         public void TheCallersEnvNeverReachesDocker() => Assert.DoesNotContain(Canary, run.EnvLog, StringComparison.Ordinal);
 
-        [Fact(Skip = PendingFreshLeg)]
+        [Fact]
         public void TheScratchHasDbAndCompose() =>
             Assert.Contains(run.Calls, c => c.StartsWith("cwd=", StringComparison.Ordinal)
                 && c.Contains(" db ", StringComparison.Ordinal) && c.Contains(" compose.yaml ", StringComparison.Ordinal));
 
-        [Fact(Skip = PendingFreshLeg)]
-        public void TheScratchHasNoDotEnvOrDotGitCopiedIn() =>
-            Assert.DoesNotContain(run.Calls, c => c.StartsWith("cwd=", StringComparison.Ordinal)
-                && (c.Contains(" .env ", StringComparison.Ordinal) || c.Contains(" .git ", StringComparison.Ordinal)));
+        [Fact]
+        public void TheScratchHasNoDotEnvOrDotGitCopiedIn()
+        {
+            // setup.sh legitimately writes $scratch/.env before every later docker call inside the
+            // scratch, so only the FIRST cwd= line — the version probe, which runs before setup.sh
+            // ever touches the scratch — can prove the rsync itself excluded .env/.git.
+            var first = Array.Find(run.Calls, c => c.StartsWith("cwd=", StringComparison.Ordinal));
+            Assert.NotNull(first);
+            Assert.DoesNotContain(" .env ", first, StringComparison.Ordinal);
+            Assert.DoesNotContain(" .git ", first, StringComparison.Ordinal);
+        }
 
-        [Fact(Skip = PendingFreshLeg)]
+        [Fact]
         public void TheOverlayPinsExactlyFiveImagesToTheTag() =>
             Assert.Equal(5, Regex.Matches(run.Overlay, @"^\s*image:\s*\S+:home-v9\.9\.9\s*$", RegexOptions.Multiline).Count);
 
-        [Fact(Skip = PendingFreshLeg)]
+        [Fact]
         public void TheOverlayNamesTheFiveServices() =>
             Assert.DoesNotContain(new[] { "api:", "engine:", "icecast:", "admin_ui:", "piper:" },
                 s => !run.Overlay.Contains(s, StringComparison.Ordinal));
 
-        [Fact(Skip = PendingFreshLeg)]
+        [Fact]
         public void TheFileSetIsBasePiperOnlyGate() =>
             Assert.Contains(run.Calls, c => c.Contains("files=compose.yaml:compose.piper-only.yaml:compose.gate.yaml", StringComparison.Ordinal));
 
-        [Fact(Skip = PendingFreshLeg)]
+        [Fact]
         public void TheProjectNameIsLegScoped() =>
             Assert.Matches(@"project=gw-gate-fresh-[0-9a-f]{8}(\s|$)", string.Join("\n", run.Calls));
 
-        [Fact(Skip = PendingFreshLeg)]
+        [Fact]
         public void SetupRanWithYes() => Assert.Contains(run.Calls, c => c.StartsWith("setup.sh --yes", StringComparison.Ordinal));
 
-        [Fact(Skip = PendingFreshLeg)]
+        [Fact]
         public void SetupWroteTheEnvInsideTheScratch()
         {
             var setup = Assert.Single(run.Calls, c => c.StartsWith("setup.sh ", StringComparison.Ordinal));
@@ -75,7 +81,7 @@ public static class FeatureTheStackGateRunsAFreshInstallInAScratch
             Assert.Contains($"GW_ENV_FILE={scratch}/.env", setup, StringComparison.Ordinal);
         }
 
-        [Fact(Skip = PendingFreshLeg)]
+        [Fact]
         public void TheStackIsTornDownWithVolumes() =>
             Assert.Contains(run.Calls, c => c.Contains("compose", StringComparison.Ordinal) && c.EndsWith("down -v", StringComparison.Ordinal));
 
@@ -176,14 +182,14 @@ public static class FeatureTheStackGateRunsAFreshInstallInAScratch
 
         public void Dispose() => station.Dispose();
 
-        [Fact(Skip = PendingFreshLeg)]
+        [Fact]
         public void ExitIsOne() => Assert.Equal(1, run.ExitCode);
 
-        [Fact(Skip = PendingFreshLeg)]
+        [Fact]
         public void DownRunsAfterTheFailedUp() =>
             Assert.True(run.IndexOf("down -v") > run.IndexOf("up files="), string.Join("\n", run.Calls));
 
-        [Fact(Skip = PendingFreshLeg)]
+        [Fact]
         public void DownNamesTheLegProject() =>
             Assert.Matches(@"-p gw-gate-fresh-[0-9a-f]{8} .*down -v", string.Join("\n", run.Calls));
     }
@@ -197,13 +203,13 @@ public static class FeatureTheStackGateRunsAFreshInstallInAScratch
 
         public void Dispose() => station.Dispose();
 
-        [Fact(Skip = PendingFreshLeg)]
+        [Fact]
         public void ExitIsOne() => Assert.Equal(1, run.ExitCode);
 
-        [Fact(Skip = PendingFreshLeg)]
+        [Fact]
         public void HealthIsTheFirstFailingAssertion() => Assert.Equal("health", run.FirstFailure);
 
-        [Fact(Skip = PendingFreshLeg)]
+        [Fact]
         public void ComposeLogsAreAttached() => Assert.True(File.Exists(Path.Combine(run.ReportDir, "compose-fresh.log")));
     }
 }

@@ -5,8 +5,9 @@
 # box: each requested leg runs a real docker compose stack pinned to the tag, inside its OWN
 # scratch copy of the checkout — never the caller's working tree, never the caller's `.env`.
 #
-#   --fresh          a clean install from nothing (setup.sh --yes, launch.sh --pinned, health/
-#                     on-air waits — the leg itself lands in T487)
+#   --fresh          a clean install from nothing (setup.sh --yes, bare launch.sh — the
+#                     wizard's own .env picks the pinned piper-only topology — health/on-air
+#                     waits)
 #   --upgrade        an existing station upgraded onto the tag (T491+)
 #   --capture        captures stream audio during the leg for a loudness/crossfade check
 #                     (T491+; requires --fresh)
@@ -14,21 +15,28 @@
 #   --from <vX.Y.Z>  the tag the upgrade leg starts from (validated, stored; unused until T491)
 #   --report <dir>   write gate-report.md + gate-report.json there (default: .)
 #
-# This file (PLAN T486) is the skeleton: arg parsing, the prerequisite probe, isolation, the
-# scratch + compose.gate.yaml generator, the PROJECTS/trap teardown, and the report writer. The
-# fresh leg's actual orchestration (setup/launch/health/on-air) lands in T487 — until then
-# `--fresh` always records `ran/failed` so the skeleton is provable end-to-end without a live
-# stack. `--upgrade`/`--capture`/`--chaos` are report-only "skipped" rows until T491+.
+# This file started as PLAN T486's skeleton: arg parsing, the prerequisite probe, isolation, the
+# scratch + compose.gate.yaml generator, the PROJECTS/trap teardown, and the report writer. PLAN
+# T487 fills in the fresh leg's own orchestration (media synth, setup.sh --yes, launch.sh,
+# health, on-air — see run_fresh_leg). `--upgrade`/`--capture`/`--chaos` are still report-only
+# "skipped" rows until T491+.
 #
 # Usage: tools/gate/stack_gate.sh --tag <vX.Y.Z> [--fresh] [--upgrade] [--capture] [--chaos]
 #                                  [--from <vX.Y.Z>] [--report <dir>]
 # Exit codes: 0 = every requested leg passed (or none were requested); 1 = a leg failed (see the
-#             report); 2 = usage error or a missing prerequisite (docker, ffmpeg, jq; gh only
-#             with --upgrade) — reached before any leg runs, so no report is written.
+#             report); 2 = usage error or a missing prerequisite (docker, ffmpeg, jq, curl; gh
+#             only with --upgrade) — reached before any leg runs, so no report is written.
 #
 # Isolation (F178.1): never reads the caller's .env; strips GW_*/COMPOSE_*/the six .env secret
 # names from its own exported environment before any docker call, so a developer's shell leaking
 # a real ADMIN_PASSWORD or a stray GW_* override can never reach the stack under test.
+#
+# Knobs (env, all optional — the fresh leg's own; --upgrade/--capture/--chaos add more at
+# T491+): GATE_API_BASE (default http://localhost:8080) the api base URL /health is probed
+# against; GATE_STREAM_URL (default http://localhost:8000/stream) threaded into the real
+# setup.sh's own on-air poll target; GATE_HEALTH_SECS (default 180) and GATE_ONAIR_SECS (default
+# 300) the wall-clock budgets for the health and on-air waits below; GATE_POLL_SECS (default 5,
+# must be a positive integer) how often each wait re-probes.
 
 set -euo pipefail
 
@@ -52,6 +60,22 @@ require_prereq() {
 PROJECTS=()      # "scratch_dir|project_name" — down -v runs from inside scratch_dir
 SCRATCH_DIRS=()  # every mktemp -d this run made, regardless of which leg it belongs to
 
+# The fresh leg's own compose file set (base + piper-only + the tag overlay) — hoisted once so
+# cleanup() and every gate-side compose call (up's implicit COMPOSE_FILE, exec, logs, down) share
+# the exact same list rather than repeating the literal -f flags at each call site (T486 review).
+COMPOSE_FILES=(-f compose.yaml -f compose.piper-only.yaml -f compose.gate.yaml)
+# Same file set, colon-joined for the COMPOSE_FILE env var — the form setup.sh's own internal
+# launch and this leg's bare `./launch.sh` call both read for a "bare compose" invocation with no
+# explicit -f (see run_fresh_leg). Kept as a second literal, not derived from COMPOSE_FILES,
+# because the array carries the `-f` separators the joined form must not have; update both
+# together if the file set ever changes.
+COMPOSE_FILE_LIST="compose.yaml:compose.piper-only.yaml:compose.gate.yaml"
+
+# Measurements the fresh leg records on its way to a pass (or as far as it got) — empty until
+# run_fresh_leg sets them, read by write_report below.
+FRESH_HEALTH_SECS=""
+FRESH_ONAIR_SECS=""
+
 # shellcheck disable=SC2317 # false positive: only called indirectly via `trap cleanup EXIT`,
 # which shellcheck's reachability analysis doesn't follow (documented SC2317 caveat).
 cleanup() {
@@ -59,8 +83,13 @@ cleanup() {
   for entry in "${PROJECTS[@]}"; do
     scratch="${entry%%|*}"
     project="${entry#*|}"
-    ( cd "$scratch" && docker compose -p "$project" \
-        -f compose.yaml -f compose.piper-only.yaml -f compose.gate.yaml down -v ) || true
+    # A project can be registered before setup.sh ever runs (see run_fresh_leg) so that a REAL
+    # setup.sh's own internal launch lands under this same project name — but that means a leg
+    # that fails before setup.sh ever writes $scratch/.env never brought anything up either.
+    # Skip those quietly rather than run a `down -v` against a project nothing exists under
+    # (T486 review: teardown noise).
+    [ -f "$scratch/.env" ] || continue
+    ( cd "$scratch" && docker compose -p "$project" "${COMPOSE_FILES[@]}" down -v ) || true
   done
   for scratch in "${SCRATCH_DIRS[@]}"; do
     rm -rf "$scratch"
@@ -114,6 +143,9 @@ if [ -n "$FROM_TAG" ] && [[ ! "$FROM_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
 fi
 [ "$DO_CAPTURE" = 0 ] || [ "$DO_FRESH" = 1 ]   || usage_error "--capture requires --fresh"
 [ "$DO_CHAOS" = 0 ]   || [ "$DO_CAPTURE" = 1 ] || usage_error "--chaos requires --capture"
+if [ -n "${GATE_POLL_SECS:-}" ] && ! [[ "$GATE_POLL_SECS" =~ ^[1-9][0-9]*$ ]]; then
+  usage_error "GATE_POLL_SECS must be a positive integer: $GATE_POLL_SECS"
+fi
 
 # ---------------------------------------------------------------------------------------------
 # Prerequisite probe — binaries on THIS host; docker compose's v2-ness is checked per leg, inside
@@ -123,6 +155,7 @@ fi
 require_prereq docker
 require_prereq ffmpeg
 require_prereq jq
+require_prereq curl
 [ "$DO_UPGRADE" = 1 ] && require_prereq gh
 
 # ---------------------------------------------------------------------------------------------
@@ -176,12 +209,88 @@ gate_project_name() {
   printf 'gw-gate-%s-%s' "$1" "$(tr -dc 'a-f0-9' < /dev/urandom | head -c 8)"
 }
 
+# make_gate_media <dir> — SPEC F178.3's run-time half (T489 later moves this into its own
+# tools/gate/make_media.sh): two 45-second tracks at -12 and -30 integrated LUFS, tone mixed with
+# shaped noise (so loudnorm has real dynamics to normalize, not a bare sine) rather than pure
+# tone, tagged genre=music so setup.sh's own Q2 .flac/.mp3 count sees a populated library.
+make_gate_media() {
+  local dir="$1" i lufs
+  mkdir -p "$dir"
+  for i in 1 2; do
+    case "$i" in 1) lufs=-12 ;; *) lufs=-30 ;; esac
+    ffmpeg -nostats -hide_banner -loglevel error -y -f lavfi -i \
+      "sine=frequency=440:duration=45[tone];anoisesrc=color=pink:duration=45[noise];[tone][noise]amix=inputs=2:duration=shortest,loudnorm=I=${lufs}:TP=-1:LRA=7" \
+      -metadata genre=music -ar 44100 -ac 2 "$dir/gate-track-${i}.flac"
+  done
+}
+
+# gate_setup_answers <media_dir> — the interview's stdin, in question order (setup.sh F132.2).
+# Q1 (images mode) is asked ONLY when a .NET 10 SDK is on THIS PATH right now — the same one-
+# liner setup.sh:310's check_dotnet10_sdk uses, mirrored here (not shared: setup.sh is a file
+# this task may not edit) so the gate answers the exact menu setup.sh actually shows. Then Q2 the
+# dir make_gate_media just populated, Q3 [2] piper-only, Q4 [y] admin UI — the wizard defaults
+# named in SPEC F178.2.
+gate_setup_answers() {
+  local media_dir="$1"
+  if command -v dotnet >/dev/null 2>&1 && dotnet --list-sdks 2>/dev/null | grep -q '^10\.'; then
+    printf '1\n'
+  fi
+  printf '%s\n2\ny\n' "$media_dir"
+}
+
+# stage_pinned_overlay_for_launch <scratch> — launch.sh names its OWN pins file
+# (compose.pinned.yaml), never compose.gate.yaml, so the tag overlay's content is duplicated
+# onto it inside the scratch — the scratch is disposable, launch.sh is not the file to teach a
+# second overlay name to for one gate run. `rm -f` first: every top-level scratch entry rsync
+# just produced is a SYMLINK back into the real checkout (the hermetic test harness's own repo
+# copy is itself a symlink farm, and rsync -a preserves symlinks as symlinks) until this line
+# replaces it — writing through that symlink unlinked (`cp` onto an existing symlink follows it)
+# would edit the caller's actual working tree, exactly what this whole script exists to never do.
+stage_pinned_overlay_for_launch() {
+  local scratch="$1"
+  rm -f "$scratch/compose.pinned.yaml"
+  cp "$scratch/compose.gate.yaml" "$scratch/compose.pinned.yaml"
+}
+
+# attach_fresh_compose_logs <scratch> <project> — F178.4: any miss past the point the stack was
+# asked to come up gets the compose logs into the report dir, so a failed leg is diagnosable
+# without re-running it. REPORT_DIR may not exist yet (write_report, below, is normally what
+# creates it) — mkdir -p here too, since a miss can land long before that.
+attach_fresh_compose_logs() {
+  local scratch="$1" project="$2"
+  mkdir -p "$REPORT_DIR"
+  ( cd "$scratch" && docker compose -p "$project" "${COMPOSE_FILES[@]}" logs --no-color ) \
+    > "$REPORT_DIR/compose-fresh.log" 2>&1 || true
+}
+
+# fresh_onair_frame <scratch> <project> — the on-air read (tools/onair_gate.sh:34-48): telnet the
+# engine's control socket over /dev/tcp for output.icecast.metadata, then select frame "--- 1 ---"
+# (the CURRENT on-air track) when frame markers are present, or take the whole reply when they
+# are not (the gate's own docker stub prints one bare line, no frame markers at all).
+fresh_onair_frame() {
+  local scratch="$1" project="$2" raw
+  raw="$(cd "$scratch" && docker compose -p "$project" "${COMPOSE_FILES[@]}" \
+    exec -T engine bash -s <<'ONAIR_CMD' | tr -d '\r'
+exec 3<>/dev/tcp/127.0.0.1/1234 || { echo "CONNECT_FAILED"; exit 1; }
+printf '%s\n' "output.icecast.metadata" >&3
+while IFS= read -r line <&3; do case "$line" in END*) break ;; *) printf '%s\n' "$line" ;; esac; done
+printf 'exit\n' >&3
+ONAIR_CMD
+)"
+  if grep -qE '^--- [0-9]+ ---$' <<<"$raw"; then
+    awk '/^--- [0-9]+ ---$/ { cur = ($2 == "1"); next } cur { print }' <<<"$raw"
+  else
+    printf '%s' "$raw"
+  fi
+}
+
 run_fresh_leg() {
   local scratch project version_output major
   scratch="$(mktemp -d)"
   SCRATCH_DIRS+=("$scratch")
 
-  rsync -a --exclude .env --exclude .git "$root/" "$scratch/"
+  rsync -a --exclude .env --exclude .git --exclude node_modules --exclude bin --exclude obj \
+    "$root/" "$scratch/"
 
   # The leg's first docker call, from inside the scratch — never from the caller's checkout.
   # "docker compose v2" (SPEC F178.1) means the `docker compose` PLUGIN, as opposed to the legacy
@@ -206,16 +315,108 @@ run_fresh_leg() {
   fi
 
   write_compose_gate_overlay "$scratch" "$TAG"
+  stage_pinned_overlay_for_launch "$scratch"
 
+  # SPEC F178.3 (run-time half) — the wizard's Q2 needs files on disk before it asks for them.
+  local media_dir="$scratch/media"
+  make_gate_media "$media_dir"
+
+  # Registered BEFORE setup.sh ever runs, not after: setup.sh's own wizard launches the stack
+  # itself (invoke_launch -> a bare ./launch.sh) as part of --yes, and that child launch.sh reads
+  # COMPOSE_PROJECT_NAME from the environment it inherits from setup.sh. Without this project name
+  # in setup.sh's own env, compose falls back to compose.yaml's top-level `name: genwave` — on a
+  # real box that's the live dev station's project (setup.sh's internal launch would recreate ITS
+  # containers), and this leg's own compose calls further down would then collide on the SAME
+  # published ports (8080/8000/5432) as a second, differently-named stack (T487 review F1).
+  # cleanup()'s down -v is guarded on $scratch/.env existing, so registering this early is safe
+  # even when setup.sh fails before ever writing one (T486 teardown-noise finding).
   project="$(gate_project_name fresh)"
   PROJECTS+=("$scratch|$project")
 
-  # T487 replaces this: the fresh leg proper — setup.sh --yes, launch.sh --pinned against
-  # compose.yaml + compose.piper-only.yaml + compose.gate.yaml under $project, health/on-air
-  # waits, compose logs attached on a miss. For now the leg always fails so the skeleton
-  # (scratch, overlay, project naming, teardown, report) is provable without a live stack.
-  LEG_STATUS[fresh]="failed"
-  LEG_DETAIL[fresh]="fresh leg not implemented (T487)"
+  # SPEC F178.2 — setup.sh --yes, answers on stdin, .env landing inside the scratch.
+  # COMPOSE_PROJECT_NAME/COMPOSE_FILE isolate setup.sh's OWN internal launch (above) under this
+  # leg's project rather than the top-level `name: genwave`; GW_STREAM_URL matters only to the
+  # REAL setup.sh's own on-air poll (the stub ignores it) — harmless either way. GW_ENV_FILE is
+  # NOT itself read by setup.sh's wizard; the media path is answered on stdin
+  # (gate_setup_answers), so no MEDIA_DIR env is passed here. GW_ONAIR_TIMEOUT_SECONDS is
+  # deliberately left unset — setup.sh's own default (900s) covers a first-run pull of five
+  # images; this leg measures its OWN "within GATE_ONAIR_SECS of up" wait below, against the
+  # already-up stack (SPEC F178.4), so passing GATE_ONAIR_SECS through here would start that clock
+  # before the pull even begins.
+  if ! (cd "$scratch" && gate_setup_answers "$media_dir" | \
+        GW_ENV_FILE="$scratch/.env" \
+        COMPOSE_PROJECT_NAME="$project" COMPOSE_FILE="$COMPOSE_FILE_LIST" \
+        GW_STREAM_URL="${GATE_STREAM_URL:-http://localhost:8000/stream}" \
+        ./setup.sh --yes); then
+    LEG_STATUS[fresh]="failed"; LEG_DETAIL[fresh]="setup"
+    attach_fresh_compose_logs "$scratch" "$project"
+    return
+  fi
+
+  # Bare ./launch.sh — no --pinned, which also stacks compose.demo.yaml (Caddy, PUBLIC_HOST),
+  # wrong for a fresh-install gate; the wizard's own .env (GW_PRESET=home-piper-only) already
+  # picks the pinned piper-only topology, and stage_pinned_overlay_for_launch (above) already put
+  # the tag's images in the file launch.sh actually reads. Same COMPOSE_PROJECT_NAME as the
+  # setup.sh call above, so a real setup.sh's own internal launch and this call converge on the
+  # SAME stack rather than colliding on ports — this second call is then an idempotent
+  # re-converge (stub world: setup.sh never touched docker at all, so this is the only `up`).
+  # The isolation strip earlier in this script dropped any caller-supplied COMPOSE_*; these are
+  # the gate's own, set fresh here.
+  if ! (cd "$scratch" && \
+        COMPOSE_FILE="$COMPOSE_FILE_LIST" \
+        COMPOSE_PROJECT_NAME="$project" \
+        ./launch.sh); then
+    LEG_STATUS[fresh]="failed"; LEG_DETAIL[fresh]="launch"
+    attach_fresh_compose_logs "$scratch" "$project"
+    return
+  fi
+
+  # SPEC F178.4 — /health must go green within GATE_HEALTH_SECS (default 180). Strip a trailing
+  # slash: GATE_API_BASE (the fake station's own base URL, in tests) carries one, and appending
+  # "/health" straight onto it would double the slash and 404 against the real path. Both budgets
+  # below are measured off bash's own $SECONDS (wall clock since the shell started) rather than a
+  # sleep counter, so curl's own probe time (health) and the `docker compose exec` round-trip
+  # (on-air) both count against the budget instead of running for free between sleeps; `--max-time
+  # 5` keeps a single hung probe from eating the whole budget by itself.
+  local api_base="${GATE_API_BASE:-http://localhost:8080}"
+  api_base="${api_base%/}"
+  local health_budget="${GATE_HEALTH_SECS:-180}" poll_secs="${GATE_POLL_SECS:-5}"
+  local health_start=$SECONDS health_ok=0 elapsed=0
+  while :; do
+    if curl -fsS --max-time 5 -o /dev/null "$api_base/health"; then health_ok=1; break; fi
+    elapsed=$((SECONDS - health_start))
+    [ "$elapsed" -ge "$health_budget" ] && break
+    sleep "$poll_secs"
+  done
+  elapsed=$((SECONDS - health_start))
+  if [ "$health_ok" != "1" ]; then
+    LEG_STATUS[fresh]="failed"; LEG_DETAIL[fresh]="health"
+    attach_fresh_compose_logs "$scratch" "$project"
+    return
+  fi
+  FRESH_HEALTH_SECS="$elapsed"
+
+  # SPEC F178.4 — output.icecast.metadata frame 1 must carry a track_id within GATE_ONAIR_SECS
+  # (default 300) of up.
+  local onair_budget="${GATE_ONAIR_SECS:-300}"
+  local onair_start=$SECONDS onair_ok=0 frame
+  while :; do
+    frame="$(fresh_onair_frame "$scratch" "$project")"
+    if grep -q 'track_id="' <<<"$frame"; then onair_ok=1; break; fi
+    elapsed=$((SECONDS - onair_start))
+    [ "$elapsed" -ge "$onair_budget" ] && break
+    sleep "$poll_secs"
+  done
+  elapsed=$((SECONDS - onair_start))
+  if [ "$onair_ok" != "1" ]; then
+    LEG_STATUS[fresh]="failed"; LEG_DETAIL[fresh]="on-air"
+    attach_fresh_compose_logs "$scratch" "$project"
+    return
+  fi
+  FRESH_ONAIR_SECS="$elapsed"
+
+  LEG_STATUS[fresh]="passed"
+  LEG_DETAIL[fresh]=""
 }
 
 if [ "$DO_FRESH" = 1 ]; then
@@ -264,18 +465,40 @@ leg_row_md() {
 }
 
 leg_json() {
-  local status="$1" detail="$2" first_failure="" skipped_by=""
+  local status="$1" detail="$2" measurements="${3:-}" first_failure="" skipped_by=""
+  [ -n "$measurements" ] || measurements="{}"
   case "$status" in
     failed)  first_failure="$detail" ;;
     skipped) skipped_by="$detail" ;;
   esac
-  jq -n --arg status "$status" --arg first_failure "$first_failure" --arg skipped_by "$skipped_by" '
+  jq -n --arg status "$status" --arg first_failure "$first_failure" --arg skipped_by "$skipped_by" \
+    --argjson measurements "$measurements" '
     {
       status: $status,
       first_failure: (if $first_failure == "" then null else $first_failure end),
       skipped_by: (if $skipped_by == "" then null else $skipped_by end),
-      measurements: {}
+      measurements: $measurements
     }'
+}
+
+# fresh_measurements_json — {} until the fresh leg has measured at least one of health_secs/
+# onair_secs (FRESH_HEALTH_SECS/FRESH_ONAIR_SECS, set by run_fresh_leg as it clears each wait —
+# a leg that fails at on-air still reports the health_secs it already measured).
+fresh_measurements_json() {
+  jq -n --arg h "$FRESH_HEALTH_SECS" --arg o "$FRESH_ONAIR_SECS" '
+    (if $h == "" then {} else {health_secs: ($h | tonumber)} end) +
+    (if $o == "" then {} else {onair_secs: ($o | tonumber)} end)'
+}
+
+# fresh_measurements_md — the same facts as fresh_measurements_json, rendered as report lines;
+# "none" when neither was ever measured.
+fresh_measurements_md() {
+  if [ -z "$FRESH_HEALTH_SECS" ] && [ -z "$FRESH_ONAIR_SECS" ]; then
+    printf 'none\n'
+    return
+  fi
+  [ -n "$FRESH_HEALTH_SECS" ] && printf 'fresh health_secs: %s\n' "$FRESH_HEALTH_SECS"
+  [ -n "$FRESH_ONAIR_SECS" ] && printf 'fresh onair_secs: %s\n' "$FRESH_ONAIR_SECS"
 }
 
 first_failure_across_legs() {
@@ -300,13 +523,13 @@ write_report() {
     for leg in fresh upgrade capture chaos; do
       leg_row_md "$leg" "${LEG_STATUS[$leg]}" "${LEG_DETAIL[$leg]}"
     done
-    printf '\n## Measurements\n\nnone\n\n'
+    printf '\n## Measurements\n\n%s\n\n' "$(fresh_measurements_md)"
     printf 'Needs manual evidence: the LLL ear — %s facts are manual\n' "$manual_facts"
   } > "$out_dir/gate-report.md"
 
   local first_failure fresh_json upgrade_json capture_json chaos_json
   first_failure="$(first_failure_across_legs)"
-  fresh_json="$(leg_json "${LEG_STATUS[fresh]}" "${LEG_DETAIL[fresh]}")"
+  fresh_json="$(leg_json "${LEG_STATUS[fresh]}" "${LEG_DETAIL[fresh]}" "$(fresh_measurements_json)")"
   upgrade_json="$(leg_json "${LEG_STATUS[upgrade]}" "${LEG_DETAIL[upgrade]}")"
   capture_json="$(leg_json "${LEG_STATUS[capture]}" "${LEG_DETAIL[capture]}")"
   chaos_json="$(leg_json "${LEG_STATUS[chaos]}" "${LEG_DETAIL[chaos]}")"
