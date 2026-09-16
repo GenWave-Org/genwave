@@ -56,12 +56,12 @@ using Microsoft.Extensions.Options;
 /// happens entirely off the on-air clock (T401's <c>AdSpotWorker</c> tick, SPEC F161.1) — the natural
 /// place to coordinate backend concurrency if that ever proves necessary; adding a shared gate here
 /// now, with no caller yet, would be speculative. EACH attempt gets its OWN <c>Llm:TimeoutSeconds</c>
-/// budget (gh-#696, the first-contact finding — <see cref="NewAttemptBudget"/>): the on-air writers
-/// (<see cref="LlmCopyWriter.PostChatCompletionAsync"/>'s re-ask callers) share one budget across a
-/// re-ask because the break they write for is imminent, but this writer runs entirely off the air
-/// clock — the same fact that justifies the missing single-flight gate — and on the reference
-/// station's CPU-bound 3B model one completion took 49 of a 90-second shared budget, so the re-ask
-/// timed out by construction on every tick and the stock pass yielded nothing.
+/// budget (gh-#696, the first-contact finding — built inline in <see cref="WriteAsync"/>):
+/// the on-air writers (<see cref="LlmCopyWriter.PostChatCompletionAsync"/>'s re-ask callers) share
+/// one budget across a re-ask because the break they write for is imminent, but this writer runs
+/// entirely off the air clock — the same fact that justifies the missing single-flight gate — and on
+/// the reference station's CPU-bound 3B model one completion took 49 of a 90-second shared budget, so
+/// the re-ask timed out by construction on every tick and the stock pass yielded nothing.
 /// </para>
 ///
 /// <para>
@@ -139,28 +139,24 @@ public sealed partial class AdScriptWriter(
         var requestUri = EndpointUri.Combine(cfg.Endpoint, "/v1/chat/completions");
         var maxTokens = DeriveScriptGenerationCap(request);
 
-        using var firstBudget = NewAttemptBudget(cfg, ct);
+        // The budget rides the injected TimeProvider (STORY-442, gh-#723) so a fake clock can fire it;
+        // CancelAfter has no TimeProvider overload, so this mirrors DependencyHealthProber.ProbeOneAsync.
+        using var firstBudget = new CancellationTokenSource(TimeSpan.FromSeconds(cfg.TimeoutSeconds), timeProvider);
+        using var firstLinked = CancellationTokenSource.CreateLinkedTokenSource(ct, firstBudget.Token);
         var firstAttempt = await AttemptAsync(
-            http, requestUri, cfg, request, systemPrompt, userPrompt, maxTokens, validate, mode, ct, firstBudget.Token);
+            http, requestUri, cfg, request, systemPrompt, userPrompt, maxTokens, validate, mode, ct, firstLinked.Token);
         if (firstAttempt is not AdScriptAttemptOutcome.ValidatorRefused refused)
             return ResultOf(firstAttempt); // Success, or a transport/generation fault — never re-asked (skip-only).
 
         // SPEC F160.3's ladder shape: exactly ONE re-ask, naming the violated rule, appended to the
-        // SAME user prompt the rejected draft already saw.
+        // SAME user prompt the rejected draft already saw. A fresh budget pair (gh-#696) — never
+        // shared with the first attempt's.
         var reaskUserPrompt = userPrompt + "\n\n" + AdScriptPromptBuilder.BuildReaskLine(refused.RuleId, refused.Reason);
-        using var reaskBudget = NewAttemptBudget(cfg, ct);
+        using var reaskBudget = new CancellationTokenSource(TimeSpan.FromSeconds(cfg.TimeoutSeconds), timeProvider);
+        using var reaskLinked = CancellationTokenSource.CreateLinkedTokenSource(ct, reaskBudget.Token);
         var secondAttempt = await AttemptAsync(
-            http, requestUri, cfg, request, systemPrompt, reaskUserPrompt, maxTokens, validate, mode, ct, reaskBudget.Token);
+            http, requestUri, cfg, request, systemPrompt, reaskUserPrompt, maxTokens, validate, mode, ct, reaskLinked.Token);
         return ResultOf(secondAttempt);
-    }
-
-    /// <summary>One attempt's own <c>Llm:TimeoutSeconds</c> budget, linked to the caller's token
-    /// (gh-#696) — a fresh one per attempt, never shared across the re-ask; see the class remarks.</summary>
-    static CancellationTokenSource NewAttemptBudget(LlmOptions cfg, CancellationToken ct)
-    {
-        var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        budget.CancelAfter(TimeSpan.FromSeconds(cfg.TimeoutSeconds));
-        return budget;
     }
 
     static AdScriptWriteResult ResultOf(AdScriptAttemptOutcome outcome) => outcome switch
