@@ -39,6 +39,7 @@ using Microsoft.Extensions.Hosting;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Host.Tests.Fakes;
+using GenWave.Host.Tests.Support;
 
 namespace GenWave.Host.Tests.Specs;
 
@@ -319,7 +320,8 @@ public static class FeatureJinglePackEnrichmentAndHashFailures
             // against the SAME URLs.
             const string slug = "cancelled-reinstall-pack";
             const string keptFile = "kept.wav";
-            var jingleRoot = Directory.CreateTempSubdirectory("t414-r2-f69-").FullName;
+            using var jingleRootDir = new TempDir();
+            var jingleRoot = jingleRootDir.Path;
             var assetDir = JingleTestAudio.NewTempDir();
             try
             {
@@ -369,9 +371,6 @@ public static class FeatureJinglePackEnrichmentAndHashFailures
                 try { Directory.Delete(assetDir, recursive: true); }
                 catch (IOException) { /* best-effort cleanup */ }
                 catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
-                try { Directory.Delete(jingleRoot, recursive: true); }
-                catch (IOException) { /* best-effort cleanup */ }
-                catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
             }
         }
     }
@@ -392,14 +391,15 @@ file sealed class FreshCorruptArc : IDisposable
 
     public HttpStatusCode Status { get; private init; }
     public string Body { get; private init; } = "";
-    public string JingleRoot { get; }
+    public string JingleRoot => jingleRootDir.Path;
     public FakeJinglePackStore Store { get; }
 
+    readonly TempDir jingleRootDir;
     readonly EnrichmentFailureWebFactory factory;
 
-    FreshCorruptArc(string jingleRoot, FakeJinglePackStore store, EnrichmentFailureWebFactory factory, HttpStatusCode status, string body)
+    FreshCorruptArc(TempDir jingleRootDir, FakeJinglePackStore store, EnrichmentFailureWebFactory factory, HttpStatusCode status, string body)
     {
-        JingleRoot = jingleRoot;
+        this.jingleRootDir = jingleRootDir;
         Store = store;
         this.factory = factory;
         Status = status;
@@ -408,7 +408,8 @@ file sealed class FreshCorruptArc : IDisposable
 
     public static async Task<FreshCorruptArc> RunAsync()
     {
-        var jingleRoot = Directory.CreateTempSubdirectory("t414-r2-f1-fresh-").FullName;
+        var jingleRootDir = new TempDir();
+        var jingleRoot = jingleRootDir.Path;
         var assetDir = JingleTestAudio.NewTempDir();
         try
         {
@@ -432,16 +433,14 @@ file sealed class FreshCorruptArc : IDisposable
             var response = await client.PostAsync($"/api/jingle-packs/{Slug}/install", null);
             var body = await response.Content.ReadAsStringAsync();
 
-            return new FreshCorruptArc(jingleRoot, store, factory, response.StatusCode, body);
+            return new FreshCorruptArc(jingleRootDir, store, factory, response.StatusCode, body);
         }
         catch
         {
             // Construction failed before ownership of jingleRoot passed to the returned instance's own
             // Dispose (the `using` in the calling Scenario never runs when RunAsync itself throws) — clean
             // it up here or it leaks forever (T414 review round 3 finding 5).
-            try { Directory.Delete(jingleRoot, recursive: true); }
-            catch (IOException) { /* best-effort cleanup */ }
-            catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
+            jingleRootDir.Dispose();
             throw;
         }
         finally
@@ -455,9 +454,7 @@ file sealed class FreshCorruptArc : IDisposable
     public void Dispose()
     {
         factory.Dispose();
-        try { Directory.Delete(JingleRoot, recursive: true); }
-        catch (IOException) { /* best-effort cleanup */ }
-        catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
+        jingleRootDir.Dispose();
     }
 }
 
@@ -476,14 +473,15 @@ file sealed class TagLibUnreadableArc : IDisposable
 
     public HttpStatusCode Status { get; private init; }
     public string Body { get; private init; } = "";
-    public string JingleRoot { get; }
+    public string JingleRoot => jingleRootDir.Path;
     public FakeJinglePackStore Store { get; }
 
+    readonly TempDir jingleRootDir;
     readonly EnrichmentFailureWebFactory factory;
 
-    TagLibUnreadableArc(string jingleRoot, FakeJinglePackStore store, EnrichmentFailureWebFactory factory, HttpStatusCode status, string body)
+    TagLibUnreadableArc(TempDir jingleRootDir, FakeJinglePackStore store, EnrichmentFailureWebFactory factory, HttpStatusCode status, string body)
     {
-        JingleRoot = jingleRoot;
+        this.jingleRootDir = jingleRootDir;
         Store = store;
         this.factory = factory;
         Status = status;
@@ -492,7 +490,8 @@ file sealed class TagLibUnreadableArc : IDisposable
 
     public static async Task<TagLibUnreadableArc> RunAsync()
     {
-        var jingleRoot = Directory.CreateTempSubdirectory("t414-delta-taglib-").FullName;
+        var jingleRootDir = new TempDir();
+        var jingleRoot = jingleRootDir.Path;
         var assetDir = JingleTestAudio.NewTempDir();
         try
         {
@@ -511,16 +510,14 @@ file sealed class TagLibUnreadableArc : IDisposable
             var response = await client.PostAsync($"/api/jingle-packs/{Slug}/install", null);
             var body = await response.Content.ReadAsStringAsync();
 
-            return new TagLibUnreadableArc(jingleRoot, store, factory, response.StatusCode, body);
+            return new TagLibUnreadableArc(jingleRootDir, store, factory, response.StatusCode, body);
         }
         catch
         {
             // Construction failed before ownership of jingleRoot passed to the returned instance's own
             // Dispose (the `using` in the calling Scenario never runs when RunAsync itself throws) — clean
             // it up here or it leaks forever (T414 review round 3 finding 5).
-            try { Directory.Delete(jingleRoot, recursive: true); }
-            catch (IOException) { /* best-effort cleanup */ }
-            catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
+            jingleRootDir.Dispose();
             throw;
         }
         finally
@@ -534,9 +531,7 @@ file sealed class TagLibUnreadableArc : IDisposable
     public void Dispose()
     {
         factory.Dispose();
-        try { Directory.Delete(JingleRoot, recursive: true); }
-        catch (IOException) { /* best-effort cleanup */ }
-        catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
+        jingleRootDir.Dispose();
     }
 }
 
@@ -555,14 +550,15 @@ file sealed class ZeroDurationArc : IDisposable
 
     public HttpStatusCode Status { get; private init; }
     public string Body { get; private init; } = "";
-    public string JingleRoot { get; }
+    public string JingleRoot => jingleRootDir.Path;
     public FakeJinglePackStore Store { get; }
 
+    readonly TempDir jingleRootDir;
     readonly EnrichmentFailureWebFactory factory;
 
-    ZeroDurationArc(string jingleRoot, FakeJinglePackStore store, EnrichmentFailureWebFactory factory, HttpStatusCode status, string body)
+    ZeroDurationArc(TempDir jingleRootDir, FakeJinglePackStore store, EnrichmentFailureWebFactory factory, HttpStatusCode status, string body)
     {
-        JingleRoot = jingleRoot;
+        this.jingleRootDir = jingleRootDir;
         Store = store;
         this.factory = factory;
         Status = status;
@@ -571,7 +567,8 @@ file sealed class ZeroDurationArc : IDisposable
 
     public static async Task<ZeroDurationArc> RunAsync()
     {
-        var jingleRoot = Directory.CreateTempSubdirectory("t414-delta-zerodur-").FullName;
+        var jingleRootDir = new TempDir();
+        var jingleRoot = jingleRootDir.Path;
         var assetDir = JingleTestAudio.NewTempDir();
         try
         {
@@ -590,16 +587,14 @@ file sealed class ZeroDurationArc : IDisposable
             var response = await client.PostAsync($"/api/jingle-packs/{Slug}/install", null);
             var body = await response.Content.ReadAsStringAsync();
 
-            return new ZeroDurationArc(jingleRoot, store, factory, response.StatusCode, body);
+            return new ZeroDurationArc(jingleRootDir, store, factory, response.StatusCode, body);
         }
         catch
         {
             // Construction failed before ownership of jingleRoot passed to the returned instance's own
             // Dispose (the `using` in the calling Scenario never runs when RunAsync itself throws) — clean
             // it up here or it leaks forever (T414 review round 3 finding 5).
-            try { Directory.Delete(jingleRoot, recursive: true); }
-            catch (IOException) { /* best-effort cleanup */ }
-            catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
+            jingleRootDir.Dispose();
             throw;
         }
         finally
@@ -613,9 +608,7 @@ file sealed class ZeroDurationArc : IDisposable
     public void Dispose()
     {
         factory.Dispose();
-        try { Directory.Delete(JingleRoot, recursive: true); }
-        catch (IOException) { /* best-effort cleanup */ }
-        catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
+        jingleRootDir.Dispose();
     }
 }
 
@@ -628,19 +621,20 @@ file sealed class ReinstallCorruptArc : IDisposable
     public const string OtherFile = "other.wav";
 
     public HttpStatusCode SecondStatus { get; private init; }
-    public string JingleRoot { get; }
+    public string JingleRoot => jingleRootDir.Path;
     public FakeJinglePackStore Store { get; }
     public string FirstKeptBytesHash { get; private init; } = "";
     public string FirstOtherBytesHash { get; private init; } = "";
 
+    readonly TempDir jingleRootDir;
     readonly EnrichmentFailureWebFactory firstFactory;
     readonly EnrichmentFailureWebFactory secondFactory;
 
     ReinstallCorruptArc(
-        string jingleRoot, FakeJinglePackStore store, EnrichmentFailureWebFactory firstFactory, EnrichmentFailureWebFactory secondFactory,
+        TempDir jingleRootDir, FakeJinglePackStore store, EnrichmentFailureWebFactory firstFactory, EnrichmentFailureWebFactory secondFactory,
         HttpStatusCode secondStatus, string firstKeptHash, string firstOtherHash)
     {
-        JingleRoot = jingleRoot;
+        this.jingleRootDir = jingleRootDir;
         Store = store;
         this.firstFactory = firstFactory;
         this.secondFactory = secondFactory;
@@ -651,7 +645,8 @@ file sealed class ReinstallCorruptArc : IDisposable
 
     public static async Task<ReinstallCorruptArc> RunAsync()
     {
-        var jingleRoot = Directory.CreateTempSubdirectory("t414-r2-f1-reinstall-").FullName;
+        var jingleRootDir = new TempDir();
+        var jingleRoot = jingleRootDir.Path;
         var assetDir = JingleTestAudio.NewTempDir();
         try
         {
@@ -690,16 +685,14 @@ file sealed class ReinstallCorruptArc : IDisposable
             var secondInstall = await secondClient.PostAsync($"/api/jingle-packs/{Slug}/install", null);
 
             return new ReinstallCorruptArc(
-                jingleRoot, store, firstFactory, secondFactory, secondInstall.StatusCode, firstKeptHash, firstOtherHash);
+                jingleRootDir, store, firstFactory, secondFactory, secondInstall.StatusCode, firstKeptHash, firstOtherHash);
         }
         catch
         {
             // Construction failed before ownership of jingleRoot passed to the returned instance's own
             // Dispose (the `using` in the calling Scenario never runs when RunAsync itself throws) — clean
             // it up here or it leaks forever (T414 review round 3 finding 5).
-            try { Directory.Delete(jingleRoot, recursive: true); }
-            catch (IOException) { /* best-effort cleanup */ }
-            catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
+            jingleRootDir.Dispose();
             throw;
         }
         finally
@@ -714,9 +707,7 @@ file sealed class ReinstallCorruptArc : IDisposable
     {
         firstFactory.Dispose();
         secondFactory.Dispose();
-        try { Directory.Delete(JingleRoot, recursive: true); }
-        catch (IOException) { /* best-effort cleanup */ }
-        catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
+        jingleRootDir.Dispose();
     }
 }
 
@@ -728,14 +719,15 @@ file sealed class HashMismatchArc : IDisposable
     const string File1 = "asset.wav";
 
     public HttpStatusCode Status { get; private init; }
-    public string JingleRoot { get; }
+    public string JingleRoot => jingleRootDir.Path;
     public FakeJinglePackStore Store { get; }
 
+    readonly TempDir jingleRootDir;
     readonly HashMismatchWebFactory factory;
 
-    HashMismatchArc(string jingleRoot, FakeJinglePackStore store, HashMismatchWebFactory factory, HttpStatusCode status)
+    HashMismatchArc(TempDir jingleRootDir, FakeJinglePackStore store, HashMismatchWebFactory factory, HttpStatusCode status)
     {
-        JingleRoot = jingleRoot;
+        this.jingleRootDir = jingleRootDir;
         Store = store;
         this.factory = factory;
         Status = status;
@@ -743,7 +735,8 @@ file sealed class HashMismatchArc : IDisposable
 
     public static async Task<HashMismatchArc> RunAsync()
     {
-        var jingleRoot = Directory.CreateTempSubdirectory("t414-r2-f61-").FullName;
+        var jingleRootDir = new TempDir();
+        var jingleRoot = jingleRootDir.Path;
         var assetDir = JingleTestAudio.NewTempDir();
         try
         {
@@ -755,16 +748,14 @@ file sealed class HashMismatchArc : IDisposable
             var client = await HashMismatchWebFactory.LoggedInClientAsync(factory);
 
             var response = await client.PostAsync($"/api/jingle-packs/{Slug}/install", null);
-            return new HashMismatchArc(jingleRoot, store, factory, response.StatusCode);
+            return new HashMismatchArc(jingleRootDir, store, factory, response.StatusCode);
         }
         catch
         {
             // Construction failed before ownership of jingleRoot passed to the returned instance's own
             // Dispose (the `using` in the calling Scenario never runs when RunAsync itself throws) — clean
             // it up here or it leaks forever (T414 review round 3 finding 5).
-            try { Directory.Delete(jingleRoot, recursive: true); }
-            catch (IOException) { /* best-effort cleanup */ }
-            catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
+            jingleRootDir.Dispose();
             throw;
         }
         finally
@@ -778,9 +769,7 @@ file sealed class HashMismatchArc : IDisposable
     public void Dispose()
     {
         factory.Dispose();
-        try { Directory.Delete(JingleRoot, recursive: true); }
-        catch (IOException) { /* best-effort cleanup */ }
-        catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
+        jingleRootDir.Dispose();
     }
 }
 
@@ -792,14 +781,15 @@ file sealed class PathEscapeArc : IDisposable
 
     public HttpStatusCode Status { get; private init; }
     public string Body { get; private init; } = "";
-    public string JingleRoot { get; }
+    public string JingleRoot => jingleRootDir.Path;
     public FakeJinglePackStore Store { get; }
 
+    readonly TempDir jingleRootDir;
     readonly PathEscapeWebFactory factory;
 
-    PathEscapeArc(string jingleRoot, FakeJinglePackStore store, PathEscapeWebFactory factory, HttpStatusCode status, string body)
+    PathEscapeArc(TempDir jingleRootDir, FakeJinglePackStore store, PathEscapeWebFactory factory, HttpStatusCode status, string body)
     {
-        JingleRoot = jingleRoot;
+        this.jingleRootDir = jingleRootDir;
         Store = store;
         this.factory = factory;
         Status = status;
@@ -808,7 +798,8 @@ file sealed class PathEscapeArc : IDisposable
 
     public static async Task<PathEscapeArc> RunAsync()
     {
-        var jingleRoot = Directory.CreateTempSubdirectory("t414-r3-pathescape-").FullName;
+        var jingleRootDir = new TempDir();
+        var jingleRoot = jingleRootDir.Path;
         try
         {
             var store = new FakeJinglePackStore();
@@ -818,16 +809,14 @@ file sealed class PathEscapeArc : IDisposable
             var response = await client.PostAsync($"/api/jingle-packs/{Slug}/install", null);
             var body = await response.Content.ReadAsStringAsync();
 
-            return new PathEscapeArc(jingleRoot, store, factory, response.StatusCode, body);
+            return new PathEscapeArc(jingleRootDir, store, factory, response.StatusCode, body);
         }
         catch
         {
             // Construction failed before ownership of jingleRoot passed to the returned instance's own
             // Dispose (the `using` in the calling Scenario never runs when RunAsync itself throws) — clean
             // it up here or it leaks forever (T414 review round 3 finding 5).
-            try { Directory.Delete(jingleRoot, recursive: true); }
-            catch (IOException) { /* best-effort cleanup */ }
-            catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
+            jingleRootDir.Dispose();
             throw;
         }
     }
@@ -835,9 +824,7 @@ file sealed class PathEscapeArc : IDisposable
     public void Dispose()
     {
         factory.Dispose();
-        try { Directory.Delete(JingleRoot, recursive: true); }
-        catch (IOException) { /* best-effort cleanup */ }
-        catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
+        jingleRootDir.Dispose();
     }
 }
 

@@ -5,10 +5,10 @@ namespace GenWave.Host.Tests;
 
 /// <summary>
 /// Sweeps <see cref="Path.GetTempPath"/> once per Host.Tests process (gh-#710, STORY-441, PLAN
-/// T479): the dev box accumulated ~60k <c>gw-*</c> scratch directories because specs that call
-/// <c>Directory.CreateTempSubdirectory</c> directly have no guaranteed cleanup path when a run is
-/// killed mid-test (a debugger stop, a CI cancellation, a crash) — <see cref="TempDir.Dispose"/>
-/// never runs, and the OS never reclaims <c>/tmp</c> on its own between container runs.
+/// T479): the dev box accumulated ~60k <c>gw-*</c> scratch directories because a spec that creates
+/// its own fresh scratch directory has no guaranteed cleanup path when a run is killed mid-test (a
+/// debugger stop, a CI cancellation, a crash) — <see cref="TempDir.Dispose"/> never runs, and the
+/// OS never reclaims <c>/tmp</c> on its own between container runs.
 ///
 /// Removes every directory under the real temp root whose name starts with <see
 /// cref="TempSweep.Prefixes"/> (<c>gw-</c>, <c>genwave-pawire-</c>, <c>story343-env-</c>,

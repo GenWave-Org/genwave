@@ -15,6 +15,22 @@ internal sealed class TempDir : IDisposable
 
     public string Path { get; }
 
+    /// <summary>
+    /// A scratch directory whose lifetime is the whole test process rather than one <c>using</c>
+    /// block — the third lifetime shape after <c>using var</c> and fixture-owned — for a static helper that hands a fresh path to many call sites
+    /// across a spec file — or across several — threading a per-call disposer through every one
+    /// of them would balloon the diff for no behavioural gain. <see cref="Dispose"/> runs once,
+    /// at <see cref="AppDomain.ProcessExit"/>, best-effort; a killed process leaves the directory
+    /// for the startup <c>TempSweep</c> to reclaim, exactly like every other <c>gw-*</c> scratch
+    /// dir.
+    /// </summary>
+    public static string CreateForProcessLifetime()
+    {
+        var dir = new TempDir();
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => dir.Dispose();
+        return dir.Path;
+    }
+
     public void Dispose()
     {
         if (disposed)

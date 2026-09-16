@@ -225,8 +225,8 @@ public sealed class Story425Collection : ICollectionFixture<Story425Arc>
 /// </summary>
 public sealed class Story425Arc : IAsyncLifetime
 {
-    string? authoredRoot;
-    string? failureAuthoredRoot;
+    TempDir? authoredRootDir;
+    TempDir? failureAuthoredRootDir;
 
     public string SpotTitle { get; } = "Approve promotes";
     public string AdsRootPrefix { get; private set; } = "";
@@ -279,18 +279,18 @@ public sealed class Story425Arc : IAsyncLifetime
         // A local, not a field — Story425Database is file-local (CS9051), the Story424Database
         // precedent one story over.
         await using var database = await Story425Database.StartAsync();
-        authoredRoot = Directory.CreateTempSubdirectory("t445-story425-approve-").FullName;
-        failureAuthoredRoot = Directory.CreateTempSubdirectory("t445-story425-approve-failure-").FullName;
-        AdsRootPrefix = Path.Combine(authoredRoot, "ads") + Path.DirectorySeparatorChar;
+        authoredRootDir = new TempDir();
+        failureAuthoredRootDir = new TempDir();
+        AdsRootPrefix = Path.Combine(authoredRootDir.Path, "ads") + Path.DirectorySeparatorChar;
 
         // AC5's own arrangement (STORY-425 AC5) — a regular FILE sitting exactly where
         // AdRenderService.PromotePreviewAsync's own Directory.CreateDirectory(adsRoot) must land,
         // reproducing even as CI's own root user (a bare permissions denial would not).
-        await File.WriteAllBytesAsync(Path.Combine(failureAuthoredRoot, "ads"), [0]);
+        await File.WriteAllBytesAsync(Path.Combine(failureAuthoredRootDir.Path, "ads"), [0]);
 
         await SeedAdsLibraryAsync(database.LibraryConnectionString);
 
-        await using var factory = new Story425WebFactory(database, authoredRoot);
+        await using var factory = new Story425WebFactory(database, authoredRootDir.Path);
         var client = factory.CreateClient();
         await LoginAsync(client);
 
@@ -311,8 +311,8 @@ public sealed class Story425Arc : IAsyncLifetime
         var (spotId, _) = await AdSpotJobTestHelpers.CreateDraftSpotWithScriptAsync(client, sponsorId, SpotTitle, script);
 
         var key = ComputeCurrentPreviewKey(script, sponsor, liveSettings);
-        var previewPath = Path.Combine(authoredRoot, "preview", $"{spotId}-{key}.wav");
-        Directory.CreateDirectory(Path.Combine(authoredRoot, "preview"));
+        var previewPath = Path.Combine(authoredRootDir.Path, "preview", $"{spotId}-{key}.wav");
+        Directory.CreateDirectory(Path.Combine(authoredRootDir.Path, "preview"));
         await File.WriteAllBytesAsync(previewPath, BuildMinimalWavBytes());
         await AdSpotJobTestHelpers.SetAdSpotPreviewStampAsync(database.StationConnectionString, spotId, previewPath, key, DateTime.UtcNow);
         PreviewPathBeforePromotion = previewPath;
@@ -352,7 +352,7 @@ public sealed class Story425Arc : IAsyncLifetime
         // by a rejected approve. ──
         var (staleSpotId, _) = await AdSpotJobTestHelpers.CreateDraftSpotWithScriptAsync(
             client, sponsorId, "Approve on stale preview", script);
-        var stalePreviewPath = Path.Combine(authoredRoot, "preview", $"{staleSpotId}-stale.wav");
+        var stalePreviewPath = Path.Combine(authoredRootDir.Path, "preview", $"{staleSpotId}-stale.wav");
         await File.WriteAllBytesAsync(stalePreviewPath, BuildMinimalWavBytes());
         await AdSpotJobTestHelpers.SetAdSpotPreviewStampAsync(
             database.StationConnectionString, staleSpotId, stalePreviewPath, new string('0', 64), DateTime.UtcNow);
@@ -373,7 +373,7 @@ public sealed class Story425Arc : IAsyncLifetime
         var (missingFileSpotId, _) = await AdSpotJobTestHelpers.CreateDraftSpotWithScriptAsync(
             client, sponsorId, "Approve on missing preview file", script);
         var missingFileKey = ComputeCurrentPreviewKey(script, sponsor, liveSettings);
-        var missingFilePreviewPath = Path.Combine(authoredRoot, "preview", $"{missingFileSpotId}-{missingFileKey}.wav");
+        var missingFilePreviewPath = Path.Combine(authoredRootDir.Path, "preview", $"{missingFileSpotId}-{missingFileKey}.wav");
         await File.WriteAllBytesAsync(missingFilePreviewPath, BuildMinimalWavBytes());
         await AdSpotJobTestHelpers.SetAdSpotPreviewStampAsync(
             database.StationConnectionString, missingFileSpotId, missingFilePreviewPath, missingFileKey, DateTime.UtcNow);
@@ -399,13 +399,13 @@ public sealed class Story425Arc : IAsyncLifetime
         var (escapedSpotId, _) = await AdSpotJobTestHelpers.CreateDraftSpotWithScriptAsync(
             client, sponsorId, "Approve on escaped preview path", script);
         var escapedKey = ComputeCurrentPreviewKey(script, sponsor, liveSettings);
-        var escapedPreviewPath = Path.Combine(authoredRoot, "preview", $"{escapedSpotId}-{escapedKey}.wav");
+        var escapedPreviewPath = Path.Combine(authoredRootDir.Path, "preview", $"{escapedSpotId}-{escapedKey}.wav");
         await File.WriteAllBytesAsync(escapedPreviewPath, BuildMinimalWavBytes());
         await AdSpotJobTestHelpers.SetAdSpotPreviewStampAsync(
             database.StationConnectionString, escapedSpotId, escapedPreviewPath, escapedKey, DateTime.UtcNow);
 
-        var outsideDirectory = Directory.CreateTempSubdirectory("t445-story425-preview-outside-").FullName;
-        var outsidePath = Path.Combine(outsideDirectory, "escape.wav");
+        using var outsideDirectoryDir = new TempDir();
+        var outsidePath = Path.Combine(outsideDirectoryDir.Path, "escape.wav");
         await File.WriteAllBytesAsync(outsidePath, BuildMinimalWavBytes());
         await AdSpotJobTestHelpers.SetAdSpotPreviewPathAsync(database.StationConnectionString, escapedSpotId, outsidePath);
 
@@ -431,19 +431,18 @@ public sealed class Story425Arc : IAsyncLifetime
         var escapedWarning = factory.Logs.Messages.FirstOrDefault(m => m.Contains($"spot {escapedSpotId}", StringComparison.Ordinal));
         EscapedPathWarningNamesTheSpotId = escapedWarning is not null;
         EscapedPathWarningOmitsTheRawPath = escapedWarning is not null && !escapedWarning.Contains(outsidePath, StringComparison.Ordinal);
-        Directory.Delete(outsideDirectory, recursive: true);
 
         // ── AC5 — a landing failure falls back to Approved with no media row, no partial state — its
         // own WebFactory/authored-root pair (see this file's own header remarks). ──
-        await using var failureFactory = new Story425WebFactory(database, failureAuthoredRoot);
+        await using var failureFactory = new Story425WebFactory(database, failureAuthoredRootDir.Path);
         var failureClient = failureFactory.CreateClient();
         await LoginAsync(failureClient);
 
         var (failureSpotId, _) = await AdSpotJobTestHelpers.CreateDraftSpotWithScriptAsync(
             failureClient, sponsorId, "Approve landing failure", script);
         var failureKey = ComputeCurrentPreviewKey(script, sponsor, liveSettings);
-        var failurePreviewPath = Path.Combine(failureAuthoredRoot, "preview", $"{failureSpotId}-{failureKey}.wav");
-        Directory.CreateDirectory(Path.Combine(failureAuthoredRoot, "preview"));
+        var failurePreviewPath = Path.Combine(failureAuthoredRootDir.Path, "preview", $"{failureSpotId}-{failureKey}.wav");
+        Directory.CreateDirectory(Path.Combine(failureAuthoredRootDir.Path, "preview"));
         await File.WriteAllBytesAsync(failurePreviewPath, BuildMinimalWavBytes());
         await AdSpotJobTestHelpers.SetAdSpotPreviewStampAsync(
             database.StationConnectionString, failureSpotId, failurePreviewPath, failureKey, DateTime.UtcNow);
@@ -461,15 +460,13 @@ public sealed class Story425Arc : IAsyncLifetime
         FailureRowPreviewKey = failureRow.PreviewKey;
         FailureRowPreviewAt = failureRow.PreviewAt;
         FailureLandedMediaRowCount = await AdSpotJobTestHelpers.CountLibraryMediaRowsUnderPathAsync(
-            database.LibraryConnectionString, Path.Combine(failureAuthoredRoot, "ads"));
+            database.LibraryConnectionString, Path.Combine(failureAuthoredRootDir.Path, "ads"));
     }
 
     public Task DisposeAsync()
     {
-        if (authoredRoot is not null && Directory.Exists(authoredRoot))
-            Directory.Delete(authoredRoot, recursive: true);
-        if (failureAuthoredRoot is not null && Directory.Exists(failureAuthoredRoot))
-            Directory.Delete(failureAuthoredRoot, recursive: true);
+        authoredRootDir?.Dispose();
+        failureAuthoredRootDir?.Dispose();
         return Task.CompletedTask;
     }
 

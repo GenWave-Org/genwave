@@ -114,6 +114,7 @@ file sealed class MountStub : IDisposable
 file sealed class ArmableMountStub : IDisposable
 {
     readonly WebApplication app;
+    readonly TempDir markerDir = new();
 
     public string Url { get; }
 
@@ -121,8 +122,7 @@ file sealed class ArmableMountStub : IDisposable
 
     public ArmableMountStub()
     {
-        MarkerPath = Path.Combine(
-            Directory.CreateTempSubdirectory("gw-setup-story345-arm-").FullName, "armed");
+        MarkerPath = Path.Combine(markerDir.Path, "armed");
 
         var builder = WebApplication.CreateEmptyBuilder(new WebApplicationOptions());
         builder.WebHost.UseKestrelCore().ConfigureKestrel(k => k.Listen(IPAddress.Loopback, 0));
@@ -154,6 +154,7 @@ file sealed class ArmableMountStub : IDisposable
     {
         app.StopAsync().GetAwaiter().GetResult();
         app.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        markerDir.Dispose();
     }
 }
 
@@ -240,12 +241,12 @@ public static class FeatureSetupLaunchClockHandoff
 
     static string MakeMediaDir(int flacCount)
     {
-        var dir = Directory.CreateTempSubdirectory("gw-setup-story345-media-").FullName;
+        var dir = TempDir.CreateForProcessLifetime();
         for (var i = 0; i < flacCount; i++) File.WriteAllText(Path.Combine(dir, $"track{i}.flac"), "");
         return dir;
     }
 
-    static string ScratchEnvDir() => Directory.CreateTempSubdirectory("gw-setup-story345-env-").FullName;
+    static string ScratchEnvDir() => TempDir.CreateForProcessLifetime();
 
     static string ScratchEnvPath() => Path.Combine(ScratchEnvDir(), ".env");
 
@@ -269,8 +270,7 @@ public static class FeatureSetupLaunchClockHandoff
     /// under this harness).</summary>
     static string WriteLaunchStub(int exitCode, string? argvLogPath = null)
     {
-        var path = Path.Combine(
-            Directory.CreateTempSubdirectory("gw-setup-story345-launch-").FullName, "launch-stub.sh");
+        var path = Path.Combine(TempDir.CreateForProcessLifetime(), "launch-stub.sh");
         var logLine = argvLogPath is null
             ? ""
             : $"printf '%s\\n' \"argv:$*\" >> \"{argvLogPath}\"\n" +
@@ -290,8 +290,7 @@ public static class FeatureSetupLaunchClockHandoff
     static string WriteLaunchStubThatArmsMountPartway(
         string markerPath, int armAfterSeconds, int totalRuntimeSeconds, int exitCode = 0)
     {
-        var path = Path.Combine(
-            Directory.CreateTempSubdirectory("gw-setup-story345-launch-").FullName, "launch-stub.sh");
+        var path = Path.Combine(TempDir.CreateForProcessLifetime(), "launch-stub.sh");
         var remainingSeconds = totalRuntimeSeconds - armAfterSeconds;
         // `: > markerPath`, not `touch` — a shell builtin, so this never depends on `touch`
         // being on the scratch PATH at all.
@@ -307,8 +306,7 @@ public static class FeatureSetupLaunchClockHandoff
     /// (near-instant) return under <see cref="WriteLaunchStub"/>.</summary>
     static string WriteDelayedLaunchStub(int sleepSeconds, int exitCode)
     {
-        var path = Path.Combine(
-            Directory.CreateTempSubdirectory("gw-setup-story345-launch-").FullName, "launch-stub.sh");
+        var path = Path.Combine(TempDir.CreateForProcessLifetime(), "launch-stub.sh");
         File.WriteAllText(path, $"#!/usr/bin/env bash\nsleep {sleepSeconds}\nexit {exitCode}\n");
         MakeExecutable(path);
         return path;
@@ -322,8 +320,7 @@ public static class FeatureSetupLaunchClockHandoff
     /// observes launch.sh's own final exit code).</summary>
     static string WriteLaunchStubThatSwallowsInt(int totalRuntimeSeconds, int exitCode)
     {
-        var path = Path.Combine(
-            Directory.CreateTempSubdirectory("gw-setup-story345-launch-").FullName, "launch-stub.sh");
+        var path = Path.Combine(TempDir.CreateForProcessLifetime(), "launch-stub.sh");
         File.WriteAllText(path,
             $"#!/usr/bin/env bash\ntrap '' INT\nsleep {totalRuntimeSeconds}\nexit {exitCode}\n");
         MakeExecutable(path);
@@ -420,7 +417,7 @@ public static class FeatureSetupLaunchClockHandoff
     static (int ExitCode, string StdOut, string StdErr) RunSetup(
         string binDir, string envFile, string stdinAnswers, IReadOnlyDictionary<string, string> extraEnv)
     {
-        var scratchDir = Directory.CreateTempSubdirectory("gw-setup-story345-stdin-").FullName;
+        var scratchDir = TempDir.CreateForProcessLifetime();
         var answersPath = Path.Combine(scratchDir, "answers.txt");
         File.WriteAllText(answersPath, stdinAnswers);
 
@@ -442,7 +439,7 @@ public static class FeatureSetupLaunchClockHandoff
         string binDir, string envFile, string stdinAnswers, IReadOnlyDictionary<string, string> extraEnv,
         TimeSpan sendAfter)
     {
-        var workDir = Directory.CreateTempSubdirectory("gw-setup-story345-sigint-").FullName;
+        var workDir = TempDir.CreateForProcessLifetime();
         var pgidFile = Path.Combine(workDir, "pgid");
         var answersPath = Path.Combine(workDir, "answers.txt");
         File.WriteAllText(answersPath, stdinAnswers);
@@ -553,8 +550,8 @@ public static class FeatureSetupLaunchClockHandoff
             // Bare invocation, no topology flags — GW_PRESET (just written to .env) IS the
             // topology (F132.5); the wizard's own contract is a bare ./launch.sh (T317 smoke,
             // the T318 task note's explicit ruling: no --no-launch escape hatch, no flags).
-            var argvLog = Path.Combine(
-                Directory.CreateTempSubdirectory("gw-setup-story345-argv-").FullName, "argv.log");
+            using var argvLogDir = new TempDir();
+            var argvLog = Path.Combine(argvLogDir.Path, "argv.log");
             var launchStub = WriteLaunchStub(exitCode: 0, argvLogPath: argvLog);
             // B2 (round-3 review): the stale-mount gate is now universal — a mount already
             // serving on the FIRST poll is indistinguishable from a stale/pre-existing stack, so
@@ -1558,8 +1555,8 @@ public static class FeatureSetupLaunchClockHandoff
             // pinned here is setup.sh's OWN half of the fix: the explicit render-before-print_
             // ready_to_launch call, made safe by preflight_print_report's idempotency guard
             // against the EXIT trap's own unconditional call later.
-            var argvLog = Path.Combine(
-                Directory.CreateTempSubdirectory("gw-setup-story345-argv-").FullName, "argv.log");
+            using var argvLogDir = new TempDir();
+            var argvLog = Path.Combine(argvLogDir.Path, "argv.log");
             var launchStub = WriteLaunchStub(exitCode: 0, argvLogPath: argvLog);
             using var mount = new MountStub(servesOnAttempt: 2);
             var mediaDir = MakeMediaDir(flacCount: 1);

@@ -111,7 +111,7 @@ internal static class GateHarness
     public static string MakeRepoCopy()
     {
         var root = RepoRootLocator.Find(AppContext.BaseDirectory);
-        var copy = Directory.CreateTempSubdirectory("story444-repo-").FullName;
+        var copy = TempDir.CreateForProcessLifetime();
         foreach (var entry in Directory.EnumerateFileSystemEntries(root))
         {
             var name = Path.GetFileName(entry);
@@ -154,8 +154,8 @@ internal static class GateHarness
     {
         bin ??= MakeBinDir();
         var copy = MakeRepoCopy();
-        var log = Path.Combine(Directory.CreateTempSubdirectory("story444-log-").FullName, "stub.log");
-        var report = Path.Combine(Directory.CreateTempSubdirectory("story444-report-").FullName, "out");
+        var log = Path.Combine(TempDir.CreateForProcessLifetime(), "stub.log");
+        var report = Path.Combine(TempDir.CreateForProcessLifetime(), "out");
 
         var extraEnv = new Dictionary<string, string>
         {
@@ -286,7 +286,7 @@ internal static class GateHarness
     /// optionally with a 3-second digital-silence gap in the middle.</summary>
     public static string MakeWav(double lufs, int seconds = 6, bool withGap = false)
     {
-        var path = Path.Combine(Directory.CreateTempSubdirectory("story445-wav-").FullName, "tone.wav");
+        var path = Path.Combine(TempDir.CreateForProcessLifetime(), "tone.wav");
         var half = seconds / 2;
         var graph = withGap
             ? $"sine=frequency=440:duration={half},loudnorm=I={lufs}:TP=-1:LRA=7[a];anullsrc=r=48000:cl=mono:d=3[s];sine=frequency=440:duration={half},loudnorm=I={lufs}:TP=-1:LRA=7[b];[a][s][b]concat=n=3:v=0:a=1"

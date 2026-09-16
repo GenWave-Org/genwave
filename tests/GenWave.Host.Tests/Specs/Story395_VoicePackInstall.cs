@@ -28,6 +28,7 @@ using GenWave.Core.Abstractions;
 using GenWave.Host.Api;
 using GenWave.Host.Catalog;
 using GenWave.Host.Tests.Fakes;
+using GenWave.Host.Tests.Support;
 
 namespace GenWave.Host.Tests.Specs;
 
@@ -560,59 +561,51 @@ public static class FeatureVoicePackInstallGoesLiveWithoutARestart
             // way. A SECOND, fresh factory instance is also what a real cancelled-reinstall needs —
             // CatalogProxyService's own 15-minute cache means only a cold cache (a fresh app instance)
             // actually re-fetches instead of replaying the FIRST install's own cached asset bytes.
-            var voicesRoot = Directory.CreateTempSubdirectory("t413-story395-voices-reinstall-").FullName;
-            try
+            using var voicesRootDir = new TempDir();
+            var voicesRoot = voicesRootDir.Path;
+            var store = new FakeVoicePackStore();
+            string firstHash, secondHash;
+            await using (var firstFactory = new VoicePackInstallWebFactory(
+                store, voicesRoot, VoicePackInstallFixtures.FirstPtBytes, VoicePackInstallFixtures.SecondPtBytes))
             {
-                var store = new FakeVoicePackStore();
-                string firstHash, secondHash;
-                await using (var firstFactory = new VoicePackInstallWebFactory(
-                    store, voicesRoot, VoicePackInstallFixtures.FirstPtBytes, VoicePackInstallFixtures.SecondPtBytes))
-                {
-                    var firstClient = await VoicePackInstallWebFactory.LoggedInClientAsync(firstFactory);
-                    var first = await firstClient.PostAsync($"/api/voice-packs/{VoicePackInstallFixtures.InstallSlug}/install", null);
-                    Assert.True(first.IsSuccessStatusCode, await first.Content.ReadAsStringAsync());
+                var firstClient = await VoicePackInstallWebFactory.LoggedInClientAsync(firstFactory);
+                var first = await firstClient.PostAsync($"/api/voice-packs/{VoicePackInstallFixtures.InstallSlug}/install", null);
+                Assert.True(first.IsSuccessStatusCode, await first.Content.ReadAsStringAsync());
 
-                    firstHash = Convert.ToHexStringLower(SHA256.HashData(
-                        await File.ReadAllBytesAsync(Path.Combine(voicesRoot, "af_first.pt"))));
-                    secondHash = Convert.ToHexStringLower(SHA256.HashData(
-                        await File.ReadAllBytesAsync(Path.Combine(voicesRoot, "af_second.pt"))));
-                }
-
-                store.ThrowOnUpsert = new OperationCanceledException("simulated client disconnect mid-upsert");
-                await using (var secondFactory = new VoicePackInstallWebFactory(
-                    store, voicesRoot,
-                    VoicePackInstallFixtures.SecondInstallFirstPtBytes, VoicePackInstallFixtures.SecondInstallSecondPtBytes))
-                {
-                    var secondClient = await VoicePackInstallWebFactory.LoggedInClientAsync(secondFactory);
-                    try
-                    {
-                        await secondClient.PostAsync($"/api/voice-packs/{VoicePackInstallFixtures.InstallSlug}/install", null);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        // Rethrowing past the action (rather than answering with a 500) is the fix's
-                        // own point — the client genuinely disconnected, so there is no one left to
-                        // answer. TestServer resurfaces that unhandled exception at the call site;
-                        // either way, the disk/DB state asserted below is what this fact pins.
-                    }
-                }
-
-                var restoredFirstHash = Convert.ToHexStringLower(SHA256.HashData(
+                firstHash = Convert.ToHexStringLower(SHA256.HashData(
                     await File.ReadAllBytesAsync(Path.Combine(voicesRoot, "af_first.pt"))));
-                var restoredSecondHash = Convert.ToHexStringLower(SHA256.HashData(
+                secondHash = Convert.ToHexStringLower(SHA256.HashData(
                     await File.ReadAllBytesAsync(Path.Combine(voicesRoot, "af_second.pt"))));
-                Assert.Equal(firstHash, restoredFirstHash);
-                Assert.Equal(secondHash, restoredSecondHash);
-                Assert.Equal(1, store.PackCount);
-                Assert.Empty(Directory.EnumerateFiles(voicesRoot, "*.tmp"));
-                Assert.Empty(Directory.EnumerateFiles(voicesRoot, "*.prev-*"));
             }
-            finally
+
+            store.ThrowOnUpsert = new OperationCanceledException("simulated client disconnect mid-upsert");
+            await using (var secondFactory = new VoicePackInstallWebFactory(
+                store, voicesRoot,
+                VoicePackInstallFixtures.SecondInstallFirstPtBytes, VoicePackInstallFixtures.SecondInstallSecondPtBytes))
             {
-                try { Directory.Delete(voicesRoot, recursive: true); }
-                catch (IOException) { /* best-effort cleanup */ }
-                catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
+                var secondClient = await VoicePackInstallWebFactory.LoggedInClientAsync(secondFactory);
+                try
+                {
+                    await secondClient.PostAsync($"/api/voice-packs/{VoicePackInstallFixtures.InstallSlug}/install", null);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Rethrowing past the action (rather than answering with a 500) is the fix's
+                    // own point — the client genuinely disconnected, so there is no one left to
+                    // answer. TestServer resurfaces that unhandled exception at the call site;
+                    // either way, the disk/DB state asserted below is what this fact pins.
+                }
             }
+
+            var restoredFirstHash = Convert.ToHexStringLower(SHA256.HashData(
+                await File.ReadAllBytesAsync(Path.Combine(voicesRoot, "af_first.pt"))));
+            var restoredSecondHash = Convert.ToHexStringLower(SHA256.HashData(
+                await File.ReadAllBytesAsync(Path.Combine(voicesRoot, "af_second.pt"))));
+            Assert.Equal(firstHash, restoredFirstHash);
+            Assert.Equal(secondHash, restoredSecondHash);
+            Assert.Equal(1, store.PackCount);
+            Assert.Empty(Directory.EnumerateFiles(voicesRoot, "*.tmp"));
+            Assert.Empty(Directory.EnumerateFiles(voicesRoot, "*.prev-*"));
         }
     }
 
@@ -1098,7 +1091,7 @@ file sealed class VoicePackInstallWebFactory : WebApplicationFactory<Program>
 
     readonly FakeVoicePackStore store;
     readonly FakeHttpMessageHandler handler;
-    readonly bool ownsVoicesRoot;
+    readonly TempDir? ownedVoicesRoot;
     readonly bool adminEnabled;
 
     public string VoicesRoot { get; }
@@ -1107,8 +1100,7 @@ file sealed class VoicePackInstallWebFactory : WebApplicationFactory<Program>
     /// listing scenario reuse this factory for its kill-switch fact rather than standing up a
     /// parallel one — every other caller leaves it at its default (true, the app's own default).</summary>
     public VoicePackInstallWebFactory(FakeVoicePackStore store, bool adminEnabled = true)
-        : this(store, Directory.CreateTempSubdirectory("t413-story395-voices-").FullName,
-            VoicePackInstallFixtures.FirstPtBytes, VoicePackInstallFixtures.SecondPtBytes, ownsVoicesRoot: true, adminEnabled)
+        : this(store, new TempDir(), VoicePackInstallFixtures.FirstPtBytes, VoicePackInstallFixtures.SecondPtBytes, adminEnabled)
     {
     }
 
@@ -1123,17 +1115,26 @@ file sealed class VoicePackInstallWebFactory : WebApplicationFactory<Program>
     /// both instances.
     /// </summary>
     public VoicePackInstallWebFactory(FakeVoicePackStore store, string voicesRoot, byte[] firstPtBytes, byte[] secondPtBytes)
-        : this(store, voicesRoot, firstPtBytes, secondPtBytes, ownsVoicesRoot: false, adminEnabled: true)
+        : this(store, voicesRoot, firstPtBytes, secondPtBytes, ownedVoicesRoot: null, adminEnabled: true)
+    {
+    }
+
+    /// <summary>The self-creating constructor's own <see cref="TempDir"/> flows through as BOTH the
+    /// resolved <paramref name="ownedRoot"/> path and the disposer this instance owns — created once,
+    /// here, never twice.</summary>
+    VoicePackInstallWebFactory(
+        FakeVoicePackStore store, TempDir ownedRoot, byte[] firstPtBytes, byte[] secondPtBytes, bool adminEnabled)
+        : this(store, ownedRoot.Path, firstPtBytes, secondPtBytes, ownedRoot, adminEnabled)
     {
     }
 
     VoicePackInstallWebFactory(
-        FakeVoicePackStore store, string voicesRoot, byte[] firstPtBytes, byte[] secondPtBytes, bool ownsVoicesRoot,
+        FakeVoicePackStore store, string voicesRoot, byte[] firstPtBytes, byte[] secondPtBytes, TempDir? ownedVoicesRoot,
         bool adminEnabled)
     {
         this.store = store;
         VoicesRoot = voicesRoot;
-        this.ownsVoicesRoot = ownsVoicesRoot;
+        this.ownedVoicesRoot = ownedVoicesRoot;
         this.adminEnabled = adminEnabled;
         handler = VoicePackInstallFixtures.BuildRoutedHandler(voicesRoot, firstPtBytes, secondPtBytes);
     }
@@ -1160,11 +1161,9 @@ file sealed class VoicePackInstallWebFactory : WebApplicationFactory<Program>
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing && ownsVoicesRoot)
+        if (disposing)
         {
-            try { Directory.Delete(VoicesRoot, recursive: true); }
-            catch (IOException) { /* best-effort cleanup */ }
-            catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
+            ownedVoicesRoot?.Dispose();
         }
 
         base.Dispose(disposing);

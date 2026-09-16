@@ -125,20 +125,12 @@ public sealed class JinglePackReinstallOrphansArc : IAsyncLifetime
     public async Task InitializeAsync()
     {
         await using var database = await JinglePackReinstallOrphansDatabase.StartAsync();
-        var jingleRoot = Directory.CreateTempSubdirectory("t414-r2-f34-jingle-").FullName;
-        try
-        {
-            await SeedAdsLibraryAsync(database.LibraryConnectionString);
+        using var jingleRootDir = new TempDir();
+        var jingleRoot = jingleRootDir.Path;
+        await SeedAdsLibraryAsync(database.LibraryConnectionString);
 
-            await RunCleanDropAsync(database, jingleRoot);
-            await RunRefusedDropAsync(database, jingleRoot);
-        }
-        finally
-        {
-            try { Directory.Delete(jingleRoot, recursive: true); }
-            catch (IOException) { /* best-effort cleanup */ }
-            catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
-        }
+        await RunCleanDropAsync(database, jingleRoot);
+        await RunRefusedDropAsync(database, jingleRoot);
     }
 
     async Task RunCleanDropAsync(JinglePackReinstallOrphansDatabase database, string jingleRoot)
