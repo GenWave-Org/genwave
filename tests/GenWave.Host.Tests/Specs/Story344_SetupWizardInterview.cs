@@ -139,7 +139,7 @@ public static class FeatureSetupWizardInterview
         return dir;
     }
 
-    static string ScratchEnvDir() => Directory.CreateTempSubdirectory("gw-setup-story344-env-").FullName;
+    static string ScratchEnvDir() => TempDir.CreateForProcessLifetime();
 
     static string ScratchEnvPath() => Path.Combine(ScratchEnvDir(), ".env");
 
@@ -153,7 +153,7 @@ public static class FeatureSetupWizardInterview
     /// <summary>A fresh scratch directory holding the given count of .flac/.mp3 files (and nothing else).</summary>
     static string MakeMediaDir(int flacCount = 0, int mp3Count = 0)
     {
-        var dir = Directory.CreateTempSubdirectory("gw-setup-story344-media-").FullName;
+        var dir = TempDir.CreateForProcessLifetime();
         for (var i = 0; i < flacCount; i++) File.WriteAllText(Path.Combine(dir, $"track{i}.flac"), "");
         for (var i = 0; i < mp3Count; i++) File.WriteAllText(Path.Combine(dir, $"track{i}.mp3"), "");
         return dir;
@@ -174,7 +174,7 @@ public static class FeatureSetupWizardInterview
         string binDir, string envFile, string stdinAnswers,
         IReadOnlyDictionary<string, string>? extraEnv = null)
     {
-        var scratchDir = Directory.CreateTempSubdirectory("gw-setup-story344-stdin-").FullName;
+        var scratchDir = TempDir.CreateForProcessLifetime();
         var answersPath = Path.Combine(scratchDir, "answers.txt");
         File.WriteAllText(answersPath, stdinAnswers);
 
@@ -190,8 +190,7 @@ public static class FeatureSetupWizardInterview
     /// WriteLaunchStub (file-scoped there too, so duplicated rather than shared).</summary>
     static string WriteExitZeroLaunchStub()
     {
-        var path = Path.Combine(
-            Directory.CreateTempSubdirectory("gw-setup-story344-launch-").FullName, "launch-stub.sh");
+        var path = Path.Combine(TempDir.CreateForProcessLifetime(), "launch-stub.sh");
         File.WriteAllText(path, "#!/usr/bin/env bash\nexit 0\n");
         if (!OperatingSystem.IsWindows())
         {
@@ -276,7 +275,8 @@ public static class FeatureSetupWizardInterview
             // GW_MEMINFO_FILE + GW_ARCH report a 3 GiB x86_64 box -> piper-only recommended; the
             // owner overrides to Full at the prompt (answer "1"). The final .env must honor the
             // OVERRIDE, not the recommendation.
-            var meminfo = Path.Combine(Directory.CreateTempSubdirectory("gw-setup-story344-ram-").FullName, "meminfo");
+            using var meminfoDir = new TempDir();
+            var meminfo = Path.Combine(meminfoDir.Path, "meminfo");
             File.WriteAllText(meminfo, "MemTotal:        3945000 kB\nMemFree:          100000 kB\n");
             var mediaDir = MakeMediaDir(flacCount: 1);
             var envFile = ScratchEnvPath();
@@ -337,7 +337,8 @@ public static class FeatureSetupWizardInterview
         {
             // A beefy arm64 box (16 GiB) — bare arch used to force piper-only regardless of
             // headroom; the recommendation must now follow the RAM, same as any other arch.
-            var meminfo = Path.Combine(Directory.CreateTempSubdirectory("gw-setup-story344-ram-").FullName, "meminfo");
+            using var meminfoDir = new TempDir();
+            var meminfo = Path.Combine(meminfoDir.Path, "meminfo");
             File.WriteAllText(meminfo, "MemTotal:        16000000 kB\nMemFree:          1000000 kB\n");
             var mediaDir = MakeMediaDir(flacCount: 1);
             var envFile = ScratchEnvPath();

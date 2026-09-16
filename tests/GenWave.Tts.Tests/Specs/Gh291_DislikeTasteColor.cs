@@ -13,6 +13,7 @@
 
 namespace GenWave.Tts.Tests.Specs;
 
+using Microsoft.Extensions.Time.Testing;
 using GenWave.Core.Domain;
 using GenWave.Tts.Tests.Fakes;
 

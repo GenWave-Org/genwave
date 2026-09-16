@@ -69,7 +69,7 @@ public static class FeatureAFailedMigrationStopsTheLaunch
     static string MakeScratchRepo(bool plantFailingMigration)
     {
         var root = RepoRootLocator.Find(AppContext.BaseDirectory);
-        var scratch = Directory.CreateTempSubdirectory("story436-repo-").FullName;
+        var scratch = TempDir.CreateForProcessLifetime();
         foreach (var entry in Directory.EnumerateFileSystemEntries(root))
         {
             var name = Path.GetFileName(entry);
@@ -96,7 +96,7 @@ public static class FeatureAFailedMigrationStopsTheLaunch
     /// <summary>The six required secrets, via preflight's GW_ENV_FILE seam — never the real .env.</summary>
     static string WriteEnvFile()
     {
-        var path = Path.Combine(Directory.CreateTempSubdirectory("story436-env-").FullName, "test.env");
+        var path = Path.Combine(TempDir.CreateForProcessLifetime(), "test.env");
         File.WriteAllLines(path,
         [
             "POSTGRES_PASSWORD=x", "LIBRARY_DB_PASSWORD=x", "STATION_DB_PASSWORD=x",
@@ -125,7 +125,7 @@ public static class FeatureAFailedMigrationStopsTheLaunch
     {
         var bin = MakeBinDir();
         var scratch = MakeScratchRepo(plantFailingMigration);
-        var log = Path.Combine(Directory.CreateTempSubdirectory("story436-log-").FullName, "docker.log");
+        var log = Path.Combine(TempDir.CreateForProcessLifetime(), "docker.log");
 
         var extraEnv = new Dictionary<string, string>
         {

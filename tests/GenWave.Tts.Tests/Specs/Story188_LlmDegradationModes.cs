@@ -21,6 +21,7 @@
 // (Story188_DegradationStatusEndpoint.cs), not here.
 
 using Xunit;
+using Microsoft.Extensions.Time.Testing;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Tts.Tests.Fakes;

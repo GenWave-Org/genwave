@@ -120,39 +120,18 @@ internal static class CrosstalkWorkerHarness
 {
     /// <summary>
     /// Hygiene fix (round-N review — the leaked-temp-dir finding): every <see cref="BuildAsync"/> call
-    /// used to hand <see cref="CrosstalkAssembler"/> a FRESH <c>Directory.CreateTempSubdirectory</c>
-    /// root of its own, straight under the OS temp directory, with nothing ever deleting it — hundreds
-    /// of orphaned <c>crosstalk-worker-test-*</c> directories accumulate on a box that has run this
-    /// suite repeatedly (this file alone is called from three spec files, several times each), eventually
-    /// exhausting tmpfs inodes and silently redding unrelated facts across the whole test run. ONE
-    /// shared root for the WHOLE test process instead, created lazily on first use; each
-    /// <see cref="BuildAsync"/> call gets its own uniquely-named SUBdirectory underneath it, and
-    /// <see cref="AppDomain.ProcessExit"/> deletes the entire root, recursively, exactly once, when the
+    /// used to hand <see cref="CrosstalkAssembler"/> a FRESH scratch directory of its own, straight
+    /// under the OS temp directory, with nothing ever deleting it — hundreds of orphaned directories
+    /// accumulate on a box that has run this suite repeatedly (this file alone is called from three
+    /// spec files, several times each), eventually exhausting tmpfs inodes and silently redding
+    /// unrelated facts across the whole test run. ONE shared root for the WHOLE test process instead
+    /// (<see cref="TempDir.CreateForProcessLifetime"/>), created lazily on first use; each
+    /// <see cref="BuildAsync"/> call gets its own uniquely-named SUBdirectory underneath it, and the
+    /// shared root's own disposal deletes everything beneath it, recursively, exactly once, when the
     /// test host process itself ends — no per-call disposal for every one of the many call sites across
     /// Story328/Story353/Story354 to thread through.
     /// </summary>
-    static readonly string SharedTempRoot = CreateSharedTempRoot();
-
-    static string CreateSharedTempRoot()
-    {
-        var root = Directory.CreateTempSubdirectory("crosstalk-worker-tests-").FullName;
-        AppDomain.CurrentDomain.ProcessExit += (_, _) =>
-        {
-            try
-            {
-                Directory.Delete(root, recursive: true);
-            }
-            catch (IOException)
-            {
-                // Best-effort cleanup — a stray open handle at process teardown never fails the run.
-            }
-            catch (UnauthorizedAccessException)
-            {
-                // Same — teardown ordering is not guaranteed, so this is advisory, not load-bearing.
-            }
-        };
-        return root;
-    }
+    static readonly string SharedTempRoot = TempDir.CreateForProcessLifetime();
 
     static readonly string WellFormedReply = string.Join('\n', new[]
     {

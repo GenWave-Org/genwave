@@ -164,7 +164,7 @@ public static class ScriptProcess
     /// symlinked in and nothing else — a scenario adds a scripted stub on top with <see cref="AddStub"/>.</summary>
     public static string MakeBinDir(params string[] extraTools)
     {
-        var dir = Directory.CreateTempSubdirectory("gw-script-bin-").FullName;
+        var dir = TempDir.CreateForProcessLifetime();
         foreach (var tool in BaseTools.Concat(extraTools).Distinct(StringComparer.Ordinal))
             File.CreateSymbolicLink(Path.Combine(dir, tool), ResolveTool(tool));
         return dir;

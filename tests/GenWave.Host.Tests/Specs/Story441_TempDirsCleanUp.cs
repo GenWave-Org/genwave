@@ -3,8 +3,8 @@
 // BDD specification — xUnit. AC1–AC3 drive TempDir; AC5–AC7 drive TempSweep.Run over a scratch root
 // (never the real temp root); AC4 and AC8 are source pins over tests/GenWave.Host.Tests.
 //
-// RED at plan time: TempDir/TempSweep are throwing skeletons; 28 files still call
-// Directory.CreateTempSubdirectory directly.
+// Was red at plan time (throwing skeletons, 28 files creating their own scratch directories);
+// green since T479/T480.
 
 using GenWave.Host.Tests.Support;
 
@@ -12,8 +12,9 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureTestTempDirectoriesCleanUpAfterThemselves
 {
-    const string PendingType = "pending: T479 — TempDir + TempSweep + the once-per-process sweep (STORY-441)";
-    const string PendingCallSites = "pending: T480 — every CreateTempSubdirectory call site moves onto TempDir (STORY-441)";
+    // Split so this file's own source text never trips the scan below (which greps for the very
+    // same API name it is asserting nothing but TempDir.cs still calls).
+    const string Needle = "CreateTemp" + "Subdirectory";
 
     static string HostTestsDir =>
         Path.Combine(RepoRootLocator.Find(AppContext.BaseDirectory), "tests", "GenWave.Host.Tests");
@@ -32,7 +33,7 @@ public static class FeatureTestTempDirectoriesCleanUpAfterThemselves
             path = dir.Path;
         }
 
-        [Fact(Skip = PendingType)]
+        [Fact]
         public void StartsWithTheTempRootAndPrefix() =>
             Assert.StartsWith(Path.Combine(Path.GetTempPath(), TempDir.Prefix), path, StringComparison.Ordinal);
     }
@@ -50,7 +51,7 @@ public static class FeatureTestTempDirectoriesCleanUpAfterThemselves
             dir.Dispose();
         }
 
-        [Fact(Skip = PendingType)]
+        [Fact]
         public void TheDirectoryIsGone() => Assert.False(Directory.Exists(path));
     }
 
@@ -58,41 +59,42 @@ public static class FeatureTestTempDirectoriesCleanUpAfterThemselves
     // HAPPY PATH — TempSweep
     // ---------------------------------------------------------------------
 
-    public sealed class ScenarioTheSweepRemovesStaleAndKeepsFresh
+    public sealed class ScenarioTheSweepRemovesStaleAndKeepsFresh : IDisposable
     {
-        readonly string root;
+        readonly TempDir root = new();
 
         public ScenarioTheSweepRemovesStaleAndKeepsFresh()
         {
-            root = Directory.CreateTempSubdirectory("story441-root-").FullName;
             var stale = DateTime.UtcNow - TimeSpan.FromHours(2);
             foreach (var name in new[] { "gw-stale", "genwave-pawire-x", "story343-env-x", "gh332-x", "unrelated-x" })
             {
-                var dir = Directory.CreateDirectory(Path.Combine(root, name));
+                var dir = Directory.CreateDirectory(Path.Combine(root.Path, name));
                 Directory.SetLastWriteTimeUtc(dir.FullName, stale);
             }
-            Directory.CreateDirectory(Path.Combine(root, "gw-fresh"));
+            Directory.CreateDirectory(Path.Combine(root.Path, "gw-fresh"));
 
-            TempSweep.Run(root, olderThan: TimeSpan.FromHours(1));
+            TempSweep.Run(root.Path, olderThan: TimeSpan.FromHours(1));
         }
 
-        [Fact(Skip = PendingType)]
-        public void GwStaleIsGone() => Assert.False(Directory.Exists(Path.Combine(root, "gw-stale")));
+        public void Dispose() => root.Dispose();
 
-        [Fact(Skip = PendingType)]
-        public void GwFreshRemains() => Assert.True(Directory.Exists(Path.Combine(root, "gw-fresh")));
+        [Fact]
+        public void GwStaleIsGone() => Assert.False(Directory.Exists(Path.Combine(root.Path, "gw-stale")));
 
-        [Fact(Skip = PendingType)]
-        public void PawireIsGone() => Assert.False(Directory.Exists(Path.Combine(root, "genwave-pawire-x")));
+        [Fact]
+        public void GwFreshRemains() => Assert.True(Directory.Exists(Path.Combine(root.Path, "gw-fresh")));
 
-        [Fact(Skip = PendingType)]
-        public void Story343EnvIsGone() => Assert.False(Directory.Exists(Path.Combine(root, "story343-env-x")));
+        [Fact]
+        public void PawireIsGone() => Assert.False(Directory.Exists(Path.Combine(root.Path, "genwave-pawire-x")));
 
-        [Fact(Skip = PendingType)]
-        public void Gh332IsGone() => Assert.False(Directory.Exists(Path.Combine(root, "gh332-x")));
+        [Fact]
+        public void Story343EnvIsGone() => Assert.False(Directory.Exists(Path.Combine(root.Path, "story343-env-x")));
 
-        [Fact(Skip = PendingType)]
-        public void UnrelatedRemains() => Assert.True(Directory.Exists(Path.Combine(root, "unrelated-x")));
+        [Fact]
+        public void Gh332IsGone() => Assert.False(Directory.Exists(Path.Combine(root.Path, "gh332-x")));
+
+        [Fact]
+        public void UnrelatedRemains() => Assert.True(Directory.Exists(Path.Combine(root.Path, "unrelated-x")));
     }
 
     public sealed class ScenarioTheSweepRunsOncePerProcess
@@ -105,18 +107,18 @@ public static class FeatureTestTempDirectoriesCleanUpAfterThemselves
             .Where(f => File.ReadAllText(f).Contains("TempSweep.Run(Path.GetTempPath()", StringComparison.Ordinal))
             .ToArray();
 
-        [Fact(Skip = PendingType)]
+        [Fact]
         public void ExactlyOneInitializerCallsTheSweep() => Assert.Single(callers);
     }
 
-    public sealed class ScenarioNoSpecCallsCreateTempSubdirectoryDirectly
+    public sealed class ScenarioNoSpecBypassesTempDir
     {
         readonly string[] hits = Directory.EnumerateFiles(HostTestsDir, "*.cs", SearchOption.AllDirectories)
-            .Where(f => File.ReadAllText(f).Contains("CreateTempSubdirectory", StringComparison.Ordinal))
+            .Where(f => File.ReadAllText(f).Contains(Needle, StringComparison.Ordinal))
             .Select(f => Path.GetRelativePath(HostTestsDir, f))
             .ToArray();
 
-        [Fact(Skip = PendingCallSites)]
+        [Fact]
         public void TheOnlyHitIsTempDir() =>
             Assert.Equal([Path.Combine("Support", "TempDir.cs")], hits);
     }
@@ -136,7 +138,7 @@ public static class FeatureTestTempDirectoriesCleanUpAfterThemselves
             caught = Record.Exception(dir.Dispose);
         }
 
-        [Fact(Skip = PendingType)]
+        [Fact]
         public void NoExceptionEscapes() => Assert.Null(caught);
     }
 }

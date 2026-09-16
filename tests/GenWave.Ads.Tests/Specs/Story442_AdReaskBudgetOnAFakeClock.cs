@@ -7,8 +7,8 @@
 // The writer is built the Story390 way (real recorder/ring/counters, fakes at the HTTP/options/mode
 // seams) with a FakeTimeProvider in place of TimeProvider.System.
 //
-// RED at plan time: NewAttemptBudget uses CancelAfter on the wall clock — AC5 passes only after a
-// real 5-second wait, so AC6 fails.
+// Went green at T484: AdScriptWriter.WriteAsync now builds each attempt's budget as
+// new CancellationTokenSource(delay, timeProvider), so fake time advances it instead of a real wait.
 
 using System.Diagnostics;
 using GenWave.Ads.Tests.Fakes;
@@ -20,8 +20,6 @@ namespace GenWave.Ads.Tests.Specs;
 
 public static class FeatureAdReaskBudgetOnAFakeClock
 {
-    const string Pending = "pending: T484 — AdScriptWriter's per-attempt budget is a fake-clock cancellation (STORY-442)";
-
     const int BudgetSeconds = 5;
     static readonly TimeSpan WallClockCeiling = TimeSpan.FromMilliseconds(500);
 
@@ -74,11 +72,11 @@ public static class FeatureAdReaskBudgetOnAFakeClock
 
         public Task DisposeAsync() => Task.CompletedTask;
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void TheAttemptResolvesToTimeout() =>
             Assert.Equal(LlmCallCause.Timeout, (result as AdScriptWriteResult.Failed)?.Cause);
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void TheFactNeverWaitedOnTheWall() => Assert.True(elapsed < WallClockCeiling, $"took {elapsed}");
     }
 }

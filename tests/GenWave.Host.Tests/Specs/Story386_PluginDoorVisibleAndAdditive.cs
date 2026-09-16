@@ -161,11 +161,12 @@ public static class FeaturePluginDoorVisibleAndAdditive
 
     public sealed class ScenarioAPluginProviderJoinsTheFanOut : IDisposable
     {
-        readonly string root = Directory.CreateTempSubdirectory("genwave-host-plugin-door-").FullName;
+        readonly TempDir rootDir = new();
+        string root => rootDir.Path;
 
         public ScenarioAPluginProviderJoinsTheFanOut() => ExamplePluginBuildOutput.CopyInto(root, "example-dice");
 
-        public void Dispose() => Directory.Delete(root, recursive: true);
+        public void Dispose() => rootDir.Dispose();
 
         [Fact]
         public async Task ThePluginContextProviderResolvesAlongsideWeatherAndHistory()
@@ -184,9 +185,10 @@ public static class FeaturePluginDoorVisibleAndAdditive
 
     public sealed class ScenarioADriftingKeyGetterNeverReachesContextPipeline : IDisposable
     {
-        readonly string root = Directory.CreateTempSubdirectory("genwave-host-plugin-door-").FullName;
+        readonly TempDir rootDir = new();
+        string root => rootDir.Path;
 
-        public void Dispose() => Directory.Delete(root, recursive: true);
+        public void Dispose() => rootDir.Dispose();
 
         [Fact]
         public async Task TheValidatedKeyReachesThePipelineAndTheHostBootsCleanly()
@@ -220,7 +222,8 @@ public static class FeaturePluginDoorVisibleAndAdditive
 
     public sealed class ScenarioStatusReportsEveryOutcome : IDisposable
     {
-        readonly string root = Directory.CreateTempSubdirectory("genwave-host-plugin-door-").FullName;
+        readonly TempDir rootDir = new();
+        string root => rootDir.Path;
 
         public ScenarioStatusReportsEveryOutcome()
         {
@@ -228,7 +231,7 @@ public static class FeaturePluginDoorVisibleAndAdditive
             WriteBrokenPlugin(root, "broken-plugin");
         }
 
-        public void Dispose() => Directory.Delete(root, recursive: true);
+        public void Dispose() => rootDir.Dispose();
 
         [Fact]
         public async Task PluginsArrayCarriesTheLoadedPluginRow()
@@ -275,9 +278,10 @@ public static class FeaturePluginDoorVisibleAndAdditive
 
     public sealed class ScenarioASlugEmbeddingCrLfIsNeutralized : IDisposable
     {
-        readonly string root = Directory.CreateTempSubdirectory("genwave-host-plugin-door-").FullName;
+        readonly TempDir rootDir = new();
+        string root => rootDir.Path;
 
-        public void Dispose() => Directory.Delete(root, recursive: true);
+        public void Dispose() => rootDir.Dispose();
 
         [Fact]
         public async Task ACrLfEmbeddedSlugProducesASingleLineBoothSummaryAndLogMessage()
@@ -322,11 +326,12 @@ public static class FeaturePluginDoorVisibleAndAdditive
 
     public sealed class ScenarioPluginSettingsReadTheirOwnSection : IDisposable
     {
-        readonly string root = Directory.CreateTempSubdirectory("genwave-host-plugin-door-").FullName;
+        readonly TempDir rootDir = new();
+        string root => rootDir.Path;
 
         public ScenarioPluginSettingsReadTheirOwnSection() => ExamplePluginBuildOutput.CopyInto(root, "example-dice");
 
-        public void Dispose() => Directory.Delete(root, recursive: true);
+        public void Dispose() => rootDir.Dispose();
 
         [Fact]
         public async Task SettingReturnsTheConfiguredValueFromPluginsName()
@@ -388,39 +393,33 @@ public static class FeaturePluginDoorVisibleAndAdditive
         [Fact]
         public async Task OneKnobAloneLoadsNothingAndSaysWhichHalfIsMissing()
         {
-            var root = Directory.CreateTempSubdirectory("genwave-host-plugin-door-").FullName;
-            try
+            using var rootDir = new TempDir();
+            var root = rootDir.Path;
+            ExamplePluginBuildOutput.CopyInto(root, "example-dice");
+
+            // A path guaranteed never to exist — never the literal Plugins:Root DEFAULT, so this
+            // fact never depends on whatever this machine's own filesystem happens to hold at
+            // "/plugins" (STORY-385 AC1's own "root missing = Directory.Exists false" mechanism,
+            // proven against a path this test fully controls).
+            var neverMounted = Path.Combine(Path.GetTempPath(), $"genwave-plugins-never-mounted-{Guid.NewGuid():n}");
+
+            await using (var enabledOnly = new PluginDoorWebFactory(neverMounted, enabled: true))
             {
-                ExamplePluginBuildOutput.CopyInto(root, "example-dice");
-
-                // A path guaranteed never to exist — never the literal Plugins:Root DEFAULT, so this
-                // fact never depends on whatever this machine's own filesystem happens to hold at
-                // "/plugins" (STORY-385 AC1's own "root missing = Directory.Exists false" mechanism,
-                // proven against a path this test fully controls).
-                var neverMounted = Path.Combine(Path.GetTempPath(), $"genwave-plugins-never-mounted-{Guid.NewGuid():n}");
-
-                await using (var enabledOnly = new PluginDoorWebFactory(neverMounted, enabled: true))
-                {
-                    var status = enabledOnly.Services.GetRequiredService<PluginStatusAccessor>();
-                    Assert.NotNull(status.MissingKnobNote);
-                    Assert.Contains("mounted", status.MissingKnobNote, StringComparison.Ordinal);
-                    Assert.DoesNotContain(
-                        enabledOnly.Services.GetServices<IContextProvider>(), p => p.Key == "example-dice");
-                }
-
-                // The inverse: a real mount, but Plugins:Enabled left unset.
-                await using (var mountOnly = new PluginDoorWebFactory(root, enabled: null))
-                {
-                    var status = mountOnly.Services.GetRequiredService<PluginStatusAccessor>();
-                    Assert.NotNull(status.MissingKnobNote);
-                    Assert.Contains("Enabled", status.MissingKnobNote, StringComparison.Ordinal);
-                    Assert.DoesNotContain(
-                        mountOnly.Services.GetServices<IContextProvider>(), p => p.Key == "example-dice");
-                }
+                var status = enabledOnly.Services.GetRequiredService<PluginStatusAccessor>();
+                Assert.NotNull(status.MissingKnobNote);
+                Assert.Contains("mounted", status.MissingKnobNote, StringComparison.Ordinal);
+                Assert.DoesNotContain(
+                    enabledOnly.Services.GetServices<IContextProvider>(), p => p.Key == "example-dice");
             }
-            finally
+
+            // The inverse: a real mount, but Plugins:Enabled left unset.
+            await using (var mountOnly = new PluginDoorWebFactory(root, enabled: null))
             {
-                Directory.Delete(root, recursive: true);
+                var status = mountOnly.Services.GetRequiredService<PluginStatusAccessor>();
+                Assert.NotNull(status.MissingKnobNote);
+                Assert.Contains("Enabled", status.MissingKnobNote, StringComparison.Ordinal);
+                Assert.DoesNotContain(
+                    mountOnly.Services.GetServices<IContextProvider>(), p => p.Key == "example-dice");
             }
         }
 

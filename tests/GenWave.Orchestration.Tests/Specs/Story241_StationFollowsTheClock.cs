@@ -8,6 +8,7 @@
 
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using GenWave.Abstractions.Playout;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
@@ -456,7 +457,8 @@ public static class FeatureStationFollowsTheClock
         {
             // Now = 01:45 MST, inside a 01:30-03:30 wall-clock segment that straddles the gap.
             var now = new DateTimeOffset(2026, 3, 8, 8, 45, 0, TimeSpan.Zero);
-            var time = new FakeTimeProvider(now, DenverZone);
+            var time = new FakeTimeProvider(now);
+            time.SetLocalTimeZone(DenverZone); // Microsoft's FakeTimeProvider has no localTimeZone ctor param (gh-#723 / T482)
             var day = TimeZoneInfo.ConvertTime(now, DenverZone).DayOfWeek;
 
             var segment = new ScheduleSegment(
@@ -479,7 +481,8 @@ public static class FeatureStationFollowsTheClock
             // Now = 01:45 MDT (the first pass through the repeated hour), inside the same 01:30-03:30
             // wall-clock segment.
             var now = new DateTimeOffset(2026, 11, 1, 7, 45, 0, TimeSpan.Zero);
-            var time = new FakeTimeProvider(now, DenverZone);
+            var time = new FakeTimeProvider(now);
+            time.SetLocalTimeZone(DenverZone); // Microsoft's FakeTimeProvider has no localTimeZone ctor param (gh-#723 / T482)
             var day = TimeZoneInfo.ConvertTime(now, DenverZone).DayOfWeek;
 
             var segment = new ScheduleSegment(
@@ -503,7 +506,8 @@ public static class FeatureStationFollowsTheClock
             // Same transition day, but a 04:00-05:00 window well clear of the 02:00-03:00 gap — an
             // ordinary hour that must convert exactly, no DST arithmetic involved.
             var now = new DateTimeOffset(2026, 3, 8, 10, 30, 0, TimeSpan.Zero); // 04:30 MDT
-            var time = new FakeTimeProvider(now, DenverZone);
+            var time = new FakeTimeProvider(now);
+            time.SetLocalTimeZone(DenverZone); // Microsoft's FakeTimeProvider has no localTimeZone ctor param (gh-#723 / T482)
             var day = TimeZoneInfo.ConvertTime(now, DenverZone).DayOfWeek;
 
             var segment = new ScheduleSegment(
@@ -524,7 +528,8 @@ public static class FeatureStationFollowsTheClock
             // invalid hour and must step FORWARD to 03:00 MDT (T119 review F1a: neither existing DST
             // fact ever resolves an invalid/ambiguous BOUNDARY, only spans that merely cross the gap).
             var now = new DateTimeOffset(2026, 3, 8, 8, 0, 0, TimeSpan.Zero); // 01:00 MST (-07:00)
-            var time = new FakeTimeProvider(now, DenverZone);
+            var time = new FakeTimeProvider(now);
+            time.SetLocalTimeZone(DenverZone); // Microsoft's FakeTimeProvider has no localTimeZone ctor param (gh-#723 / T482)
             var day = TimeZoneInfo.ConvertTime(now, DenverZone).DayOfWeek;
 
             var segment = new ScheduleSegment(
@@ -544,7 +549,8 @@ public static class FeatureStationFollowsTheClock
             // BOUNDARY (01:30) is itself the ambiguous wall time — must resolve to the FIRST (still-MDT)
             // occurrence (T119 review F1b). Pins the Max()-not-Min() choice: Min() would give 08:30Z.
             var now = new DateTimeOffset(2026, 11, 1, 6, 30, 0, TimeSpan.Zero); // 00:30 MDT (-06:00)
-            var time = new FakeTimeProvider(now, DenverZone);
+            var time = new FakeTimeProvider(now);
+            time.SetLocalTimeZone(DenverZone); // Microsoft's FakeTimeProvider has no localTimeZone ctor param (gh-#723 / T482)
             var day = TimeZoneInfo.ConvertTime(now, DenverZone).DayOfWeek;
 
             var segment = new ScheduleSegment(
@@ -566,7 +572,8 @@ public static class FeatureStationFollowsTheClock
             // would hand back a boundary already 40 minutes in the past, violating OnAirSnapshot's "next
             // instant" contract. Must resolve to the SECOND occurrence instead.
             var now = new DateTimeOffset(2026, 11, 1, 8, 10, 0, TimeSpan.Zero); // 01:10 MST, second pass
-            var time = new FakeTimeProvider(now, DenverZone);
+            var time = new FakeTimeProvider(now);
+            time.SetLocalTimeZone(DenverZone); // Microsoft's FakeTimeProvider has no localTimeZone ctor param (gh-#723 / T482)
             var day = TimeZoneInfo.ConvertTime(now, DenverZone).DayOfWeek;
 
             var segment = new ScheduleSegment(
