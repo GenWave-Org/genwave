@@ -18,13 +18,17 @@
 #   --capture        records CAPTURE_SECS of the fresh leg's own live stream and measures it: no
 #                     silent gaps, loudness within TOL_LU of the station's own configured target,
 #                     speech aired through the booth log (requires --fresh)
-#   --chaos          fault injection INSIDE the capture leg's own recording (SPEC F178.8; requires
+#   --chaos          fault injection around the capture leg's own recording (SPEC F178.8; requires
 #                     --capture): api-down (T496) — `compose stop api`, sleep GATE_OUTAGE_SECS,
 #                     `compose start api`, then poll for a non-safe track_id within
 #                     GATE_RECOVERY_SECS; zero silence events during the outage, else the gate
 #                     leg fails "api-down silence" (not the capture leg's own "silence" — see
-#                     run_capture_leg's post-measure attribution). Engine-reconnect (T497) is not
-#                     yet implemented.
+#                     run_capture_leg's post-measure attribution). Engine-reconnect (T497) —
+#                     AFTER the capture leg finishes, only when api-down passed — `compose restart
+#                     engine`, wait for the container healthy, then poll for a non-safe track_id
+#                     within GATE_RECONNECT_SECS, else "engine-reconnect on-air"; then a FRESH
+#                     60-second capture measured for silence only, else "engine-reconnect silence"
+#                     (see run_engine_reconnect_scenario).
 #   --from <vX.Y.Z>  the previous release the upgrade leg starts from — overrides the newest
 #                     other `v*` GitHub release otherwise resolved via `gh release list`
 #   --report <dir>   write gate-report.md + gate-report.json there (default: .)
@@ -38,7 +42,8 @@
 # resolution, the worktree, and the stop/migrate/restart sequence. PLAN T494 added the role-
 # boundary check (SPEC F178.7) between the migration and the api restart. PLAN T496 added the
 # api-down chaos scenario (SPEC F178.8(a)) inside run_capture_leg's own recording (see
-# run_api_down_scenario). Engine-reconnect (SPEC F178.8(b)) is still pending, PLAN T497.
+# run_api_down_scenario). PLAN T497 added the engine-reconnect chaos scenario (SPEC F178.8(b)),
+# run right after run_capture_leg finishes rather than inside it (see run_engine_reconnect_scenario).
 #
 # Usage: tools/gate/stack_gate.sh --tag <vX.Y.Z> [--fresh] [--upgrade] [--capture] [--chaos]
 #                                  [--from <vX.Y.Z>] [--report <dir>]
@@ -64,9 +69,11 @@
 # 360, must be a positive integer) how long --capture records; GATE_OUTAGE_SECS (default 90, must
 # be a positive integer) how long --chaos's api-down scenario holds `api` stopped; GATE_RECOVERY_SECS
 # (default 120, must be a positive integer) the wall-clock budget the same scenario allows for a
-# non-safe track_id to reappear after `compose start api`; TOL_LU, SILENCE_FLOOR,
-# SILENCE_SECS — measure_audio.sh's own tolerance knobs, passed through untouched (see
-# tools/gate/measure_audio.sh).
+# non-safe track_id to reappear after `compose start api`; GATE_RECONNECT_SECS (default 60, must
+# be a positive integer) the wall-clock budget --chaos's engine-reconnect scenario allows for a
+# non-safe track_id to reappear after `compose restart engine` (health wait included); TOL_LU,
+# SILENCE_FLOOR, SILENCE_SECS — measure_audio.sh's own tolerance knobs, passed through untouched
+# (see tools/gate/measure_audio.sh).
 
 set -euo pipefail
 
@@ -149,18 +156,31 @@ CAPTURE_INTEGRATED_LUFS=""
 CAPTURE_BOOTH_LOG=""
 CAPTURE_FFMPEG_TAIL=""
 
-# Chaos leg measurements (T496, SPEC F178.8(a)) — the api-down scenario runs INSIDE run_capture_leg
-# itself (see run_api_down_scenario), never a leg of its own, so these are set there rather than
-# by a run_chaos_leg. CHAOS_API_DOWN_RAN flips to 1 the moment `compose stop api` is attempted —
-# it, not DO_CHAOS, is what the post-capture placeholder below reads to tell "the scenario really
-# ran" apart from "capture never got that far" (e.g. login/target failed first). CHAOS_OUTAGE_SECS
-# is the GATE_OUTAGE_SECS value once the outage actually happened; CHAOS_RECOVERY_SECS is the
-# elapsed seconds from `start api` to the first non-safe frame, empty if recovery never happened
-# within GATE_RECOVERY_SECS. T497 adds its own ENGINE_* twins alongside these, same pattern.
+# Chaos leg measurements (T496/T497, SPEC F178.8) — the api-down scenario runs INSIDE
+# run_capture_leg itself (see run_api_down_scenario); the engine-reconnect scenario runs right
+# AFTER run_capture_leg returns, only when api-down passed (see run_engine_reconnect_scenario).
+# Neither is a leg of its own, so these are set by the scenario functions rather than by a
+# run_chaos_leg. CHAOS_API_DOWN_RAN flips to 1 the moment `compose stop api` is attempted; it, not
+# DO_CHAOS, is what the post-capture code below reads to tell "the scenario really ran" apart from
+# "capture never got that far" (e.g. login/target failed first). ENGINE_RESTART_RAN is the same
+# flag for `compose restart engine`. CHAOS_OUTAGE_SECS is the GATE_OUTAGE_SECS value once the
+# outage actually happened; CHAOS_RECOVERY_SECS is the elapsed seconds from `start api` to the
+# first non-safe frame, empty if recovery never happened within GATE_RECOVERY_SECS — a single
+# source of truth per measurement, no separate "_OK" flag (an empty seconds string already means
+# "never reached"). ENGINE_ONAIR_SECS is the same shape for `restart engine`: elapsed seconds
+# (health wait included) to the first non-safe frame, empty if it never happened within
+# GATE_RECONNECT_SECS. ENGINE_SILENCE_EVENTS is the post-restart capture's own silence_events=
+# reading (SPEC F178.5(a) only — loudness is deliberately not judged here), empty if that capture
+# was never reached. ENGINE_CAPTURE_FFMPEG_TAIL is that capture's own ffmpeg tail, set only when
+# the recording itself fails, for the report's diagnostic line — never part of the JSON
+# measurements (mirrors CAPTURE_FFMPEG_TAIL).
 CHAOS_API_DOWN_RAN=0
 CHAOS_OUTAGE_SECS=""
 CHAOS_RECOVERY_SECS=""
-CHAOS_RECOVERY_OK=0
+ENGINE_RESTART_RAN=0
+ENGINE_ONAIR_SECS=""
+ENGINE_SILENCE_EVENTS=""
+ENGINE_CAPTURE_FFMPEG_TAIL=""
 
 # A background ffmpeg still recording on an abort (Ctrl-C, set -e) is not killed here on purpose:
 # it is bounded by `-t CAPTURE_SECS` and its source dies with the stack's `down -v` below.
@@ -251,6 +271,9 @@ if [ -n "${GATE_OUTAGE_SECS:-}" ] && ! [[ "$GATE_OUTAGE_SECS" =~ ^[1-9][0-9]*$ ]
 fi
 if [ -n "${GATE_RECOVERY_SECS:-}" ] && ! [[ "$GATE_RECOVERY_SECS" =~ ^[1-9][0-9]*$ ]]; then
   usage_error "GATE_RECOVERY_SECS must be a positive integer: $GATE_RECOVERY_SECS"
+fi
+if [ -n "${GATE_RECONNECT_SECS:-}" ] && ! [[ "$GATE_RECONNECT_SECS" =~ ^[1-9][0-9]*$ ]]; then
+  usage_error "GATE_RECONNECT_SECS must be a positive integer: $GATE_RECONNECT_SECS"
 fi
 
 # ---------------------------------------------------------------------------------------------
@@ -851,7 +874,6 @@ run_api_down_scenario() {
   local recovery_ok recovery_elapsed
   read -r recovery_ok recovery_elapsed < <(wait_for_onair "$scratch" "$project" "$recovery_budget")
   if [ "$recovery_ok" = "1" ]; then
-    CHAOS_RECOVERY_OK=1
     CHAOS_RECOVERY_SECS="$recovery_elapsed"
   fi
 }
@@ -936,7 +958,7 @@ run_capture_leg() {
   # "passed" here to "api-down silence" (silence is the outage's own verdict and wins over a slow
   # recovery — see the measure case below).
   if [ "$CHAOS_API_DOWN_RAN" = 1 ]; then
-    if [ "$CHAOS_RECOVERY_OK" = 1 ]; then
+    if [ -n "$CHAOS_RECOVERY_SECS" ]; then
       LEG_STATUS[chaos]="passed"; LEG_DETAIL[chaos]=""
     else
       LEG_STATUS[chaos]="failed"; LEG_DETAIL[chaos]="api-down recovery"
@@ -1000,6 +1022,90 @@ run_capture_leg() {
   fi
 }
 
+# run_engine_reconnect_scenario <scratch> <project> — SPEC F178.8(b) / STORY-447 (T497): runs
+# AFTER run_capture_leg has fully returned (its own recording, measure and booth-log steps all
+# done), never inside that recording — the api-down window's own capture must already have been
+# measured clean before the engine is touched at all, since a real reconnect briefly interrupts
+# the encode, and the test harness's fake stream flips to a different file the instant `restart
+# engine` is logged. Only called by the caller below when LEG_STATUS[chaos] is already "passed"
+# (api-down clean); resolves LEG_STATUS[chaos]/LEG_DETAIL[chaos] itself, unlike
+# run_api_down_scenario, since there is no later caller left to do it for this one.
+#
+# `compose restart engine` restarts ONLY the engine container (the same invocation shape
+# run_api_down_scenario uses, so the docker stub's `*" restart engine"*` case and a caller's own
+# `EndsWith("restart engine")` check both match) — api/icecast/db keep running throughout. The
+# engine reconnects to icecast on its own and, until it is fed again, plays the safe fallback it
+# pulls from the api (engine/genwave.liq); the non-safe track_id this scenario polls for is PUSHED
+# by the api's PlayoutFeederService, which opens a fresh TcpClient to the restarted control socket
+# on its next tick (src/GenWave.Host/Playout/PlayoutFeederService.cs). A reconnect that never
+# turns non-safe is therefore a feeder question first, not an engine one. A `compose restart
+# engine` that itself fails returns early with no frame measured, so it is reported as
+# "engine-reconnect on-air" — the spec's only on-air-side name — with the compose error on stderr.
+# wait_for_health anchors the gap clock to "the container reporting healthy" (SPEC F178.8(b)); the
+# api never actually goes unhealthy across an engine restart, so this returns at once on a real
+# stack — its own result isn't itself a pass/fail gate here (not named in AC5-AC7). ENGINE_ONAIR_SECS
+# is the total elapsed time from the restart command — health wait included — to the first
+# non-safe frame; GATE_RECONNECT_SECS (default 60) bounds only the on-air poll itself, reusing
+# wait_for_onair's own loop rather than a second one.
+run_engine_reconnect_scenario() {
+  local scratch="$1" project="$2"
+  local budget="${GATE_RECONNECT_SECS:-60}"
+  local gap_start=$SECONDS
+
+  ENGINE_RESTART_RAN=1
+  if ! (cd "$scratch" && docker compose -p "$project" "${COMPOSE_FILES[@]}" restart engine); then
+    LEG_STATUS[chaos]="failed"; LEG_DETAIL[chaos]="engine-reconnect on-air"
+    return
+  fi
+
+  wait_for_health >/dev/null
+
+  local onair_ok onair_elapsed
+  read -r onair_ok onair_elapsed < <(wait_for_onair "$scratch" "$project" "$budget")
+  if [ "$onair_ok" != "1" ]; then
+    LEG_STATUS[chaos]="failed"; LEG_DETAIL[chaos]="engine-reconnect on-air"
+    return
+  fi
+  ENGINE_ONAIR_SECS=$((SECONDS - gap_start))
+
+  # Post-restart capture (SPEC F178.8(b)): a FRESH 60-second recording — the spec fixes this
+  # scenario's own capture length, independent of CAPTURE_SECS (the api-down window's length) —
+  # same ffmpeg flags as run_capture_leg's own recording, foreground (nothing else needs to run
+  # concurrently with it, unlike the api-down scenario inside the backgrounded capture leg).
+  local reconnect_capture_secs=60
+  local stream_url="${GATE_STREAM_URL:-http://localhost:8000/stream}"
+  local ffmpeg_log_file="$scratch/ffmpeg-reconnect.log" ffmpeg_status=0
+  ffmpeg -nostats -hide_banner -loglevel error -y -reconnect 1 \
+      -i "$stream_url" -t "$reconnect_capture_secs" -ar 48000 -ac 1 "$scratch/capture-reconnect.wav" \
+      > "$ffmpeg_log_file" 2>&1 || ffmpeg_status=$?
+  if [ "$ffmpeg_status" -ne 0 ] || [ ! -s "$scratch/capture-reconnect.wav" ]; then
+    LEG_STATUS[chaos]="failed"; LEG_DETAIL[chaos]="engine-reconnect capture"
+    ENGINE_CAPTURE_FFMPEG_TAIL="$(tail -5 "$ffmpeg_log_file" 2>/dev/null || true)"
+    return
+  fi
+
+  # Silence only (SPEC F178.5(a), via F178.8(b): "passes F178.5(a)") — loudness is F178.5(b) and
+  # is deliberately NOT judged here, so measure_audio.sh's own exit code (which covers silence OR
+  # loudness together) is never read below, only its silence_events= field off stdout, present
+  # regardless of exit 0/1. CAPTURE_TARGET_LUFS is already set by the time this scenario can even
+  # run (it is read before run_capture_leg's own recording starts, and this only runs once that
+  # leg's chaos verdict is "passed") — --target is required by measure_audio.sh but its number
+  # plays no part in this scenario's own verdict.
+  local measure_out measure_status=0
+  measure_out="$("$root/tools/gate/measure_audio.sh" "$scratch/capture-reconnect.wav" \
+      --target "$CAPTURE_TARGET_LUFS")" || measure_status=$?
+  if [ "$measure_status" -ge 2 ]; then
+    LEG_STATUS[chaos]="failed"; LEG_DETAIL[chaos]="engine-reconnect measure"
+    return
+  fi
+  # Same leniency as the capture leg: a measure exit 0/1 with no silence_events= on stdout (not
+  # something measure_audio.sh does today) reads as no silence, with the null visible in the report.
+  ENGINE_SILENCE_EVENTS="$(printf '%s\n' "$measure_out" | sed -n 's/.*silence_events=\([0-9]*\).*/\1/p')"
+  if [ -n "$ENGINE_SILENCE_EVENTS" ] && [ "$ENGINE_SILENCE_EVENTS" -gt 0 ]; then
+    LEG_STATUS[chaos]="failed"; LEG_DETAIL[chaos]="engine-reconnect silence"
+  fi
+}
+
 if [ "$DO_CAPTURE" = 1 ]; then
   if [ "${LEG_STATUS[fresh]}" = "passed" ]; then
     run_capture_leg
@@ -1012,14 +1118,18 @@ fi
 
 # The api-down scenario (T496) runs INSIDE run_capture_leg itself (SPEC F178.8(a): "with capture
 # running") and resolves LEG_STATUS[chaos]/LEG_DETAIL[chaos] there before run_capture_leg
-# returns. `--chaos` without `--capture` already exits 2 at the usage check above, so the only
-# gap left here is "capture never got far enough to record at all" (e.g. its own login/target
-# call failed before the recording — or before this leg, --fresh itself never passed) — chaos
-# never ran in that case, and LEG_STATUS[chaos] is still empty.
-# T497 will add the engine-reconnect scenario here, right after the api-down one, still inside
-# run_capture_leg's own recording.
+# returns. `--chaos` without `--capture` already exits 2 at the usage check above, so one gap left
+# here is "capture never got far enough to record at all" (e.g. its own login/target call failed
+# before the recording — or before this leg, --fresh itself never passed) — chaos never ran in
+# that case, and LEG_STATUS[chaos] is still empty. The other gap: the engine-reconnect scenario
+# (T497) is a SEPARATE call, made here rather than from inside run_capture_leg, and only attempted
+# once api-down has already resolved "passed" — an api-down failure already stands as chaos's
+# first failure and the engine scenario simply never runs (its own measurements stay null, no
+# extra report line).
 if [ "$DO_CHAOS" = 1 ]; then
-  if [ -z "${LEG_STATUS[chaos]}" ]; then
+  if [ "${LEG_STATUS[chaos]}" = "passed" ]; then
+    run_engine_reconnect_scenario "$FRESH_SCRATCH" "$FRESH_PROJECT"
+  elif [ -z "${LEG_STATUS[chaos]}" ]; then
     LEG_STATUS[chaos]="skipped"; LEG_DETAIL[chaos]="capture leg did not record"
   fi
 else
@@ -1158,27 +1268,39 @@ upgrade_measurements_md() {
   return 0
 }
 
-# chaos_measurements_json — CHAOS_OUTAGE_SECS/CHAOS_RECOVERY_SECS as jq NUMBERs, or `null` for a
-# value the api-down scenario never reached (CHAOS_API_DOWN_RAN staying 0 means both are null).
+# chaos_measurements_json — CHAOS_OUTAGE_SECS/CHAOS_RECOVERY_SECS/ENGINE_ONAIR_SECS/
+# ENGINE_SILENCE_EVENTS as jq NUMBERs, or `null` for a value its own scenario never reached
+# (CHAOS_API_DOWN_RAN staying 0 means the first pair is null; ENGINE_RESTART_RAN staying 0 means
+# the second pair is null — the engine scenario only runs after a passed api-down, so the second
+# pair null never implies anything about the first, while the first pair null implies the second).
 chaos_measurements_json() {
   jq -n \
     --arg outage "$CHAOS_OUTAGE_SECS" \
     --arg recovery "$CHAOS_RECOVERY_SECS" \
+    --arg onair "$ENGINE_ONAIR_SECS" \
+    --arg silence "$ENGINE_SILENCE_EVENTS" \
     '{
       api_down_outage_secs: (if $outage == "" then null else ($outage | tonumber) end),
-      api_down_recovery_seconds: (if $recovery == "" then null else ($recovery | tonumber) end)
+      api_down_recovery_seconds: (if $recovery == "" then null else ($recovery | tonumber) end),
+      engine_reconnect_onair_seconds: (if $onair == "" then null else ($onair | tonumber) end),
+      engine_reconnect_silence_events: (if $silence == "" then null else ($silence | tonumber) end)
     }'
 }
 
 # chaos_measurements_md — the same facts as chaos_measurements_json, rendered as report lines;
-# "none" when the api-down scenario never ran at all.
+# "none" only when NEITHER scenario ever ran (each prints its own facts independently otherwise,
+# since the engine-reconnect scenario can run — and fail early, before a silence reading exists —
+# without the api-down scenario itself having failed).
 chaos_measurements_md() {
-  if [ "$CHAOS_API_DOWN_RAN" != 1 ]; then
+  if [ "$CHAOS_API_DOWN_RAN" != 1 ] && [ "$ENGINE_RESTART_RAN" != 1 ]; then
     printf 'none\n'
     return
   fi
   [ -n "$CHAOS_OUTAGE_SECS" ] && printf 'api-down outage: %s s\n' "$CHAOS_OUTAGE_SECS"
   [ -n "$CHAOS_RECOVERY_SECS" ] && printf 'api-down recovery: %s s\n' "$CHAOS_RECOVERY_SECS"
+  [ -n "$ENGINE_ONAIR_SECS" ] && printf 'engine-reconnect on-air: %s s\n' "$ENGINE_ONAIR_SECS"
+  [ -n "$ENGINE_SILENCE_EVENTS" ] && printf 'engine-reconnect silence events: %s\n' "$ENGINE_SILENCE_EVENTS"
+  [ -n "$ENGINE_CAPTURE_FFMPEG_TAIL" ] && printf 'engine-reconnect capture error: %s\n' "$ENGINE_CAPTURE_FFMPEG_TAIL"
   return 0
 }
 
