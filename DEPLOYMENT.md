@@ -132,7 +132,8 @@ only boundary is network isolation) to the internet. `compose.demo.yaml` uses th
 docker compose -f compose.yaml -f compose.pinned.yaml -f compose.demo.yaml config
 # api.ports must resolve to exactly one entry: host_ip 127.0.0.1, target 8080.
 # No 0.0.0.0, no 8081. Then confirm on the host after `up`:
-ss -ltn     # 127.0.0.1:8080 and 127.0.0.1:3000, plus caddy on 0.0.0.0:80/:443 — and nothing else;
+ss -ltn     # 127.0.0.1:8080, plus caddy on 0.0.0.0:80/:443 — and nothing else. 127.0.0.1:3000
+            # appears only while COMPOSE_PROFILES=admin (the temporary-admin path below);
             # never 0.0.0.0:8080/:8081/:3000
 ```
 
@@ -241,7 +242,7 @@ offline builds and tests. The one topology fact it persists is
 | `GW_PRESET` | Files | Shape |
 |---|---|---|
 | `home` | `compose.yaml` + `compose.pinned.yaml` | published images, LAN station — no demo overlay, no `PUBLIC_HOST` |
-| `home-piper-only` | + `compose.piper-only.yaml` | the 4 GB-class topology (Piper primary, no kokoro/ollama) |
+| `home-piper-only` | + `compose.piper-only.yaml` | the 4 GB-class topology (Piper primary; kokoro, voice-seed, ollama and ollama-init disabled) |
 | `dev` / `dev-piper-only` | `compose.yaml` (+ piper-only) | the from-source flow |
 
 `launch.sh` is the only reader of the key; an explicit `--pinned` / `--piper-only` flag always
@@ -646,7 +647,8 @@ Opting in needs both halves:
 
 ```bash
 # knob 1 — the setting, in the api service's environment: block (the root .env alone
-#          never reaches the container — on a pinned box use a small local overlay):
+#          never reaches the container — on a pinned box use a small local overlay you
+#          write yourself; `compose.local.yaml` below is that file, it does not ship):
 #          services: { api: { environment: { Gardener__FileActions__Enabled: "true" } } }
 # knob 2 — the mount, via the shipped overlay:
 docker compose -f compose.yaml -f compose.pinned.yaml -f compose.demo.yaml \

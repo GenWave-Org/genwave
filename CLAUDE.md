@@ -1,6 +1,6 @@
 # GenWave
 
-Self-hosted internet radio station for a small private community. A C# .NET 10 control plane orchestrates [Liquidsoap](https://www.liquidsoap.info/) (real-time mixing, crossfade, encode) and [Icecast](https://icecast.org/) (fan-out), backed by Postgres. The point: **loudness-matched, crossfaded, never-silent broadcast** end-to-end on Docker.
+Self-hosted internet radio station for a small private community. A C# .NET 10 control plane orchestrates [Liquidsoap](https://www.liquidsoap.info/) (real-time mixing, crossfade, encode) and [Icecast](https://icecast.org/) (fan-out), backed by Postgres. The point: **loudness-matched, crossfaded broadcast that never stops** end-to-end on Docker.
 
 ## Rules
 
@@ -23,7 +23,7 @@ Self-hosted internet radio station for a small private community. A C# .NET 10 c
 | Streaming | Icecast |
 | Database | PostgreSQL |
 | Container | Docker Compose (`compose.yaml`) |
-| Tests | xUnit (7 test projects under `tests/`) |
+| Tests | xUnit (9 test projects under `tests/`) |
 
 ## Commands
 
@@ -31,13 +31,15 @@ Self-hosted internet radio station for a small private community. A C# .NET 10 c
 # Build
 dotnet build GenWave.sln
 
-# Test
+# Test — PR tier (no Docker, ffmpeg on PATH) / full suite (Docker + ffmpeg)
+dotnet test GenWave.sln --filter "Category!=Integration"
 dotnet test GenWave.sln
+# Host suite alone on the dev box: append `-- xUnit.MaxParallelThreads=3`
 
-# Run locally (Docker)
-./launch.sh          # or: docker compose up
+# Run locally (Docker) — migrates, then composes; a raw `docker compose up` skips migrations
+./launch.sh
 
-# Build Docker image only
+# Build solution + run tests + build images (SKIP_TESTS=1 skips the tests)
 ./build.sh
 ```
 
@@ -53,13 +55,17 @@ src/
   GenWave.Loudness/      # Ffmpeg{Loudness,Cue,Energy}Analyzer + AubioBpmAnalyzer
   GenWave.Tts/           # Kokoro client, render→measure→cache (ITtsSegmentSource)
   GenWave.Orchestration/ # Orchestrator (INextItemProvider): music + TTS patter interleave
+  GenWave.Ads/           # ad briefs, sponsors, script validation, AdSpotWorker
+  GenWave.Plugins/       # plugin door: SPI load context, whole-plugin skip on failure
 tests/
+  GenWave.Ads.Tests/
   GenWave.Architecture.Tests/  # the fitness laws (see CONTRIBUTING.md + SEAMS.md)
   GenWave.Context.Tests/
   GenWave.Core.Tests/
   GenWave.Host.Tests/
   GenWave.MediaLibrary.Tests/
   GenWave.Orchestration.Tests/
+  GenWave.Plugins.Tests/
   GenWave.Tts.Tests/
 engine/genwave.liq           # Liquidsoap script
 icecast/                     # Icecast Dockerfile + config template
@@ -77,4 +83,4 @@ db/                          # Postgres init scripts
 | `/build-loop` | `docs/PLAN.md` checkboxes, one commit per task | Build each task through review + smoke |
 | `/document` | `README.md`, `DEPLOYMENT.md`, `docs/MEMORY.md` | Reconcile docs with reality |
 
-Each doc has one owner command — don't write another command's file.
+Each doc has one owner command — don't write another command's file. `docs/` is gitignored: these are local working docs, absent from a fresh clone.
