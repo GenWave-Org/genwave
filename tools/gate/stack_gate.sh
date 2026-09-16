@@ -8,12 +8,19 @@
 #   --fresh          a clean install from nothing (setup.sh --yes, bare launch.sh — the
 #                     wizard's own .env picks the pinned piper-only topology — health/on-air
 #                     waits)
-#   --upgrade        an existing station upgraded onto the tag (T493)
+#   --upgrade        an existing station on the previous release, upgraded onto the tag: a
+#                     `git worktree` of the previous release stands up its own pinned stack,
+#                     waits on-air, then `compose stop api`, swaps in the CURRENT tag's db/ +
+#                     migrate.sh, runs the migration, checks the role boundary (station_svc/
+#                     library_svc each locked out of the other's schema, SPEC F178.7), brings api
+#                     back on the CURRENT tag, and waits health/on-air again (SPEC F178.6/F178.7;
+#                     see run_upgrade_leg)
 #   --capture        records CAPTURE_SECS of the fresh leg's own live stream and measures it: no
 #                     silent gaps, loudness within TOL_LU of the station's own configured target,
 #                     speech aired through the booth log (requires --fresh)
 #   --chaos          fault injection during the leg (T496; requires --capture)
-#   --from <vX.Y.Z>  the tag the upgrade leg starts from (validated, stored; unused until T493)
+#   --from <vX.Y.Z>  the previous release the upgrade leg starts from — overrides the newest
+#                     other `v*` GitHub release otherwise resolved via `gh release list`
 #   --report <dir>   write gate-report.md + gate-report.json there (default: .)
 #
 # This file started as PLAN T486's skeleton: arg parsing, the prerequisite probe, isolation, the
@@ -21,14 +28,17 @@
 # T487 filled in the fresh leg's own orchestration (media synth, setup.sh --yes, launch.sh,
 # health, on-air — see run_fresh_leg). PLAN T491 filled in the capture leg (run_capture_leg):
 # admin login, the station's own loudness target, the recording, measure_audio.sh, and the
-# booth-log speech check. `--upgrade`/`--chaos` are still report-only "skipped" rows until
-# T493/T496.
+# booth-log speech check. PLAN T493 filled in the upgrade leg (run_upgrade_leg): previous-release
+# resolution, the worktree, and the stop/migrate/restart sequence. PLAN T494 added the role-
+# boundary check (SPEC F178.7) between the migration and the api restart. `--chaos` is still a
+# report-only "skipped" row until T496.
 #
 # Usage: tools/gate/stack_gate.sh --tag <vX.Y.Z> [--fresh] [--upgrade] [--capture] [--chaos]
 #                                  [--from <vX.Y.Z>] [--report <dir>]
 # Exit codes: 0 = every requested leg passed (or none were requested); 1 = a leg failed (see the
 #             report); 2 = usage error or a missing prerequisite (docker, ffmpeg, jq, curl; gh
-#             only with --upgrade) — reached before any leg runs, so no report is written.
+#             only with --upgrade AND no --from, since --from needs no release lookup at all) —
+#             reached before any leg runs, so no report is written.
 #
 # Isolation (F178.1): never reads the caller's .env; strips GW_*/COMPOSE_*/the six .env secret
 # names from its own exported environment before any docker call, so a developer's shell leaking
@@ -36,12 +46,14 @@
 # capture leg's own admin login (below) reads the scratch's ADMIN_PASSWORD straight off the
 # scratch's `.env` on disk for the same reason — never `source`d, never exported.
 #
-# Knobs (env, all optional — the fresh leg's own; --upgrade/--chaos add more at T493/T496):
+# Knobs (env, all optional — the fresh and upgrade legs share the same ones; --chaos adds more at
+# T496):
 # GATE_API_BASE (default http://localhost:8080) the api base URL /health is probed against, and
 # — with --capture — /api/auth/login + /api/settings too; GATE_STREAM_URL (default
 # http://localhost:8000/stream) threaded into the real setup.sh's own on-air poll target and, with
 # --capture, the URL ffmpeg records from; GATE_HEALTH_SECS (default 180) and GATE_ONAIR_SECS
-# (default 300) the wall-clock budgets for the health and on-air waits below; GATE_POLL_SECS
+# (default 300) the wall-clock budgets for the health and on-air waits below (the upgrade leg
+# runs both waits twice — before and after the cutover — against the same budgets); GATE_POLL_SECS
 # (default 5, must be a positive integer) how often each wait re-probes; CAPTURE_SECS (default
 # 360, must be a positive integer) how long --capture records; TOL_LU, SILENCE_FLOOR,
 # SILENCE_SECS — measure_audio.sh's own tolerance knobs, passed through untouched (see
@@ -68,6 +80,11 @@ require_prereq() {
 # ---------------------------------------------------------------------------------------------
 PROJECTS=()      # "scratch_dir|project_name" — down -v runs from inside scratch_dir
 SCRATCH_DIRS=()  # every mktemp -d this run made, regardless of which leg it belongs to
+WORKTREES=()     # every `git worktree add` target this run made (the upgrade leg's previous
+                 # release checkout) — `git worktree remove --force` on EXIT, same as the other
+                 # two lists; removed before SCRATCH_DIRS is rm -rf'd (a worktree the parent repo
+                 # doesn't know about anymore is exactly the debris `git worktree remove` exists
+                 # to avoid on a real box's checkout).
 
 # The fresh leg's own compose file set (base + piper-only + the tag overlay) — hoisted once so
 # cleanup() and every gate-side compose call (up's implicit COMPOSE_FILE, exec, logs, down) share
@@ -84,6 +101,27 @@ COMPOSE_FILE_LIST="compose.yaml:compose.piper-only.yaml:compose.gate.yaml"
 # run_fresh_leg sets them, read by write_report below.
 FRESH_HEALTH_SECS=""
 FRESH_ONAIR_SECS=""
+
+# Upgrade leg measurements (T493) — UPGRADE_PREVIOUS as soon as resolve_previous_tag succeeds;
+# UPGRADE_HEALTH_SECS/UPGRADE_ONAIR_SECS as soon as EITHER wait clears (the leg waits twice, once
+# against the previous release, once again after the cutover — the later measurement overwrites
+# the earlier one, since a passing leg's own numbers are the ones that describe the tag actually
+# being gated). UPGRADE_MIGRATE_TAIL is the current migrate.sh's own tail output, set only when
+# it exits non-zero, for the report's diagnostic line — never part of the JSON measurements.
+UPGRADE_PREVIOUS=""
+UPGRADE_HEALTH_SECS=""
+UPGRADE_ONAIR_SECS=""
+UPGRADE_MIGRATE_TAIL=""
+
+# UPGRADE_BOUNDARY (T494, SPEC F178.7) — "ok" once BOTH cross-schema probes below come back
+# "permission denied", "failed" the moment either one doesn't; empty when the role-boundary check
+# is never reached at all (a leg that failed earlier, e.g. at migrate). Rendered into the report
+# as its own "role boundary | <value>" line/JSON field, twin-style with the other UPGRADE_* facts.
+# UPGRADE_BOUNDARY_TAIL is the first non-matching probe's own output, set only on a failed check,
+# for the report's diagnostic line — never part of the JSON measurements (mirrors
+# UPGRADE_MIGRATE_TAIL above).
+UPGRADE_BOUNDARY=""
+UPGRADE_BOUNDARY_TAIL=""
 
 # The fresh leg's own scratch + compose project name, set by run_fresh_leg as soon as each exists
 # — run_capture_leg (T491) reuses this SAME stack rather than standing up a second one, since
@@ -105,7 +143,7 @@ CAPTURE_FFMPEG_TAIL=""
 # shellcheck disable=SC2317 # false positive: only called indirectly via `trap cleanup EXIT`,
 # which shellcheck's reachability analysis doesn't follow (documented SC2317 caveat).
 cleanup() {
-  local entry scratch project
+  local entry scratch project worktree
   for entry in "${PROJECTS[@]}"; do
     scratch="${entry%%|*}"
     project="${entry#*|}"
@@ -116,6 +154,15 @@ cleanup() {
     # (T486 review: teardown noise).
     [ -f "$scratch/.env" ] || continue
     ( cd "$scratch" && docker compose -p "$project" "${COMPOSE_FILES[@]}" down -v ) || true
+  done
+  # Before the scratch rm -rf below, which would otherwise yank the worktree's directory out from
+  # under git and leave a stale entry in the ORIGINAL checkout's `.git/worktrees/` on a real box.
+  # Run from $root (the original checkout — see resolve_previous_tag/run_upgrade_leg), the same
+  # place `git worktree add` ran from, since `git worktree remove` needs a real repo to find the
+  # worktree's admin data in. `--force` — the leg mutates db/ and the compose overlay inside the
+  # worktree (SPEC F178.6's cutover), so it is never git-clean by the time this runs.
+  for worktree in "${WORKTREES[@]}"; do
+    ( cd "$root" && git worktree remove --force "$worktree" ) || true
   done
   for scratch in "${SCRATCH_DIRS[@]}"; do
     rm -rf "$scratch"
@@ -185,7 +232,10 @@ require_prereq docker
 require_prereq ffmpeg
 require_prereq jq
 require_prereq curl
-[ "$DO_UPGRADE" = 1 ] && require_prereq gh
+# gh only resolves the previous release when the caller didn't name one outright — --from skips
+# the lookup entirely (see resolve_previous_tag), so a box with no `gh` at all can still run an
+# upgrade leg pinned with --from.
+[ "$DO_UPGRADE" = 1 ] && [ -z "$FROM_TAG" ] && require_prereq gh
 
 # ---------------------------------------------------------------------------------------------
 # Isolation (F178.1) — strip GW_*/COMPOSE_*/the six .env secret names from OUR OWN exported
@@ -275,15 +325,63 @@ stage_pinned_overlay_for_launch() {
   cp "$scratch/compose.gate.yaml" "$scratch/compose.pinned.yaml"
 }
 
-# attach_fresh_compose_logs <scratch> <project> — F178.4: any miss past the point the stack was
-# asked to come up gets the compose logs into the report dir, so a failed leg is diagnosable
-# without re-running it. REPORT_DIR may not exist yet (write_report, below, is normally what
-# creates it) — mkdir -p here too, since a miss can land long before that.
+# attach_fresh_compose_logs <scratch> <project> [logname] — F178.4: any miss past the point the
+# stack was asked to come up gets the compose logs into the report dir, so a failed leg is
+# diagnosable without re-running it. <logname> defaults to compose-fresh.log; the upgrade leg
+# (T493) passes compose-upgrade.log so the two legs' dumps never overwrite each other. REPORT_DIR
+# may not exist yet (write_report, below, is normally what creates it) — mkdir -p here too, since
+# a miss can land long before that.
 attach_fresh_compose_logs() {
-  local scratch="$1" project="$2"
+  local scratch="$1" project="$2" logname="${3:-compose-fresh.log}"
   mkdir -p "$REPORT_DIR"
   ( cd "$scratch" && docker compose -p "$project" "${COMPOSE_FILES[@]}" logs --no-color ) \
-    > "$REPORT_DIR/compose-fresh.log" 2>&1 || true
+    > "$REPORT_DIR/$logname" 2>&1 || true
+}
+
+# check_compose_v2 <scratch> — SPEC F178.1's "docker compose v2" means the plugin, as opposed to
+# the legacy `docker-compose` v1 binary: any plugin major >= 2 qualifies, so this parses the major
+# out of `docker compose version` rather than pinning the literal string "v2" (a real box's plugin
+# is newer than the fixture's stubbed "v2.29.0" and must still pass). Prints nothing on success;
+# on failure prints the message a caller should use as its own LEG_DETAIL and returns non-zero.
+# Runs from inside <scratch> — a leg's first docker call, never from the caller's checkout.
+check_compose_v2() {
+  local scratch="$1" version_output major
+  if ! version_output="$(cd "$scratch" && docker compose version)"; then
+    printf 'docker compose version failed'
+    return 1
+  fi
+  if [[ "$version_output" =~ [vV]?([0-9]+)\.[0-9]+\.[0-9]+ ]]; then
+    major="${BASH_REMATCH[1]}"
+  else
+    printf 'could not parse docker compose version: %s' "$version_output"
+    return 1
+  fi
+  if [ "$major" -lt 2 ]; then
+    printf 'docker compose plugin v2+ required, got: %s' "$version_output"
+    return 1
+  fi
+  return 0
+}
+
+# wait_for_health — SPEC F178.4: /health must go green within GATE_HEALTH_SECS (default 180).
+# gate_api_base strips a trailing slash: GATE_API_BASE (the fake station's own base URL, in
+# tests) carries one, and appending "/health" straight onto it would double the slash and 404
+# against the real path. The budget is measured off bash's own $SECONDS (wall clock since the
+# shell started) rather than a sleep counter, so curl's own probe time counts against the budget
+# too; `--max-time 5` keeps a single hung probe from eating the whole budget by itself. Prints
+# "<0|1> <elapsed>" on its own stdout line — a caller reads both with `read -r ok elapsed < <(…)`.
+wait_for_health() {
+  local api_base; api_base="$(gate_api_base)"
+  local budget="${GATE_HEALTH_SECS:-180}" poll_secs="${GATE_POLL_SECS:-5}"
+  local start=$SECONDS ok=0 elapsed=0
+  while :; do
+    if curl -fsS --max-time 5 -o /dev/null "$api_base/health"; then ok=1; break; fi
+    elapsed=$((SECONDS - start))
+    [ "$elapsed" -ge "$budget" ] && break
+    sleep "$poll_secs"
+  done
+  elapsed=$((SECONDS - start))
+  printf '%s %s\n' "$ok" "$elapsed"
 }
 
 # fresh_onair_frame <scratch> <project> — the on-air read (tools/onair_gate.sh:34-48): telnet the
@@ -307,8 +405,26 @@ ONAIR_CMD
   fi
 }
 
+# wait_for_onair <scratch> <project> — SPEC F178.4: output.icecast.metadata frame 1 must carry a
+# track_id within GATE_ONAIR_SECS (default 300) of up. Same budget shape and output contract as
+# wait_for_health.
+wait_for_onair() {
+  local scratch="$1" project="$2"
+  local budget="${GATE_ONAIR_SECS:-300}" poll_secs="${GATE_POLL_SECS:-5}"
+  local start=$SECONDS ok=0 elapsed=0 frame
+  while :; do
+    frame="$(fresh_onair_frame "$scratch" "$project")"
+    if grep -q 'track_id="' <<<"$frame"; then ok=1; break; fi
+    elapsed=$((SECONDS - start))
+    [ "$elapsed" -ge "$budget" ] && break
+    sleep "$poll_secs"
+  done
+  elapsed=$((SECONDS - start))
+  printf '%s %s\n' "$ok" "$elapsed"
+}
+
 run_fresh_leg() {
-  local scratch project version_output major
+  local scratch project
   scratch="$(mktemp -d)"
   SCRATCH_DIRS+=("$scratch")
   FRESH_SCRATCH="$scratch"
@@ -317,24 +433,9 @@ run_fresh_leg() {
     "$root/" "$scratch/"
 
   # The leg's first docker call, from inside the scratch — never from the caller's checkout.
-  # "docker compose v2" (SPEC F178.1) means the `docker compose` PLUGIN, as opposed to the legacy
-  # `docker-compose` v1 binary — any plugin major >= 2 qualifies, so this parses the major out of
-  # `docker compose version` rather than pinning the literal string "v2" (a real box's plugin is
-  # newer than the fixture's stubbed "v2.29.0" and must still pass).
-  if ! version_output="$(cd "$scratch" && docker compose version)"; then
-    LEG_STATUS[fresh]="failed"; LEG_DETAIL[fresh]="docker compose version failed"
-    return
-  fi
-  if [[ "$version_output" =~ [vV]?([0-9]+)\.[0-9]+\.[0-9]+ ]]; then
-    major="${BASH_REMATCH[1]}"
-  else
-    LEG_STATUS[fresh]="failed"
-    LEG_DETAIL[fresh]="could not parse docker compose version: $version_output"
-    return
-  fi
-  if [ "$major" -lt 2 ]; then
-    LEG_STATUS[fresh]="failed"
-    LEG_DETAIL[fresh]="docker compose plugin v2+ required, got: $version_output"
+  local compose_detail
+  if ! compose_detail="$(check_compose_v2 "$scratch")"; then
+    LEG_STATUS[fresh]="failed"; LEG_DETAIL[fresh]="$compose_detail"
     return
   fi
 
@@ -406,48 +507,25 @@ run_fresh_leg() {
     return
   fi
 
-  # SPEC F178.4 — /health must go green within GATE_HEALTH_SECS (default 180). Strip a trailing
-  # slash: GATE_API_BASE (the fake station's own base URL, in tests) carries one, and appending
-  # "/health" straight onto it would double the slash and 404 against the real path. Both budgets
-  # below are measured off bash's own $SECONDS (wall clock since the shell started) rather than a
-  # sleep counter, so curl's own probe time (health) and the `docker compose exec` round-trip
-  # (on-air) both count against the budget instead of running for free between sleeps; `--max-time
-  # 5` keeps a single hung probe from eating the whole budget by itself.
-  local api_base; api_base="$(gate_api_base)"
-  local health_budget="${GATE_HEALTH_SECS:-180}" poll_secs="${GATE_POLL_SECS:-5}"
-  local health_start=$SECONDS health_ok=0 elapsed=0
-  while :; do
-    if curl -fsS --max-time 5 -o /dev/null "$api_base/health"; then health_ok=1; break; fi
-    elapsed=$((SECONDS - health_start))
-    [ "$elapsed" -ge "$health_budget" ] && break
-    sleep "$poll_secs"
-  done
-  elapsed=$((SECONDS - health_start))
+  # SPEC F178.4 — health then on-air, both within their own wall-clock budgets (see
+  # wait_for_health/wait_for_onair).
+  local health_ok health_elapsed
+  read -r health_ok health_elapsed < <(wait_for_health)
   if [ "$health_ok" != "1" ]; then
     LEG_STATUS[fresh]="failed"; LEG_DETAIL[fresh]="health"
     attach_fresh_compose_logs "$scratch" "$project"
     return
   fi
-  FRESH_HEALTH_SECS="$elapsed"
+  FRESH_HEALTH_SECS="$health_elapsed"
 
-  # SPEC F178.4 — output.icecast.metadata frame 1 must carry a track_id within GATE_ONAIR_SECS
-  # (default 300) of up.
-  local onair_budget="${GATE_ONAIR_SECS:-300}"
-  local onair_start=$SECONDS onair_ok=0 frame
-  while :; do
-    frame="$(fresh_onair_frame "$scratch" "$project")"
-    if grep -q 'track_id="' <<<"$frame"; then onair_ok=1; break; fi
-    elapsed=$((SECONDS - onair_start))
-    [ "$elapsed" -ge "$onair_budget" ] && break
-    sleep "$poll_secs"
-  done
-  elapsed=$((SECONDS - onair_start))
+  local onair_ok onair_elapsed
+  read -r onair_ok onair_elapsed < <(wait_for_onair "$scratch" "$project")
   if [ "$onair_ok" != "1" ]; then
     LEG_STATUS[fresh]="failed"; LEG_DETAIL[fresh]="on-air"
     attach_fresh_compose_logs "$scratch" "$project"
     return
   fi
-  FRESH_ONAIR_SECS="$elapsed"
+  FRESH_ONAIR_SECS="$onair_elapsed"
 
   LEG_STATUS[fresh]="passed"
   LEG_DETAIL[fresh]=""
@@ -459,8 +537,232 @@ else
   LEG_STATUS[fresh]="skipped"; LEG_DETAIL[fresh]="--fresh not given"
 fi
 
+# resolve_previous_tag — SPEC F178.6: --from, when given, always wins outright (no `gh` call at
+# all — see the prerequisite probe above). Otherwise the newest OTHER published `v*` release:
+# --exclude-drafts --exclude-pre-releases narrows the release LIST itself to "published" ones
+# (SPEC F178.6); filtering is done in jq here so the stub and the real CLI take the same path —
+# `gh release list` itself already orders newest first, so the first candidate jq finds after
+# excluding --tag IS the newest other one. Prints the resolved tag on success; prints nothing and
+# returns non-zero when `gh` failed or no other `v*` release exists to fall back to.
+resolve_previous_tag() {
+  if [ -n "$FROM_TAG" ]; then
+    printf '%s' "$FROM_TAG"
+    return 0
+  fi
+  local raw candidate
+  if ! raw="$(gh release list --limit 50 --exclude-drafts --exclude-pre-releases --json tagName)"; then
+    return 1
+  fi
+  candidate="$(printf '%s' "$raw" | jq -r --arg tag "$TAG" '
+      [ .[].tagName | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")) | select(. != $tag) ]
+      | .[0] // empty
+    ')"
+  [ -n "$candidate" ] || return 1
+  printf '%s' "$candidate"
+}
+
+# fail_upgrade_leg <detail> — every miss inside run_upgrade_leg PAST the point $worktree/$project
+# exist marks the leg failed with the same two lines: LEG_STATUS/LEG_DETAIL[upgrade], then the
+# SAME attach_fresh_compose_logs "$worktree" "$project" "compose-upgrade.log" call. $worktree/
+# $project are read off run_upgrade_leg's own `local`s via bash's dynamic scoping — this helper is
+# only ever called from inside that function's stack frame, never on its own. The caller still
+# does its own `return` right after calling this — a `return` in here would only exit
+# fail_upgrade_leg itself, not run_upgrade_leg. The three misses that happen BEFORE $project
+# exists (resolve_previous_tag/worktree add/check_compose_v2) don't call this — there is no
+# compose project yet for attach_fresh_compose_logs to dump.
+fail_upgrade_leg() {
+  LEG_STATUS[upgrade]="failed"; LEG_DETAIL[upgrade]="$1"
+  attach_fresh_compose_logs "$worktree" "$project" "compose-upgrade.log"
+}
+
+# upgrade_boundary_query <worktree> <project> <role> <query> — SPEC F178.7 / STORY-446 (T494): one
+# cross-schema probe of the role boundary, run as <role> via the same compose invocation shape
+# capture_booth_log_count (above) uses against the db service — the db is up throughout the leg,
+# api still stopped at this point (see run_upgrade_leg's own call site, between migrate and the
+# api restart). The real db container's socket connection is `trust`, so no password is needed for
+# either role.
+#
+# A real psql exits 1 on the very outcome we want (permission denied) and the stub always exits 0;
+# the text is the only signal both share, so the status is ignored. Prints that text verbatim.
+upgrade_boundary_query() {
+  local worktree="$1" project="$2" role="$3" query="$4" out
+  out="$(cd "$worktree" && docker compose -p "$project" "${COMPOSE_FILES[@]}" \
+      exec -T db psql -U "$role" -d genwave -tA -c "$query" < /dev/null 2>&1)" || true
+  printf '%s' "$out"
+}
+
+# run_upgrade_leg — SPEC F178.6/F178.7 / STORY-446 (T493/T494): a `git worktree` of the previous
+# release stands up its OWN pinned stack (setup.sh --yes + the gate's own `up -d`, exactly the
+# fresh leg's own shape — see below), waits health/on-air, then `compose stop api`, swaps the
+# CURRENT tag's db/ + migrate.sh into the worktree, runs that migration, checks the role boundary
+# (station_svc locked out of library.media, library_svc locked out of station.settings —
+# upgrade_boundary_query above), brings api back up on the CURRENT tag, and waits health/on-air
+# again.
+run_upgrade_leg() {
+  local scratch worktree project previous
+  scratch="$(mktemp -d)"
+  SCRATCH_DIRS+=("$scratch")
+  worktree="$scratch/prev"
+
+  if ! previous="$(resolve_previous_tag)"; then
+    LEG_STATUS[upgrade]="failed"; LEG_DETAIL[upgrade]="previous"
+    return
+  fi
+  UPGRADE_PREVIOUS="$previous"
+
+  # `git worktree add` runs from $root — the ORIGINAL checkout this script was invoked from, NOT
+  # a rsync scratch copy (those drop .git on purpose; see run_fresh_leg's own rsync, --exclude
+  # .git). A worktree needs a real repo behind it to check the previous tag's tree out of.
+  if ! (cd "$root" && git worktree add "$worktree" "$previous"); then
+    LEG_STATUS[upgrade]="failed"; LEG_DETAIL[upgrade]="worktree"
+    return
+  fi
+  # Registered immediately — a failure on any later line still gets the worktree torn down on
+  # EXIT (cleanup, above), the same guarantee PROJECTS/SCRATCH_DIRS give the other two lists.
+  WORKTREES+=("$worktree")
+
+  # The leg's first docker call, from this run's own scratch — never the caller's checkout
+  # (mirrors run_fresh_leg's own check_compose_v2 call; see its comment above).
+  local compose_detail
+  if ! compose_detail="$(check_compose_v2 "$scratch")"; then
+    LEG_STATUS[upgrade]="failed"; LEG_DETAIL[upgrade]="$compose_detail"
+    return
+  fi
+
+  # The previous release's own pinned overlay — stage_pinned_overlay_for_launch matters here for
+  # the SAME reason it matters to the fresh leg: setup.sh --yes below launches the stack itself
+  # (GW_PRESET=home-piper-only in the .env it writes makes its bare ./launch.sh read
+  # compose.pinned.yaml, not compose.gate.yaml or COMPOSE_FILE).
+  write_compose_gate_overlay "$worktree" "$previous"
+  stage_pinned_overlay_for_launch "$worktree"
+
+  local media_dir="$worktree/media"
+  "$root/tools/gate/make_media.sh" "$media_dir"
+
+  # Registered BEFORE setup.sh ever runs, not after — see run_fresh_leg's own comment on this
+  # same pattern; the reasoning is identical, just against the worktree instead of a rsync scratch.
+  project="$(gate_project_name upgrade)"
+  PROJECTS+=("$worktree|$project")
+
+  if ! (cd "$worktree" && gate_setup_answers "$media_dir" | \
+        GW_ENV_FILE="$worktree/.env" \
+        COMPOSE_PROJECT_NAME="$project" COMPOSE_FILE="$COMPOSE_FILE_LIST" \
+        GW_STREAM_URL="${GATE_STREAM_URL:-http://localhost:8000/stream}" \
+        ./setup.sh --yes); then
+    fail_upgrade_leg "setup"
+    return
+  fi
+
+  # The gate's own `up -d` — a raw compose call, NOT the previous worktree's own ./launch.sh: that
+  # script's --pinned would also stack compose.demo.yaml (wrong here, same reason the fresh leg
+  # never passes --pinned either), and a bare ./launch.sh from an OLDER release can't be trusted
+  # to behave like the current one. Real setup.sh --yes already launched the stack itself and
+  # waited on-air as part of --yes (same as the fresh leg); this call is that same idempotent
+  # re-converge.
+  if ! (cd "$worktree" && docker compose -p "$project" "${COMPOSE_FILES[@]}" up -d); then
+    fail_upgrade_leg "up"
+    return
+  fi
+
+  local health_ok health_elapsed onair_ok onair_elapsed
+  read -r health_ok health_elapsed < <(wait_for_health)
+  if [ "$health_ok" != "1" ]; then
+    fail_upgrade_leg "health"
+    return
+  fi
+  UPGRADE_HEALTH_SECS="$health_elapsed"
+
+  read -r onair_ok onair_elapsed < <(wait_for_onair "$worktree" "$project")
+  if [ "$onair_ok" != "1" ]; then
+    fail_upgrade_leg "on-air"
+    return
+  fi
+  UPGRADE_ONAIR_SECS="$onair_elapsed"
+
+  # --- The cutover (SPEC F178.6) --------------------------------------------------------------
+  if ! (cd "$worktree" && docker compose -p "$project" "${COMPOSE_FILES[@]}" stop api); then
+    fail_upgrade_leg "stop"
+    return
+  fi
+
+  # db/ + migrate.sh + the overlay all swap to the CURRENT tag's — $root is this script's own
+  # invocation root (the tag under test), never the previous release's. The case guard keeps the
+  # rm -rf pinned under this run's OWN mktemp scratch even if $worktree were ever miscomputed —
+  # $worktree is always $scratch/prev, built two lines above, never caller input.
+  local target_db="$worktree/db"
+  case "$target_db" in
+    "$scratch"/*) : ;;
+    *)
+      LEG_STATUS[upgrade]="failed"; LEG_DETAIL[upgrade]="db"
+      return ;;
+  esac
+  rm -rf "$target_db"
+  cp -a "$root/db" "$target_db"
+  cp "$root/migrate.sh" "$worktree/migrate.sh"
+  write_compose_gate_overlay "$worktree" "$TAG"
+
+  # migrate.sh's own exit status, captured exactly (never via `if ! v=$(…)`, which loses it) — a
+  # non-zero status is the fact this leg exists to catch, not just a boolean pass/fail. cwd/.env/
+  # COMPOSE_* mirror what migrate.sh itself documents it needs (it cd's to its own dirname, then
+  # `docker compose` picks up .env from there and COMPOSE_FILE for the file set); it never starts
+  # or stops the stack itself, only the db service already running under it.
+  local s=0 out
+  out="$(cd "$worktree" && COMPOSE_FILE="$COMPOSE_FILE_LIST" COMPOSE_PROJECT_NAME="$project" \
+        ./migrate.sh 2>&1)" || s=$?
+  if [ "$s" -ne 0 ]; then
+    UPGRADE_MIGRATE_TAIL="$(printf '%s\n' "$out" | tail -5)"
+    fail_upgrade_leg "migrate"
+    return
+  fi
+
+  # --- Role boundary (SPEC F178.7) ------------------------------------------------------------
+  # After migration, while api is still stopped and the db is up: station_svc must be unable to
+  # read library.media, and library_svc must be unable to read station.settings. Anything other
+  # than "permission denied" on either side fails the leg; a row count means the migration granted
+  # a role more than its own schema.
+  local station_boundary library_boundary
+  station_boundary="$(upgrade_boundary_query "$worktree" "$project" station_svc \
+      "select count(*) from library.media")"
+  library_boundary="$(upgrade_boundary_query "$worktree" "$project" library_svc \
+      "select count(*) from station.settings")"
+  if [[ "$station_boundary" == *"permission denied"* ]] && [[ "$library_boundary" == *"permission denied"* ]]; then
+    UPGRADE_BOUNDARY="ok"
+  else
+    UPGRADE_BOUNDARY="failed"
+    if [[ "$station_boundary" != *"permission denied"* ]]; then
+      UPGRADE_BOUNDARY_TAIL="$(printf '%s\n' "$station_boundary" | tail -3)"
+    else
+      UPGRADE_BOUNDARY_TAIL="$(printf '%s\n' "$library_boundary" | tail -3)"
+    fi
+    fail_upgrade_leg "role boundary"
+    return
+  fi
+
+  if ! (cd "$worktree" && docker compose -p "$project" "${COMPOSE_FILES[@]}" up -d api); then
+    fail_upgrade_leg "restart"
+    return
+  fi
+
+  read -r health_ok health_elapsed < <(wait_for_health)
+  if [ "$health_ok" != "1" ]; then
+    fail_upgrade_leg "health"
+    return
+  fi
+  UPGRADE_HEALTH_SECS="$health_elapsed"
+
+  read -r onair_ok onair_elapsed < <(wait_for_onair "$worktree" "$project")
+  if [ "$onair_ok" != "1" ]; then
+    fail_upgrade_leg "on-air"
+    return
+  fi
+  UPGRADE_ONAIR_SECS="$onair_elapsed"
+
+  LEG_STATUS[upgrade]="passed"
+  LEG_DETAIL[upgrade]=""
+}
+
 if [ "$DO_UPGRADE" = 1 ]; then
-  LEG_STATUS[upgrade]="skipped"; LEG_DETAIL[upgrade]="not implemented until T493"
+  run_upgrade_leg
 else
   LEG_STATUS[upgrade]="skipped"; LEG_DETAIL[upgrade]="--upgrade not given"
 fi
@@ -699,6 +1001,44 @@ capture_measurements_md() {
   return 0
 }
 
+# upgrade_measurements_json — every UPGRADE_* value as a jq NUMBER (or STRING for previous/role
+# boundary), or `null` for a value the upgrade leg never reached (UPGRADE_PREVIOUS empty means the
+# leg never resolved a previous release at all, so every field is null in that case too).
+# health_secs/onair_secs hold whichever wait cleared last — the leg waits on both twice, once
+# against the previous release and once again after the cutover, and the second measurement
+# describes the tag actually being gated, so it is the one worth keeping. role_boundary (T494,
+# SPEC F178.7) is "ok"/"failed"/null — a twin of the "role boundary | <value>" report-md line.
+upgrade_measurements_json() {
+  jq -n \
+    --arg previous "$UPGRADE_PREVIOUS" \
+    --arg h "$UPGRADE_HEALTH_SECS" \
+    --arg o "$UPGRADE_ONAIR_SECS" \
+    --arg boundary "$UPGRADE_BOUNDARY" \
+    '{
+      previous: (if $previous == "" then null else $previous end),
+      health_secs: (if $h == "" then null else ($h | tonumber) end),
+      onair_secs: (if $o == "" then null else ($o | tonumber) end),
+      role_boundary: (if $boundary == "" then null else $boundary end)
+    }'
+}
+
+# upgrade_measurements_md — the same facts as upgrade_measurements_json, rendered as report lines;
+# "none" when the upgrade leg never resolved a previous release. A failed migrate's stderr tail
+# (UPGRADE_MIGRATE_TAIL) is appended as a diagnostic line when that step is what failed the leg.
+upgrade_measurements_md() {
+  if [ -z "$UPGRADE_PREVIOUS" ]; then
+    printf 'none\n'
+    return
+  fi
+  printf 'upgrade previous: %s\n' "$UPGRADE_PREVIOUS"
+  [ -n "$UPGRADE_HEALTH_SECS" ] && printf 'upgrade health_secs: %s\n' "$UPGRADE_HEALTH_SECS"
+  [ -n "$UPGRADE_ONAIR_SECS" ] && printf 'upgrade onair_secs: %s\n' "$UPGRADE_ONAIR_SECS"
+  [ -n "$UPGRADE_BOUNDARY" ] && printf 'role boundary | %s\n' "$UPGRADE_BOUNDARY"
+  [ -n "$UPGRADE_BOUNDARY_TAIL" ] && printf 'role boundary error: %s\n' "$UPGRADE_BOUNDARY_TAIL"
+  [ -n "$UPGRADE_MIGRATE_TAIL" ] && printf 'migrate error: %s\n' "$UPGRADE_MIGRATE_TAIL"
+  return 0
+}
+
 first_failure_across_legs() {
   local leg
   for leg in fresh upgrade capture chaos; do
@@ -722,6 +1062,7 @@ write_report() {
       leg_row_md "$leg" "${LEG_STATUS[$leg]}" "${LEG_DETAIL[$leg]}"
     done
     printf '\n## Measurements\n\n%s\n' "$(fresh_measurements_md)"
+    printf '%s\n' "$(upgrade_measurements_md)"
     printf '%s\n\n' "$(capture_measurements_md)"
     printf 'Needs manual evidence: the LLL ear — %s facts are manual\n' "$manual_facts"
   } > "$out_dir/gate-report.md"
@@ -729,7 +1070,7 @@ write_report() {
   local first_failure fresh_json upgrade_json capture_json chaos_json capture_top_json
   first_failure="$(first_failure_across_legs)"
   fresh_json="$(leg_json "${LEG_STATUS[fresh]}" "${LEG_DETAIL[fresh]}" "$(fresh_measurements_json)")"
-  upgrade_json="$(leg_json "${LEG_STATUS[upgrade]}" "${LEG_DETAIL[upgrade]}")"
+  upgrade_json="$(leg_json "${LEG_STATUS[upgrade]}" "${LEG_DETAIL[upgrade]}" "$(upgrade_measurements_json)")"
   capture_json="$(leg_json "${LEG_STATUS[capture]}" "${LEG_DETAIL[capture]}" "$(capture_measurements_json)")"
   chaos_json="$(leg_json "${LEG_STATUS[chaos]}" "${LEG_DETAIL[chaos]}")"
   # A top-level twin of the capture leg's own target/silence/integrated/booth_log — SPEC F178.5's
