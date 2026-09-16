@@ -362,7 +362,16 @@ run_fresh_leg() {
   # re-converge (stub world: setup.sh never touched docker at all, so this is the only `up`).
   # The isolation strip earlier in this script dropped any caller-supplied COMPOSE_*; these are
   # the gate's own, set fresh here.
+  #
+  # T488 real-box finding: SKIP_PREFLIGHT=1 forced on THIS call only (mirrors setup.sh's own
+  # invoke_launch/1640-1650 comment) — setup.sh --yes just above already ran launch.sh's machine
+  # preflight over this exact scratch's env moments earlier via its own internal invoke_launch,
+  # so a second preflight here is redundant AND actively wrong: it would see the leg's own api
+  # container (just brought up by that first launch) already bound to :8080 and report the port
+  # "already in use by an unidentified process" — the leg failing against itself. Never exported
+  # process-wide; scoped to this one subprocess only.
   if ! (cd "$scratch" && \
+        SKIP_PREFLIGHT=1 \
         COMPOSE_FILE="$COMPOSE_FILE_LIST" \
         COMPOSE_PROJECT_NAME="$project" \
         ./launch.sh); then
