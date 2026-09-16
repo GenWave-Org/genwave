@@ -23,7 +23,7 @@ public static class FeatureScriptPreflight
 
     static string WriteEnvFile(params string[] assignments)
     {
-        var path = Path.Combine(Directory.CreateTempSubdirectory("gw-preflight-env-").FullName, "test.env");
+        var path = Path.Combine(TempDir.CreateForProcessLifetime(), "test.env");
         File.WriteAllLines(path, assignments);
         return path;
     }

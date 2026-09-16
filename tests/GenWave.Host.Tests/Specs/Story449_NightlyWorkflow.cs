@@ -46,7 +46,7 @@ public static class FeatureTheNightlyKeepsOneRedIssue
     {
         var bin = ScriptProcess.MakeBinDir("jq");
         ScriptProcess.AddStub(bin, "gh", GhStub);
-        var log = Path.Combine(Directory.CreateTempSubdirectory("story449-log-").FullName, "gh.log");
+        var log = Path.Combine(TempDir.CreateForProcessLifetime(), "gh.log");
         var env = new Dictionary<string, string>
         {
             ["GATE_STUB_LOG"] = log,

@@ -272,56 +272,48 @@ public sealed class JinglePackInstallArc : IAsyncLifetime
     public async Task InitializeAsync()
     {
         await using var database = await JinglePackInstallDatabase.StartAsync();
-        var jingleRoot = Directory.CreateTempSubdirectory("t414-story399-jingle-").FullName;
-        try
+        using var jingleRootDir = new TempDir();
+        var jingleRoot = jingleRootDir.Path;
+        AdsLibraryId = await SeedAdsLibraryAsync(database.LibraryConnectionString);
+
+        await using var factory = new JinglePackInstallWebFactory(database, jingleRoot);
+        var client = await JinglePackInstallWebFactory.LoggedInClientAsync(factory);
+
+        var install = await client.PostAsync($"/api/jingle-packs/{JinglePackInstallFixtures.Slug}/install", null);
+        if (!install.IsSuccessStatusCode)
+            throw new InvalidOperationException(
+                $"fixture install of '{JinglePackInstallFixtures.Slug}' failed: {await install.Content.ReadAsStringAsync()}");
+
+        InstalledAssetPathsExist = JinglePackInstallFixtures.AssetFiles.All(
+            file => File.Exists(Path.Combine(jingleRoot, JinglePackInstallFixtures.Slug, file)));
+
+        InstalledAssetByteLengthsMatch = JinglePackInstallFixtures.AssetFiles.All(file =>
         {
-            AdsLibraryId = await SeedAdsLibraryAsync(database.LibraryConnectionString);
+            var onDiskPath = Path.Combine(jingleRoot, JinglePackInstallFixtures.Slug, file);
+            return File.Exists(onDiskPath)
+                && File.ReadAllBytes(onDiskPath).Length == JinglePackInstallFixtures.AssetBytes(file).Length;
+        });
 
-            await using var factory = new JinglePackInstallWebFactory(database, jingleRoot);
-            var client = await JinglePackInstallWebFactory.LoggedInClientAsync(factory);
+        NoStagingSiblingSurvives = !Directory.EnumerateDirectories(jingleRoot, "*.staging-*").Any();
 
-            var install = await client.PostAsync($"/api/jingle-packs/{JinglePackInstallFixtures.Slug}/install", null);
-            if (!install.IsSuccessStatusCode)
-                throw new InvalidOperationException(
-                    $"fixture install of '{JinglePackInstallFixtures.Slug}' failed: {await install.Content.ReadAsStringAsync()}");
+        InstalledRows = await ReadInstalledRowsAsync(database.LibraryConnectionString);
 
-            InstalledAssetPathsExist = JinglePackInstallFixtures.AssetFiles.All(
-                file => File.Exists(Path.Combine(jingleRoot, JinglePackInstallFixtures.Slug, file)));
+        var random = await client.GetAsync("/media/random");
+        RandomAfterInstallStatus = random.StatusCode;
 
-            InstalledAssetByteLengthsMatch = JinglePackInstallFixtures.AssetFiles.All(file =>
-            {
-                var onDiskPath = Path.Combine(jingleRoot, JinglePackInstallFixtures.Slug, file);
-                return File.Exists(onDiskPath)
-                    && File.ReadAllBytes(onDiskPath).Length == JinglePackInstallFixtures.AssetBytes(file).Length;
-            });
+        var listing = await client.GetAsync("/api/jingle-packs");
+        ListingAfterInstall = await listing.Content.ReadFromJsonAsync<InstalledJinglePackSummaryDto[]>() ?? [];
 
-            NoStagingSiblingSurvives = !Directory.EnumerateDirectories(jingleRoot, "*.staging-*").Any();
+        await SeedMalformedDefinitionAsync(database.StationConnectionString);
+        var malformedListing = await client.GetAsync("/api/jingle-packs");
+        MalformedListingStatus = malformedListing.StatusCode;
+        var afterMalformedInsert =
+            await malformedListing.Content.ReadFromJsonAsync<InstalledJinglePackSummaryDto[]>() ?? [];
+        MalformedListingSummary = afterMalformedInsert
+            .SingleOrDefault(summary => summary.Slug == JinglePackInstallFixtures.MalformedSlug);
 
-            InstalledRows = await ReadInstalledRowsAsync(database.LibraryConnectionString);
-
-            var random = await client.GetAsync("/media/random");
-            RandomAfterInstallStatus = random.StatusCode;
-
-            var listing = await client.GetAsync("/api/jingle-packs");
-            ListingAfterInstall = await listing.Content.ReadFromJsonAsync<InstalledJinglePackSummaryDto[]>() ?? [];
-
-            await SeedMalformedDefinitionAsync(database.StationConnectionString);
-            var malformedListing = await client.GetAsync("/api/jingle-packs");
-            MalformedListingStatus = malformedListing.StatusCode;
-            var afterMalformedInsert =
-                await malformedListing.Content.ReadFromJsonAsync<InstalledJinglePackSummaryDto[]>() ?? [];
-            MalformedListingSummary = afterMalformedInsert
-                .SingleOrDefault(summary => summary.Slug == JinglePackInstallFixtures.MalformedSlug);
-
-            BedPoolIds = await factory.Services.GetRequiredService<IAdBedPool>()
-                .ListReadyBedIdsAsync(AdsLibraryId, CancellationToken.None);
-        }
-        finally
-        {
-            try { Directory.Delete(jingleRoot, recursive: true); }
-            catch (IOException) { /* best-effort cleanup */ }
-            catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
-        }
+        BedPoolIds = await factory.Services.GetRequiredService<IAdBedPool>()
+            .ListReadyBedIdsAsync(AdsLibraryId, CancellationToken.None);
     }
 
     static async Task<long> SeedAdsLibraryAsync(string libraryConnectionString)
@@ -741,27 +733,19 @@ public sealed class JinglePackToneInstallArc : IAsyncLifetime
     public async Task InitializeAsync()
     {
         await using var database = await JinglePackToneInstallDatabase.StartAsync();
-        var jingleRoot = Directory.CreateTempSubdirectory("t414-story399-jingle-tone-").FullName;
-        try
-        {
-            await SeedAdsLibraryAsync(database.LibraryConnectionString);
+        using var jingleRootDir = new TempDir();
+        var jingleRoot = jingleRootDir.Path;
+        await SeedAdsLibraryAsync(database.LibraryConnectionString);
 
-            await using var factory = new JinglePackToneInstallWebFactory(database, jingleRoot);
-            var client = await JinglePackToneInstallWebFactory.LoggedInClientAsync(factory);
+        await using var factory = new JinglePackToneInstallWebFactory(database, jingleRoot);
+        var client = await JinglePackToneInstallWebFactory.LoggedInClientAsync(factory);
 
-            var install = await client.PostAsync($"/api/jingle-packs/{JinglePackToneInstallFixtures.Slug}/install", null);
-            InstallStatusCode = install.StatusCode;
-            InstallBody = await install.Content.ReadAsStringAsync();
+        var install = await client.PostAsync($"/api/jingle-packs/{JinglePackToneInstallFixtures.Slug}/install", null);
+        InstallStatusCode = install.StatusCode;
+        InstallBody = await install.Content.ReadAsStringAsync();
 
-            if (InstallStatusCode == HttpStatusCode.OK)
-                InstalledRows = await ReadInstalledRowsAsync(database.LibraryConnectionString);
-        }
-        finally
-        {
-            try { Directory.Delete(jingleRoot, recursive: true); }
-            catch (IOException) { /* best-effort cleanup */ }
-            catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
-        }
+        if (InstallStatusCode == HttpStatusCode.OK)
+            InstalledRows = await ReadInstalledRowsAsync(database.LibraryConnectionString);
     }
 
     static async Task SeedAdsLibraryAsync(string libraryConnectionString)

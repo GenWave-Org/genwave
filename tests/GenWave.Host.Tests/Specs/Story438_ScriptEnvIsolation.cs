@@ -90,7 +90,7 @@ public static class FeatureScriptSpecsDoNotInheritTheDevelopersShell
 
     static string MakeBinDir(params string[] tools)
     {
-        var dir = Directory.CreateTempSubdirectory("story438-bin-").FullName;
+        var dir = TempDir.CreateForProcessLifetime();
         foreach (var tool in tools)
             File.CreateSymbolicLink(Path.Combine(dir, tool), ResolveTool(tool));
         return dir;
@@ -99,7 +99,7 @@ public static class FeatureScriptSpecsDoNotInheritTheDevelopersShell
     /// <summary>A script that prints the child's view of the variables under test, one NAME=value per line.</summary>
     static string WriteProbeScript()
     {
-        var path = Path.Combine(Directory.CreateTempSubdirectory("story438-probe-").FullName, "probe.sh");
+        var path = Path.Combine(TempDir.CreateForProcessLifetime(), "probe.sh");
         File.WriteAllText(path, """
             #!/usr/bin/env bash
             for name in GW_SPEC_CANARY_438 SKIP_SPEC_CANARY_438 COMPOSE_SPEC_CANARY_438 \
@@ -218,7 +218,7 @@ public static class FeatureScriptSpecsDoNotInheritTheDevelopersShell
 
     public static class ScenarioAnExplicitOverrideStillFlowsThrough
     {
-        static readonly string EnvFile = Path.Combine(Directory.CreateTempSubdirectory("story438-env-").FullName, "test.env");
+        static readonly string EnvFile = Path.Combine(TempDir.CreateForProcessLifetime(), "test.env");
 
         static readonly Lazy<Run> Probe = new(() =>
         {
@@ -250,7 +250,7 @@ public static class FeatureScriptSpecsDoNotInheritTheDevelopersShell
                 case "$*" in *" version"*) echo "Docker Compose version v2.29.0" ;; esac
                 exit 0
                 """);
-            var scratch = Directory.CreateTempSubdirectory("story438-repo-").FullName;
+            var scratch = TempDir.CreateForProcessLifetime();
             foreach (var entry in Directory.EnumerateFileSystemEntries(RepoRoot))
             {
                 var name = Path.GetFileName(entry);

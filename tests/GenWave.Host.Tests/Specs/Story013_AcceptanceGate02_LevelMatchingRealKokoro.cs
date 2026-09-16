@@ -21,6 +21,7 @@ using GenWave.Tts;
 
 // Alias to disambiguate the GenWave.Loudness namespace from the Loudness domain type.
 using GenWave.Host.Tests.Fakes;
+using GenWave.Host.Tests.Support;
 using FfmpegAnalyzer = GenWave.Loudness.FfmpegLoudnessAnalyzer;
 using TrackLoudness = GenWave.Core.Domain.Loudness;
 
@@ -135,7 +136,7 @@ public static class FeatureAcceptanceGate02LevelMatchingRealKokoro
     public sealed class ScenarioRenderedSegmentHasMeasuredLoudness : IAsyncLifetime
     {
         readonly KokoroFixture fixture;
-        DirectoryInfo cacheDir = null!;
+        TempDir cacheDir = null!;
         MediaItem renderedItem = null!;
 
         public ScenarioRenderedSegmentHasMeasuredLoudness(KokoroFixture fixture)
@@ -145,14 +146,14 @@ public static class FeatureAcceptanceGate02LevelMatchingRealKokoro
 
         public async Task InitializeAsync()
         {
-            cacheDir = System.IO.Directory.CreateTempSubdirectory("genwave-t016-");
+            cacheDir = new TempDir();
             using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
-            renderedItem = await RenderSegmentAsync(cacheDir.FullName, fixture.BaseUrl, cts.Token);
+            renderedItem = await RenderSegmentAsync(cacheDir.Path, fixture.BaseUrl, cts.Token);
         }
 
         public Task DisposeAsync()
         {
-            if (cacheDir.Exists) cacheDir.Delete(recursive: true);
+            cacheDir.Dispose();
             return Task.CompletedTask;
         }
 

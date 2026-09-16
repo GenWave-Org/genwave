@@ -44,24 +44,26 @@ public static class FeatureCapturedAudioProvesNoDeadAirAndLevel
     // HAPPY PATH — the synthesised media
     // ---------------------------------------------------------------------
 
-    public sealed class ScenarioTheSynthesisedTracksHitTheirTargets
+    public sealed class ScenarioTheSynthesisedTracksHitTheirTargets : IDisposable
     {
-        readonly string outDir = Directory.CreateTempSubdirectory("story445-media-").FullName;
+        readonly TempDir outDir = new();
         readonly int exitCode;
 
         public ScenarioTheSynthesisedTracksHitTheirTargets() =>
-            exitCode = ScriptProcess.Run(Path.Combine(Repo, "tools", "gate", "make_media.sh"), RealPath, null, null, outDir).ExitCode;
+            exitCode = ScriptProcess.Run(Path.Combine(Repo, "tools", "gate", "make_media.sh"), RealPath, null, null, outDir.Path).ExitCode;
+
+        public void Dispose() => outDir.Dispose();
 
         [Fact(Skip = PendingMedia)]
         public void TheScriptSucceeds() => Assert.Equal(0, exitCode);
 
         [Fact(Skip = PendingMedia)]
         public void TheLoudTrackIsAtMinusTwelve() =>
-            Assert.InRange(IntegratedLufs(Path.Combine(outDir, "tone-loud.mp3")), -13, -11);
+            Assert.InRange(IntegratedLufs(Path.Combine(outDir.Path, "tone-loud.mp3")), -13, -11);
 
         [Fact(Skip = PendingMedia)]
         public void TheQuietTrackIsAtMinusThirty() =>
-            Assert.InRange(IntegratedLufs(Path.Combine(outDir, "tone-quiet.mp3")), -31, -29);
+            Assert.InRange(IntegratedLufs(Path.Combine(outDir.Path, "tone-quiet.mp3")), -31, -29);
     }
 
     public sealed class ScenarioTheCommittedClipsAreSmallAndSourced

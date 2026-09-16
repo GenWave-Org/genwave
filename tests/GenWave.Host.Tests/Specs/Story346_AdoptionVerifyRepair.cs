@@ -59,7 +59,7 @@ public static class FeatureAdoptionVerifyRepair
     static string MakeScratchCheckout()
     {
         var repoRoot = RepoRootLocator.Find(AppContext.BaseDirectory);
-        var root = Directory.CreateTempSubdirectory("gw-setup-story346-checkout-").FullName;
+        var root = TempDir.CreateForProcessLifetime();
 
         File.Copy(Path.Combine(repoRoot, "setup.sh"), Path.Combine(root, "setup.sh"));
         MakeExecutable(Path.Combine(root, "setup.sh"));
@@ -107,7 +107,7 @@ public static class FeatureAdoptionVerifyRepair
             UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
     }
 
-    static string ScratchEnvDir() => Directory.CreateTempSubdirectory("gw-setup-story346-env-").FullName;
+    static string ScratchEnvDir() => TempDir.CreateForProcessLifetime();
 
     static string ScratchEnvPath() => Path.Combine(ScratchEnvDir(), ".env");
 
@@ -274,8 +274,7 @@ public static class FeatureAdoptionVerifyRepair
         sb.AppendLine("    ;;");
         sb.AppendLine("esac");
 
-        var path = Path.Combine(
-            Directory.CreateTempSubdirectory("gw-setup-story346-docker-").FullName, "docker-stub.sh");
+        var path = Path.Combine(TempDir.CreateForProcessLifetime(), "docker-stub.sh");
         File.WriteAllText(path, sb.ToString());
         MakeExecutable(path);
         return path;
@@ -386,7 +385,7 @@ public static class FeatureAdoptionVerifyRepair
     {
         var lib = Path.Combine(repoRoot, "db", "01-library.sh");
         var station = Path.Combine(repoRoot, "db", "06-station-settings-migration.sh");
-        var dir = Directory.CreateTempSubdirectory("gw-setup-story346-realdb-").FullName;
+        var dir = TempDir.CreateForProcessLifetime();
         var compose =
             $"""
             name: {projectName}
@@ -459,7 +458,7 @@ public static class FeatureAdoptionVerifyRepair
         string scriptPath, string binDir, string envFile, string stdinAnswers,
         IReadOnlyDictionary<string, string> extraEnv, string[] args)
     {
-        var scratchDir = Directory.CreateTempSubdirectory("gw-setup-story346-stdin-").FullName;
+        var scratchDir = TempDir.CreateForProcessLifetime();
         var answersPath = Path.Combine(scratchDir, "answers.txt");
         File.WriteAllText(answersPath, stdinAnswers);
 
@@ -797,7 +796,8 @@ public static class FeatureAdoptionVerifyRepair
             var envFile = ScratchEnvPath();
             WriteEnvFile(envFile, HealthyEnvValues(Path.GetTempPath(), "compose.yaml"));
 
-            var logPath = Path.Combine(Directory.CreateTempSubdirectory("gw-setup-story346-log-").FullName, "argv.log");
+            using var logPathDir = new TempDir();
+            var logPath = Path.Combine(logPathDir.Path, "argv.log");
             var docker = WriteDockerStub(logPath: logPath);   // every knob at its healthy default
 
             var (exitCode, stdOut, _) = RunSetupInCheckout(checkoutRoot, ScriptProcess.MakeBinDir(), envFile, "",
@@ -1036,7 +1036,8 @@ public static class FeatureAdoptionVerifyRepair
             // kokoro's finding is offered first and ollama's second.
             var envFile = ScratchEnvPath();
             WriteEnvFile(envFile, HealthyEnvValues(Path.GetTempPath(), "compose.yaml"));
-            var logPath = Path.Combine(Directory.CreateTempSubdirectory("gw-setup-story346-log-").FullName, "argv.log");
+            using var logPathDir = new TempDir();
+            var logPath = Path.Combine(logPathDir.Path, "argv.log");
             var docker = WriteDockerStub(
                 actualContainers:
                 [
@@ -1061,7 +1062,8 @@ public static class FeatureAdoptionVerifyRepair
         {
             var envFile = ScratchEnvPath();
             WriteEnvFile(envFile, HealthyEnvValues(Path.GetTempPath(), "compose.yaml"));
-            var logPath = Path.Combine(Directory.CreateTempSubdirectory("gw-setup-story346-log-").FullName, "argv.log");
+            using var logPathDir = new TempDir();
+            var logPath = Path.Combine(logPathDir.Path, "argv.log");
             var docker = WriteDockerStub(
                 actualContainers:
                 [
@@ -1131,7 +1133,8 @@ public static class FeatureAdoptionVerifyRepair
             // never a crash — the run still ends via the ordinary "still outstanding" exit 5.
             var envFile = ScratchEnvPath();
             WriteEnvFile(envFile, HealthyEnvValues(Path.GetTempPath(), "compose.yaml"));
-            var logPath = Path.Combine(Directory.CreateTempSubdirectory("gw-setup-story346-log-").FullName, "argv.log");
+            using var logPathDir = new TempDir();
+            var logPath = Path.Combine(logPathDir.Path, "argv.log");
             var docker = WriteDockerStub(
                 actualContainers:
                 [
@@ -1274,7 +1277,8 @@ public static class FeatureAdoptionVerifyRepair
             var checkoutRoot = MakeScratchCheckout();
             var envFile = Path.Combine(checkoutRoot, ".env");
             WriteEnvFile(envFile, HealthyEnvValues(Path.GetTempPath(), "compose.yaml"));
-            var logPath = Path.Combine(Directory.CreateTempSubdirectory("gw-setup-story346-log-").FullName, "argv.log");
+            using var logPathDir = new TempDir();
+            var logPath = Path.Combine(logPathDir.Path, "argv.log");
             var docker = WriteDockerStub(logPath: logPath);
             var before = SnapshotTree(checkoutRoot);
 

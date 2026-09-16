@@ -48,13 +48,14 @@ public static class FeatureAdSpotSourceRegistrationOrder
 
     public sealed class ScenarioThePluginSourceComesFirst : IDisposable
     {
-        readonly string root = Directory.CreateTempSubdirectory("genwave-host-ad-spot-order-").FullName;
+        readonly TempDir rootDir = new();
+        string root => rootDir.Path;
 
         public ScenarioThePluginSourceComesFirst() =>
             EmittedHostTestPlugin.CreateInto(
                 root, "ad-order-plugin", "Ad Order Plugin", "AdOrderPlugin.EntryPoint", PluginSource);
 
-        public void Dispose() => Directory.Delete(root, recursive: true);
+        public void Dispose() => rootDir.Dispose();
 
         [Fact]
         public async Task ThePluginSourceResolvesBeforeTheLibraryFloor()

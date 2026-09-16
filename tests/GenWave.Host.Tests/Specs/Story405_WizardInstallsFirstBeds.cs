@@ -251,12 +251,12 @@ public static class FeatureTheWizardInstallsTheFirstBeds
 
     static string MakeMediaDir(int flacCount)
     {
-        var dir = Directory.CreateTempSubdirectory("gw-setup-story405-media-").FullName;
+        var dir = TempDir.CreateForProcessLifetime();
         for (var i = 0; i < flacCount; i++) File.WriteAllText(Path.Combine(dir, $"track{i}.flac"), "");
         return dir;
     }
 
-    static string ScratchEnvDir() => Directory.CreateTempSubdirectory("gw-setup-story405-env-").FullName;
+    static string ScratchEnvDir() => TempDir.CreateForProcessLifetime();
 
     static string ScratchEnvPath() => Path.Combine(ScratchEnvDir(), ".env");
 
@@ -277,8 +277,7 @@ public static class FeatureTheWizardInstallsTheFirstBeds
     /// sibling it takes no optional argv-log path.</summary>
     static string WriteLaunchStub(int exitCode)
     {
-        var path = Path.Combine(
-            Directory.CreateTempSubdirectory("gw-setup-story405-launch-").FullName, "launch-stub.sh");
+        var path = Path.Combine(TempDir.CreateForProcessLifetime(), "launch-stub.sh");
         File.WriteAllText(path, $"#!/usr/bin/env bash\nexit {exitCode}\n");
         MakeExecutable(path);
         return path;
@@ -290,8 +289,7 @@ public static class FeatureTheWizardInstallsTheFirstBeds
     /// one call is never affected, only install_first_beds's later cookie-jar mktemp is.</summary>
     static string WriteLaunchStubTouchingMarker(int exitCode, string markerFile)
     {
-        var path = Path.Combine(
-            Directory.CreateTempSubdirectory("gw-setup-story405-launch-").FullName, "launch-stub.sh");
+        var path = Path.Combine(TempDir.CreateForProcessLifetime(), "launch-stub.sh");
         // `: > "$file"` (a no-op builtin plus a redirect), not `touch` — kept even though
         // ScriptProcess.MakeBinDir's default toolset now includes touch, since this form needs
         // no PATH lookup at all.
@@ -323,7 +321,7 @@ public static class FeatureTheWizardInstallsTheFirstBeds
         string binDir, string envFile, string stdinAnswers, IReadOnlyDictionary<string, string> extraEnv,
         params string[] args)
     {
-        var scratchDir = Directory.CreateTempSubdirectory("gw-setup-story405-stdin-").FullName;
+        var scratchDir = TempDir.CreateForProcessLifetime();
         var answersPath = Path.Combine(scratchDir, "answers.txt");
         File.WriteAllText(answersPath, stdinAnswers);
 

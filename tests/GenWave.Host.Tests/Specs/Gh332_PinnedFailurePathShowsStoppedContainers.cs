@@ -62,7 +62,7 @@ public static class FeaturePinnedFailurePathShowsStoppedContainers
 
     static string WriteEnvFile(string[] assignments)
     {
-        var path = Path.Combine(Directory.CreateTempSubdirectory("gh332-env-").FullName, "test.env");
+        var path = Path.Combine(TempDir.CreateForProcessLifetime(), "test.env");
         File.WriteAllLines(path, assignments);
         return path;
     }
@@ -72,7 +72,7 @@ public static class FeaturePinnedFailurePathShowsStoppedContainers
     static Run RunPinnedLaunch()
     {
         var bin = MakeBinDirWithDockerStub();
-        var log = Path.Combine(Directory.CreateTempSubdirectory("gh332-log-").FullName, "docker.log");
+        var log = Path.Combine(TempDir.CreateForProcessLifetime(), "docker.log");
 
         var (exitCode, stdOut, stdErr) = ScriptProcess.Run(
             "launch.sh", bin, envFile: WriteEnvFile(),
