@@ -4,7 +4,7 @@ Thanks for wanting to make GenWave better. Bug reports, fixes, and features are 
 
 ## 🏛️ Architecture governance
 
-Ten laws, eleven ids (L4 has two halves), enforced as fitness tests in `tests/GenWave.Architecture.Tests` (they run inside the normal `dotnet test GenWave.sln` — no separate CI lane). Full rationale for each: the per-law XML doc comments in that project (start at `Support/LawId.cs`) — the maintainer's own design notes cover the same ground (gh-#398) but live outside this shipped repo (`docs/` is gitignored).
+Eleven laws, twelve ids (L4 has two halves), enforced as fitness tests in `tests/GenWave.Architecture.Tests` (they run inside the normal `dotnet test GenWave.sln` — no separate CI lane). Full rationale for each: the per-law XML doc comments in that project (start at `Support/LawId.cs`) — the maintainer's own design notes cover the same ground (gh-#398) but live outside this shipped repo (`docs/` is gitignored).
 
 | Law | Rule | Why |
 |---|---|---|
@@ -19,6 +19,7 @@ Ten laws, eleven ids (L4 has two halves), enforced as fitness tests in `tests/Ge
 | `L8` | Outside `GenWave.Tts`, no production code calls `PronunciationRuleSet.Merge`/`MergeWithProvenance` or `PronunciationRuleProvider.BuildMerged` directly — `PronunciationsController`'s own `MergeWithProvenance` call (its display-only rules-table projection, never a render) is the one *designed* exemption | `PronunciationRuleResolver.ResolveForRender` is the one resolve seam for air and audition — parity is structural, not a coincidence two call sites agree on today |
 | `L9` | Outside `AnnouncementsController` and `AnnouncementNowPlayingController`, no production type names `AnnounceTokenAuthenticationDefaults.SchemeName` inside an `[Authorize(AuthenticationSchemes = ...)]` list | A widened schemes list elsewhere would silently promote the HA announce token to full admin authority, with every other test still green |
 | `L10` | No dependency cycles among `GenWave.*` namespaces (`Gh445_NamespaceCycleFreedom`) | A cycle is an accidental module merge |
+| `L11` | Every `Skip=` string under `tests/` starts with `pending: T<n>`, `manual:`, `gate:` or `obsolete:` (`Story443_SkipPrefixLaw`) | The skip count then means pending, manual, or gated — never forgotten |
 
 Adoption is honest: violations that predate a law are named and dated in the suite's exemption baseline and the laws fail on NEW violations only — never add a baseline entry to make your own change green. (The five debt entries that shipped with adoption were burned down via gh-#406 on 2026-08-13; only designed exemptions remain.)
 

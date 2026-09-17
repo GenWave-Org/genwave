@@ -27,8 +27,12 @@
        (GenWave.Architecture.Tests/Support/DepsJsonDependencyScan.cs): every restored NuGet/project
        dependency gets exactly one entry there and shared-framework (BCL) assemblies never do, so
        "nothing beyond the BCL" is exactly "no library entry besides the project's own self-entry"
-       — no name matching, no silent under-coverage. Smallest-dependency net effect: one library
-       dependency (ArchUnitNET), used only where it earns its keep. -->
+       — no name matching, no silent under-coverage. Smallest-dependency net effect: two library
+       dependencies (ArchUnitNET, Microsoft.CodeAnalysis.CSharp), used only where they earn their
+       keep. T505 adds Microsoft.CodeAnalysis.CSharp for the skip-prefix law's scanner
+       (SkipReasons) — already pinned in Directory.Packages.props and referenced by
+       GenWave.Host.Tests and GenWave.Plugins.Tests, so this is a second consumer, not a new
+       dependency on the solution graph. -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -39,6 +43,7 @@
 
   <ItemGroup>
     <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="TngTech.ArchUnitNET" />
     <PackageReference Include="xunit" />
