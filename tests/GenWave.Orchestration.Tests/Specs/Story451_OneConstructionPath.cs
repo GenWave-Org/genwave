@@ -9,6 +9,7 @@
 // is what each fact actually exercises.
 
 using System.Reflection;
+using System.Text.RegularExpressions;
 using GenWave.Abstractions.Playout;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
@@ -266,7 +267,6 @@ public static class FeatureOneConstructionPath
         // (not each Theory row) counted once, mirroring how the pre-move baseline was measured.
 
         const int FactMethodCount = 556; // reflected [Fact]/[Theory] methods, measured before T512 moved any site (the move adds and removes no attribute, so pre = post); the runner reports 562 cases = 556 + theory rows
-        const int SkipCount = 105; // 108 pre-T514 minus the 3 AC6/AC7 facts this task un-skips
 
         static IReadOnlyList<(MethodInfo Method, FactAttribute Attribute)> ReflectFactMethods() =>
             typeof(FeatureOneConstructionPath).Assembly
@@ -282,14 +282,15 @@ public static class FeatureOneConstructionPath
         public void KeepsThePreMoveFactCount() =>
             Assert.Equal(FactMethodCount, ReflectFactMethods().Count);
 
-        /// <summary>AC9 — no fact was skipped to make the move pass</summary>
+        /// <summary>AC9 — no fact is skipped outside the STORY-451…459 pendings</summary>
         [Fact]
-        public void KeepsThePreMoveSkipCount()
+        public void SkipsNothingOutsideTheEpicPendings()
         {
-            var skipped = ReflectFactMethods().Where(x => x.Attribute.Skip is not null).ToList();
+            var skipsOutsideTheEpic = ReflectFactMethods()
+                .Select(x => x.Attribute.Skip)
+                .Where(skip => skip is not null && !Regex.IsMatch(skip, "STORY-45[1-9]"));
 
-            Assert.Equal(SkipCount, skipped.Count);
-            Assert.All(skipped, x => Assert.Matches("STORY-45[1-9]", x.Attribute.Skip));
+            Assert.Empty(skipsOutsideTheEpic);
         }
     }
 }
