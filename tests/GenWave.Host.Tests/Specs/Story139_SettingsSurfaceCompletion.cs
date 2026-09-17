@@ -20,6 +20,8 @@ using GenWave.Host.Options;
 using GenWave.Host.Playout;
 using GenWave.Host.Tests.Fakes;
 using GenWave.Orchestration;
+using GenWave.TestSupport;
+using GenWave.TestSupport.Fakes;
 
 // Alias to disambiguate GenWave.Loudness (the analyzer project) from the Loudness domain type.
 using CoreLoudness = GenWave.Core.Domain.Loudness;
@@ -178,11 +180,21 @@ public static class FeatureSettingsSurfaceCompletion
             var budgetProvider = new FakeRenderBudgetProvider(TimeSpan.FromSeconds(1));
 
             var musicSelectionPolicy = new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance);
-            var orchestrator = new Orchestrator(
-                identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy, tts,
-                new NoOpActivePersonaAccessor(), NullLogger<Orchestrator>.Instance, budgetProvider,
-                new SpeechDeferralQueue(time),
-                time, new FakeBoundaryBiasProvider(TimeSpan.Zero));
+            var orchestrator = new OrchestratorBuilder()
+                .WithIdentity(identityProvider)
+                .WithScope(scopeProvider)
+                .WithCadence(cadenceProvider)
+                .WithRotation(rotationProvider)
+                .WithMusicSelectionPolicy(musicSelectionPolicy)
+                .WithTts(tts)
+                .WithPersonaAccessor(new NoOpActivePersonaAccessor())
+                .WithLogger(NullLogger<Orchestrator>.Instance)
+                .WithRenderBudget(budgetProvider)
+                .WithDeferralQueue(new SpeechDeferralQueue(time))
+                .WithTime(time)
+                .WithLookahead(TimeSpan.Zero)
+                .Build()
+                .Orchestrator;
             var ctx = new PlayoutContext([]);
 
             // Unit 1 — budget (1s) is far shorter than the render delay (10s): the budget timer is

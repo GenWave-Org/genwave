@@ -105,12 +105,21 @@ public static class FeatureDeepCutsAndTheRelaxLadder
         var policyLogger = new CapturingLogger<MusicSelectionPolicy>();
         var musicSelectionPolicy = new MusicSelectionPolicy(
             catalog, policyLogger, new FakeEnvelopeProvider(envelope), provider);
-        var orchestrator = new Orchestrator(
-            identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy,
-            new FakeTtsSegmentSource(), personaAccessor, NullLogger<Orchestrator>.Instance,
-            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(5)),
-            new SpeechDeferralQueue(TimeProvider.System),
-            TimeProvider.System, new FakeBoundaryBiasProvider(TimeSpan.Zero));
+        var orchestrator = new OrchestratorBuilder()
+            .WithIdentity(identityProvider)
+            .WithScope(scopeProvider)
+            .WithCadence(cadenceProvider)
+            .WithRotation(rotationProvider)
+            .WithMusicSelectionPolicy(musicSelectionPolicy)
+            .WithTts(new FakeTtsSegmentSource())
+            .WithPersonaAccessor(personaAccessor)
+            .WithLogger(NullLogger<Orchestrator>.Instance)
+            .WithRenderBudget(TimeSpan.FromSeconds(5))
+            .WithDeferralQueue(new SpeechDeferralQueue(TimeProvider.System))
+            .WithTime(TimeProvider.System)
+            .WithBoundaryBias(new FakeBoundaryBiasProvider(TimeSpan.Zero))
+            .Build()
+            .Orchestrator;
         return (orchestrator, policyLogger);
     }
 

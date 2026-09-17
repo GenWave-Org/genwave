@@ -25,20 +25,22 @@ public static class FeatureOrchestratorPlanner
         ITtsSegmentSource ttsSource,
         CadenceConfig? cadence = null,
         LibraryScope? scope = null,
-        TimeSpan? renderBudget = null)
-    {
-        var identityProvider = new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default"));
-        var scopeProvider = new FakeStationScopeProvider(scope ?? new LibraryScope([1L]));
-        var cadenceProvider = new FakeCadenceProvider(cadence ?? new CadenceConfig());
-        var rotationProvider = new FakeRotationSettingsProvider(new RotationSettings());
-        var musicSelectionPolicy = new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance);
-        return new Orchestrator(
-            identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy, ttsSource,
-            new FakeActivePersonaAccessor(), NullLogger<Orchestrator>.Instance,
-            new FakeRenderBudgetProvider(renderBudget ?? TimeSpan.FromSeconds(30)),
-            new SpeechDeferralQueue(TimeProvider.System),
-            TimeProvider.System, new FakeBoundaryBiasProvider(TimeSpan.Zero));
-    }
+        TimeSpan? renderBudget = null) =>
+        new OrchestratorBuilder()
+            .WithIdentity(new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")))
+            .WithScope(new FakeStationScopeProvider(scope ?? new LibraryScope([1L])))
+            .WithCadence(cadence ?? new CadenceConfig())
+            .WithRotation(new FakeRotationSettingsProvider(new RotationSettings()))
+            .WithMusicSelectionPolicy(new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance))
+            .WithTts(ttsSource)
+            .WithPersonaAccessor(new FakeActivePersonaAccessor())
+            .WithLogger(NullLogger<Orchestrator>.Instance)
+            .WithRenderBudget(renderBudget ?? TimeSpan.FromSeconds(30))
+            .WithDeferralQueue(new SpeechDeferralQueue(TimeProvider.System))
+            .WithTime(TimeProvider.System)
+            .WithBoundaryBias(new FakeBoundaryBiasProvider(TimeSpan.Zero))
+            .Build()
+            .Orchestrator;
 
     static List<MediaItem> ProduceN(Orchestrator orchestrator, int n)
     {
@@ -262,16 +264,21 @@ public static class FeatureOrchestratorPlanner
                 BackAnnounceAfterEachTrack = false,
                 StationIdEveryNUnits = 0,
             });
-            var identityProvider = new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default"));
-            var scopeProvider = new FakeStationScopeProvider(new LibraryScope([1L]));
-            var rotationProvider = new FakeRotationSettingsProvider(new RotationSettings());
-            var musicSelectionPolicy = new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance);
-            var orchestrator = new Orchestrator(
-                identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy, tts,
-                new FakeActivePersonaAccessor(), NullLogger<Orchestrator>.Instance,
-                new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
-                new SpeechDeferralQueue(TimeProvider.System),
-                TimeProvider.System, new FakeBoundaryBiasProvider(TimeSpan.Zero));
+            var orchestrator = new OrchestratorBuilder()
+                .WithIdentity(new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")))
+                .WithScope(new FakeStationScopeProvider(new LibraryScope([1L])))
+                .WithCadence(cadenceProvider)
+                .WithRotation(new FakeRotationSettingsProvider(new RotationSettings()))
+                .WithMusicSelectionPolicy(new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance))
+                .WithTts(tts)
+                .WithPersonaAccessor(new FakeActivePersonaAccessor())
+                .WithLogger(NullLogger<Orchestrator>.Instance)
+                .WithRenderBudget(TimeSpan.FromSeconds(30))
+                .WithDeferralQueue(new SpeechDeferralQueue(TimeProvider.System))
+                .WithTime(TimeProvider.System)
+                .WithBoundaryBias(new FakeBoundaryBiasProvider(TimeSpan.Zero))
+                .Build()
+                .Orchestrator;
             var ctx = new PlayoutContext([]);
 
             // Unit 1 — cadence has LeadIn off: the pulled item is music, no lead-in precedes it.

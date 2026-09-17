@@ -52,19 +52,23 @@ public static class FeatureEnvelopeProviderAndLadder
         IPersonaPickProvider? personaPickProvider = null,
         int artistSeparation = 0)
     {
-        var identityProvider = new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default"));
-        var scopeProvider = new FakeStationScopeProvider(new LibraryScope([1L]));
-        var cadenceProvider = new FakeCadenceProvider(SilentCadence);
-        var rotationProvider = new FakeRotationSettingsProvider(new RotationSettings { ArtistSeparation = artistSeparation });
         var policyLogger = new CapturingLogger<MusicSelectionPolicy>();
-        var musicSelectionPolicy = new MusicSelectionPolicy(
-            catalog, policyLogger, new FakeEnvelopeProvider(envelope), personaPickProvider);
-        var orchestrator = new Orchestrator(
-            identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy,
-            new FakeTtsSegmentSource(), new FakeActivePersonaAccessor(), NullLogger<Orchestrator>.Instance,
-            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(5)),
-            new SpeechDeferralQueue(TimeProvider.System),
-            TimeProvider.System, new FakeBoundaryBiasProvider(TimeSpan.Zero));
+        var orchestrator = new OrchestratorBuilder()
+            .WithIdentity(new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")))
+            .WithScope(new FakeStationScopeProvider(new LibraryScope([1L])))
+            .WithCadence(SilentCadence)
+            .WithRotation(new FakeRotationSettingsProvider(new RotationSettings { ArtistSeparation = artistSeparation }))
+            .WithMusicSelectionPolicy(new MusicSelectionPolicy(
+                catalog, policyLogger, new FakeEnvelopeProvider(envelope), personaPickProvider))
+            .WithTts(new FakeTtsSegmentSource())
+            .WithPersonaAccessor(new FakeActivePersonaAccessor())
+            .WithLogger(NullLogger<Orchestrator>.Instance)
+            .WithRenderBudget(TimeSpan.FromSeconds(5))
+            .WithDeferralQueue(new SpeechDeferralQueue(TimeProvider.System))
+            .WithTime(TimeProvider.System)
+            .WithBoundaryBias(new FakeBoundaryBiasProvider(TimeSpan.Zero))
+            .Build()
+            .Orchestrator;
         return (orchestrator, policyLogger);
     }
 

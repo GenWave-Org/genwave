@@ -1,7 +1,7 @@
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 
-namespace GenWave.Orchestration.Tests.Fakes;
+namespace GenWave.TestSupport.Fakes;
 
 /// <summary>
 /// Mutable <see cref="ICadenceProvider"/> double (gitea-#211, mirrors <see cref="FakeStationScopeProvider"/>
@@ -9,9 +9,11 @@ namespace GenWave.Orchestration.Tests.Fakes;
 /// <c>IOptionsMonitor&lt;StationOptions&gt;</c> reload without standing up a real options stack in a
 /// unit test.
 /// </summary>
-sealed class FakeCadenceProvider(CadenceConfig cadence) : ICadenceProvider
+public sealed class FakeCadenceProvider(CadenceConfig cadence) : ICadenceProvider
 {
+    /// <summary>The cadence config a spec can mutate between calls.</summary>
     public CadenceConfig Cadence { get; set; } = cadence;
 
+    /// <inheritdoc/>
     public CadenceConfig Current => Cadence;
 }

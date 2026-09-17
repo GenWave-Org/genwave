@@ -60,16 +60,23 @@ public static class FeatureContextSegmentsAirAtBoundaries
         var catalog = new FakeMediaCatalog(MakeTrackRef("t1"));
         var musicSelectionPolicy = new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance);
 
-        return new Orchestrator(
-            identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy, tts,
-            personaAccessor ?? new FakeActivePersonaAccessor(),
-            logger ?? NullLogger<Orchestrator>.Instance,
-            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
-            queue,
-            clock,
-            new FakeBoundaryBiasProvider(TimeSpan.Zero),
-            personaStore: personaStore,
-            contextSettings: contextSettings ?? new FakeContextSettingsProvider());
+        var builder = new OrchestratorBuilder()
+            .WithIdentity(identityProvider)
+            .WithScope(scopeProvider)
+            .WithCadence(cadenceProvider)
+            .WithRotation(rotationProvider)
+            .WithMusicSelectionPolicy(musicSelectionPolicy)
+            .WithTts(tts)
+            .WithPersonaAccessor(personaAccessor ?? new FakeActivePersonaAccessor())
+            .WithLogger(logger ?? NullLogger<Orchestrator>.Instance)
+            .WithRenderBudget(TimeSpan.FromSeconds(30))
+            .WithDeferralQueue(queue)
+            .WithTime(clock)
+            .WithBoundaryBias(new FakeBoundaryBiasProvider(TimeSpan.Zero))
+            .WithContextSettings(contextSettings ?? new FakeContextSettingsProvider());
+        if (personaStore is not null)
+            builder = builder.WithPersonaStore(personaStore);
+        return builder.Build().Orchestrator;
     }
 
     // ---------------------------------------------------------------------

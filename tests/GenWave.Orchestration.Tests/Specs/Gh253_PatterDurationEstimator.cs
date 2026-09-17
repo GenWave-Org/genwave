@@ -257,25 +257,27 @@ public static class FeaturePatterDurationEstimator
             var clock = new FakeTimeProvider(DateTimeOffset.Parse("2030-01-01T00:00:00Z"));
             var estimator = new RollingPatterDurationEstimator();
             var tts = new FakeTtsSegmentSource { DurationMs = 12_000 };
-            var orchestrator = new Orchestrator(
-                new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")),
-                new FakeStationScopeProvider(new LibraryScope([1L])),
-                new FakeCadenceProvider(new CadenceConfig
+            var orchestrator = new OrchestratorBuilder()
+                .WithIdentity(new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")))
+                .WithScope(new FakeStationScopeProvider(new LibraryScope([1L])))
+                .WithCadence(new CadenceConfig
                 {
                     LeadInBeforeEachTrack = true,
                     BackAnnounceAfterEachTrack = false,
                     StationIdEveryNUnits = 0,
-                }),
-                new FakeRotationSettingsProvider(new RotationSettings()),
-                new MusicSelectionPolicy(new FakeMediaCatalog(MakeTrack("m1")), NullLogger<MusicSelectionPolicy>.Instance),
-                tts,
-                new FakeActivePersonaAccessor(),
-                NullLogger<Orchestrator>.Instance,
-                new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
-                new SpeechDeferralQueue(clock),
-                clock,
-                new FakeBoundaryBiasProvider(TimeSpan.FromMinutes(10)),
-                patterEstimator: estimator);
+                })
+                .WithRotation(new FakeRotationSettingsProvider(new RotationSettings()))
+                .WithMusicSelectionPolicy(new MusicSelectionPolicy(new FakeMediaCatalog(MakeTrack("m1")), NullLogger<MusicSelectionPolicy>.Instance))
+                .WithTts(tts)
+                .WithPersonaAccessor(new FakeActivePersonaAccessor())
+                .WithLogger(NullLogger<Orchestrator>.Instance)
+                .WithRenderBudget(TimeSpan.FromSeconds(30))
+                .WithDeferralQueue(new SpeechDeferralQueue(clock))
+                .WithTime(clock)
+                .WithBoundaryBias(new FakeBoundaryBiasProvider(TimeSpan.FromMinutes(10)))
+                .WithPatterEstimator(estimator)
+                .Build()
+                .Orchestrator;
 
             // When three units are planned (each unit = one lead-in + one music item)
             var ctx = new PlayoutContext([]);
@@ -294,25 +296,27 @@ public static class FeaturePatterDurationEstimator
             var clock = new FakeTimeProvider(DateTimeOffset.Parse("2030-01-01T00:00:00Z"));
             var estimator = new RollingPatterDurationEstimator();
             var tts = new FakeTtsSegmentSource { DurationMs = null };
-            var orchestrator = new Orchestrator(
-                new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")),
-                new FakeStationScopeProvider(new LibraryScope([1L])),
-                new FakeCadenceProvider(new CadenceConfig
+            var orchestrator = new OrchestratorBuilder()
+                .WithIdentity(new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")))
+                .WithScope(new FakeStationScopeProvider(new LibraryScope([1L])))
+                .WithCadence(new CadenceConfig
                 {
                     LeadInBeforeEachTrack = true,
                     BackAnnounceAfterEachTrack = false,
                     StationIdEveryNUnits = 0,
-                }),
-                new FakeRotationSettingsProvider(new RotationSettings()),
-                new MusicSelectionPolicy(new FakeMediaCatalog(MakeTrack("m1")), NullLogger<MusicSelectionPolicy>.Instance),
-                tts,
-                new FakeActivePersonaAccessor(),
-                NullLogger<Orchestrator>.Instance,
-                new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
-                new SpeechDeferralQueue(clock),
-                clock,
-                new FakeBoundaryBiasProvider(TimeSpan.FromMinutes(10)),
-                patterEstimator: estimator);
+                })
+                .WithRotation(new FakeRotationSettingsProvider(new RotationSettings()))
+                .WithMusicSelectionPolicy(new MusicSelectionPolicy(new FakeMediaCatalog(MakeTrack("m1")), NullLogger<MusicSelectionPolicy>.Instance))
+                .WithTts(tts)
+                .WithPersonaAccessor(new FakeActivePersonaAccessor())
+                .WithLogger(NullLogger<Orchestrator>.Instance)
+                .WithRenderBudget(TimeSpan.FromSeconds(30))
+                .WithDeferralQueue(new SpeechDeferralQueue(clock))
+                .WithTime(clock)
+                .WithBoundaryBias(new FakeBoundaryBiasProvider(TimeSpan.FromMinutes(10)))
+                .WithPatterEstimator(estimator)
+                .Build()
+                .Orchestrator;
 
             // When units are planned
             var ctx = new PlayoutContext([]);

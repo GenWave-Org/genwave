@@ -61,12 +61,21 @@ public static class FeatureOrchestratorConsultationOrder
             catalog, new CapturingLogger<MusicSelectionPolicy>(),
             new FakeEnvelopeProvider(envelope), personaPickProvider, requestFulfillmentSource);
 
-        return new Orchestrator(
-            identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy,
-            new FakeTtsSegmentSource(), new FakeActivePersonaAccessor(), new CapturingLogger<Orchestrator>(),
-            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(5)),
-            new SpeechDeferralQueue(TimeProvider.System),
-            TimeProvider.System, new FakeBoundaryBiasProvider(TimeSpan.Zero));
+        return new OrchestratorBuilder()
+            .WithIdentity(identityProvider)
+            .WithScope(scopeProvider)
+            .WithCadence(cadenceProvider)
+            .WithRotation(rotationProvider)
+            .WithMusicSelectionPolicy(musicSelectionPolicy)
+            .WithTts(new FakeTtsSegmentSource())
+            .WithPersonaAccessor(new FakeActivePersonaAccessor())
+            .WithLogger(new CapturingLogger<Orchestrator>())
+            .WithRenderBudget(TimeSpan.FromSeconds(5))
+            .WithDeferralQueue(new SpeechDeferralQueue(TimeProvider.System))
+            .WithTime(TimeProvider.System)
+            .WithBoundaryBias(new FakeBoundaryBiasProvider(TimeSpan.Zero))
+            .Build()
+            .Orchestrator;
     }
 
     public static class ScenarioALiveRequestShortCircuitsTheChain
@@ -190,19 +199,21 @@ public static class FeatureSingleConsultationPerPick
                 new FakeEnvelopeProvider(envelope),
                 personaPickProvider: null,
                 requestFulfillmentSource: fulfillmentSource);
-            var orchestrator = new Orchestrator(
-                new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")),
-                new FakeStationScopeProvider(new LibraryScope([1L])),
-                new FakeCadenceProvider(SilentCadence),
-                new FakeRotationSettingsProvider(new RotationSettings()),
-                musicSelectionPolicy,
-                new FakeTtsSegmentSource(),
-                new FakeActivePersonaAccessor(),
-                new CapturingLogger<Orchestrator>(),
-                new FakeRenderBudgetProvider(TimeSpan.FromSeconds(5)),
-                deferralQueue,
-                clock,
-                new FakeBoundaryBiasProvider(TimeSpan.FromMinutes(10)));
+            var orchestrator = new OrchestratorBuilder()
+                .WithIdentity(new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")))
+                .WithScope(new FakeStationScopeProvider(new LibraryScope([1L])))
+                .WithCadence(SilentCadence)
+                .WithRotation(new FakeRotationSettingsProvider(new RotationSettings()))
+                .WithMusicSelectionPolicy(musicSelectionPolicy)
+                .WithTts(new FakeTtsSegmentSource())
+                .WithPersonaAccessor(new FakeActivePersonaAccessor())
+                .WithLogger(new CapturingLogger<Orchestrator>())
+                .WithRenderBudget(TimeSpan.FromSeconds(5))
+                .WithDeferralQueue(deferralQueue)
+                .WithTime(clock)
+                .WithBoundaryBias(new FakeBoundaryBiasProvider(TimeSpan.FromMinutes(10)))
+                .Build()
+                .Orchestrator;
 
             // Act: pull the next item — the bias window is active, so pre-fix this drove the
             // resample loop straight through the fulfillment rung on every attempt.

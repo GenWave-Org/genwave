@@ -1,7 +1,7 @@
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 
-namespace GenWave.Orchestration.Tests.Fakes;
+namespace GenWave.TestSupport.Fakes;
 
 /// <summary>
 /// In-memory <see cref="IPersonaStore"/> double (STORY-241/242, PLAN T120) for
@@ -10,7 +10,7 @@ namespace GenWave.Orchestration.Tests.Fakes;
 /// member throws, mirroring the "not exercised by these scenarios" convention every other
 /// <see cref="IPersonaStore"/> double in this codebase already follows.
 /// </summary>
-sealed class FakePersonaStore : IPersonaStore
+public sealed class FakePersonaStore : IPersonaStore
 {
     readonly Dictionary<long, Persona> personas = [];
     readonly Dictionary<long, PersonaCard> cards = [];
@@ -24,8 +24,10 @@ sealed class FakePersonaStore : IPersonaStore
     /// <c>ResolveAsync</c> path.</summary>
     public Exception? ThrowOnGetCardById { get; set; }
 
+    /// <summary>Every id passed to <see cref="GetByIdAsync"/>, in call order.</summary>
     public List<long> GetByIdCalls { get; } = [];
 
+    /// <summary>Seeds a persona, keyed by its own id.</summary>
     public void Add(Persona persona) => personas[persona.Id] = persona;
 
     /// <summary>Round-3 review addition — simulates a persona "deleted out of band" mid-test
@@ -34,8 +36,10 @@ sealed class FakePersonaStore : IPersonaStore
     /// store itself faulted" shape.</summary>
     public void Remove(long id) => personas.Remove(id);
 
+    /// <summary>Seeds a persona card, keyed by persona id.</summary>
     public void AddCard(long personaId, PersonaCard card) => cards[personaId] = card;
 
+    /// <inheritdoc/>
     public Task<Persona?> GetByIdAsync(long id, CancellationToken ct)
     {
         GetByIdCalls.Add(id);
@@ -44,6 +48,7 @@ sealed class FakePersonaStore : IPersonaStore
         return Task.FromResult(personas.TryGetValue(id, out var persona) ? persona : null);
     }
 
+    /// <inheritdoc/>
     public Task<PersonaCard?> GetCardByIdAsync(long id, CancellationToken ct)
     {
         if (ThrowOnGetCardById is { } ex) throw ex;
@@ -51,18 +56,23 @@ sealed class FakePersonaStore : IPersonaStore
         return Task.FromResult(cards.TryGetValue(id, out var card) ? card : null);
     }
 
+    /// <summary>Not exercised by OnAirPersonaAccessor specs — always throws.</summary>
     public Task<IReadOnlyList<Persona>> GetAllAsync(CancellationToken ct) =>
         throw new NotSupportedException("Not exercised by OnAirPersonaAccessor specs.");
 
+    /// <summary>Not exercised by OnAirPersonaAccessor specs — always throws.</summary>
     public Task<PersonaWriteResult> CreateAsync(PersonaDraft draft, CancellationToken ct) =>
         throw new NotSupportedException("Not exercised by OnAirPersonaAccessor specs.");
 
+    /// <summary>Not exercised by OnAirPersonaAccessor specs — always throws.</summary>
     public Task<PersonaWriteResult> UpdateAsync(long id, PersonaDraft draft, CancellationToken ct) =>
         throw new NotSupportedException("Not exercised by OnAirPersonaAccessor specs.");
 
+    /// <summary>Not exercised by OnAirPersonaAccessor specs — always throws.</summary>
     public Task<PersonaWriteResult> DeleteAsync(long id, CancellationToken ct) =>
         throw new NotSupportedException("Not exercised by OnAirPersonaAccessor specs.");
 
+    /// <summary>Not exercised by OnAirPersonaAccessor specs — always throws.</summary>
     public Task<long?> GetIdBySlugAsync(string slug, CancellationToken ct) =>
         throw new NotSupportedException("Not exercised by OnAirPersonaAccessor specs.");
 }

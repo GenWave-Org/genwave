@@ -1,7 +1,7 @@
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 
-namespace GenWave.Orchestration.Tests.Fakes;
+namespace GenWave.TestSupport.Fakes;
 
 /// <summary>
 /// Mutable <see cref="IStationIdentityProvider"/> double (SPEC F44.1, gitea-#196, mirrors
@@ -9,9 +9,11 @@ namespace GenWave.Orchestration.Tests.Fakes;
 /// simulate a live <c>IOptionsMonitor&lt;StationOptions&gt;</c> reload without standing up a real
 /// options stack in a unit test.
 /// </summary>
-sealed class FakeStationIdentityProvider(StationIdentity identity) : IStationIdentityProvider
+public sealed class FakeStationIdentityProvider(StationIdentity identity) : IStationIdentityProvider
 {
+    /// <summary>The station identity a spec can mutate between calls.</summary>
     public StationIdentity Identity { get; set; } = identity;
 
+    /// <inheritdoc/>
     public StationIdentity Current => Identity;
 }

@@ -76,6 +76,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\GenWave.Ads\GenWave.Ads.csproj" />
+    <ProjectReference Include="..\GenWave.TestSupport\GenWave.TestSupport.csproj" />
   </ItemGroup>
 
 </Project>

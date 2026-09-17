@@ -52,24 +52,38 @@ public static class FeatureStationFollowsTheClock
         var personaAccessor = new OnAirPersonaAccessor(caching, personaStore, NullLogger<OnAirPersonaAccessor>.Instance);
         var envelopeProvider = new ScheduleEnvelopeProvider(caching, stationDefault);
 
-        var identityProvider = new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default"));
-        var scopeProvider = new FakeStationScopeProvider(new LibraryScope([1L]));
-        var cadenceProvider = new FakeCadenceProvider(cadence ?? new CadenceConfig
-        {
-            LeadInBeforeEachTrack = false,
-            BackAnnounceAfterEachTrack = false,
-            StationIdEveryNUnits = 0,
-        });
-        var rotationProvider = new FakeRotationSettingsProvider(rotationSettings ?? new RotationSettings());
         var logger = new CapturingLogger<MusicSelectionPolicy>();
         var musicSelectionPolicy = new MusicSelectionPolicy(catalog, logger, envelopeProvider, personaPickProvider);
         var tts = new FakeTtsSegmentSource();
-        var orchestrator = new Orchestrator(
-            identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy,
-            tts, personaAccessor, NullLogger<Orchestrator>.Instance,
-            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(5)),
-            new SpeechDeferralQueue(time),
-            time, new FakeBoundaryBiasProvider(TimeSpan.Zero));
+        // Deliberately never calls WithScheduleResolver/WithSchedule below: the ORIGINAL wiring never
+        // gave the Orchestrator its own scheduleResolver seam either — `caching` is threaded only
+        // through personaAccessor and envelopeProvider above, exactly as the production DI shape does.
+        // The builder's own default (an empty-snapshot CachingScheduleResolver) resolves no boundary
+        // and no current show for every one of Orchestrator's own scheduleResolver reads, which is
+        // externally indistinguishable from Orchestrator's true null default here (both leave
+        // EnqueueHandoffCeremonyAsync a permanent no-op and every Show-name read null) — the only
+        // difference is one unasserted "No CachingScheduleResolver wired" WARN line the null path logs
+        // once, which this file's facts never assert on.
+        var orchestrator = new OrchestratorBuilder()
+            .WithIdentity(new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")))
+            .WithScope(new FakeStationScopeProvider(new LibraryScope([1L])))
+            .WithCadence(cadence ?? new CadenceConfig
+            {
+                LeadInBeforeEachTrack = false,
+                BackAnnounceAfterEachTrack = false,
+                StationIdEveryNUnits = 0,
+            })
+            .WithRotation(new FakeRotationSettingsProvider(rotationSettings ?? new RotationSettings()))
+            .WithMusicSelectionPolicy(musicSelectionPolicy)
+            .WithTts(tts)
+            .WithPersonaAccessor(personaAccessor)
+            .WithLogger(NullLogger<Orchestrator>.Instance)
+            .WithRenderBudget(TimeSpan.FromSeconds(5))
+            .WithDeferralQueue(new SpeechDeferralQueue(time))
+            .WithTime(time)
+            .WithBoundaryBias(new FakeBoundaryBiasProvider(TimeSpan.Zero))
+            .Build()
+            .Orchestrator;
 
         return new ProductionChain(orchestrator, personaAccessor, envelopeProvider, time, logger, tts);
     }

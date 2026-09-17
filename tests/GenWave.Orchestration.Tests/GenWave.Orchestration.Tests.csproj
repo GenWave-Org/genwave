@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />
@@ -18,10 +19,13 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Using Include="GenWave.TestSupport" />
+    <Using Include="GenWave.TestSupport.Fakes" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\GenWave.Orchestration\GenWave.Orchestration.csproj" />
+    <ProjectReference Include="..\GenWave.TestSupport\GenWave.TestSupport.csproj" />
   </ItemGroup>
 
 </Project>

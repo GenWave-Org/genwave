@@ -50,4 +50,8 @@
     <None Include="Fixtures\abstractions-5.7.0-surface.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\GenWave.TestSupport\GenWave.TestSupport.csproj" />
+  </ItemGroup>
+
 </Project>

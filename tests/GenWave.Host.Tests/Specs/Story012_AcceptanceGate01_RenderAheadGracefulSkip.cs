@@ -15,6 +15,7 @@ using GenWave.Core.Playout;
 using GenWave.Host.Tests.Fakes;
 using GenWave.Host.Tests.Support;
 using GenWave.Orchestration;
+using GenWave.TestSupport;
 using GenWave.Tts;
 
 namespace GenWave.Host.Tests.Specs;
@@ -184,12 +185,21 @@ public static class FeatureAcceptanceGate01RenderAheadGracefulSkipToMusic
         var rotationProvider = new FakeRotationSettingsProvider(new RotationSettings());
 
         var musicSelectionPolicy = new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance);
-        return new Orchestrator(
-            identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy, segmentSource,
-            new NoOpActivePersonaAccessor(), NullLogger<Orchestrator>.Instance,
-            new FakeRenderBudgetProvider(renderBudget),
-            new SpeechDeferralQueue(TimeProvider.System),
-            TimeProvider.System, new FakeBoundaryBiasProvider(TimeSpan.Zero));
+        return new OrchestratorBuilder()
+            .WithIdentity(identityProvider)
+            .WithScope(scopeProvider)
+            .WithCadence(cadenceProvider)
+            .WithRotation(rotationProvider)
+            .WithMusicSelectionPolicy(musicSelectionPolicy)
+            .WithTts(segmentSource)
+            .WithPersonaAccessor(new NoOpActivePersonaAccessor())
+            .WithLogger(NullLogger<Orchestrator>.Instance)
+            .WithRenderBudget(renderBudget)
+            .WithDeferralQueue(new SpeechDeferralQueue(TimeProvider.System))
+            .WithTime(TimeProvider.System)
+            .WithLookahead(TimeSpan.Zero)
+            .Build()
+            .Orchestrator;
     }
 
     // -------------------------------------------------------------------------

@@ -32,12 +32,22 @@ public static class FeatureClockAnchoredIdents
         var rotationProvider = new FakeRotationSettingsProvider(new RotationSettings());
         var musicSelectionPolicy = new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance);
 
-        return new Orchestrator(
-            identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy, tts,
-            new FakeActivePersonaAccessor(), NullLogger<Orchestrator>.Instance,
-            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
-            queue, clock, new FakeBoundaryBiasProvider(TimeSpan.Zero),
-            catalog: catalog);
+        return new OrchestratorBuilder()
+            .WithIdentity(identityProvider)
+            .WithScope(scopeProvider)
+            .WithCadence(cadenceProvider)
+            .WithRotation(rotationProvider)
+            .WithMusicSelectionPolicy(musicSelectionPolicy)
+            .WithTts(tts)
+            .WithPersonaAccessor(new FakeActivePersonaAccessor())
+            .WithLogger(NullLogger<Orchestrator>.Instance)
+            .WithRenderBudget(TimeSpan.FromSeconds(30))
+            .WithDeferralQueue(queue)
+            .WithTime(clock)
+            .WithBoundaryBias(new FakeBoundaryBiasProvider(TimeSpan.Zero))
+            .WithCatalog(catalog)
+            .Build()
+            .Orchestrator;
     }
 
     // ---------------------------------------------------------------------

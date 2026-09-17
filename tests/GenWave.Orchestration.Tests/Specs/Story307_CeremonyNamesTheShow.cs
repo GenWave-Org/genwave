@@ -43,15 +43,6 @@ public static class FeatureCeremonyNamesTheShow
         var caching = new CachingScheduleResolver(scheduleStore, resolver, new FakeScheduleSpecialStore());
         var personaAccessor = new OnAirPersonaAccessor(caching, personaStore, NullLogger<OnAirPersonaAccessor>.Instance);
 
-        var identityProvider = new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default"));
-        var scopeProvider = new FakeStationScopeProvider(new LibraryScope([1L]));
-        var cadenceProvider = new FakeCadenceProvider(new CadenceConfig
-        {
-            LeadInBeforeEachTrack = false,
-            BackAnnounceAfterEachTrack = false,
-            StationIdEveryNUnits = 0,
-        });
-        var rotationProvider = new FakeRotationSettingsProvider(new RotationSettings());
         var logger = new CapturingLogger<Orchestrator>();
         var tts = new FakeTtsSegmentSource();
         var events = new CapturingStationEventSink();
@@ -59,15 +50,29 @@ public static class FeatureCeremonyNamesTheShow
         var catalog = new FakeMediaCatalog(MakeTrackRef("t1"));
         var musicSelectionPolicy = new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance);
 
-        var orchestrator = new Orchestrator(
-            identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy,
-            tts, personaAccessor, logger,
-            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(5)),
-            queue,
-            time, new FakeBoundaryBiasProvider(lookahead),
-            scheduleResolver: caching,
-            personaStore: personaStore,
-            events: events);
+        var orchestrator = new OrchestratorBuilder()
+            .WithIdentity(new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")))
+            .WithScope(new FakeStationScopeProvider(new LibraryScope([1L])))
+            .WithCadence(new CadenceConfig
+            {
+                LeadInBeforeEachTrack = false,
+                BackAnnounceAfterEachTrack = false,
+                StationIdEveryNUnits = 0,
+            })
+            .WithRotation(new FakeRotationSettingsProvider(new RotationSettings()))
+            .WithMusicSelectionPolicy(musicSelectionPolicy)
+            .WithTts(tts)
+            .WithPersonaAccessor(personaAccessor)
+            .WithLogger(logger)
+            .WithRenderBudget(TimeSpan.FromSeconds(5))
+            .WithDeferralQueue(queue)
+            .WithTime(time)
+            .WithBoundaryBias(new FakeBoundaryBiasProvider(lookahead))
+            .WithScheduleResolver(caching)
+            .WithPersonaStore(personaStore)
+            .WithEvents(events)
+            .Build()
+            .Orchestrator;
 
         return new ProductionChain(orchestrator, queue, time, scheduleStore, tts);
     }

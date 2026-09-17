@@ -38,18 +38,23 @@ public static class FeatureStationIdentityLive
         BuildOrchestrator(string name)
     {
         var identityProvider = new FakeStationIdentityProvider(new StationIdentity("s1", name, "af_heart"));
-        var scopeProvider = new FakeStationScopeProvider(new LibraryScope([1L]));
-        var cadenceProvider = new FakeCadenceProvider(LeadInOnlyCadence);
-        var rotationProvider = new FakeRotationSettingsProvider(new RotationSettings());
         var catalog = new FakeMediaCatalog(MakeRef("track1"));
         var tts = new FakeTtsSegmentSource();
-        var musicSelectionPolicy = new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance);
-        var orchestrator = new Orchestrator(
-            identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy, tts,
-            new FakeActivePersonaAccessor(), NullLogger<Orchestrator>.Instance,
-            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
-            new SpeechDeferralQueue(TimeProvider.System),
-            TimeProvider.System, new FakeBoundaryBiasProvider(TimeSpan.Zero));
+        var orchestrator = new OrchestratorBuilder()
+            .WithIdentity(identityProvider)
+            .WithScope(new FakeStationScopeProvider(new LibraryScope([1L])))
+            .WithCadence(LeadInOnlyCadence)
+            .WithRotation(new FakeRotationSettingsProvider(new RotationSettings()))
+            .WithMusicSelectionPolicy(new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance))
+            .WithTts(tts)
+            .WithPersonaAccessor(new FakeActivePersonaAccessor())
+            .WithLogger(NullLogger<Orchestrator>.Instance)
+            .WithRenderBudget(TimeSpan.FromSeconds(30))
+            .WithDeferralQueue(new SpeechDeferralQueue(TimeProvider.System))
+            .WithTime(TimeProvider.System)
+            .WithBoundaryBias(new FakeBoundaryBiasProvider(TimeSpan.Zero))
+            .Build()
+            .Orchestrator;
         return (orchestrator, tts, identityProvider);
     }
 

@@ -1,4 +1,4 @@
-namespace GenWave.Orchestration.Tests.Fakes;
+namespace GenWave.TestSupport.Fakes;
 
 using Microsoft.Extensions.Logging;
 
@@ -11,17 +11,21 @@ using Microsoft.Extensions.Logging;
 /// F82.6 per-pick Debug line, which no pre-T64 spec needed to inspect. Mirrors
 /// <c>GenWave.Tts.Tests.Fakes.CapturingLogger&lt;T&gt;</c>. Test-scope only.
 /// </summary>
-sealed class CapturingLogger<T> : ILogger<T>
+public sealed class CapturingLogger<T> : ILogger<T>
 {
     /// <summary>Every logged message, in call order, tagged with the level it was logged at.</summary>
     public List<(LogLevel Level, string Message)> Entries { get; } = [];
 
+    /// <summary>Every logged message at Warning level or above, in call order.</summary>
     public IEnumerable<string> Warnings => Entries.Where(e => e.Level >= LogLevel.Warning).Select(e => e.Message);
 
+    /// <summary>No scope tracking — always returns null.</summary>
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
+    /// <summary>Always enabled — every level is captured.</summary>
     public bool IsEnabled(LogLevel logLevel) => true;
 
+    /// <summary>Records the formatted message into <see cref="Entries"/>.</summary>
     public void Log<TState>(
         LogLevel logLevel, EventId eventId, TState state, Exception? exception,
         Func<TState, Exception?, string> formatter)

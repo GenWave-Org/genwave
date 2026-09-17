@@ -658,21 +658,23 @@ public static class FeatureStraddleHandoff
             var resolver = new ScheduleResolver(time, new FakeStationDefaultEnvelopeSource(SegmentEnvelope.StationDefault));
             var caching = new CachingScheduleResolver(scheduleStore, resolver, new FakeScheduleSpecialStore());
             var queue = new SpeechDeferralQueue(time);
-            var orchestrator = new Orchestrator(
-                new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")),
-                new FakeStationScopeProvider(new LibraryScope([1L])),
-                new FakeCadenceProvider(CadenceOff),
-                new FakeRotationSettingsProvider(new RotationSettings()),
-                new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance),
-                new FakeTtsSegmentSource(),
-                new FakeActivePersonaAccessor(),
-                NullLogger<Orchestrator>.Instance,
-                new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
-                queue,
-                time,
-                new FakeBoundaryBiasProvider(TimeSpan.FromMinutes(10)),
-                scheduleResolver: caching,
-                personaStore: personaStore ?? TwoDjStore());
+            var orchestrator = new OrchestratorBuilder()
+                .WithIdentity(new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")))
+                .WithScope(new FakeStationScopeProvider(new LibraryScope([1L])))
+                .WithCadence(CadenceOff)
+                .WithRotation(new FakeRotationSettingsProvider(new RotationSettings()))
+                .WithMusicSelectionPolicy(new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance))
+                .WithTts(new FakeTtsSegmentSource())
+                .WithPersonaAccessor(new FakeActivePersonaAccessor())
+                .WithLogger(NullLogger<Orchestrator>.Instance)
+                .WithRenderBudget(TimeSpan.FromSeconds(30))
+                .WithDeferralQueue(queue)
+                .WithTime(time)
+                .WithBoundaryBias(new FakeBoundaryBiasProvider(TimeSpan.FromMinutes(10)))
+                .WithScheduleResolver(caching)
+                .WithPersonaStore(personaStore ?? TwoDjStore())
+                .Build()
+                .Orchestrator;
 
             return (orchestrator, scheduleStore, time, queue);
         }

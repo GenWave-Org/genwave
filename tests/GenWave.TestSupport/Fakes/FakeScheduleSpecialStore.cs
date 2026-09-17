@@ -1,7 +1,7 @@
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 
-namespace GenWave.Orchestration.Tests.Fakes;
+namespace GenWave.TestSupport.Fakes;
 
 /// <summary>
 /// In-memory <see cref="IScheduleSpecialStore"/> double (STORY-317, PLAN T260) — the specials-cache
@@ -22,11 +22,12 @@ namespace GenWave.Orchestration.Tests.Fakes;
 /// mid-flight-invalidation race <see cref="FakeScheduleStore"/> already proves for the week snapshot.
 /// </para>
 /// </summary>
-sealed class FakeScheduleSpecialStore(IReadOnlyList<ScheduleSpecial>? seed = null) : IScheduleSpecialStore
+public sealed class FakeScheduleSpecialStore(IReadOnlyList<ScheduleSpecial>? seed = null) : IScheduleSpecialStore
 {
     IReadOnlyList<ScheduleSpecial> current = seed ?? [];
     TaskCompletionSource<IReadOnlyList<ScheduleSpecial>>? pendingLoad;
 
+    /// <summary>How many times <see cref="ListUpcomingAsync"/> has been called.</summary>
     public int ListUpcomingAsyncCallCount { get; private set; }
 
     /// <summary>Every <c>fromDate</c> a caller has ever passed, in call order — lets a spec assert
@@ -38,8 +39,10 @@ sealed class FakeScheduleSpecialStore(IReadOnlyList<ScheduleSpecial>? seed = nul
     /// <see cref="FakeScheduleStore.ThrowOnLoadWeek"/>'s own convention. Never cleared automatically.</summary>
     public Exception? ThrowOnListUpcoming { get; set; }
 
+    /// <summary>Raised by <see cref="RaiseSpecialsChanged"/> to simulate a write from another caller.</summary>
     public event Action? SpecialsChanged;
 
+    /// <inheritdoc/>
     public Task<IReadOnlyList<ScheduleSpecial>> ListUpcomingAsync(DateOnly fromDate, CancellationToken ct)
     {
         ListUpcomingAsyncCallCount++;
@@ -49,12 +52,15 @@ sealed class FakeScheduleSpecialStore(IReadOnlyList<ScheduleSpecial>? seed = nul
         return pendingLoad?.Task ?? Task.FromResult(current);
     }
 
+    /// <summary>Not needed by any T260 spec — <see cref="CachingScheduleResolver"/> only ever reads. Always throws.</summary>
     public Task<ScheduleSpecialCreateResult> CreateAsync(ScheduleSpecial special, CancellationToken ct) =>
         throw new NotSupportedException("FakeScheduleSpecialStore is a read-only double for T260 caching specs.");
 
+    /// <summary>Not needed by any T260 spec — <see cref="CachingScheduleResolver"/> only ever reads. Always throws.</summary>
     public Task<bool> DeleteAsync(long id, CancellationToken ct) =>
         throw new NotSupportedException("FakeScheduleSpecialStore is a read-only double for T260 caching specs.");
 
+    /// <summary>Simulates a specials write landing from another caller by raising <see cref="SpecialsChanged"/>.</summary>
     public void RaiseSpecialsChanged() => SpecialsChanged?.Invoke();
 
     /// <summary>Arms a gate so the NEXT <see cref="ListUpcomingAsync"/> call returns an incomplete task,

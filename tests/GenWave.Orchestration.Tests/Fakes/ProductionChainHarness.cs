@@ -83,46 +83,38 @@ static class ProductionChainHarness
         var mediaCatalog = catalog ?? new FakeMediaCatalog(MakeTrackRef("t1"));
         var musicSelectionPolicy = new MusicSelectionPolicy(mediaCatalog, NullLogger<MusicSelectionPolicy>.Instance);
 
-        var orchestrator = new Orchestrator(
-            identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy,
-            tts, personaAccessor, logger,
-            new FakeRenderBudgetProvider(renderBudget ?? TimeSpan.FromSeconds(5)),
-            queue,
-            time, new FakeBoundaryBiasProvider(lookahead),
-            scheduleResolver: caching,
-            personaStore: personaStore,
-            events: events,
-            catalog: mediaCatalog,
-            patterEstimator: patterEstimator,
-            crosstalkPlanner: crosstalkPlanner);
+        var orchestrator = new OrchestratorBuilder()
+            .WithIdentity(identityProvider)
+            .WithScope(scopeProvider)
+            .WithCadence(cadenceProvider)
+            .WithRotation(rotationProvider)
+            .WithMusicSelectionPolicy(musicSelectionPolicy)
+            .WithTts(tts)
+            .WithPersonaAccessor(personaAccessor)
+            .WithLogger(logger)
+            .WithRenderBudget(renderBudget ?? TimeSpan.FromSeconds(5))
+            .WithDeferralQueue(queue)
+            .WithTime(time)
+            .WithBoundaryBias(new FakeBoundaryBiasProvider(lookahead))
+            .WithScheduleResolver(caching)
+            .WithPersonaStore(personaStore)
+            .WithEvents(events)
+            .WithCatalog(mediaCatalog)
+            .WithPatterEstimator(patterEstimator)
+            .WithCrosstalkPlanner(crosstalkPlanner)
+            .Build()
+            .Orchestrator;
 
         return new ProductionChain(orchestrator, queue, time, scheduleStore, tts, events, logger, mediaCatalog);
     }
 
-    public static Persona MakePersona(long id, string name, string voice)
-    {
-        var now = DateTime.UnixEpoch;
-        return new Persona(id, name, "", "", voice, now, now);
-    }
+    // Moved to GenWave.TestSupport.TestData at PLAN T511 (OrchestratorBuilder's own defaults need
+    // these too); forwarding keeps every existing call site in this project unchanged until T512 folds this harness into the builder.
+    public static Persona MakePersona(long id, string name, string voice) =>
+        TestData.MakePersona(id, name, voice);
 
-    public static MediaReference MakeTrackRef(string id) => new(
-        MediaId: id,
-        Locator: $"/media/{id}.mp3",
-        Title: $"Track {id}",
-        Loudness: new Loudness(-23.0, -1.0, true),
-        DurationMs: null,
-        SampleRate: null,
-        Channels: null,
-        BitrateKbps: null,
-        Artist: null,
-        Album: null,
-        Genre: null,
-        Year: null);
+    public static MediaReference MakeTrackRef(string id) => TestData.MakeTrackRef(id);
 
-    public static FakePersonaStore OneDjStore(long id, string name, string voice)
-    {
-        var store = new FakePersonaStore();
-        store.Add(MakePersona(id, name, voice));
-        return store;
-    }
+    public static FakePersonaStore OneDjStore(long id, string name, string voice) =>
+        TestData.OneDjStore(id, name, voice);
 }

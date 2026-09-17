@@ -1,7 +1,7 @@
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 
-namespace GenWave.Orchestration.Tests.Fakes;
+namespace GenWave.TestSupport.Fakes;
 
 /// <summary>
 /// In-memory <see cref="IScheduleStore"/> double (STORY-241, PLAN T119) that counts
@@ -18,11 +18,12 @@ namespace GenWave.Orchestration.Tests.Fakes;
 /// so the NEXT (ungated) load observes it.
 /// </para>
 /// </summary>
-sealed class FakeScheduleStore(ScheduleWeekSnapshot snapshot) : IScheduleStore
+public sealed class FakeScheduleStore(ScheduleWeekSnapshot snapshot) : IScheduleStore
 {
     ScheduleWeekSnapshot current = snapshot;
     TaskCompletionSource<ScheduleWeekSnapshot>? pendingLoad;
 
+    /// <summary>How many times <see cref="LoadWeekAsync"/> has been called.</summary>
     public int LoadWeekAsyncCallCount { get; private set; }
 
     /// <summary>Set to make the next <see cref="LoadWeekAsync"/> call throw, simulating an
@@ -31,8 +32,10 @@ sealed class FakeScheduleStore(ScheduleWeekSnapshot snapshot) : IScheduleStore
     /// a scenario proving recovery sets this back to <see langword="null"/> itself.</summary>
     public Exception? ThrowOnLoadWeek { get; set; }
 
+    /// <summary>Raised by <see cref="RaiseWeekChanged"/> to simulate a write from another caller.</summary>
     public event Action? WeekChanged;
 
+    /// <inheritdoc/>
     public Task<ScheduleWeekSnapshot> LoadWeekAsync(CancellationToken ct)
     {
         LoadWeekAsyncCallCount++;
@@ -41,20 +44,24 @@ sealed class FakeScheduleStore(ScheduleWeekSnapshot snapshot) : IScheduleStore
         return pendingLoad?.Task ?? Task.FromResult(current);
     }
 
+    /// <summary>Not needed by any T119 spec — <see cref="CachingScheduleResolver"/> only ever reads. Always throws.</summary>
     public Task<ScheduleReplaceResult> ReplaceWeekAsync(
         IReadOnlyList<ScheduleSegment> week, string? expectedVersion, CancellationToken ct) =>
         throw new NotSupportedException("FakeScheduleStore is a read-only double for T119 specs.");
 
+    /// <summary>PLAN T240's show delete guard read — not exercised by any T119 spec. Always throws.</summary>
     // PLAN T240's show delete guard read — not exercised by any T119 spec (this double never carries
     // show_id-scoped rows), mirrors ReplaceWeekAsync's own NotSupportedException posture above.
     public Task<IReadOnlyList<ScheduledSlot>> GetSlotsByShowIdAsync(long showId, CancellationToken ct) =>
         throw new NotSupportedException("FakeScheduleStore is a read-only double for T119 specs.");
 
+    /// <summary>PLAN T243's show assignment write — not exercised by any T119 spec. Always throws.</summary>
     // PLAN T243's show assignment write — not exercised by any T119 spec (this double is read-only by
     // design, see class remarks), mirrors ReplaceWeekAsync's own NotSupportedException posture above.
     public Task<ShowAssignResult> AssignShowAsync(long blockId, long? showId, bool applyToRun, CancellationToken ct) =>
         throw new NotSupportedException("FakeScheduleStore is a read-only double for T119 specs.");
 
+    /// <summary>Simulates a schedule write landing from another caller by raising <see cref="WeekChanged"/>.</summary>
     public void RaiseWeekChanged() => WeekChanged?.Invoke();
 
     /// <summary>Arms a gate so the NEXT <see cref="LoadWeekAsync"/> call returns an incomplete task,
