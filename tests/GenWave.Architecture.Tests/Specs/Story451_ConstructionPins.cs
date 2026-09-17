@@ -3,16 +3,19 @@
 // BDD specification — xUnit. AC4 scans src/ and tests/ for `new Orchestrator(`; AC5 reads Host.Tests' csproj and file list; AC8 reflects the
 // TestSupport assembly for [Fact] methods.
 //
-// RED at plan time: every fact is [Fact(Skip = Pending)] with a loud body — remove the Skip only in the
-// task that makes it green. The builder comments name the arrange each scenario needs.
+// RED at plan time: every fact was [Fact(Skip = Pending)] with a loud body — remove the Skip only in
+// the task that makes it green. T513 un-skips ScenarioHostTestsAfterTheMove's three facts;
+// ScenarioTheTextScanForConstruction's three facts stay skipped until T514 lands the two-site text scan.
 
 using System.Reflection;
+using System.Xml.Linq;
+using GenWave.Architecture.Tests.Support;
 
 namespace GenWave.Architecture.Tests.Specs;
 
 public static class FeatureConstructionPins
 {
-    const string Pending = "pending: T514 — two `new Orchestrator(` sites; Host.Tests rides TestSupport (STORY-451)";
+    const string Pending = "pending: T514 — two `new Orchestrator(` sites (STORY-451)";
 
     // ---------------------------------------------------------------------
     // HAPPY PATH
@@ -37,19 +40,35 @@ public static class FeatureConstructionPins
 
     public sealed class ScenarioHostTestsAfterTheMove
     {
-        // Given: GenWave.Host.Tests.csproj and its Fakes folder
+        // Given: GenWave.Host.Tests.csproj and its file tree
+
+        static readonly string HostTestsDir =
+            Path.Combine(SolutionLocator.Root(), "tests", "GenWave.Host.Tests");
 
         /// <summary>AC5 — the ProjectReference is present</summary>
-        [Fact(Skip = Pending)]
-        public void ReferencesTestSupport() => Assert.Fail(Pending);
+        [Fact]
+        public void ReferencesTestSupport()
+        {
+            var csprojPath = Path.Combine(HostTestsDir, "GenWave.Host.Tests.csproj");
+            var csproj = XDocument.Load(csprojPath);
+
+            var referencesTestSupport = csproj.Descendants("ProjectReference")
+                .Select(reference => reference.Attribute("Include")?.Value)
+                .Any(include => include is not null
+                    && include.EndsWith("GenWave.TestSupport.csproj", StringComparison.Ordinal));
+
+            Assert.True(referencesTestSupport, $"{csprojPath} carries no ProjectReference to GenWave.TestSupport");
+        }
 
         /// <summary>AC5 — the duplicate fake is deleted</summary>
-        [Fact(Skip = Pending)]
-        public void NoLongerCarriesFakeRenderBudgetProvider() => Assert.Fail(Pending);
+        [Fact]
+        public void NoLongerCarriesFakeRenderBudgetProvider() =>
+            Assert.Empty(Directory.EnumerateFiles(HostTestsDir, "FakeRenderBudgetProvider.cs", SearchOption.AllDirectories));
 
         /// <summary>AC5 — the duplicate fake is deleted</summary>
-        [Fact(Skip = Pending)]
-        public void NoLongerCarriesFakeBoundaryBiasProvider() => Assert.Fail(Pending);
+        [Fact]
+        public void NoLongerCarriesFakeBoundaryBiasProvider() =>
+            Assert.Empty(Directory.EnumerateFiles(HostTestsDir, "FakeBoundaryBiasProvider.cs", SearchOption.AllDirectories));
     }
 
     public sealed class ScenarioTheSupportAssembly

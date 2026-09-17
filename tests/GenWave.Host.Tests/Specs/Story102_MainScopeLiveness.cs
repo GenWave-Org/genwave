@@ -19,6 +19,7 @@ using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Host.Api;
 using GenWave.Orchestration;
+using GenWave.TestSupport;
 
 namespace GenWave.Host.Tests.Specs;
 
@@ -210,13 +211,21 @@ public static class FeatureMainScopeLiveness
             var cadenceProvider = new FakeCadenceProvider(SilentCadence);
             var rotationProvider = new FakeRotationSettingsProvider(new RotationSettings());
             var musicSelectionPolicy = new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance);
-            var orchestrator = new Orchestrator(
-                identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy,
-                new NoOpTtsSegmentSource(),
-                new NoOpActivePersonaAccessor(), NullLogger<Orchestrator>.Instance,
-                new FakeRenderBudgetProvider(TimeSpan.FromSeconds(5)),
-                new SpeechDeferralQueue(TimeProvider.System),
-                TimeProvider.System, new FakeBoundaryBiasProvider(TimeSpan.Zero));
+            var orchestrator = new OrchestratorBuilder()
+                .WithIdentity(identityProvider)
+                .WithScope(scopeProvider)
+                .WithCadence(cadenceProvider)
+                .WithRotation(rotationProvider)
+                .WithMusicSelectionPolicy(musicSelectionPolicy)
+                .WithTts(new NoOpTtsSegmentSource())
+                .WithPersonaAccessor(new NoOpActivePersonaAccessor())
+                .WithLogger(NullLogger<Orchestrator>.Instance)
+                .WithRenderBudget(TimeSpan.FromSeconds(5))
+                .WithDeferralQueue(new SpeechDeferralQueue(TimeProvider.System))
+                .WithTime(TimeProvider.System)
+                .WithLookahead(TimeSpan.Zero)
+                .Build()
+                .Orchestrator;
 
             await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
             Assert.Equal(new long[] { 1L }, catalog.Scopes[0].LibraryIds);
@@ -290,13 +299,21 @@ public static class FeatureMainScopeLiveness
             var cadenceProvider = new FakeCadenceProvider(SilentCadence);
             var rotationProvider = new FakeRotationSettingsProvider(new RotationSettings());
             var musicSelectionPolicy = new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance);
-            var orchestrator = new Orchestrator(
-                identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy,
-                new NoOpTtsSegmentSource(),
-                new NoOpActivePersonaAccessor(), NullLogger<Orchestrator>.Instance,
-                new FakeRenderBudgetProvider(TimeSpan.FromSeconds(5)),
-                new SpeechDeferralQueue(TimeProvider.System),
-                TimeProvider.System, new FakeBoundaryBiasProvider(TimeSpan.Zero));
+            var orchestrator = new OrchestratorBuilder()
+                .WithIdentity(identityProvider)
+                .WithScope(scopeProvider)
+                .WithCadence(cadenceProvider)
+                .WithRotation(rotationProvider)
+                .WithMusicSelectionPolicy(musicSelectionPolicy)
+                .WithTts(new NoOpTtsSegmentSource())
+                .WithPersonaAccessor(new NoOpActivePersonaAccessor())
+                .WithLogger(NullLogger<Orchestrator>.Instance)
+                .WithRenderBudget(TimeSpan.FromSeconds(5))
+                .WithDeferralQueue(new SpeechDeferralQueue(TimeProvider.System))
+                .WithTime(TimeProvider.System)
+                .WithLookahead(TimeSpan.Zero)
+                .Build()
+                .Orchestrator;
 
             var item = await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
 
