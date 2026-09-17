@@ -5,8 +5,8 @@
 // nothing here ever starts a Kokoro. AC4–AC7 are text pins over ci.yml, CONTRIBUTING.md and the
 // MediaLibrary guard (Story107's repo-root grep-assert idiom).
 //
-// RED at plan time: the guard is a throwing skeleton; ci.yml still says integration runs
-// "on-demand on a dev box"; CONTRIBUTING has no "Test tiers" table.
+// Was red at plan time (the guard was a throwing skeleton, ci.yml said integration runs
+// "on-demand on a dev box", CONTRIBUTING had no "Test tiers" table); T504 turned it green.
 
 using GenWave.Host.Tests.Support;
 
@@ -14,8 +14,6 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureTestTiersNamedPinnedAndGuarded
 {
-    const string Pending = "pending: T504 — the Host tier guard, the ci.yml comment and the CONTRIBUTING tier table (STORY-439)";
-
     static string RepoRoot => RepoRootLocator.Find(AppContext.BaseDirectory);
     static string ReadRepoFile(params string[] parts) => File.ReadAllText(Path.Combine([RepoRoot, .. parts]));
 
@@ -47,7 +45,7 @@ public static class FeatureTestTiersNamedPinnedAndGuarded
 
     public sealed class ScenarioTheShippedAssemblyPasses
     {
-        [Fact(Skip = Pending)]
+        [Fact]
         public void ReportsZeroViolations()
         {
             var violations = TierTraitConventionGuard.FindViolations(typeof(KokoroFixture).Assembly.GetExportedTypes());
@@ -64,11 +62,11 @@ public static class FeatureTestTiersNamedPinnedAndGuarded
         public void TheTestStepFiltersOutIntegration() =>
             Assert.Contains("--filter \"Category!=Integration\"", ci, StringComparison.Ordinal);
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void NoLineSaysIntegrationRunsOnADevBox() =>
             Assert.DoesNotContain("on-demand on a dev box", ci, StringComparison.Ordinal);
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void OneLineNamesTierTwoNightly() =>
             Assert.Single(ci.Split('\n'), line => line.Contains("tier 2 (nightly)", StringComparison.Ordinal));
     }
@@ -84,15 +82,15 @@ public static class FeatureTestTiersNamedPinnedAndGuarded
             table = start < 0 ? "" : text[start..];
         }
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void NamesTheTierOneFilter() =>
             Assert.Contains("`Category!=Integration`", table, StringComparison.Ordinal);
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void NamesTheTierTwoFilter() =>
             Assert.Contains("`Category=Integration`", table, StringComparison.Ordinal);
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void NamesTheManualPrefix() =>
             Assert.Contains("`manual:`", table, StringComparison.Ordinal);
     }
@@ -101,9 +99,9 @@ public static class FeatureTestTiersNamedPinnedAndGuarded
     {
         // The committed baseline hash of IntegrationTraitConventionGuard.cs (2026-09-15) — T504 adds
         // a Host twin, it never widens the MediaLibrary guard's scope.
-        const string BaselineSha256 = "pending: T504 records the baseline hash here";
+        const string BaselineSha256 = "b8382267f983fd617a9b9be13c708a92fa8715beb5b0fc8c9eff734666cc7552";
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public void IsByteIdenticalToTheBaseline()
         {
             var bytes = File.ReadAllBytes(Path.Combine(RepoRoot, "tests", "GenWave.MediaLibrary.Tests", "IntegrationTraitConventionGuard.cs"));
@@ -119,7 +117,7 @@ public static class FeatureTestTiersNamedPinnedAndGuarded
 
     public sealed class ScenarioAKokoroConsumerWithoutTheTraitIsRejected
     {
-        [Fact(Skip = Pending)]
+        [Fact]
         public void ReportsThatClassByName()
         {
             var violations = TierTraitConventionGuard.FindViolations([typeof(KokoroConsumerWithoutTrait)]);
@@ -130,7 +128,7 @@ public static class FeatureTestTiersNamedPinnedAndGuarded
 
     public sealed class ScenarioAStackFixtureConsumerWithoutTheTraitIsRejected
     {
-        [Fact(Skip = Pending)]
+        [Fact]
         public void ReportsThatClassByName()
         {
             var violations = TierTraitConventionGuard.FindViolations(

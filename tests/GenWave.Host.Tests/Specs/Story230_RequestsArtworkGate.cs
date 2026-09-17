@@ -9,7 +9,10 @@
 // from every run forever), but a runtime reachability/precondition check that writes a clear
 // skip line and returns cleanly when the live stack isn't up or isn't configured for this gate,
 // and drives the REAL surfaces (an anonymous wish POST, the admin booth-log/settings/media APIs,
-// a single ICY metadata handshake against the live Icecast stream) when it is. Both facts share
+// a single ICY metadata handshake against the live Icecast stream) when it is. Per SPEC F177.1
+// (STORY-439, PLAN T504), ScenarioFlywheel carries [Trait("Category", "Integration")] — it needs
+// more than Postgres (the live compose stack), so it is tier 2 and runs nightly, never in PR CI's
+// tier 1 filter. Both facts share
 // ONE flywheel run via an xUnit collection fixture (RequestsArtworkFlywheelFixture) — mirroring
 // KokoroFixture's shared-container idiom — because POSTing the wish twice would trip
 // Requests:PerIpCooldownMinutes (default 5) on the second fact.
@@ -90,6 +93,7 @@ public static class FeatureRequestsArtworkGate
     public sealed class FlywheelCollection : ICollectionFixture<RequestsArtworkFlywheelFixture>;
 
     [Collection(FlywheelCollectionName)]
+    [Trait("Category", "Integration")]
     public sealed class ScenarioFlywheel(RequestsArtworkFlywheelFixture fixture, ITestOutputHelper output)
     {
         [Fact]
