@@ -53,8 +53,8 @@ jobs:
         run: dotnet restore GenWave.sln
       - name: Build (warnings are errors)
         run: dotnet build GenWave.sln --no-restore --configuration Release
-      # Same policy as ci.yml: integration tests need fixture-managed side containers and run
-      # on a dev box, not here.
+      # Test tiers (SPEC F177.1): same tier-1 filter as ci.yml's build-test job — see that job's
+      # comment for the full tier 1/2/3 breakdown.
       # ffmpeg: the F88 artwork specs (Story222) drive the REAL binary (gh-#105) — same step
       # as ci.yml's build-test; this gate runs its own test pass and needs it too.
       # gh-#588: the retry loop itself lives in .github/actions/install-ffmpeg (was

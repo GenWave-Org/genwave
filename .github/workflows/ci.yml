@@ -37,8 +37,9 @@ jobs:
       # red path unreachable if it ran after Test.
       - name: SEAMS.md drift check
         run: ./tools/check-seam-index.sh
-      # Integration tests need fixture-managed side containers (Postgres, Kokoro) — they run
-      # on-demand on a dev box, not in CI (same policy as the pre-migration pipeline).
+      # Test tiers (SPEC F177.1): tier 1 = this filter, every fact without Category=Integration,
+      # including the fixture Postgres facts; tier 2 (nightly) = Category=Integration: Kokoro, a
+      # stream capture or a full compose stack (nightly.yml); tier 3 = Skip="manual: …", checked by ear.
       # ffmpeg: the F88 artwork specs (Story222) drive the REAL binary — both fixture generation
       # and the extraction under test — matching the api image, which ships ffmpeg (gh-#105).
       # gh-#588: the retry loop itself lives in .github/actions/install-ffmpeg (was
