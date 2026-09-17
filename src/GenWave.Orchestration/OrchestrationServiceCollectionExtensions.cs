@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using GenWave.Core.Abstractions;
 
 namespace GenWave.Orchestration;
@@ -118,6 +119,44 @@ public static class OrchestrationServiceCollectionExtensions
         // constructor parameter's own remarks).
         services.AddSingleton<ClockAnchoredImagingProducer>();
 
-        return services.AddSingleton<INextItemProvider, Orchestrator>();
+        // The production construction site (SPEC F184.3/F184.5, STORY-451, T514). The only other
+        // `new Orchestrator(` is GenWave.TestSupport's OrchestratorBuilder; Story451_ConstructionPins
+        // pins the pair. A factory, not AddSingleton<INextItemProvider, Orchestrator>(): every seam is
+        // read INSIDE the lambda, i.e. at first resolve of INextItemProvider, never at this call.
+        // That is load-bearing — Program.cs registers IPersonaPickProvider, IRequestFulfillmentSource,
+        // IStationEventSink, IContextSettingsProvider and IAdSpotVend AFTER AddGenWaveOrchestration so
+        // they beat the TryAdd defaults above; a resolve-time read sees the last registration, exactly
+        // as constructor injection did. Optional seams with a NoOp type coalesce to it; the other ten
+        // pass GetService's null through to the Orchestrator's own null handling, unchanged.
+        services.AddSingleton<INextItemProvider>(sp => new Orchestrator(
+            sp.GetRequiredService<IStationIdentityProvider>(),
+            sp.GetRequiredService<IStationScopeProvider>(),
+            sp.GetRequiredService<ICadenceProvider>(),
+            sp.GetRequiredService<IRotationSettingsProvider>(),
+            sp.GetRequiredService<MusicSelectionPolicy>(),
+            sp.GetRequiredService<ITtsSegmentSource>(),
+            sp.GetRequiredService<IActivePersonaAccessor>(),
+            sp.GetRequiredService<ILogger<Orchestrator>>(),
+            sp.GetRequiredService<IRenderBudgetProvider>(),
+            sp.GetRequiredService<SpeechDeferralQueue>(),
+            sp.GetRequiredService<TimeProvider>(),
+            sp.GetRequiredService<IBoundaryBiasProvider>(),
+            scheduleResolver: sp.GetService<CachingScheduleResolver>(),
+            personaStore: sp.GetService<IPersonaStore>(),
+            events: sp.GetService<IStationEventSink>() ?? NoOpStationEventSink.Instance,
+            stationClock: sp.GetService<IStationClockProvider>(),
+            patterEstimator: sp.GetService<IPatterDurationEstimator>(),
+            contextSettings: sp.GetService<IContextSettingsProvider>() ?? NoOpContextSettingsProvider.Instance,
+            catalog: sp.GetService<IMediaCatalog>(),
+            imagingSettings: sp.GetService<IStationImagingSettingsProvider>() ?? NoOpStationImagingSettingsProvider.Instance,
+            crosstalkPlanner: sp.GetService<CrosstalkPlanner>(),
+            announcementSource: sp.GetService<IAnnouncementSource>(),
+            announcementRenderer: sp.GetService<IVerbatimSegmentRenderer>(),
+            voiceLister: sp.GetService<ITtsVoiceLister>(),
+            announcementCopyWriter: sp.GetService<IAnnouncementCopyWriter>(),
+            adCadenceProvider: sp.GetService<IAdCadenceProvider>() ?? NoOpAdCadenceProvider.Instance,
+            adSpotVend: sp.GetService<IAdSpotVend>() ?? NoOpAdSpotVend.Instance));
+
+        return services;
     }
 }

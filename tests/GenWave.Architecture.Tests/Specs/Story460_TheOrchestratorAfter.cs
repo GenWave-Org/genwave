@@ -27,7 +27,7 @@ public static class FeatureTheOrchestratorAfter
 
     public sealed class ScenarioTheTextScanAfterTheSplit
     {
-        // Given: `new Orchestrator(` over src/ and tests/
+        // Given: the Orchestrator's own construction call, scanned over src/ and tests/
 
         /// <summary>AC2 — </summary>
         [Fact(Skip = Pending)]

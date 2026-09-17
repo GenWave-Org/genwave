@@ -3,20 +3,59 @@
 // BDD specification — xUnit. AC1–AC3 drive OrchestratorBuilder (tests/GenWave.TestSupport); AC6/AC7 drive AddOrchestration through a
 // ServiceCollection; AC9 is the recount. AC4/AC5/AC8 are pins in Architecture.Tests (Story451_ConstructionPins).
 //
-// AC1/AC2 went green at T511. The remaining facts are [Fact(Skip = …)] with a loud body — remove the Skip
-// only in the task that makes it green (AC3/AC9 → T512, AC6/AC7 → T514).
+// AC1/AC2 went green at T511, AC3/AC9 at T512. AC6/AC7 land at T514, below: they drive
+// AddGenWaveOrchestration through a real ServiceCollection rather than OrchestratorBuilder, so the
+// optional-seam resolution the extension method itself owns (not the builder's own With* defaults)
+// is what each fact actually exercises.
 
 using System.Reflection;
 using GenWave.Abstractions.Playout;
+using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Orchestration.Tests.Fakes;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 
 namespace GenWave.Orchestration.Tests.Specs;
 
 public static class FeatureOneConstructionPath
 {
-    const string PendingAddOrchestration = "pending: T514 — AddOrchestration resolves optional seams once (STORY-451)";
+    // ---------------------------------------------------------------------
+    // Helpers
+    // ---------------------------------------------------------------------
+
+    /// <summary>
+    /// Every seam AddGenWaveOrchestration itself does not supply (AC6/AC7's own arrange) — the 12
+    /// required Orchestrator constructor params it resolves via GetRequiredService, plus
+    /// IMediaCatalog/ILogger&lt;MusicSelectionPolicy&gt; so its own TryAddSingleton&lt;MusicSelectionPolicy&gt;
+    /// can activate. TimeProvider/SpeechDeferralQueue/MusicSelectionPolicy stay unregistered here on
+    /// purpose — AddGenWaveOrchestration TryAdds all three itself.
+    /// </summary>
+    static ServiceCollection RequiredSeamServices()
+    {
+        var services = new ServiceCollection();
+
+        services.AddSingleton<IStationIdentityProvider>(new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")));
+        services.AddSingleton<IStationScopeProvider>(new FakeStationScopeProvider(new LibraryScope([1L])));
+        services.AddSingleton<ICadenceProvider>(new FakeCadenceProvider(new CadenceConfig
+        {
+            LeadInBeforeEachTrack = false,
+            BackAnnounceAfterEachTrack = false,
+            StationIdEveryNUnits = 0,
+        }));
+        services.AddSingleton<IRotationSettingsProvider>(new FakeRotationSettingsProvider(new RotationSettings()));
+        services.AddSingleton<ITtsSegmentSource>(new FakeTtsSegmentSource());
+        services.AddSingleton<IActivePersonaAccessor>(new FakeActivePersonaAccessor());
+        services.AddSingleton<IRenderBudgetProvider>(new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)));
+        services.AddSingleton<IBoundaryBiasProvider>(new FakeBoundaryBiasProvider(TimeSpan.Zero));
+        services.AddSingleton<ILogger<Orchestrator>>(NullLogger<Orchestrator>.Instance);
+        services.AddSingleton<ILogger<MusicSelectionPolicy>>(NullLogger<MusicSelectionPolicy>.Instance);
+        services.AddSingleton<IMediaCatalog>(new FakeMediaCatalog(TestData.MakeTrackRef("t1")));
+
+        return services;
+    }
 
     // ---------------------------------------------------------------------
     // HAPPY PATH
@@ -156,26 +195,69 @@ public static class FeatureOneConstructionPath
         }
     }
 
-    public sealed class ScenarioAddOrchestrationWithNoOptionalSeams
+    public sealed class ScenarioAddOrchestrationWithNoOptionalSeams : IAsyncLifetime
     {
-        // Given: ServiceCollection + AddOrchestration, no IAdSpotVend registered
+        readonly List<MediaItem?> served = [];
+        INextItemProvider? orchestrator;
+
+        // Given: ServiceCollection + AddGenWaveOrchestration, no IAdSpotVend registered — the ad
+        // cadence still fires every unit, so a real vend WOULD be reachable if one were wired.
+        public async Task InitializeAsync()
+        {
+            var services = RequiredSeamServices();
+            services.AddSingleton<IAdCadenceProvider>(new FakeAdCadenceProvider(1));
+            services.AddGenWaveOrchestration();
+
+            var provider = services.BuildServiceProvider().GetRequiredService<INextItemProvider>();
+            orchestrator = provider;
+
+            var ctx = new PlayoutContext([]);
+            served.Add(await provider.GetNextAsync(ctx, CancellationToken.None)); // unit 0 — no trigger
+            served.Add(await provider.GetNextAsync(ctx, CancellationToken.None)); // unit 1 — fires
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
 
         /// <summary>AC6 — resolution succeeds without the optional seam</summary>
-        [Fact(Skip = PendingAddOrchestration)]
-        public void ResolvesTheNextItemProvider() => Assert.Fail(PendingAddOrchestration);
+        [Fact]
+        public void ResolvesTheNextItemProvider() => Assert.NotNull(orchestrator);
 
-        /// <summary>AC6 — the Orchestrator's vend is NoOpAdSpotVend</summary>
-        [Fact(Skip = PendingAddOrchestration)]
-        public void BuiltWithTheNoOpVend() => Assert.Fail(PendingAddOrchestration);
+        /// <summary>AC6 — the Orchestrator's vend is NoOpAdSpotVend: no ad ever airs</summary>
+        [Fact]
+        public void BuiltWithTheNoOpVend() => Assert.DoesNotContain(served, item => item?.SegmentKind == SegmentKind.Ad);
     }
 
-    public sealed class ScenarioAddOrchestrationWithARegisteredSeam
+    public sealed class ScenarioAddOrchestrationWithARegisteredSeam : IAsyncLifetime
     {
-        // Given: a fake IAdSpotVend registered before AddOrchestration
+        readonly FakeAdSpotVend vend = new()
+        {
+            Answer = new MediaItem(
+                "spot-1", "/authored/ads/spot-1.wav", "Spot spot-1",
+                new Loudness(-14.0, -1.0, true),
+                SegmentKind: SegmentKind.Ad),
+        };
+
+        // Given: a fake IAdSpotVend registered before AddGenWaveOrchestration — AddGenWaveOrchestration's
+        // own TryAddSingleton<IAdSpotVend>(NoOpAdSpotVend.Instance) must lose to it.
+        public async Task InitializeAsync()
+        {
+            var services = RequiredSeamServices();
+            services.AddSingleton<IAdCadenceProvider>(new FakeAdCadenceProvider(1));
+            services.AddSingleton<IAdSpotVend>(vend);
+            services.AddGenWaveOrchestration();
+
+            var orchestrator = services.BuildServiceProvider().GetRequiredService<INextItemProvider>();
+
+            var ctx = new PlayoutContext([]);
+            await orchestrator.GetNextAsync(ctx, CancellationToken.None); // unit 0 — no trigger
+            await orchestrator.GetNextAsync(ctx, CancellationToken.None); // unit 1 — fires
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
 
         /// <summary>AC7 — the registered fake wins over the NoOp</summary>
-        [Fact(Skip = PendingAddOrchestration)]
-        public void BuiltWithTheRegisteredVend() => Assert.Fail(PendingAddOrchestration);
+        [Fact]
+        public void BuiltWithTheRegisteredVend() => Assert.Equal(1, vend.CallCount);
     }
 
     public sealed class ScenarioTheRecountAfterTheMove
@@ -184,7 +266,7 @@ public static class FeatureOneConstructionPath
         // (not each Theory row) counted once, mirroring how the pre-move baseline was measured.
 
         const int FactMethodCount = 556; // reflected [Fact]/[Theory] methods, measured before T512 moved any site (the move adds and removes no attribute, so pre = post); the runner reports 562 cases = 556 + theory rows
-        const int SkipCount = 108; // 111 pre-move minus the 3 AC3/AC9 facts this task un-skips
+        const int SkipCount = 105; // 108 pre-T514 minus the 3 AC6/AC7 facts this task un-skips
 
         static IReadOnlyList<(MethodInfo Method, FactAttribute Attribute)> ReflectFactMethods() =>
             typeof(FeatureOneConstructionPath).Assembly
