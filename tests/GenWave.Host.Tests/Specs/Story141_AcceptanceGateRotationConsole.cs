@@ -178,7 +178,7 @@ public static class FeatureAcceptanceGateRotationConsole
     public sealed class ScenarioTwoTrackCatalogReversesTheDrain
     {
         const string Skip =
-            "V10(a) — v10smoke, scratch stack, 2026-07-14: 2-track fixture (ffmpeg sine mp3s, " +
+            "manual: V10(a) — v10smoke, scratch stack, 2026-07-14: 2-track fixture (ffmpeg sine mp3s, " +
             "16.0s each, different artists — Radio Aurora \"Alpha Signal\" @-22.2 LUFS, Radio " +
             "Borealis \"Bravo Echo\" @-22.0 LUFS; both >=14s per V4's poll-race note), cadence " +
             "music-heavy (Station:Cadence:LeadInBeforeEachTrack/BackAnnounceAfterEachTrack=false, " +
@@ -216,7 +216,7 @@ public static class FeatureAcceptanceGateRotationConsole
     public sealed class ScenarioArtistSeparationObserved
     {
         const string SkipMultiArtist =
-            "V10(b) — v10smoke, scratch stack, 2026-07-14: MEDIA_DIR grown from 2 to 6 tracks " +
+            "manual: V10(b) — v10smoke, scratch stack, 2026-07-14: MEDIA_DIR grown from 2 to 6 tracks " +
             "across 3 artists (Radio Aurora x2, Radio Borealis x2, Radio Cascade x2, 15s each) by " +
             "adding 4 more ffmpeg sine mp3s to the running stack's bind-mounted MEDIA_DIR (no " +
             "restart) -- a transient sandbox-filesystem quirk briefly marked the 4 new rows " +
@@ -232,7 +232,7 @@ public static class FeatureAcceptanceGateRotationConsole
             "tier holding cleanly once the catalog exceeds the 2-artist separation depth). WARN " +
             "counts in `docker compose -p v10smoke logs api` over the same window: " +
             "\"Artist-separation relaxed\" x11, \"Anti-repeat window relaxed\" x22 (legal per the " +
-            "V10 sequencing note -- a relaxation WARN is expected exactly when the 6-track catalog " +
+            "manual: V10 sequencing note -- a relaxation WARN is expected exactly when the 6-track catalog " +
             "is smaller than the 20-entry recent window, never evidence of a bug on its own). " +
             "Evidence: v10/partb_playhistory_poll_multiartist.log, v10/partb_api_log_multiartist.txt.";
 
@@ -244,7 +244,7 @@ public static class FeatureAcceptanceGateRotationConsole
         }
 
         const string SkipSingleArtist =
-            "V10(b) — v10smoke, scratch stack, 2026-07-14: all 6 rows' artist collapsed to one " +
+            "manual: V10(b) — v10smoke, scratch stack, 2026-07-14: all 6 rows' artist collapsed to one " +
             "value (\"Solo Broadcast\") via PATCH /api/media/{id} with a fresh If-Match per row " +
             "(the dispatch's PATCH-based alternative to a separate single-artist fixture). Polled " +
             "GET /api/play-history over a ~90s follow-on window (21:38:15-21:39:51Z, 8+ " +
@@ -271,7 +271,7 @@ public static class FeatureAcceptanceGateRotationConsole
     public sealed class ScenarioStationIdSemantics
     {
         const string SkipPeriod =
-            "V10(c) — v10smoke, scratch stack, 2026-07-14: PUT /api/settings " +
+            "manual: V10(c) — v10smoke, scratch stack, 2026-07-14: PUT /api/settings " +
             "Station:Cadence:StationIdEveryNUnits=4 + LeadInBeforeEachTrack=true, then `docker " +
             "compose -p v10smoke restart api` to reset the Orchestrator's in-memory unitCount to " +
             "genuinely zero (a fresh process). Polled play-history from that restart: no station-ID " +
@@ -305,7 +305,7 @@ public static class FeatureAcceptanceGateRotationConsole
         }
 
         const string SkipLiveZero =
-            "V10(c) — v10smoke, scratch stack, 2026-07-14: PUT /api/settings " +
+            "manual: V10(c) — v10smoke, scratch stack, 2026-07-14: PUT /api/settings " +
             "Station:Cadence:StationIdEveryNUnits=0 -> 200, echoed back value=\"0\". Polled play- " +
             "history for a further ~100s / 13+ aired music units: the station-ID content-hash never " +
             "reappeared once (confirmed against the SAME hash that had been firing on the 4-unit " +
@@ -320,8 +320,8 @@ public static class FeatureAcceptanceGateRotationConsole
         }
 
         const string SkipNegative =
-            "V10(c) — v10smoke, scratch stack, 2026-07-14: PUT /api/settings " +
-            "Station:Cadence:StationIdEveryNUnits=-1 -> 400 {\"errors\":{\"settings\":[\"Value " +
+            "manual: V10(c) — v10smoke, scratch stack, 2026-07-14: PUT /api/settings " +
+            "Station:Cadence:StationIdEveryNUnits=-1 -> 400 {\"errors\":{\"settings\":[\"manual: Value " +
             "'-1' is not valid for 'Station:Cadence:StationIdEveryNUnits'. Must be a non-negative " +
             "integer (0 disables).\"]}}; re-GET confirmed the persisted value stayed at the prior " +
             "0, nothing written by the rejected PUT.";
@@ -333,11 +333,11 @@ public static class FeatureAcceptanceGateRotationConsole
         }
 
         const string SkipBootClean =
-            "V10(c) — v10smoke, scratch stack, 2026-07-14: with " +
+            "manual: V10(c) — v10smoke, scratch stack, 2026-07-14: with " +
             "Station:Cadence:StationIdEveryNUnits=0 the effective value flowing through " +
             "IConfiguration at process start (station.settings overlay layered on top of env, " +
             "Program.cs's own layering order -- functionally identical to an env-sourced 0 for the " +
-            "ValidateOnStart() mechanism under test, since IConfiguration flattens both to the same " +
+            "manual: ValidateOnStart() mechanism under test, since IConfiguration flattens both to the same " +
             "string by key), `docker compose -p v10smoke restart api` came back healthy within 3 " +
             "poll ticks (~6s) with zero validation exceptions in the logs -- confirming " +
             "StationCadenceOptions' widened [Range(0, int.MaxValue)] floor (V6) is genuinely " +
@@ -360,7 +360,7 @@ public static class FeatureAcceptanceGateRotationConsole
     public sealed class ScenarioFreshDeploySafeToggleAndBoundedBulk
     {
         const string Skip =
-            "V10(d) — v10smoke, scratch stack, 2026-07-14: the fresh-deploy shape (F27 boot seed, " +
+            "manual: V10(d) — v10smoke, scratch stack, 2026-07-14: the fresh-deploy shape (F27 boot seed, " +
             "library 'safe' id=2 outside the main scope [1], seed row mediaId=3 \"Please Stand By " +
             "(Station Default)\") -- zero scope edits made. GET /api/media/3 -> 200, " +
             "X-Out-Of-Scope: true, ETag W/\"773\" (F43.1). PATCH /api/media/3 {eligible:false} with " +
@@ -412,7 +412,7 @@ public static class FeatureAcceptanceGateRotationConsole
     public sealed class ScenarioIdentityEditReachesEverySurfaceLive
     {
         const string Skip =
-            "V10(e) — v10smoke, scratch stack, 2026-07-14: PUT /api/settings Station:Name=" +
+            "manual: V10(e) — v10smoke, scratch stack, 2026-07-14: PUT /api/settings Station:Name=" +
             "\"Wavelength Radio\" -> 200; GET /api/stations IMMEDIATELY returned " +
             "[{\"id\":1,\"name\":\"Wavelength Radio\"}], no api restart (F44.1/F44.6). Curled the " +
             "admin-ui Next.js server directly at GET /dashboard using the SAME genwave-auth cookie " +
@@ -422,7 +422,7 @@ public static class FeatureAcceptanceGateRotationConsole
             "literal string \"Wavelength Radio\" -- server-rendered, not client-fetched (F44.7, " +
             "closes gitea-#195). The next LeadIn patter segment's play-history entry (title AND artist, " +
             "since TtsSegmentSource stamps both from the live identity read regardless of Kind) " +
-            "carried \"Wavelength Radio\", replacing the prior segments' \"V10 Scratch Station\" -- " +
+            "carried \"Wavelength Radio\", replacing the prior segments' \"manual: V10 Scratch Station\" -- " +
             "a cache-hit render (same spoken text) still gets a FRESH display-metadata stamp per " +
             "unit (F44.1/F44.5, F39.3's cache-vs-display-metadata distinction). Evidence: " +
             "v10/parte_dashboard.html, v10/parte_playhistory_after_rename.json.";
@@ -457,7 +457,7 @@ public static class FeatureAcceptanceGateRotationConsole
     public sealed class ScenarioSettingsSurfaceCompleteAndHonest
     {
         const string SkipInventory =
-            "V10(f) — v10smoke, scratch stack, 2026-07-14: GET /api/settings returned 27 keys. " +
+            "manual: V10(f) — v10smoke, scratch stack, 2026-07-14: GET /api/settings returned 27 keys. " +
             "Every F44.2 key present with applyMode=\"live\": Station:Name, Station:Voice, " +
             "Station:Rotation:RecentWindow, Station:Rotation:ArtistSeparation, " +
             "Tts:RenderBudgetSeconds, Tts:BlurbRetentionHours, Llm:MaxCopyChars, " +
@@ -489,7 +489,7 @@ public static class FeatureAcceptanceGateRotationConsole
         }
 
         const string SkipCapacityShrink =
-            "V10(f) — v10smoke, scratch stack, 2026-07-14: GET /api/play-history showed 15 entries; " +
+            "manual: V10(f) — v10smoke, scratch stack, 2026-07-14: GET /api/play-history showed 15 entries; " +
             "PUT /api/settings Admin:PlayHistoryCapacity=5 -> 200; after the next push (~16s later, " +
             "one more track boundary), GET /api/play-history returned exactly 5 entries -- the ring " +
             "trims to the new live capacity on the very next push (V8 re-verified quick, F44.2).";
@@ -501,7 +501,7 @@ public static class FeatureAcceptanceGateRotationConsole
         }
 
         const string SkipRotationPuts =
-            "V10(f) — v10smoke, scratch stack, 2026-07-14: PUT /api/settings " +
+            "manual: V10(f) — v10smoke, scratch stack, 2026-07-14: PUT /api/settings " +
             "[{Station:Rotation:RecentWindow:3},{Station:Rotation:ArtistSeparation:1}] -> 200, both " +
             "echoed back with source=override, applyMode=live -- the F41.6 knobs are genuinely " +
             "editable through the completed settings surface (parts (a)/(b) above already proved " +
@@ -515,7 +515,7 @@ public static class FeatureAcceptanceGateRotationConsole
         }
 
         const string SkipOutOfRange =
-            "V10(f) — v10smoke, scratch stack, 2026-07-14: one out-of-range PUT per representative " +
+            "manual: V10(f) — v10smoke, scratch stack, 2026-07-14: one out-of-range PUT per representative " +
             "validator kind, ALL rejected 400 with the persisted value confirmed UNCHANGED by a " +
             "re-GET immediately after each: Loudness:TargetLufs=100 (range [-40,0]) -> 400, stayed " +
             "-16; Station:Name=\"\" (non-blank string) -> 400 \"must not be blank\", stayed " +
@@ -542,7 +542,7 @@ public static class FeatureAcceptanceGateRotationConsole
     public sealed class ScenarioConflictRetriesRecoverInPlace
     {
         const string Skip =
-            "V10(g) — v10smoke, scratch stack, 2026-07-14: GET /api/media/1 -> ETag W/\"807\". " +
+            "manual: V10(g) — v10smoke, scratch stack, 2026-07-14: GET /api/media/1 -> ETag W/\"807\". " +
             "PATCH /api/media/1 {genre:\"Ambient\"} with a deliberately STALE If-Match: W/\"1\" -> " +
             "409 Conflict {\"detail\":\"The row was modified since you last read it. Re-fetch and " +
             "retry.\"}; re-GET confirmed the SAME W/\"807\" ETag (nothing changed by the failed " +
@@ -578,7 +578,7 @@ public static class FeatureAcceptanceGateRotationConsole
     public sealed class ScenarioRegressionWall
     {
         const string DotnetEvidence =
-            "V10(h) dotnet half — RUN 2026-07-14. `dotnet build GenWave.sln`: Build succeeded, " +
+            "manual: V10(h) dotnet half — RUN 2026-07-14. `dotnet build GenWave.sln`: Build succeeded, " +
             "0 Warning(s), 0 Error(s). `dotnet test GenWave.sln --filter \"Category!=" +
             "Integration\"`: 0 failed across five projects -- Core 65/65, Orchestration 56/59 (3 " +
             "skipped), MediaLibrary 14/40 (26 skipped, filtered subset), Tts 117/128 (11 skipped), " +
@@ -604,9 +604,9 @@ public static class FeatureAcceptanceGateRotationConsole
         }
 
         const string AdminUiEvidence =
-            "V10(h) admin-ui half — RUN 2026-07-14 from admin-ui/. `npx tsc --noEmit`: clean, zero " +
+            "manual: V10(h) admin-ui half — RUN 2026-07-14 from admin-ui/. `npx tsc --noEmit`: clean, zero " +
             "output. `npx jest`: 39 suites passed, 354 passed, 11 todo, 365 total (adds V3/V5/V6/ " +
-            "V9's new specs over U7's own 34-suite/327-passed wall; the one pre-existing harmless " +
+            "manual: V9's new specs over U7's own 34-suite/327-passed wall; the one pre-existing harmless " +
             "React act() warning in catalog-selection-toolbar.spec.tsx carried unchanged since Q12/ " +
             "R13/S8/T11/U7 -- not a failure, not introduced here). `npm run build`: green, 13 routes " +
             "compiled (same route set as U7's wall -- Epic V shipped zero new pages). " +
@@ -628,7 +628,7 @@ public static class FeatureAcceptanceGateRotationConsole
     public sealed class ScenarioIssueClosure
     {
         const string Skip =
-            "V10(i) — Gitea state checked 2026-07-14 via the API (read-only; this gate never closes " +
+            "manual: V10(i) — Gitea state checked 2026-07-14 via the API (read-only; this gate never closes " +
             "issues, per instruction and the MEMORY.md house rule). gitea-#195 \"GenWave at top of " +
             "dashboard should be {StationName}\", gitea-#196 \"Add Station Name to Settings page\", gitea-#197 " +
             "\"Look at what we can move from .env file to Admin UI\", gitea-#201 \"Catalog toolbar: " +

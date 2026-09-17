@@ -26,7 +26,7 @@ namespace GenWave.Host.Tests.Specs;
 public static class FeatureStationSettingsApi
 {
     const string OperatorGated =
-        "Operator-verified live (W5); see docs/PLAN.md Epic I";
+        "manual: Operator-verified live (W5); see docs/PLAN.md Epic I";
 
     // ── In-memory fakes ────────────────────────────────────────────────────
 

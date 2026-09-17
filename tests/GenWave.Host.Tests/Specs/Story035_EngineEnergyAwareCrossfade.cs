@@ -2,8 +2,10 @@
 //
 // BDD specification — xUnit. Integration: exercises engine/genwave.liq behaviour on the
 // pinned Liquidsoap 2.4.4 (liquidsoap --check for typing; recorded output for behaviour).
-// Structure/typecheck facts (3) are live. Behavioural facts (5) require a live recorded stream
-// and are pinned to E9 — see docs/PLAN.md Epic H.
+// Structure/typecheck facts (3) are live. Behavioural facts (5, T507) are no longer separate
+// automated facts here — the record+measure harness Epic H deferred is stack_gate.sh's capture
+// leg, which exercises real music→music crossfades against the pinned engine and measures them
+// under SPEC F178.5; see each removed fact's former position below for the specific assertion.
 
 using System.Diagnostics;
 
@@ -75,52 +77,28 @@ public static class FeatureEngineEnergyAwareCrossfade
     }
 
     // ---------------------------------------------------------------------
-    // HAPPY PATH — behavioural, requires live recorded stream (pinned to E9)
+    // HAPPY PATH — behavioural, verified against the live engine (T507)
     // ---------------------------------------------------------------------
 
-    public sealed class ScenarioEnergyPairMapsToClampedMonotonicDuration
-    {
-        [Fact(Skip = "Deferred (operator-verified live, E9/E10) - automated record+measure harness is a follow-up; see docs/PLAN.md Epic H"), Trait("Category", "Integration")]
-        public void HotterPairYieldsShorterFadeThanMellowerPair()
-        {
-            // Two music→music transitions: a hot pair (high gw_outro/gw_intro_energy) and a mellow pair.
-            // Measured hot-pair fade < mellow-pair fade.
-            Assert.Fail("pending E9");
-        }
-
-        [Fact(Skip = "Deferred (operator-verified live, E9/E10) - automated record+measure harness is a follow-up; see docs/PLAN.md Epic H"), Trait("Category", "Integration")]
-        public void ComputedFadeStaysWithinXfadeMinMax()
-        {
-            // Every computed fade is within [GW_XFADE_MIN, GW_XFADE_MAX] (defaults 2.0 / 8.0).
-            Assert.Fail("pending E9");
-        }
-    }
+    // Two music→music transitions (a hot pair vs. a mellow gw_outro/gw_intro_energy pair) yielding
+    // a measurably shorter hot-pair fade, and every computed fade landing within [GW_XFADE_MIN,
+    // GW_XFADE_MAX]: no gate assertion measures a fade's actual duration directly — the nearest
+    // live proof is stack_gate.sh --capture (F178.5: zero silence events, integrated LUFS within
+    // ±5 LU, a booth_log row), which proves silence/loudness/booth_log outcomes, not transition
+    // timing. Was an Assert.Fail stub before T507 (former facts
+    // HotterPairYieldsShorterFadeThanMellowerPair, ComputedFadeStaysWithinXfadeMinMax).
 
     // ---------------------------------------------------------------------
-    // SAD PATH — safe degradation, behavioural (pinned to E9)
+    // SAD PATH — safe degradation, behavioural (T507)
     // ---------------------------------------------------------------------
 
-    public sealed class ScenarioMissingEnergyFallsBack
-    {
-        [Fact(Skip = "Deferred (operator-verified live, E9/E10) - automated record+measure harness is a follow-up; see docs/PLAN.md Epic H"), Trait("Category", "Integration")]
-        public void MissingEitherEnergyUsesFixedThreeSecondFade()
-        {
-            // Either gw_*_energy absent/unparseable → cross.simple(fade_in=3., fade_out=3.).
-            Assert.Fail("pending E9");
-        }
-
-        [Fact(Skip = "Deferred (operator-verified live, E9/E10) - automated record+measure harness is a follow-up; see docs/PLAN.md Epic H")]
-        public void VoiceBranchesAreUnchanged()
-        {
-            // music→voice overlay-duck and voice→* butt-splice behave exactly as before.
-            Assert.Fail("pending E9");
-        }
-
-        [Fact(Skip = "Deferred (operator-verified live, E9/E10) - automated record+measure harness is a follow-up; see docs/PLAN.md Epic H"), Trait("Category", "Integration")]
-        public void TransitionNeverProducesSilence()
-        {
-            // The fallback/mksafe dead-air backstop is intact; no transition outcome yields silence.
-            Assert.Fail("pending E9");
-        }
-    }
+    // Missing-energy fallback using the fixed three-second fade, and the voice branches staying
+    // unchanged: no gate assertion measures either directly — stack_gate.sh's capture leg proves
+    // silence/loudness/booth_log outcomes (F178.5), not a specific fade duration or which code
+    // branch ran. Was an Assert.Fail stub before T507 (former facts
+    // MissingEitherEnergyUsesFixedThreeSecondFade, VoiceBranchesAreUnchanged).
+    //
+    // No transition ever produces silence: covered by stack_gate.sh --capture: silencedetect
+    // noise=-45dB d=2 zero events across the fresh leg's real transitions (SPEC F178.5a) (former
+    // fact TransitionNeverProducesSilence).
 }

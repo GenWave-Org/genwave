@@ -76,7 +76,7 @@ public static class FeatureAcceptanceGateHardeningSweep
     public sealed class ScenarioStationNameExpansionAndSeedTitle
     {
         const string ExpansionSkip =
-            "R13(a) — r1smoke, scratch stack, 2026-07-11: POST /api/safe-segments with the raw " +
+            "manual: R13(a) — r1smoke, scratch stack, 2026-07-11: POST /api/safe-segments with the raw " +
             "{StationName} template returned 201; the stub synth received \"You are listening to " +
             "Smoke Station. Smoke check.\" — no literal placeholder reached synthesis. The seed " +
             "path (SafeLoopSeeder) was confirmed expanded the same way. Story095/096's own specs " +
@@ -91,7 +91,7 @@ public static class FeatureAcceptanceGateHardeningSweep
         }
 
         const string SeedTitleSkip =
-            "R13(b) — r1smoke, scratch stack, 2026-07-11: fresh-boot seed row title was " +
+            "manual: R13(b) — r1smoke, scratch stack, 2026-07-11: fresh-boot seed row title was " +
             "\"Please Stand By (Station Default)\", artist \"Smoke Station\" (F29.3, gitea-#185); a " +
             "manual POST /api/safe-segments with no Title field produced \"Please Stand By\" " +
             "unchanged — the two consumers of SafeSegmentAuthor.AuthorAsync stay distinguishable " +
@@ -127,7 +127,7 @@ public static class FeatureAcceptanceGateHardeningSweep
         }
 
         const string DropdownSkip =
-            "R13(c) remainder — r2smoke, scratch stack, 2026-07-11: GET /api/voices was 401 " +
+            "manual: R13(c) remainder — r2smoke, scratch stack, 2026-07-11: GET /api/voices was 401 " +
             "anonymous, 200 with 67 real voices from the pinned kokoro-fastapi image cookie-" +
             "authed, still 200 (warm cache) with kokoro stopped, and 502 ProblemDetails once the " +
             "cache went cold with kokoro still down. r3smoke, same stack, real browser: the Voice " +
@@ -152,7 +152,7 @@ public static class FeatureAcceptanceGateHardeningSweep
     public sealed class ScenarioSafeTrackGapLive
     {
         const string GapMatchesSkip =
-            "R13(d) first half — r4smoke, scratch stack, 2026-07-11: a 55 s drain recording showed " +
+            "manual: R13(d) first half — r4smoke, scratch stack, 2026-07-11: a 55 s drain recording showed " +
             "five consecutive ~7.42 s silences between safe segments (configured " +
             "GW_SAFE_GAP_SECONDS=7.0 + segment lead/trail padding accounts for the extra ~0.42 s). " +
             "r5smoke, same stack: PUT GW_SAFE_GAP_SECONDS=3 (F19 allowlist, engine-" +
@@ -169,7 +169,7 @@ public static class FeatureAcceptanceGateHardeningSweep
         }
 
         const string CutbackSkip =
-            "R13(d) second half — NOT PROVEN this session (the dispatch's own evidence bank flags " +
+            "manual: R13(d) second half — NOT PROVEN this session (the dispatch's own evidence bank flags " +
             "it explicitly): the scratch stack used for r4smoke/r5smoke had no real main-library " +
             "content to cut back TO mid-gap, only the safe rotation, so the fallback(track_sensitive" +
             "=false, [main, safe]) preemption timing was never actually exercised — only the " +
@@ -198,7 +198,7 @@ public static class FeatureAcceptanceGateHardeningSweep
     public sealed class ScenarioArtistFidelityLive
     {
         const string NowPlayingSkip =
-            "R13(e) — r6smoke, scratch stack, 2026-07-11: /api/now-playing returned " +
+            "manual: R13(e) — r6smoke, scratch stack, 2026-07-11: /api/now-playing returned " +
             "{\"title\":\"Please Stand By (Station Default)\",\"artist\":\"Gap Smoke FM\"} for an " +
             "engine-initiated safe play; /api/play-history matched; a raw telnet " +
             "output.icecast.metadata read confirmed the engine frame itself carries artist/title " +
@@ -215,7 +215,7 @@ public static class FeatureAcceptanceGateHardeningSweep
         }
 
         const string IcyMetadataSkip =
-            "R13(e) remainder, operator procedure — the r6smoke evidence above proves the ENGINE " +
+            "manual: R13(e) remainder, operator procedure — the r6smoke evidence above proves the ENGINE " +
             "frame carries artist/title (telnet output.icecast.metadata + the api's own now-" +
             "playing/history reads, which are fed from the same feeder path); it does NOT prove " +
             "what an actual Icecast LISTENER sees, which rides the mp3/ogg stream's own icy " +
@@ -248,7 +248,7 @@ public static class FeatureAcceptanceGateHardeningSweep
     public sealed class ScenarioMainScopeLivenessRepro
     {
         const string Skip =
-            "R13(f) — r7smoke, scratch stack, 2026-07-11: the exact P9 repro re-run against the " +
+            "manual: R13(f) — r7smoke, scratch stack, 2026-07-11: the exact P9 repro re-run against the " +
             "R7 fix. Reenrich against a library outside main scope 403'd as expected; a live PUT " +
             "Station:Scope:LibraryIds=[1,2] (widening scope, no api restart) was followed " +
             "immediately by the same reenrich call returning 202; Catalog browse against the newly" +
@@ -276,7 +276,7 @@ public static class FeatureAcceptanceGateHardeningSweep
     public sealed class ScenarioPatchEtagChainLive
     {
         const string Skip =
-            "R13(g) — r8smoke, scratch stack, 2026-07-11: PATCH /api/media/{id} returned 204 with " +
+            "manual: R13(g) — r8smoke, scratch stack, 2026-07-11: PATCH /api/media/{id} returned 204 with " +
             "ETag: W/\"761\" (a real xmin, not a placeholder); a chained PATCH using that ETag " +
             "returned 204 with ETag: W/\"762\"; a third PATCH reusing the now-stale W/\"761\" " +
             "returned 409 (F31.1 — every successful PATCH now carries the RETURNING xmin as its " +
@@ -303,7 +303,7 @@ public static class FeatureAcceptanceGateHardeningSweep
     public sealed class ScenarioDepletedSafeScopeBadgesLive
     {
         const string Skip =
-            "R13(h) — r10smoke, scratch stack, 2026-07-11, real browser: depleting SafeScope's " +
+            "manual: R13(h) — r10smoke, scratch stack, 2026-07-11, real browser: depleting SafeScope's " +
             "playable set (all safe-scope rows ineligible) produced the settings-page picker badge " +
             "and the dashboard SafeScope tile's warning state within one poll interval; re-adding " +
             "an eligible row cleared both within one poll (recovery, not just onset); the F25.4 " +
@@ -352,7 +352,7 @@ public static class FeatureAcceptanceGateHardeningSweep
         }
 
         const string ChromeSkip =
-            "R13(i) remainder — r11smoke, scratch stack, 2026-07-11 (icon.svg era) and the live " +
+            "manual: R13(i) remainder — r11smoke, scratch stack, 2026-07-11 (icon.svg era) and the live " +
             "deployment, 2026-07-12 (icon.png, the operator's logo): /login's HTML carried both " +
             "icon links; both served 200 with the content-types the fact above now " +
             "checks live; auth stayed intact (favicon serving didn't leak an authenticated route). " +
@@ -377,7 +377,7 @@ public static class FeatureAcceptanceGateHardeningSweep
     public sealed class ScenarioNoUnreconciledCiGateClaims
     {
         const string Skip =
-            "R13(j) — already a REAL, always-run, non-Skip fact, not duplicated here: " +
+            "manual: R13(j) — already a REAL, always-run, non-Skip fact, not duplicated here: " +
             "FeatureSmokeTestManualGateDocs.ScenarioNoStaleCiClaims.NoUnreconciledCiGateClaimRemains" +
             "InRepoDocs (Story107) greps README.md + every docs/*.md file for CI-gate claims on " +
             "every wall run, filtered or not — it is green in today's wall below. R12's own gate " +
@@ -401,7 +401,7 @@ public static class FeatureAcceptanceGateHardeningSweep
     public sealed class ScenarioRegressionWall
     {
         const string DotnetEvidence =
-            "R13(k) dotnet half — RUN 2026-07-11. `dotnet build GenWave.sln`: Build succeeded, " +
+            "manual: R13(k) dotnet half — RUN 2026-07-11. `dotnet build GenWave.sln`: Build succeeded, " +
             "0 Warning(s), 0 Error(s). `dotnet test GenWave.sln --filter \"Category!=" +
             "Integration\"`: 519 passed, 0 failed, 69 skipped, 588 total across five projects (Core " +
             "60/0/0/60, Orchestration 29/0/3/32, Tts 52/0/11/63, MediaLibrary 11/0/26/37, Host 367/" +
@@ -422,7 +422,7 @@ public static class FeatureAcceptanceGateHardeningSweep
         }
 
         const string AdminUiEvidence =
-            "R13(k) admin-ui half — RUN 2026-07-11 from admin-ui/. `npx tsc --noEmit`: clean, zero " +
+            "manual: R13(k) admin-ui half — RUN 2026-07-11 from admin-ui/. `npx tsc --noEmit`: clean, zero " +
             "output. `npx jest`: 29 suites passed, 268 passed, 11 todo, 279 total (one pre-existing, " +
             "harmless React act() console warning in catalog-selection-toolbar.spec.tsx's " +
             "eligibility path — CatalogToolbar's onBusyChange(false) firing after unmount in the " +
@@ -449,7 +449,7 @@ public static class FeatureAcceptanceGateHardeningSweep
     public sealed class ScenarioIssueClosureIsOperatorOwned
     {
         const string Skip =
-            "R13(l) — Gitea state checked 2026-07-11 via the API (read-only; this gate never closes " +
+            "manual: R13(l) — Gitea state checked 2026-07-11 via the API (read-only; this gate never closes " +
             "issues, per instruction and the MEMORY.md house rule). All ten targeted issues are " +
             "OPEN: gitea-#179 (smoke_test.sh CI-gate docs, created 2026-07-10), gitea-#180 (live main-scope " +
             "PUT / IOptions.Value, 2026-07-10), gitea-#181 (eligibility toggle stale xmin, 2026-07-10), " +
@@ -476,7 +476,7 @@ public static class FeatureAcceptanceGateHardeningSweep
     public sealed class ScenarioDegradedModesStillDegrade
     {
         const string Skip =
-            "Sad-path gate — composes evidence already gathered above rather than re-deriving it: " +
+            "manual: Sad-path gate — composes evidence already gathered above rather than re-deriving it: " +
             "r2smoke/r3smoke (2026-07-11) showed Kokoro-down degrading to a 502 ProblemDetails on " +
             "POST /api/safe-segments and the Voice dropdown falling back to free-text, never a " +
             "crash and never a stuck form; r10smoke (2026-07-11) showed a depleted SafeScope " +

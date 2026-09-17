@@ -41,30 +41,25 @@ public static class FeatureEngineSafeSourceResilience
     }
 
     // ---------------------------------------------------------------------
-    // WIRE — live proofs (operator-gated; Skip-pinned per the W7/L8 pattern)
+    // WIRE — live proofs (T507: verified by the stack gate, not a separate live+operator fact)
     // ---------------------------------------------------------------------
 
-    [Trait("Category", "Integration")]
-    public sealed class ScenarioApiRestartUnderLiveEngine
-    {
-        const string Skip = "Live stack + operator: needs the full broadcast stack (M2 wire acceptance).";
+    // No safe_lib request-leak warning across an api restart, and the stream staying uninterrupted
+    // across it: no gate assertion reads the engine log for that specific warning or measures
+    // stream continuity directly — the nearest live proof is stack_gate.sh --chaos api-down's
+    // run_api_down_scenario, which stops/starts api against the live engine and only checks that a
+    // non-safe track_id reappears within the SPEC F178.8a recovery budget, plus the capture leg's
+    // total-silence bound over the same outage window. Was a Skip-pinned gate: fact before T507
+    // (former facts EngineLogShowsNoSafeLibRequestLeakWarningAcrossAnApiRestart,
+    // TheStreamIsUninterruptedAcrossTheApiRestart).
 
-        [Fact(Skip = Skip)]
-        public void EngineLogShowsNoSafeLibRequestLeakWarningAcrossAnApiRestart() { }
-
-        [Fact(Skip = Skip)]
-        public void TheStreamIsUninterruptedAcrossTheApiRestart() { }
-    }
-
-    [Trait("Category", "Integration")]
-    public sealed class ScenarioPrefetchVerdictApplied
-    {
-        const string Skip = "Live stack + operator: STORY-061 verdict drives this (M1 -> M2).";
-
-        [Fact(Skip = Skip)]
-        public void AScopeEditIsReflectedWithinTheVerdictsPrefetchDepthOnANewDrain() { }
-
-        [Fact(Skip = Skip)]
-        public void ADrainDuringTheApiDownWindowDegradesPerF44WithoutEngineCrash() { }
-    }
+    // A safe-scope edit reaching the verdict's prefetch depth on a new drain: no gate assertion
+    // measures prefetch depth at all — run_api_down_scenario stops/starts api and waits on a
+    // non-safe track_id, nothing about a scope edit's reach into the verdict. A drain during the
+    // api-down window degrading per F44 without an engine crash IS covered: that same
+    // run_api_down_scenario drains the safe path for the outage's full duration and the leg fails
+    // if the engine container doesn't come back / a non-safe track_id never reappears within the
+    // SPEC F178.8a recovery budget. Was a Skip-pinned gate: fact before T507 (former facts
+    // AScopeEditIsReflectedWithinTheVerdictsPrefetchDepthOnANewDrain,
+    // ADrainDuringTheApiDownWindowDegradesPerF44WithoutEngineCrash).
 }

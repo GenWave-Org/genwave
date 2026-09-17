@@ -86,6 +86,39 @@ static class TestMedia
         return path;
     }
 
+    /// <summary>
+    /// A WAV with <paramref name="quietSec"/> of a tone at <paramref name="quietGainDb"/>, followed by
+    /// <paramref name="loudSec"/> of the same tone at <paramref name="loudGainDb"/> — a fixture whose
+    /// silencedetect classification of the leading region flips with the configured noise threshold
+    /// (a quieter-than-threshold region registers as silence; a louder-than-threshold one does not).
+    /// Both gains are relative to lavfi's <c>sine</c> source level (empirically ~-21 dBFS peak / -24
+    /// dBFS RMS, not full scale), so callers must pass explicit gains for both segments rather than
+    /// assume 0 dB reads as loud.
+    /// </summary>
+    public static string CreateQuietToneThenLoudTone(
+        string dir, string fileName,
+        double quietSec, double quietGainDb, double loudSec, double loudGainDb, int frequency = 1000)
+    {
+        var path = Path.Combine(dir, fileName);
+        var quietDur = quietSec.ToString(CultureInfo.InvariantCulture);
+        var loudDur = loudSec.ToString(CultureInfo.InvariantCulture);
+        var quietGain = quietGainDb.ToString(CultureInfo.InvariantCulture);
+        var loudGain = loudGainDb.ToString(CultureInfo.InvariantCulture);
+        var filter = "[0:a][1:a]concat=n=2:v=0:a=1[out]";
+        var args = new List<string>
+        {
+            "-nostats", "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", $"sine=frequency={frequency}:duration={quietDur},volume={quietGain}dB",
+            "-f", "lavfi", "-i", $"sine=frequency={frequency}:duration={loudDur},volume={loudGain}dB",
+            "-filter_complex", filter,
+            "-map", "[out]",
+            "-ar", "44100", "-ac", "2",
+            path
+        };
+        RunFfmpeg(args);
+        return path;
+    }
+
     /// <summary>A WAV with a 1 kHz tone followed by <paramref name="silenceSec"/> of silence.</summary>
     public static string CreateToneThenSilence(string dir, string fileName, double toneSec = 10.0, double silenceSec = 4.0)
     {

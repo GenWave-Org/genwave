@@ -185,7 +185,7 @@ public static class FeatureAcceptanceGateRankingRobustness
     public sealed class ScenarioRankingProvenInTheBrowser
     {
         const string SkipVote =
-            "Z11(a) — z11smoke, scratch stack, 2026-07-16: a 5-row lookalike fixture catalog " +
+            "manual: Z11(a) — z11smoke, scratch stack, 2026-07-16: a 5-row lookalike fixture catalog " +
             "seeded via ffmpeg sine-tone mp3s tagged with real ID3 metadata — Queen/\"One Vision\" " +
             "(album \"A Kind of Magic\", media id=5), Queen/\"Bohemian Rhapsody\" (album \"A Night " +
             "at the Opera\", media id=4), Queen/\"The Show Must Go On\" (album \"Innuendo\", media " +
@@ -223,7 +223,7 @@ public static class FeatureAcceptanceGateRankingRobustness
         }
 
         const string SkipNeverPlay =
-            "Z11(a) — z11smoke, scratch stack, 2026-07-16: `GET /api/media/facets?field=album` -> " +
+            "manual: Z11(a) — z11smoke, scratch stack, 2026-07-16: `GET /api/media/facets?field=album` -> " +
             "`[{\"value\":\"A Kind of Magic\",\"count\":1},{\"value\":\"A Night at the Opera\"," +
             "\"count\":1},{\"value\":\"Empire\",\"count\":2},{\"value\":\"Innuendo\",\"count\":1}]`. " +
             "`POST /api/media/bulk/never-play` `{\"filter\":{\"albumExact\":\"A Night at the " +
@@ -258,7 +258,7 @@ public static class FeatureAcceptanceGateRankingRobustness
         }
 
         const string SkipFourHundreds =
-            "Z11(a) — z11smoke, scratch stack, 2026-07-16: `GET /api/media?artist=Queen&artist-" +
+            "manual: Z11(a) — z11smoke, scratch stack, 2026-07-16: `GET /api/media?artist=Queen&artist-" +
             "exact=Queen` -> 400 `{\"title\":\"Conflicting artist filters.\",\"detail\":\"Name at " +
             "most one of artist or artist-exact.\"}`; `GET /api/media?genre=Metal&genre-" +
             "exact=Metal` -> 400 `{\"title\":\"Conflicting genre filters.\",\"detail\":\"Name at " +
@@ -289,7 +289,7 @@ public static class FeatureAcceptanceGateRankingRobustness
     public sealed class ScenarioTooltipCoverageSpotCheckedLive
     {
         const string Skip =
-            "Z11(a) — z11smoke, scratch stack, 2026-07-16, driven through a real headless Chromium " +
+            "manual: Z11(a) — z11smoke, scratch stack, 2026-07-16, driven through a real headless Chromium " +
             "(Playwright 1.61.1, no admin-ui devDependency added -- installed into an isolated " +
             "scratchpad npm project outside this task's file ownership). Catalog bulk toolbar: " +
             "hovered the \"Vote down\" IconButton -> `page.getByRole(\"tooltip\", { name: \"Vote " +
@@ -326,7 +326,7 @@ public static class FeatureAcceptanceGateRankingRobustness
     public sealed class ScenarioRingIntegrityProvenLive
     {
         const string Skip =
-            "Z11(b) — z11smoke, scratch stack, 2026-07-16: `PUT Station:Rotation:RecentWindow=2` " +
+            "manual: Z11(b) — z11smoke, scratch stack, 2026-07-16: `PUT Station:Rotation:RecentWindow=2` " +
             "-> 200 (source=override). The 5-fixture lookalike catalog (all 4-6s tracks, forcing " +
             "fast repeats inside a 2-slot ring) polled every 3s for 90s (30 samples of `/api/now-" +
             "playing`) plus a 51-entry `/api/play-history` dump spanning ~3 minutes: EVERY repeat " +
@@ -379,7 +379,7 @@ public static class FeatureAcceptanceGateRankingRobustness
     public sealed class ScenarioRobustnessProvenLive
     {
         const string Skip =
-            "Z11(c) — z11smoke, scratch stack, 2026-07-16, MissThreshold=2 (default, unmodified). " +
+            "manual: Z11(c) — z11smoke, scratch stack, 2026-07-16, MissThreshold=2 (default, unmodified). " +
             "`PUT Library:ScanIntervalSeconds=5` -> 200 (source=override). Baseline `GET /api/" +
             "media/1` (\"Jet City Woman\"): state=ready. Moved `queensryche-jet-city-woman.mp3` OUT " +
             "of the scratch MEDIA_DIR at 2026-07-16T01:45:24Z. After ~6s (one tick): `GET /api/" +
@@ -418,7 +418,7 @@ public static class FeatureAcceptanceGateRankingRobustness
     public sealed class ScenarioGateOffsetDerivedAndPinned
     {
         const string Skip =
-            "Z11(d) — z11smoke, scratch stack, 2026-07-16. Effective Loudness:TargetLufs confirmed " +
+            "manual: Z11(d) — z11smoke, scratch stack, 2026-07-16. Effective Loudness:TargetLufs confirmed " +
             "via `GET /api/settings` = -16 (appsettings default, unmodified on this stack). " +
             "Recorded 180.04s of the scratch stack's OWN Icecast mount (`ffmpeg -i http://" +
             "localhost:18000/stream -t 180`, the scratch-mapped port -- never the operator's " +
@@ -484,7 +484,7 @@ public static class FeatureAcceptanceGateRankingRobustness
     public sealed class ScenarioRegressionWallAndCloseOut
     {
         const string SkipWall =
-            "Z11(e) — RUN 2026-07-16 (after the Story013/Story161 re-derivation edits above). " +
+            "manual: Z11(e) — RUN 2026-07-16 (after the Story013/Story161 re-derivation edits above). " +
             "`dotnet build GenWave.sln`: Build succeeded, 0 Warning(s), 0 Error(s). `dotnet " +
             "test GenWave.sln --filter \"Category!=Integration\"`: 0 failed across five " +
             "projects -- Core 97/97, Orchestration 56/59 (3 skipped), MediaLibrary 38/64 (26 " +
@@ -530,7 +530,7 @@ public static class FeatureAcceptanceGateRankingRobustness
         }
 
         const string SkipCloseOut =
-            "Z11(f) — Gitea state checked 2026-07-16 via the API (read-only; this gate never closes " +
+            "manual: Z11(f) — Gitea state checked 2026-07-16 via the API (read-only; this gate never closes " +
             "issues, per instruction and the MEMORY.md house rule). gitea-#204 \"Recalibrate the " +
             "recorded-LUFS acceptance gate for operator target overrides\", gitea-#219 \"RecentWindow=0 " +
             "evicts the on-air id from feederOwnedIds — metadata falls back to engine echo\", gitea-#220 " +

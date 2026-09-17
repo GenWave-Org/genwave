@@ -105,20 +105,23 @@ public static class FeatureAdBedPickerStampsABedPerSpot
         }
     }
 
-    public sealed class ScenarioTheRenderDucksTheBed
-    {
-        [Fact(Skip = "pending: T422 wire — AC2 (ffmpeg-provable waveform proof against a real rendered spot; T416 already emits the duck volume filter and passes BedDuckDb through unchanged — this fact needs a genuine rendered artifact, T422's own surface, not a filter-string pin)")]
-        public void TheRenderedWaveformShowsABedAtTheDuckedLevelUnderTheVoice() { }
+    // T507: AC2's ffmpeg-provable waveform proof against a REAL rendered spot (a bed at the ducked
+    // level under the voice, then unducked in the tail) has no REPEATING gate assertion — stack_gate.sh's
+    // capture leg (F178.5) proves the live STATION stream's own silence/loudness/booth_log outcomes,
+    // not a rendered ad spot's bed duck level. That proof was made once, by hand: T422 (PLAN.md),
+    // wire-proven 2026-09-08 on the dev box (Δ0.0 dB duck, 56 dB tail drop; PR #711 results comment)
+    // — a one-time recipe, not something any automated gate re-runs. Was a Skip-pinned gate: fact
+    // before T507 (former facts TheRenderedWaveformShowsABedAtTheDuckedLevelUnderTheVoice,
+    // TheBedRunsUnduckedInTheTailAfterTheVoiceEnds).
 
-        [Fact(Skip = "pending: T422 wire — AC2 (ffmpeg-provable waveform proof; T416 does not change the duck/tail shape at all — F168 only adds a fade ON TOP of the existing tail, this fact needs a genuine rendered artifact, T422's own surface)")]
-        public void TheBedRunsUnduckedInTheTailAfterTheVoiceEnds() { }
-    }
-
-    public sealed class ScenarioTheTailFadeHonorsAdsBedFadeMs
-    {
-        [Fact(Skip = "pending: T422 wire — AC3 (ffmpeg silencedetect against a real rendered spot; T416 already proves the afade=t=out filter string is emitted with the configured duration — GenWave.Tts.Tests/Specs/Story391_AdRenderAssembly.cs ScenarioTheTailFadeIsAPureFilterSuffix — this fact needs a genuine rendered artifact, T422's own surface)")]
-        public void TheBedFadesToSilenceAcrossTheTrailingAdsBedFadeMsWindow() { }
-    }
+    // T507: AC3's ffmpeg silencedetect proof that the bed fades to silence across the trailing
+    // Ads:BedFadeMs window against a REAL rendered spot is the same T422 one-time proof, not an
+    // ongoing gate assertion — the filter string itself (afade=t=out with the configured duration)
+    // stays proven at GenWave.Tts.Tests/Specs/Story391_AdRenderAssembly.cs's
+    // ScenarioTheTailFadeIsAPureFilterSuffix, but the rendered-artifact half was only ever measured
+    // once, by hand, at T422 (PLAN.md; PR #711 results comment) — no automated gate repeats it. Was
+    // a Skip-pinned gate: fact before T507 (former fact
+    // TheBedFadesToSilenceAcrossTheTrailingAdsBedFadeMsWindow).
 
     /// <summary>
     /// SPEC F168.4; STORY-403; PLAN T416 review R6(a) — proves <c>Station:Ads:BedFadeMs</c>'s own

@@ -20,7 +20,7 @@ namespace GenWave.Host.Tests.Specs;
 public static class FeatureEngineConfigEndpoint
 {
     const string OperatorGated =
-        "Operator-verified live (F4); see docs/PLAN.md Epic I follow-ups";
+        "manual: Operator-verified live (F4); see docs/PLAN.md Epic I follow-ups";
 
     // ── Shared helpers ────────────────────────────────────────────────────
 

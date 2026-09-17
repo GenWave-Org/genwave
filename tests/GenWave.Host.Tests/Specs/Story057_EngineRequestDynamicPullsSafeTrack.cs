@@ -10,7 +10,7 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureEngineRequestDynamicPullsSafeTrack
 {
-    const string OperatorGated = "Operator-gated — requires savonet/liquidsoap:v2.4.4 container for liquidsoap --check and full stack for drain observation; see docs/PLAN.md Epic K";
+    const string OperatorGated = "manual: requires savonet/liquidsoap:v2.4.4 container for liquidsoap --check and full stack for drain observation; see docs/PLAN.md Epic K";
 
     // Path to the engine script, resolved relative to the solution root at test runtime.
     private static string ScriptPath =>

@@ -6,6 +6,8 @@
 // (safe-branch amplify + replay_gain export) and converts the repo-content facts to real greps;
 // U7 proves the live halves against U1's recorded baselines on a scratch stack.
 
+using System.Diagnostics;
+
 namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureSafePathLevelMatching
@@ -62,23 +64,41 @@ public static class FeatureSafePathLevelMatching
                 "amplify must appear before the gap append so the blank gap carries no gain");
         }
 
-        // Live half — the house engine-change discipline (`liquidsoap --check` on the pinned image)
-        // is not a CI-runnable fact: no liquidsoap binary in the test image. Recorded as run, not
-        // inferred (S8/T11 evidence-pinned idiom).
-        const string Skip =
-            "U3 --check spike run (2026-07-13): `docker run --rm -v \"$PWD/engine/genwave.liq:/genwave.liq:ro\" " +
-            "--entrypoint liquidsoap savonet/liquidsoap:v2.4.4 --check /genwave.liq` (savonet/liquidsoap:v2.4.4 " +
-            "is the exact base the pinned engine/Dockerfile builds FROM — compose.yaml's `engine` service has " +
-            "no top-level `image:`, it's a `build:` context, so this is the pinned tag itself, not a proxy for " +
-            "it) — exit code 0, empty stdout/stderr (a clean --check on this script prints nothing; house R4/T11 " +
-            "convention: silence + exit 0 = pass). No -e env dummies were needed: every environment.get(...) " +
-            "call in the script already carries a default=. Verdict: PASS.";
-
-        [Fact(Skip = Skip)]
+        // T507: rewritten as a real Integration fact — a container makes the check repeatable
+        // instead of a one-time recorded run (S8/T11's own evidence-pinned idiom, superseded here).
+        [Fact]
+        [Trait("Category", "Integration")]
         public void TheScriptTypechecksOnPinnedLiquidsoap()
         {
-            // U3: liquidsoap --check on pinned v2.4.4 passed cleanly against the edited script — see
-            // the Skip reason above for the exact command, image, and result (F37.1, house discipline).
+            // savonet/liquidsoap:v2.4.4 is the exact base the pinned engine/Dockerfile builds FROM —
+            // compose.yaml's `engine` service has no top-level `image:`, it's a `build:` context, so
+            // this is the pinned tag itself, not a proxy for it. No -e env dummies are needed: every
+            // environment.get(...) call in the script already carries a default=. House R4/T11
+            // convention: silence on stdout/stderr + exit code 0 = pass (F37.1).
+            var engineDir = Path.Combine(RepoRoot, "engine");
+
+            using var process = Process.Start(new ProcessStartInfo("docker")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                ArgumentList =
+                {
+                    "run", "--rm",
+                    "-v", $"{engineDir}:/engine:ro",
+                    "--entrypoint", "liquidsoap",
+                    "savonet/liquidsoap:v2.4.4",
+                    "--check", "/engine/genwave.liq",
+                },
+            }) ?? throw new InvalidOperationException("Failed to start docker.");
+
+            var stdout = process.StandardOutput.ReadToEnd();
+            var stderr = process.StandardError.ReadToEnd();
+            process.WaitForExit();
+
+            Assert.True(
+                process.ExitCode == 0 && stdout.Length == 0 && stderr.Length == 0,
+                $"liquidsoap --check failed (exit {process.ExitCode}): stdout=[{stdout}] stderr=[{stderr}]");
         }
     }
 
@@ -95,7 +115,7 @@ public static class FeatureSafePathLevelMatching
         }
 
         // U7-rewritten (2026-07-13, u7smoke) — the live half this Skip text used to defer to U7.
-        const string Skip = "U7 (2026-07-13, u7smoke): PUT Station:SafeScope:LibraryIds=[1] so the "
+        const string Skip = "manual: U7 (2026-07-13, u7smoke): PUT Station:SafeScope:LibraryIds=[1] so the "
             + "drain pulled Quiet Track (stamped gain 20.10 dB, NOT peak-capped — the target-reachable "
             + "row U3's own live half flagged as still owed). GET /api/now-playing during the drain: "
             + "mediaId=1, gainDb=20.1 — exactly Quiet Track's own stamped replay_gain — against U1(b)'s "
@@ -113,21 +133,12 @@ public static class FeatureSafePathLevelMatching
 
     public sealed class ScenarioDrainAirsAtTargetLoudness
     {
-        const string Skip = "U7 (2026-07-13, u7smoke): 110s of the drain stream recorded (ffmpeg against "
-            + ":18000/stream) while Quiet Track (gain 20.10 dB, not peak-capped) looped in the SafeScope=[1] "
-            + "rotation. ffmpeg silencedetect precisely located the F29.6 7.00s inter-safe gaps, isolating "
-            + "a clean single-track window (offset 16.0-29.5s). Full-recording ebur128: -16.4 LUFS. Trimmed "
-            + "clean window ebur128: -16.3 LUFS. Both within F37.3's -16 ±2.5 LU band, against U1(b)'s "
-            + "pre-fix -25.8 LUFS baseline. Evidence: scratchpad u7/partb_ebur128.txt, "
-            + "partb_drain_recording.mp3, partb_frame_history.log.";
-
-        [Trait("Category", "Integration")]
-        [Fact(Skip = Skip)]
-        public void TheRecordedDrainWindowLandsAtTheConfiguredTargetWithinTolerance()
-        {
-            // U7 measured: -16.4 LUFS (full recording) / -16.3 LUFS (trimmed clean window), both
-            // within ±2.5 LU of the -16 target (F37.3).
-        }
+        // The recorded drain window landing at the configured target within tolerance (F37.3):
+        // covered by stack_gate.sh --capture's ebur128 loudness measurement against the station's
+        // own configured target (SPEC F178.5(b)) — the same live LUFS proof U7's one-time recording
+        // (110s against a SafeScope=[1] drain rotation, -16.4/-16.3 LUFS against the -16 ±2.5 LU
+        // band) stood in for before stack_gate.sh's capture leg existed (former fact
+        // TheRecordedDrainWindowLandsAtTheConfiguredTargetWithinTolerance).
     }
 
     // ── Sad path ────────────────────────────────────────────────────────────────────────────────

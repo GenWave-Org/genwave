@@ -103,14 +103,37 @@ public static class FeatureTheStackGateRunsAFreshInstallInAScratch
 
         [Fact]
         public void TheManualEvidenceLineIsFixedText() =>
-            Assert.Contains("Needs manual evidence: the LLL ear", run.ReportMd, StringComparison.Ordinal);
+            Assert.Contains("Needs manual evidence: ", run.ReportMd, StringComparison.Ordinal);
 
         [Fact]
         public void TheManualFactCountComesFromTheCheckout()
         {
-            var expected = Directory.EnumerateFiles(Path.Combine(RepoRootLocator.Find(AppContext.BaseDirectory), "tests"), "*.cs", SearchOption.AllDirectories)
-                .Sum(f => Regex.Matches(File.ReadAllText(f), "\"manual: ").Count);
-            Assert.Contains($"{expected} facts are manual", run.ReportMd, StringComparison.Ordinal);
+            var testsRoot = Path.Combine(RepoRootLocator.Find(AppContext.BaseDirectory), "tests");
+            // Mirrors tools/gate/stack_gate.sh's own count_manual_facts (SPEC F182.3): Skip= FACT
+            // sites, not a blind `"manual: ` substring count — several facts in the same
+            // acceptance-gate file routinely share one `const string Skip = "manual: ..."`
+            // (Story443's own new fact pins this bash count against the real scanner exactly;
+            // this one just proves the REPORTED number really came from scanning the checkout).
+            var expected = Directory.EnumerateFiles(testsRoot, "*.cs", SearchOption.AllDirectories)
+                .Where(f => Path.GetFileName(f) != "Story443_SkipPrefixLaw.cs")
+                .Sum(CountManualFactsInFile);
+            Assert.Contains($"Needs manual evidence: {expected} facts need a person listening to the stream", run.ReportMd, StringComparison.Ordinal);
+        }
+
+        static int CountManualFactsInFile(string file)
+        {
+            var flat = Regex.Replace(File.ReadAllText(file), @"\s+", " ");
+            var manualNames = Regex.Matches(flat, "const string (\\w+)\\s*=\\s*\"manual: ")
+                .Select(m => m.Groups[1].Value)
+                .Distinct();
+
+            var count = Regex.Matches(flat, @"\[(Fact|Theory)\([^)]*?\bSkip\s*=\s*""manual: ").Count;
+            foreach (var name in manualNames)
+            {
+                count += Regex.Matches(flat, $@"\[(Fact|Theory)\([^)]*?\bSkip\s*=\s*{Regex.Escape(name)}\b").Count;
+            }
+
+            return count;
         }
     }
 

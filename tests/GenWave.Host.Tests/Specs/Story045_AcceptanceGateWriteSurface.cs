@@ -9,7 +9,7 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureAcceptanceGateWriteSurface
 {
-    const string Pending = "Pending W7 — write-surface end-to-end + regression; operator-gated live, see docs/PLAN.md Epic I";
+    const string Pending = "manual: W7 — write-surface end-to-end + regression; operator-gated live, see docs/PLAN.md Epic I";
 
     // ---------------------------------------------------------------------
     // HAPPY PATH

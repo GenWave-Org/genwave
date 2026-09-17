@@ -459,7 +459,7 @@ public static class FeatureSafeSegmentsEndpointInProcess
 
 public static class FeatureSafeSegmentsEndpoint
 {
-    const string Pending = "Pending P6 live wiring — operator-gated, see docs/PLAN.md Epic P";
+    const string Pending = "manual: P6 live wiring — operator-gated, see docs/PLAN.md Epic P";
 
     // ---------------------------------------------------------------------
     // HAPPY PATH — bed variant + safe-track selectability

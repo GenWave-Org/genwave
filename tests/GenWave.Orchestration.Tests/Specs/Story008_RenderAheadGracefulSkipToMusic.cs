@@ -43,30 +43,6 @@ public static class FeatureRenderAheadGracefulSkipToMusic
     // HAPPY PATH — config / default value assertions
     // ---------------------------------------------------------------------
 
-    public sealed class ScenarioRenderBudgetIsConfigBound
-    {
-        [Fact(Skip = "Orchestration assembly cannot reference GenWave.Tts (Core-only dep rule) — RenderBudgetSeconds default is unasserted here")]
-        public void TtsOptionsExposesRenderBudgetSeconds() =>
-            Assert.Fail("not reachable");
-
-        [Fact(Skip = "Orchestration assembly cannot reference GenWave.Tts (Core-only dep rule) — RenderBudgetSeconds default is unasserted here")]
-        public void RenderBudgetSecondsDefaultIsThirty() =>
-            Assert.Fail("not reachable");
-    }
-
-    public sealed class ScenarioRendersAreKickedOffAheadOfTheSegmentSlot
-    {
-        // Verifying invocation-time ordering requires hooking into the FakeTtsSegmentSource
-        // at invocation time and comparing against GetNextAsync pull times.  The current fake
-        // design batches renders inside EnqueuePatterAsync (called within GetNextAsync), so
-        // render invocation and pull times are always in the same synchronous window.
-        // Cross-unit lookahead timing would require a redesign of the fake.  Skipping.
-
-        [Fact(Skip = "Cross-unit invocation-time tracking requires fake redesign — not required by current impl scope")]
-        public void RenderInvocationTimeIsBeforeTheGetNextThatYieldsTheSegment() =>
-            Assert.Fail("not reachable");
-    }
-
     public sealed class ScenarioSegmentReadyInTimeIsDelivered
     {
         [Fact]

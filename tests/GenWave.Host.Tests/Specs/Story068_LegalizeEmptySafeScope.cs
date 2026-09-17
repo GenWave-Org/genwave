@@ -3,16 +3,32 @@
 // BDD specification — xUnit. SPEC F25.1/F25.2/F25.6: the boot-time
 // StationOptionsValidator and the PUT-time SettingValidator both accept an empty
 // Station:SafeScope:LibraryIds, while non-positive ids still fail and main scope
-// (Station:Scope:LibraryIds) stays reject-empty. Runtime endpoint (F21.5) is
-// unchanged. The K5 confirm-dialog `[]` submission going through with a 200
-// (was 400) is the WIRE proof — operator-gated Integration below.
+// (Station:Scope:LibraryIds) stays reject-empty.
 //
-// Un-pinned facts run today against the shipped SettingValidator seam and are
-// red until N1 splits IsNonEmptyPositiveLongArray. Live PUT/boot/WARN-log
-// assertions are Skip-pinned Integration per the E10/W7/L8/K6/M8 pattern.
+// T507: the boot and PUT WIRE facts below are proven live — no container needed. Boot uses a real
+// WebApplicationFactory<Program> whose config deliberately carries no Station:SafeScope section at
+// all (StationScopeOptions.LibraryIds defaults to []), so StationOptionsValidator's real F25.1 branch
+// runs for real. PUT reuses the Story058-pattern direct SettingsController call. Only the live-reload
+// half of the round trip (the NEXT GET observing the write without an api restart) needs the real
+// Postgres-backed settings overlay — same "manual: requires running api + Postgres" situation
+// Story058's own LivePutIsObservableByTheSafeTrackEndpointWithoutApiRestart is already pinned on.
 
+using System.Net;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using GenWave.Host.Api;
 using GenWave.Host.Configuration;
+using GenWave.Host.Options;
+using GenWave.Host.Tests.Fakes;
+using GenWave.Host.Tests.Support;
 
 namespace GenWave.Host.Tests.Specs;
 
@@ -91,38 +107,173 @@ public static class FeatureLegalizeEmptySafeScope
     }
 
     // ---------------------------------------------------------------------
-    // WIRE — boot behavior: StationOptionsValidator accepts empty + WARN
-    // (Integration — needs the full host + a captured log sink)
+    // WIRE — boot behavior: StationOptionsValidator accepts empty + WARN (T507: live, no container)
     // ---------------------------------------------------------------------
 
-    [Trait("Category", "Integration")]
     public sealed class ScenarioBootWithEmptySafeScopeSucceedsAndWarns
     {
-        const string Skip = "Full host + log sink: N1 boot-time proof — appsettings SafeScope=[] must not fail-fatal and must emit the F25.1 WARN log line naming the F4.4 degraded mode.";
+        [Fact]
+        public async Task TheHostReachesReadyWithAnEmptySafeScopeInAppsettings()
+        {
+            await using var factory = new EmptySafeScopeWebFactory();
+            var client = factory.CreateClient();
 
-        [Fact(Skip = Skip)]
-        public void TheHostReachesReadyWithAnEmptySafeScopeInAppsettings() { }
+            var response = await client.GetAsync("/health");
 
-        [Fact(Skip = Skip)]
-        public void AWarnLogLineNamesTheF44DegradedMode() { }
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+
+        [Fact]
+        public void AWarnLogLineNamesTheF44DegradedMode()
+        {
+            using var factory = new EmptySafeScopeWebFactory();
+
+            // Forces the host to build, then resolves StationOptions for real — the same trigger
+            // IValidateOptions<StationOptions> runs under on ANY .Value read, ValidateOnStart's own
+            // eager hosted-service trigger having been removed along with every other IHostedService.
+            _ = factory.Services.GetRequiredService<IOptions<StationOptions>>().Value;
+
+            Assert.Contains(
+                factory.Logs.Messages,
+                m => m.Contains("SafeScope empty — drain events play mksafe silence (F4.4 degraded mode)", StringComparison.Ordinal));
+        }
     }
 
     // ---------------------------------------------------------------------
-    // WIRE — PUT round-trip: [] returns 200 and logs (F25.2)
+    // WIRE — PUT round-trip: [] returns 200 and logs (F25.2) (T507: live, no container)
     // ---------------------------------------------------------------------
 
-    [Trait("Category", "Integration")]
     public sealed class ScenarioPutSafeScopeEmptyRoundTripSucceedsAndWarns
     {
-        const string Skip = "Full settings pipeline (Story063-pattern factory): PUT [] must persist, return 200, and emit the F25.2 operator-origin WARN.";
+        // Non-empty starting SafeScope: SettingsController.Put's own operator-origin WARN only
+        // fires on a genuine non-empty→empty transition (its own F25.2 guard reads the CURRENT
+        // configuration section before deciding).
+        static IConfiguration BuildConfig() => new ConfigurationBuilder()
+            .AddInMemoryCollection([new("Station:SafeScope:LibraryIds:0", "1")])
+            .Build();
 
-        [Fact(Skip = Skip)]
-        public void ThePutReturns200AndPersistsTheOverlay() { }
+        static SettingsController BuildController(IConfiguration config, IStationSettingsStore store, ILogger<SettingsController> logger) =>
+            new(config, store, new SettingValidator(config), logger, new FakeIconPackStore())
+            {
+                ControllerContext = new ControllerContext
+                {
+                    HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext(),
+                },
+            };
 
-        [Fact(Skip = Skip)]
-        public void AWarnLogLineNamesTheOperatorOriginAndF44DegradedMode() { }
+        [Fact]
+        public async Task ThePutReturns200AndPersistsTheOverlay()
+        {
+            var config = BuildConfig();
+            var store = new SafeScopeEmptyFakeSettingsStore();
+            using var loggerFactory = LoggerFactory.Create(_ => { });
+            var controller = BuildController(config, store, loggerFactory.CreateLogger<SettingsController>());
 
-        [Fact(Skip = Skip)]
+            var result = await controller.Put(
+                [new SettingUpdateRequest("Station:SafeScope:LibraryIds", "[]")], CancellationToken.None);
+
+            Assert.IsType<OkObjectResult>(result);
+            Assert.Equal(1, store.WriteCallCount);
+        }
+
+        [Fact]
+        public async Task AWarnLogLineNamesTheOperatorOriginAndF44DegradedMode()
+        {
+            var config = BuildConfig();
+            var store = new SafeScopeEmptyFakeSettingsStore();
+            var logs = new CapturingLoggerProvider();
+            using var loggerFactory = LoggerFactory.Create(b => b.AddProvider(logs));
+            var controller = BuildController(config, store, loggerFactory.CreateLogger<SettingsController>());
+
+            await controller.Put([new SettingUpdateRequest("Station:SafeScope:LibraryIds", "[]")], CancellationToken.None);
+
+            Assert.Contains(
+                logs.Messages,
+                m => m.Contains("SafeScope emptied by operator — drain events play mksafe silence (F4.4 degraded mode)", StringComparison.Ordinal));
+        }
+
+        // The very next GET observing the emptied key without an api restart needs the real
+        // Postgres-backed settings overlay + IOptionsMonitor reload this in-process controller call
+        // never exercises (Get() reads straight off IConfiguration, which only the real overlay
+        // provider re-binds on a write) — the same live-apply situation Story058's own
+        // LivePutIsObservableByTheSafeTrackEndpointWithoutApiRestart is pinned on.
+        [Fact(Skip = "manual: requires running api + Postgres for the live-apply round-trip; see docs/PLAN.md Epic K"), Trait("Category", "Integration")]
         public void TheKeyIsReadBackAsAnEmptyListOnTheNextGet() { }
+    }
+
+    /// <summary>In-process fake mirroring Story058's own <c>SafeScopeFakeSettingsStore</c>.</summary>
+    sealed class SafeScopeEmptyFakeSettingsStore : IStationSettingsStore
+    {
+        readonly Dictionary<string, string> overrides = new(StringComparer.OrdinalIgnoreCase);
+
+        public int WriteCallCount { get; private set; }
+
+        public Task WriteAsync(string key, object value, CancellationToken cancellationToken = default)
+        {
+            overrides[key] = value.ToString() ?? string.Empty;
+            WriteCallCount++;
+            return Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyDictionary<string, string>> ReadAllAsync(CancellationToken cancellationToken = default)
+        {
+            IReadOnlyDictionary<string, string> result = new Dictionary<string, string>(overrides, StringComparer.OrdinalIgnoreCase);
+            return Task.FromResult(result);
+        }
+    }
+
+    /// <summary>
+    /// <see cref="WebApplicationFactory{TEntryPoint}"/> whose config carries Station:Id/Name/Voice
+    /// and a non-empty main Scope, but no Station:SafeScope section anywhere in the merged
+    /// configuration (base appsettings.json has none, and this factory deliberately does not select
+    /// the Development environment, so appsettings.Development.json's own non-empty SafeScope never
+    /// enters the mix). <c>StationScopeOptions.LibraryIds</c> for SafeScope therefore binds to its
+    /// own empty-list default — a genuine F25.1 empty-SafeScope boot, not a value an override could
+    /// fake — while the main scope stays non-empty per F25.6/F23.1.
+    /// </summary>
+    sealed class EmptySafeScopeWebFactory : WebApplicationFactory<Program>
+    {
+        internal CapturingLoggerProvider Logs { get; } = new();
+
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            builder.UseEnvironment("Production");
+
+            // GenWave.MediaLibrary.AddMediaLibrary reads ConnectionStrings:Library EAGERLY (at
+            // service-registration time, before Program.cs ever calls builder.Build()) — UseSetting
+            // is the only override mechanism that lands early enough for that read to see it.
+            builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
+
+            // Base appsettings.json itself hardcodes a non-empty Station:SafeScope:LibraryIds
+            // ([1]) — Microsoft.Extensions.Configuration has no way to shrink an array-shaped
+            // section via a later override (GetChildren() unions index keys across every
+            // provider, so an earlier provider's index 0 survives even when a later one never
+            // mentions it). Proving a genuine F25.1 empty-SafeScope boot therefore means replacing
+            // configuration wholesale (ConfigureAppConfiguration runs at builder.Build() time —
+            // late enough that it never disturbs AddMediaLibrary's eager read above, and the only
+            // hook late enough to actually rebuild the source list instead of merely overriding it).
+            builder.ConfigureAppConfiguration((_, config) =>
+            {
+                config.Sources.Clear();
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Station:Id"] = "test-station",
+                    ["Station:Name"] = "Test Station",
+                    ["Station:Voice"] = "af_heart",
+                    // Main scope stays non-empty (F25.6/F23.1) — SafeScope is left unmentioned, so
+                    // its own StationScopeOptions.LibraryIds default ([]) is what
+                    // StationOptionsValidator sees.
+                    ["Station:Scope:LibraryIds:0"] = "1",
+                    ["ConnectionStrings:Library"] = "Host=nowhere;Database=test",
+                    [StationSettingsHostingExtensions.ExpectNoStoreKey] = "true",
+                });
+            });
+
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<IHostedService>();
+                services.AddSingleton<ILoggerProvider>(Logs);
+            });
+        }
     }
 }

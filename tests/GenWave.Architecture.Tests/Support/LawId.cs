@@ -83,6 +83,11 @@ internal static class LawId
     /// extracted, exactly the tangle the F105.4 Host-graduation rule assumes never happens.</summary>
     public const string L10 = "L10";
 
+    /// <summary>Skip-prefix law (SPEC F182.1, STORY-443, PLAN T505): every <c>Skip=</c> string
+    /// under <c>tests/</c> starts with <c>pending: T&lt;n&gt;</c>, <c>manual:</c>, <c>gate:</c> or
+    /// <c>obsolete:</c> (<c>Story443_SkipPrefixLaw</c>, scanner <see cref="SkipReasons"/>).</summary>
+    public const string L11 = "L11";
+
     /// <summary>Every law id above, discovered by reflection over this type's own <c>public const
     /// string</c> fields rather than hand-listed a second time anywhere. STORY-293's carry-forward
     /// (PLAN T215): this is now the SINGLE source both Story290_DependencyLaws.cs's exemption-id

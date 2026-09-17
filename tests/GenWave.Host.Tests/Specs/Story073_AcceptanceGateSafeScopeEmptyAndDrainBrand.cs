@@ -19,7 +19,7 @@ public static class FeatureAcceptanceGateSafeScopeEmptyAndDrainBrand
     [Trait("Category", "Integration")]
     public sealed class ScenarioSafeScopeEmptyEndToEnd
     {
-        const string Skip = "Live stack + operator: N6 acceptance gate — needs the full broadcast stack and a captured api log.";
+        const string Skip = "manual: Live stack + operator: N6 acceptance gate — needs the full broadcast stack and a captured api log.";
 
         [Fact(Skip = Skip)]
         public void BootWithEmptySafeScopeReachesReadyAndEmitsTheF251Warn() { }

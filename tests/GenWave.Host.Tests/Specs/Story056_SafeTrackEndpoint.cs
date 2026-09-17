@@ -130,7 +130,7 @@ file sealed class SafeTrackWebFactory(IMediaCatalog catalog) : WebApplicationFac
 
 public static class FeatureSafeTrackEndpoint
 {
-    const string OperatorGated = "Operator-gated — requires live engine container calling the endpoint over core; see docs/PLAN.md Epic K";
+    const string OperatorGated = "manual: requires live engine container calling the endpoint over core; see docs/PLAN.md Epic K";
 
     /// <summary>
     /// STORY-223/PLAN T85 wired <see cref="ArtworkUrlResolver"/> onto this endpoint's signature —

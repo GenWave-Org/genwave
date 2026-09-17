@@ -12,7 +12,7 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureAcceptanceGateLibraryManagement
 {
-    const string OperatorGated = "Operator-gated — requires live broadcast stack; L1–L7 shipped, live sub-assertions verified by operator against running Host+Postgres; see docs/PLAN.md Epic J";
+    const string OperatorGated = "manual: requires live broadcast stack; L1–L7 shipped, live sub-assertions verified by operator against running Host+Postgres; see docs/PLAN.md Epic J";
 
     // ---------------------------------------------------------------------
     // HAPPY PATH

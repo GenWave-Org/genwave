@@ -136,7 +136,7 @@ public static class FeatureAcceptanceGateWirelessRedesign
         }
 
         const string CatalogCountsSkip =
-            "Q12(d) first half — needs a raw grouped count straight from Postgres to cross-check " +
+            "manual: Q12(d) first half — needs a raw grouped count straight from Postgres to cross-check " +
             "against, and the production db service publishes no port (compose.yaml: `networks: " +
             "[data]`, no `ports:`) — only `docker compose exec` reaches it, which this gate is not " +
             "authorized to run against the live project. Operator procedure after deploying this " +
@@ -155,7 +155,7 @@ public static class FeatureAcceptanceGateWirelessRedesign
         }
 
         const string LiveScopePutSkip =
-            "Q12(d) second half — a live PUT to Station:SafeScope:LibraryIds changes production " +
+            "manual: Q12(d) second half — a live PUT to Station:SafeScope:LibraryIds changes production " +
             "config (fires the IOptionsMonitor reload token StatusController reads from) even when " +
             "the round-trip writes back the SAME value; per this gate's own guardrail the live half " +
             "is operator-pinned by design, so an unattended write against the operator's real station " +
@@ -181,7 +181,7 @@ public static class FeatureAcceptanceGateWirelessRedesign
     public sealed class ScenarioShippedFlowsSurviveTheRedesign
     {
         const string Skip =
-            "Q12(a) — a full click-through of the redesigned console is a human/browser exercise, not " +
+            "manual: Q12(a) — a full click-through of the redesigned console is a human/browser exercise, not " +
             "an in-process C# assertion; the wire contracts each flow calls are unchanged (byte-" +
             "compatible request bodies per Q7-Q10's own acceptance) and are covered by the shipped " +
             "Host.Tests endpoint specs plus admin-ui jest specs — this fact is the LIVE walk proving " +
@@ -214,7 +214,7 @@ public static class FeatureAcceptanceGateWirelessRedesign
     public sealed class ScenarioBothThemesPaintCorrectlyLive
     {
         const string Skip =
-            "Q12(b) — the cookie-read/data-theme wiring and no-flash first render are already unit-" +
+            "manual: Q12(b) — the cookie-read/data-theme wiring and no-flash first render are already unit-" +
             "proven by admin-ui's app-shell.spec.tsx (green in the wall below); what remains is an " +
             "actual browser paint, which no jsdom/xUnit check can see. Operator procedure: (1) with " +
             "no genwave-theme cookie set (DevTools → Application → Cookies → delete it), load " +
@@ -248,7 +248,7 @@ public static class FeatureAcceptanceGateWirelessRedesign
     public sealed class ScenarioOnAirAdvanceReflectsWithinOnePollInterval
     {
         const string Skip =
-            "Q12(c) — the poll/pause/resume MECHANICS (5 s cadence, Page Visibility pause+immediate-" +
+            "manual: Q12(c) — the poll/pause/resume MECHANICS (5 s cadence, Page Visibility pause+immediate-" +
             "resume-fetch) are already unit-proven by admin-ui's dashboard-page.spec.tsx and live-on-" +
             "air-view.spec.tsx (green in the wall below, driven by fake timers + a mocked " +
             "visibilitychange event). What remains unprovable in-process is a REAL track change on the " +
@@ -284,7 +284,7 @@ public static class FeatureAcceptanceGateWirelessRedesign
     public sealed class ScenarioRegressionWall
     {
         const string DotnetEvidence =
-            "Q12(e) dotnet half — RUN 2026-07-11. `dotnet build GenWave.sln`: Build succeeded, 0 " +
+            "manual: Q12(e) dotnet half — RUN 2026-07-11. `dotnet build GenWave.sln`: Build succeeded, 0 " +
             "Warning(s), 0 Error(s). `dotnet test GenWave.sln --filter \"Category!=Integration\"`: " +
             "477 passed, 0 failed, 65 skipped, 542 total across five projects (Core 60/0/0/60, " +
             "Orchestration 29/0/3/32, Tts 52/0/11/63, MediaLibrary 11/0/26/37, Host 325/0/25/350 " +
@@ -307,7 +307,7 @@ public static class FeatureAcceptanceGateWirelessRedesign
         }
 
         const string AdminUiEvidence =
-            "Q12(e) admin-ui half — RUN 2026-07-11 from admin-ui/. `npx tsc --noEmit`: clean, zero " +
+            "manual: Q12(e) admin-ui half — RUN 2026-07-11 from admin-ui/. `npx tsc --noEmit`: clean, zero " +
             "output. `npx jest`: 25 suites passed, 232 passed, 11 todo, 243 total (one pre-existing, " +
             "harmless React act() console warning in catalog-selection-toolbar.spec.tsx's eligibility " +
             "path — CatalogToolbar's onBusyChange(false) firing after unmount in the test; not a " +
@@ -336,7 +336,7 @@ public static class FeatureAcceptanceGateWirelessRedesign
     public sealed class ScenarioIssueClosureIsOperatorOwned
     {
         const string Skip =
-            "Q12(g) — Gitea state checked 2026-07-11 via the API (read-only; this gate never closes " +
+            "manual: Q12(g) — Gitea state checked 2026-07-11 via the API (read-only; this gate never closes " +
             "issues, per instruction and the MEMORY.md house rule). gitea-#174 'Admin UI needs a new look' " +
             "(label genwave-2.0) is OPEN, created 2026-07-10, zero comments — operator to close after " +
             "reviewing this gate's evidence (the runnable wall above + the operator checklist in " +
@@ -356,7 +356,7 @@ public static class FeatureAcceptanceGateWirelessRedesign
     public sealed class ScenarioDegradedStatesRenderTruthfully
     {
         const string DrainSkip =
-            "Q12(f) first half — the drain-state RENDER logic (NowPlayingCard's `state.kind === " +
+            "manual: Q12(f) first half — the drain-state RENDER logic (NowPlayingCard's `state.kind === " +
             "\"drain\"` → 'Safe rotation — drain state.') is already unit-proven by admin-ui's " +
             "dashboard-page.spec.tsx and live-on-air-view.spec.tsx (green in the wall above); an " +
             "actual forced drain on THIS host's live station is not authorized by this gate (same " +
@@ -375,7 +375,7 @@ public static class FeatureAcceptanceGateWirelessRedesign
         }
 
         const string KokoroSkip =
-            "Q12(f) second half — the 502-to-error-toast RENDER logic is already unit-proven by admin-" +
+            "manual: Q12(f) second half — the 502-to-error-toast RENDER logic is already unit-proven by admin-" +
             "ui's safe-content-page.spec.tsx and safe-content-redesign.spec.tsx (green in the wall " +
             "above, mocked 502 response); re-confirms P6/P9(e)'s prior live proof that a Kokoro-down " +
             "POST /api/safe-segments 502s with nothing persisted. Stopping the shared kokoro container " +

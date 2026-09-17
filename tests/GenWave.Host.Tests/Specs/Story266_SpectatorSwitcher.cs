@@ -61,7 +61,7 @@ file sealed class SpectatorSwitcherWebFactory() : WebApplicationFactory<Program>
 public static class FeatureSpectatorSwitcher
 {
     const string BrowserGated =
-        "Client-rendered behavior — verified in a real browser against the compose stack (PLAN T169 acceptance).";
+        "manual: Client-rendered behavior — verified in a real browser against the compose stack (PLAN T169 acceptance).";
 
     /// <summary>The page plus every same-origin asset it references (src/href), as raw text —
     /// Story173's own <c>FetchPageBundleAsync</c> idiom, copied here rather than shared (each

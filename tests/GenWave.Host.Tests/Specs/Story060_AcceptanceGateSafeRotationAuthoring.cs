@@ -10,7 +10,7 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureAcceptanceGateSafeRotationAuthoring
 {
-    const string OperatorGated = "Operator-gated — requires live broadcast stack + drain observation; K1–K5 shipped, live sub-assertions verified by operator against running Host+Postgres; see docs/PLAN.md Epic K";
+    const string OperatorGated = "manual: requires live broadcast stack + drain observation; K1–K5 shipped, live sub-assertions verified by operator against running Host+Postgres; see docs/PLAN.md Epic K";
 
     // ---------------------------------------------------------------------
     // HAPPY PATH — operator flow round-trip

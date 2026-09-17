@@ -286,7 +286,7 @@ public static class FeatureBulkReassignEndpointInProcess
 
 public static class FeatureBulkReassignEndpoint
 {
-    const string Pending = "Pending L4 — bulk reassign endpoint; operator-gated live, see docs/PLAN.md Epic J";
+    const string Pending = "manual: L4 — bulk reassign endpoint; operator-gated live, see docs/PLAN.md Epic J";
 
     // ---------------------------------------------------------------------
     // HAPPY PATH

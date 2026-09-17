@@ -45,29 +45,13 @@ public static class FeatureMainScopeOnSettingsSurface
     }
 
     // ---------------------------------------------------------------------
-    // SAD PATH — empty main scope stays rejected (validator discipline)
-    // ---------------------------------------------------------------------
-
-    [Trait("Category", "Integration")]
-    public sealed class ScenarioEmptyMainScopeIsRejected
-    {
-        const string Skip = "Settings pipeline: exercised in M3 via the Story058-pattern factory (PUT [] -> 400, no persist, feeder keeps previous scope).";
-
-        [Fact(Skip = Skip)]
-        public void PutOfAnEmptyListReturns400ProblemDetails() { }
-
-        [Fact(Skip = Skip)]
-        public void NothingIsPersistedOnTheRejectedPut() { }
-    }
-
-    // ---------------------------------------------------------------------
     // WIRE — live apply (operator-gated)
     // ---------------------------------------------------------------------
 
     [Trait("Category", "Integration")]
     public sealed class ScenarioLivePutWidensSelection
     {
-        const string Skip = "Live stack + operator: M3 wire acceptance (PUT [1,2] makes a library-2 row selectable, no api restart).";
+        const string Skip = "manual: Live stack + operator: M3 wire acceptance (PUT [1,2] makes a library-2 row selectable, no api restart).";
 
         [Fact(Skip = Skip)]
         public void ARowParkedInLibraryTwoBecomesSelectableAfterALivePut() { }

@@ -41,7 +41,7 @@ file sealed class SpectatorAboutWebFactory(string? streamUrl) : WebApplicationFa
 public static class FeatureSpectatorAbout
 {
     const string OperatorGated =
-        "Live PUT round trip requires the real Postgres settings overlay — proven in the " +
+        "manual: Live PUT round trip requires the real Postgres settings overlay — proven in the " +
         "operator acceptance gate (mirrors Story058), not under WebApplicationFactory.";
 
     static async Task<JsonElement> FetchAboutAsync(WebApplicationFactory<Program> factory)

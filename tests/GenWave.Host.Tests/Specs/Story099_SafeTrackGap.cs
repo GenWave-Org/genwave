@@ -4,9 +4,12 @@
 // assertions) after the house `--check` spike (docs/MEMORY.md, "R4 spike verdict"). The gap
 // lives in engine/genwave.liq — append() attaches a blank(duration=gap) track directly onto
 // the safe branch after every safe track — driven by GW_SAFE_GAP_SECONDS (default 7.0, 0
-// disables) plumbed through compose.yaml. Recorded-drain and cutback-latency proofs stay
-// live/operator-gated for R13; the runnable facts here pin the script/compose artifacts the
-// way StoryF4/Story068/Story035/Story057's file-content facts do.
+// disables) plumbed through compose.yaml. Recorded-drain and cutback-latency proofs (T507) have no
+// R13-only in-repo Fact and no repeating gate assertion either — the nearest live check is
+// stack_gate.sh's api-down chaos scenario (SPEC F178.8a), which bounds total silence by the outage
+// duration, not the configured gap seconds or a single switch cycle's latency; the runnable facts
+// here pin the script/compose artifacts the way StoryF4/Story068/Story035/Story057's file-content
+// facts do.
 
 namespace GenWave.Host.Tests.Specs;
 
@@ -65,20 +68,14 @@ public static class FeatureSafeTrackGap
 
     public sealed class ScenarioLiveDrainGap
     {
-        // Operator-gated at R13 (E10→Q12 pattern): recorded drain output shows ≈gap seconds
-        // of silence between consecutive safe tracks; --check spike verdict recorded.
-
-        [Fact(Skip = "Pending R13 — live drain recording (operator/scratch stack); see docs/PLAN.md")]
-        public void RecordedDrainShowsTheConfiguredGapBetweenSafeTracks()
-        {
-            Assert.Fail("pending R13");
-        }
-
-        [Fact(Skip = "Pending R13 — live drain recording (operator/scratch stack); see docs/PLAN.md")]
-        public void CutbackToMainHappensWithinOneSourceSwitchCycleMidGap()
-        {
-            Assert.Fail("pending R13");
-        }
+        // Recorded drain output showing ≈gap seconds of silence between consecutive safe tracks,
+        // and cutback to main within one source-switch cycle mid-gap: no gate assertion measures
+        // either directly — stack_gate.sh --capture's api-down chaos scenario (F178.8a) bounds
+        // TOTAL silence by the outage duration and checks a non-safe track_id returns within
+        // 120 s, not the configured GW_SAFE_GAP_SECONDS value or a single source-switch cycle's
+        // latency. Was a Skip-pinned gate: fact before T507 (former facts
+        // RecordedDrainShowsTheConfiguredGapBetweenSafeTracks,
+        // CutbackToMainHappensWithinOneSourceSwitchCycleMidGap).
     }
 
     // ---------------------------------------------------------------------

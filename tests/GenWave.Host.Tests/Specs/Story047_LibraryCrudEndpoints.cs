@@ -284,7 +284,7 @@ public static class FeatureLibraryCrudEndpointsInProcess
 
 public static class FeatureLibraryCrudEndpoints
 {
-    const string Pending = "Pending L2 — library CRUD endpoints; operator-gated live, see docs/PLAN.md Epic J";
+    const string Pending = "manual: L2 — library CRUD endpoints; operator-gated live, see docs/PLAN.md Epic J";
 
     // ---------------------------------------------------------------------
     // HAPPY PATH

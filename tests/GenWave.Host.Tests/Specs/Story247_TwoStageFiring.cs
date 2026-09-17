@@ -344,7 +344,7 @@ public static class FeatureTwoStageFiring
             Assert.Contains(afterList!, p => p.Id == created.Id);
         }
 
-        [Fact(Skip = "T128 shipped the modal + jsdom coverage (admin-ui/__specs__/fire-modal.spec.tsx: export-first gate, cancel = no-op, 409-closes-and-toasts); closure is the orchestrator-run playwright browser smoke over the real UI, per the T92/T102 precedent — no server contract left to pin here.")]
+        [Fact(Skip = "manual: T128 shipped the modal + jsdom coverage (admin-ui/__specs__/fire-modal.spec.tsx: export-first gate, cancel = no-op, 409-closes-and-toasts); closure is the orchestrator-run playwright browser smoke over the real UI, per the T92/T102 precedent — no server contract left to pin here.")]
         public void FireModalFlowIsBrowserAcceptance() { }
     }
 }
