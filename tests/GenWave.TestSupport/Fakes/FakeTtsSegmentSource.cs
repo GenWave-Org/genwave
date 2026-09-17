@@ -1,7 +1,7 @@
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 
-namespace GenWave.Orchestration.Tests.Fakes;
+namespace GenWave.TestSupport.Fakes;
 
 /// <summary>
 /// Scripted TTS source double for orchestrator unit tests.  Returns a pre-built segment with a
@@ -9,10 +9,15 @@ namespace GenWave.Orchestration.Tests.Fakes;
 /// When <see cref="RenderDelay"/> is set the task waits for that duration before completing,
 /// simulating a slow render that may exceed the budget.
 /// </summary>
-sealed class FakeTtsSegmentSource : ITtsSegmentSource
+public sealed class FakeTtsSegmentSource : ITtsSegmentSource
 {
+    /// <summary>When true, every <see cref="RenderAsync"/> call returns null unconditionally.</summary>
     public bool AlwaysReturnNull { get; set; }
+
+    /// <summary>How many times <see cref="RenderAsync"/> has been called.</summary>
     public int RenderCallCount { get; private set; }
+
+    /// <summary>The most recent request passed to <see cref="RenderAsync"/>.</summary>
     public SegmentRequest? LastRequest { get; private set; }
 
     /// <summary>Every request seen, in call order — for specs that assert on a specific
@@ -58,6 +63,7 @@ sealed class FakeTtsSegmentSource : ITtsSegmentSource
     /// </summary>
     public Func<SegmentRequest, bool>? ShouldThrow { get; set; }
 
+    /// <inheritdoc/>
     public async Task<MediaItem?> RenderAsync(SegmentRequest request, CancellationToken ct)
     {
         RenderCallCount++;

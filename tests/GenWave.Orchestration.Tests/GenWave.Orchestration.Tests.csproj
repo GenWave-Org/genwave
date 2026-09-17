@@ -18,6 +18,8 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Using Include="GenWave.TestSupport" />
+    <Using Include="GenWave.TestSupport.Fakes" />
   </ItemGroup>
 
   <ItemGroup>

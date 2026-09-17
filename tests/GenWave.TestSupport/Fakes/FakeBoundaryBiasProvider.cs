@@ -1,6 +1,6 @@
 using GenWave.Core.Abstractions;
 
-namespace GenWave.Orchestration.Tests.Fakes;
+namespace GenWave.TestSupport.Fakes;
 
 /// <summary>
 /// Mutable <see cref="IBoundaryBiasProvider"/> double (SPEC F74.3, mirrors
@@ -8,9 +8,11 @@ namespace GenWave.Orchestration.Tests.Fakes;
 /// calls to simulate a config-provider reload without standing up a real options stack in a unit
 /// test.
 /// </summary>
-sealed class FakeBoundaryBiasProvider(TimeSpan lookahead) : IBoundaryBiasProvider
+public sealed class FakeBoundaryBiasProvider(TimeSpan lookahead) : IBoundaryBiasProvider
 {
+    /// <summary>The lookahead window a spec can mutate between calls.</summary>
     public TimeSpan Lookahead { get; set; } = lookahead;
 
+    /// <inheritdoc/>
     public TimeSpan Current => Lookahead;
 }

@@ -1,7 +1,7 @@
 using GenWave.Core.Abstractions;
 using GenWave.Core.Events;
 
-namespace GenWave.Orchestration.Tests.Fakes;
+namespace GenWave.TestSupport.Fakes;
 
 /// <summary>
 /// Recording <see cref="IStationEventSink"/> double (SPEC F87.6, STORY-227, PLAN T90) — collects
@@ -10,9 +10,11 @@ namespace GenWave.Orchestration.Tests.Fakes;
 /// over; lives here instead because <see cref="RequestFulfillmentProvider"/>'s own specs (this
 /// project) are the first in <c>GenWave.Orchestration.Tests</c> to need one.
 /// </summary>
-sealed class CapturingStationEventSink : IStationEventSink
+public sealed class CapturingStationEventSink : IStationEventSink
 {
+    /// <summary>Every published event, in publish order.</summary>
     public List<StationEvent> Events { get; } = [];
 
+    /// <summary>Records the event into <see cref="Events"/>.</summary>
     public void Publish(StationEvent evt) => Events.Add(evt);
 }

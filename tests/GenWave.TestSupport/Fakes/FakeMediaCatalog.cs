@@ -1,7 +1,7 @@
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 
-namespace GenWave.Orchestration.Tests.Fakes;
+namespace GenWave.TestSupport.Fakes;
 
 /// <summary>
 /// Scripted catalog double for orchestrator unit tests. Captures every call to
@@ -23,11 +23,12 @@ namespace GenWave.Orchestration.Tests.Fakes;
 /// literal-<see langword="null"/> ones.
 /// </para>
 /// </summary>
-sealed class FakeMediaCatalog : IMediaCatalog
+public sealed class FakeMediaCatalog : IMediaCatalog
 {
     readonly IReadOnlyList<MediaReference> pool;
     int nextIndex;
 
+    /// <summary>Seeds a single-track pool (or an empty one, passing <see langword="null"/>).</summary>
     public FakeMediaCatalog(MediaReference? ready) : this(ready is null ? [] : [ready])
     {
     }
@@ -40,7 +41,10 @@ sealed class FakeMediaCatalog : IMediaCatalog
     /// <summary>See the type-level remarks — a candidate pool for boundary-bias specs (SPEC F74.3).</summary>
     public static FakeMediaCatalog WithPool(IReadOnlyList<MediaReference> pool) => new(pool);
 
+    /// <summary>Every excludeIds list passed to <see cref="GetRandomReadyAsync"/>, in call order.</summary>
     public List<IReadOnlyList<string>> RandomCallExcludeLists { get; } = [];
+
+    /// <summary>Every scope passed to <see cref="GetRandomReadyAsync"/>, in call order.</summary>
     public List<LibraryScope> RandomCallScopes { get; } = [];
 
     /// <summary>Every orderedRecentIds list passed to <see cref="GetRotationCandidateAsync"/>, in call order.</summary>
@@ -83,9 +87,11 @@ sealed class FakeMediaCatalog : IMediaCatalog
     /// SQL concern the real repository's own deliberate non-delegation guards against, so one scripted
     /// answer source is simpler and no less honest here.
     /// </summary>
+    /// <inheritdoc/>
     public Task<MediaReference?> GetRandomReadyByImagingKindAsync(LibraryScope scope, ImagingKind kind, CancellationToken ct) =>
         GetRandomReadyByImagingKindAsync(scope, kind, showId: null, ct);
 
+    /// <inheritdoc/>
     public Task<MediaReference?> GetRandomReadyByImagingKindAsync(
         LibraryScope scope, ImagingKind kind, long? showId, CancellationToken ct)
     {
@@ -93,12 +99,15 @@ sealed class FakeMediaCatalog : IMediaCatalog
         return Task.FromResult(ImagingPoolResult);
     }
 
+    /// <inheritdoc/>
     public Task<MediaReference?> GetByIdAsync(LibraryScope scope, string mediaId, CancellationToken ct)
         => Task.FromResult(pool.FirstOrDefault(m => m.MediaId == mediaId));
 
+    /// <inheritdoc/>
     public Task<MediaReference?> GetByIdUnscopedAsync(string mediaId, CancellationToken ct)
         => Task.FromResult(pool.FirstOrDefault(m => m.MediaId == mediaId));
 
+    /// <inheritdoc/>
     public Task<MediaReference?> GetRandomReadyAsync(LibraryScope scope, IReadOnlyList<string> excludeIds, CancellationToken ct)
     {
         RandomCallExcludeLists.Add(excludeIds);
@@ -106,6 +115,7 @@ sealed class FakeMediaCatalog : IMediaCatalog
         return Task.FromResult(pool.Count == 0 ? null : pool[0]);
     }
 
+    /// <inheritdoc/>
     public Task<RotationCandidate?> GetRotationCandidateAsync(
         LibraryScope scope, IReadOnlyList<string> orderedRecentIds, int artistSeparation, CancellationToken ct)
     {
@@ -123,9 +133,11 @@ sealed class FakeMediaCatalog : IMediaCatalog
             RepeatedArtist: ScriptedRepeatedArtist));
     }
 
+    /// <inheritdoc/>
     public Task<PagedResult<MediaReference>> ListAsync(LibraryScope scope, MediaQuery query, CancellationToken ct) =>
         Task.FromResult(new PagedResult<MediaReference>([], 0, 0));
 
+    /// <inheritdoc/>
     public Task<CatalogStatusCounts> GetStatusCountsAsync(LibraryScope safeScope, CancellationToken ct) =>
         Task.FromResult(new CatalogStatusCounts(0, 0, 0, 0, 0));
 

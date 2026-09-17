@@ -13,9 +13,9 @@
     <IsTestProject>false</IsTestProject>
   </PropertyGroup>
 
-  <!-- Both packages are for the fakes that T511 moves in (FakeTtsSegmentSource rides a
-       FakeTimeProvider; the capturing fakes implement xunit-free contracts but the builder's
-       chain record is consumed by xunit specs). Unused until then by design. -->
+  <!-- Both packages back the fakes T511 moved in (FakeTtsSegmentSource rides a FakeTimeProvider;
+       the capturing fakes implement xunit-free contracts but the builder's chain record is
+       consumed by xunit specs) — the fakes and OrchestratorBuilder live here now. -->
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
     <PackageReference Include="xunit" />
