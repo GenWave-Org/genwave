@@ -975,10 +975,13 @@ run_capture_leg() {
   # and `wait`ed on, --chaos or not, so the SAME recording is what the api-down scenario below
   # (SPEC F178.8(a): "with capture running") runs against — a foreground/background split would
   # be the one difference between the two code paths worth avoiding.
+  # -ac 2: keep the stream's stereo layout. BS.1770 sums both channels' power, so a mono (L+R)/2
+  # downmix reads 3 LU low on correlated and 6 LU low on uncorrelated content against the
+  # station's own stereo output (gh-#797, 2026-09-16).
   local stream_url="${GATE_STREAM_URL:-http://localhost:8000/stream}"
   local ffmpeg_log_file="$scratch/ffmpeg-capture.log" ffmpeg_pid
   ffmpeg -nostats -hide_banner -loglevel error -y -reconnect 1 \
-      -i "$stream_url" -t "$capture_secs" -ar 48000 -ac 1 "$scratch/capture.wav" \
+      -i "$stream_url" -t "$capture_secs" -ar 48000 -ac 2 "$scratch/capture.wav" \
       > "$ffmpeg_log_file" 2>&1 &
   ffmpeg_pid=$!
 
@@ -1133,11 +1136,12 @@ run_engine_reconnect_scenario() {
   # scenario's own capture length, independent of CAPTURE_SECS (the api-down window's length) —
   # same ffmpeg flags as run_capture_leg's own recording, foreground (nothing else needs to run
   # concurrently with it, unlike the api-down scenario inside the backgrounded capture leg).
+  # -ac 2: stereo, same reason as run_capture_leg's own recording above (gh-#797).
   local reconnect_capture_secs=60
   local stream_url="${GATE_STREAM_URL:-http://localhost:8000/stream}"
   local ffmpeg_log_file="$scratch/ffmpeg-reconnect.log" ffmpeg_status=0
   ffmpeg -nostats -hide_banner -loglevel error -y -reconnect 1 \
-      -i "$stream_url" -t "$reconnect_capture_secs" -ar 48000 -ac 1 "$scratch/capture-reconnect.wav" \
+      -i "$stream_url" -t "$reconnect_capture_secs" -ar 48000 -ac 2 "$scratch/capture-reconnect.wav" \
       > "$ffmpeg_log_file" 2>&1 || ffmpeg_status=$?
   if [ "$ffmpeg_status" -ne 0 ] || [ ! -s "$scratch/capture-reconnect.wav" ]; then
     LEG_STATUS[chaos]="failed"; LEG_DETAIL[chaos]="engine-reconnect capture"
