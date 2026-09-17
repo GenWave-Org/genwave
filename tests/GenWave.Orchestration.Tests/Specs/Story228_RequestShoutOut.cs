@@ -55,19 +55,21 @@ public static class FeatureRequestShoutOutRidesTheLeadIn
             personaPickProvider: null,
             requestFulfillmentSource: fulfillmentSource);
 
-        return new Orchestrator(
-            new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")),
-            new FakeStationScopeProvider(new LibraryScope([1L])),
-            new FakeCadenceProvider(cadence),
-            new FakeRotationSettingsProvider(new RotationSettings()),
-            musicSelectionPolicy,
-            ttsSource,
-            new FakeActivePersonaAccessor(),
-            new CapturingLogger<Orchestrator>(),
-            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(5)),
-            new SpeechDeferralQueue(TimeProvider.System),
-            TimeProvider.System,
-            new FakeBoundaryBiasProvider(TimeSpan.Zero));
+        return new OrchestratorBuilder()
+            .WithIdentity(new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")))
+            .WithScope(new FakeStationScopeProvider(new LibraryScope([1L])))
+            .WithCadence(cadence)
+            .WithRotation(new FakeRotationSettingsProvider(new RotationSettings()))
+            .WithMusicSelectionPolicy(musicSelectionPolicy)
+            .WithTts(ttsSource)
+            .WithPersonaAccessor(new FakeActivePersonaAccessor())
+            .WithLogger(new CapturingLogger<Orchestrator>())
+            .WithRenderBudget(TimeSpan.FromSeconds(5))
+            .WithDeferralQueue(new SpeechDeferralQueue(TimeProvider.System))
+            .WithTime(TimeProvider.System)
+            .WithBoundaryBias(new FakeBoundaryBiasProvider(TimeSpan.Zero))
+            .Build()
+            .Orchestrator;
     }
 
     static CadenceConfig CadenceWithLeadIn(bool leadInBeforeEachTrack) => new()

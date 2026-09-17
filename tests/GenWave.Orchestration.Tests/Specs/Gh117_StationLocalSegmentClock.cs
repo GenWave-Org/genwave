@@ -51,20 +51,22 @@ public static class FeatureStationLocalSegmentClock
         var tts = new FakeTtsSegmentSource();
         var musicSelectionPolicy = new MusicSelectionPolicy(
             new FakeMediaCatalog(MakeRef("track1")), NullLogger<MusicSelectionPolicy>.Instance);
-        var orchestrator = new Orchestrator(
-            new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "af_heart")),
-            new FakeStationScopeProvider(new LibraryScope([1L])),
-            new FakeCadenceProvider(cadence),
-            new FakeRotationSettingsProvider(new RotationSettings()),
-            musicSelectionPolicy,
-            tts,
-            new FakeActivePersonaAccessor(),
-            NullLogger<Orchestrator>.Instance,
-            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
-            new SpeechDeferralQueue(new FakeTimeProvider(FixedUtc)),
-            new FakeTimeProvider(FixedUtc),
-            new FakeBoundaryBiasProvider(TimeSpan.Zero),
-            stationClock: stationClock);
+        var orchestrator = new OrchestratorBuilder()
+            .WithIdentity(new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "af_heart")))
+            .WithScope(new FakeStationScopeProvider(new LibraryScope([1L])))
+            .WithCadence(cadence)
+            .WithRotation(new FakeRotationSettingsProvider(new RotationSettings()))
+            .WithMusicSelectionPolicy(musicSelectionPolicy)
+            .WithTts(tts)
+            .WithPersonaAccessor(new FakeActivePersonaAccessor())
+            .WithLogger(NullLogger<Orchestrator>.Instance)
+            .WithRenderBudget(TimeSpan.FromSeconds(30))
+            .WithDeferralQueue(new SpeechDeferralQueue(new FakeTimeProvider(FixedUtc)))
+            .WithTime(new FakeTimeProvider(FixedUtc))
+            .WithBoundaryBias(new FakeBoundaryBiasProvider(TimeSpan.Zero))
+            .WithStationClock(stationClock)
+            .Build()
+            .Orchestrator;
         return (orchestrator, tts);
     }
 

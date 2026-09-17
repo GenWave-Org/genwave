@@ -59,13 +59,22 @@ public static class FeatureLateTimeCheckDiesQuietly
         var catalog = new FakeMediaCatalog(MakeTrackRef("t1"));
         var musicSelectionPolicy = new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance);
 
-        return new Orchestrator(
-            identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy, tts,
-            new FakeActivePersonaAccessor(),
-            logger ?? NullLogger<Orchestrator>.Instance,
-            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
-            queue, clock, new FakeBoundaryBiasProvider(TimeSpan.Zero),
-            imagingSettings: imagingSettings);
+        return new OrchestratorBuilder()
+            .WithIdentity(identityProvider)
+            .WithScope(scopeProvider)
+            .WithCadence(cadenceProvider)
+            .WithRotation(rotationProvider)
+            .WithMusicSelectionPolicy(musicSelectionPolicy)
+            .WithTts(tts)
+            .WithPersonaAccessor(new FakeActivePersonaAccessor())
+            .WithLogger(logger ?? NullLogger<Orchestrator>.Instance)
+            .WithRenderBudget(TimeSpan.FromSeconds(30))
+            .WithDeferralQueue(queue)
+            .WithTime(clock)
+            .WithBoundaryBias(new FakeBoundaryBiasProvider(TimeSpan.Zero))
+            .WithImagingSettings(imagingSettings)
+            .Build()
+            .Orchestrator;
     }
 
     // ── HAPPY PATH ──────────────────────────────────────────────────────────

@@ -28,24 +28,27 @@ public static class FeatureStationIdCadence
 
     static Orchestrator BuildOrchestrator(int stationIdEveryNUnits)
     {
-        var identityProvider = new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default"));
-        var scopeProvider = new FakeStationScopeProvider(new LibraryScope([1L]));
-        var cadenceProvider = new FakeCadenceProvider(new CadenceConfig
-        {
-            LeadInBeforeEachTrack = false,
-            BackAnnounceAfterEachTrack = false,
-            StationIdEveryNUnits = stationIdEveryNUnits,
-        });
-        var rotationProvider = new FakeRotationSettingsProvider(new RotationSettings());
         var catalog = new FakeMediaCatalog(MakeRef("track1"));
-        var tts = new FakeTtsSegmentSource();
-        var musicSelectionPolicy = new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance);
-        return new Orchestrator(
-            identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy, tts,
-            new FakeActivePersonaAccessor(), NullLogger<Orchestrator>.Instance,
-            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
-            new SpeechDeferralQueue(TimeProvider.System),
-            TimeProvider.System, new FakeBoundaryBiasProvider(TimeSpan.Zero));
+        return new OrchestratorBuilder()
+            .WithIdentity(new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")))
+            .WithScope(new FakeStationScopeProvider(new LibraryScope([1L])))
+            .WithCadence(new CadenceConfig
+            {
+                LeadInBeforeEachTrack = false,
+                BackAnnounceAfterEachTrack = false,
+                StationIdEveryNUnits = stationIdEveryNUnits,
+            })
+            .WithRotation(new FakeRotationSettingsProvider(new RotationSettings()))
+            .WithMusicSelectionPolicy(new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance))
+            .WithTts(new FakeTtsSegmentSource())
+            .WithPersonaAccessor(new FakeActivePersonaAccessor())
+            .WithLogger(NullLogger<Orchestrator>.Instance)
+            .WithRenderBudget(TimeSpan.FromSeconds(30))
+            .WithDeferralQueue(new SpeechDeferralQueue(TimeProvider.System))
+            .WithTime(TimeProvider.System)
+            .WithBoundaryBias(new FakeBoundaryBiasProvider(TimeSpan.Zero))
+            .Build()
+            .Orchestrator;
     }
 
     static List<MediaItem> ProduceN(Orchestrator orchestrator, int n)

@@ -6,6 +6,8 @@
 // AC1/AC2 went green at T511. The remaining facts are [Fact(Skip = …)] with a loud body — remove the Skip
 // only in the task that makes it green (AC3/AC9 → T512, AC6/AC7 → T514).
 
+using System.Reflection;
+using GenWave.Abstractions.Playout;
 using GenWave.Core.Domain;
 using GenWave.Orchestration.Tests.Fakes;
 using Microsoft.Extensions.Time.Testing;
@@ -14,7 +16,6 @@ namespace GenWave.Orchestration.Tests.Specs;
 
 public static class FeatureOneConstructionPath
 {
-    const string PendingHarness = "pending: T512 — the harness rides the builder; recount after the move (STORY-451)";
     const string PendingAddOrchestration = "pending: T514 — AddOrchestration resolves optional seams once (STORY-451)";
 
     // ---------------------------------------------------------------------
@@ -98,11 +99,61 @@ public static class FeatureOneConstructionPath
 
     public sealed class ScenarioTheHarnessRidesTheBuilder
     {
-        // Given: ProductionChainHarness rewritten as a builder call
+        // Given: ProductionChainHarness rewritten as a builder call — reruns the exact two-DJ
+        // noon-boundary shape Story243_DjsHandOffAudibly.cs/Story307_CeremonyNamesTheShow.cs each
+        // exercise through ProductionChainHarness.BuildProductionChain directly (rather than their own
+        // inline copy), pinning the resulting unit sequence so a future change to the builder's
+        // wiring order trips this fact first.
+
+        static readonly DayOfWeek Monday = new DateTimeOffset(2026, 3, 2, 0, 0, 0, TimeSpan.Zero).DayOfWeek;
+        static readonly DateTimeOffset JustBeforeNoon = new(2026, 3, 2, 11, 55, 0, TimeSpan.Zero);
+
+        static ScheduleWeekSnapshot TwoDjSchedule() => new(
+        [
+            new ScheduleSegment(Id: 1, Day: Monday, StartMinute: 0, EndMinute: 720, PersonaId: 10, Genres: null, EnergyMin: null, EnergyMax: null),
+            new ScheduleSegment(Id: 2, Day: Monday, StartMinute: 720, EndMinute: 1440, PersonaId: 20, Genres: null, EnergyMin: null, EnergyMax: null),
+        ]);
+
+        static FakePersonaStore TwoDjStore()
+        {
+            var store = new FakePersonaStore();
+            store.Add(TestData.MakePersona(10, "DJ Alpha", "af_alpha"));
+            store.Add(TestData.MakePersona(20, "DJ Beta", "af_beta"));
+            return store;
+        }
+
+        static bool IsSignOff(MediaItem item) =>
+            item.MediaId.StartsWith("tts:signoff", StringComparison.OrdinalIgnoreCase);
+
+        static bool IsSignOn(MediaItem item) =>
+            item.MediaId.StartsWith("tts:signon", StringComparison.OrdinalIgnoreCase);
+
+        static string Classify(MediaItem item) =>
+            IsSignOff(item) ? "SignOff" : IsSignOn(item) ? "SignOn" : "Music";
 
         /// <summary>AC3 — the four harness specs' unit order is unchanged</summary>
-        [Fact(Skip = PendingHarness)]
-        public void ProducesTheSameUnitOrderAsBefore() => Assert.Fail(PendingHarness);
+        [Fact]
+        public async Task ProducesTheSameUnitOrderAsBefore()
+        {
+            var chain = ProductionChainHarness.BuildProductionChain(
+                TwoDjStore(), TwoDjSchedule(), JustBeforeNoon, TimeSpan.FromMinutes(10));
+
+            var kinds = new List<string>();
+            for (var i = 0; i < 12; i++)
+            {
+                var item = await chain.Orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None)
+                    ?? throw new InvalidOperationException("Expected GetNextAsync to produce a media item.");
+                kinds.Add(Classify(item));
+                chain.Time.Advance(TimeSpan.FromSeconds(30));
+            }
+
+            Assert.Equal(
+                [
+                    "Music", "Music", "Music", "Music", "Music", "Music",
+                    "Music", "SignOff", "SignOn", "Music", "Music", "Music",
+                ],
+                kinds);
+        }
     }
 
     public sealed class ScenarioAddOrchestrationWithNoOptionalSeams
@@ -129,14 +180,34 @@ public static class FeatureOneConstructionPath
 
     public sealed class ScenarioTheRecountAfterTheMove
     {
-        // Given: the Orchestration.Tests assembly reflected
+        // Given: the Orchestration.Tests assembly reflected — every [Fact]/[Theory]-decorated METHOD
+        // (not each Theory row) counted once, mirroring how the pre-move baseline was measured.
+
+        const int FactMethodCount = 556; // reflected [Fact]/[Theory] methods, measured before T512 moved any site (the move adds and removes no attribute, so pre = post); the runner reports 562 cases = 556 + theory rows
+        const int SkipCount = 108; // 111 pre-move minus the 3 AC3/AC9 facts this task un-skips
+
+        static IReadOnlyList<(MethodInfo Method, FactAttribute Attribute)> ReflectFactMethods() =>
+            typeof(FeatureOneConstructionPath).Assembly
+                .GetTypes()
+                .SelectMany(t => t.GetMethods(
+                    BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly))
+                .SelectMany(m => m.GetCustomAttributes().OfType<FactAttribute>()
+                    .Select(a => (Method: m, Attribute: a)))
+                .ToList();
 
         /// <summary>AC9 — no fact was lost in the migration</summary>
-        [Fact(Skip = PendingHarness)]
-        public void KeepsThePreMoveFactCount() => Assert.Fail(PendingHarness);
+        [Fact]
+        public void KeepsThePreMoveFactCount() =>
+            Assert.Equal(FactMethodCount, ReflectFactMethods().Count);
 
         /// <summary>AC9 — no fact was skipped to make the move pass</summary>
-        [Fact(Skip = PendingHarness)]
-        public void KeepsThePreMoveSkipCount() => Assert.Fail(PendingHarness);
+        [Fact]
+        public void KeepsThePreMoveSkipCount()
+        {
+            var skipped = ReflectFactMethods().Where(x => x.Attribute.Skip is not null).ToList();
+
+            Assert.Equal(SkipCount, skipped.Count);
+            Assert.All(skipped, x => Assert.Matches("STORY-45[1-9]", x.Attribute.Skip));
+        }
     }
 }

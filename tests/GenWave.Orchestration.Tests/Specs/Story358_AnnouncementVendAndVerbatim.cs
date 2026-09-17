@@ -35,16 +35,25 @@ public static class FeatureAnnouncementVendAndVerbatim
         var catalog = new FakeMediaCatalog(MakeRef("t1"));
         var musicSelectionPolicy = new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance);
 
-        return new Orchestrator(
-            identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy, tts,
-            new FakeActivePersonaAccessor(), logger ?? NullLogger<Orchestrator>.Instance,
-            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(5)),
-            new SpeechDeferralQueue(TimeProvider.System),
-            TimeProvider.System, new FakeBoundaryBiasProvider(TimeSpan.Zero),
-            announcementSource: announcementSource,
-            announcementRenderer: announcementRenderer,
-            voiceLister: voiceLister,
-            announcementCopyWriter: announcementCopyWriter);
+        return new OrchestratorBuilder()
+            .WithIdentity(identityProvider)
+            .WithScope(scopeProvider)
+            .WithCadence(cadenceProvider)
+            .WithRotation(rotationProvider)
+            .WithMusicSelectionPolicy(musicSelectionPolicy)
+            .WithTts(tts)
+            .WithPersonaAccessor(new FakeActivePersonaAccessor())
+            .WithLogger(logger ?? NullLogger<Orchestrator>.Instance)
+            .WithRenderBudget(TimeSpan.FromSeconds(5))
+            .WithDeferralQueue(new SpeechDeferralQueue(TimeProvider.System))
+            .WithTime(TimeProvider.System)
+            .WithBoundaryBias(new FakeBoundaryBiasProvider(TimeSpan.Zero))
+            .WithAnnouncementSource(announcementSource)
+            .WithAnnouncementRenderer(announcementRenderer)
+            .WithVoiceLister(voiceLister)
+            .WithAnnouncementCopyWriter(announcementCopyWriter)
+            .Build()
+            .Orchestrator;
     }
 
     static MediaReference MakeRef(string id) => new(

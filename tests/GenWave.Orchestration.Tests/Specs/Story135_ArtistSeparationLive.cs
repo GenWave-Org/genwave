@@ -31,18 +31,23 @@ public static class FeatureArtistSeparationLive
         BuildOrchestrator(MediaReference? ready, int artistSeparation)
     {
         var catalog = new FakeMediaCatalog(ready);
-        var identityProvider = new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default"));
-        var scopeProvider = new FakeStationScopeProvider(new LibraryScope([1L]));
-        var cadenceProvider = new FakeCadenceProvider(SilentCadence);
         var rotationProvider = new FakeRotationSettingsProvider(new RotationSettings { ArtistSeparation = artistSeparation });
         var logger = new CapturingLogger<Orchestrator>();
-        var musicSelectionPolicy = new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance);
-        var orchestrator = new Orchestrator(
-            identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy,
-            new FakeTtsSegmentSource(), new FakeActivePersonaAccessor(), logger,
-            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(5)),
-            new SpeechDeferralQueue(TimeProvider.System),
-            TimeProvider.System, new FakeBoundaryBiasProvider(TimeSpan.Zero));
+        var orchestrator = new OrchestratorBuilder()
+            .WithIdentity(new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")))
+            .WithScope(new FakeStationScopeProvider(new LibraryScope([1L])))
+            .WithCadence(SilentCadence)
+            .WithRotation(rotationProvider)
+            .WithMusicSelectionPolicy(new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance))
+            .WithTts(new FakeTtsSegmentSource())
+            .WithPersonaAccessor(new FakeActivePersonaAccessor())
+            .WithLogger(logger)
+            .WithRenderBudget(TimeSpan.FromSeconds(5))
+            .WithDeferralQueue(new SpeechDeferralQueue(TimeProvider.System))
+            .WithTime(TimeProvider.System)
+            .WithBoundaryBias(new FakeBoundaryBiasProvider(TimeSpan.Zero))
+            .Build()
+            .Orchestrator;
         return (orchestrator, catalog, rotationProvider, logger);
     }
 

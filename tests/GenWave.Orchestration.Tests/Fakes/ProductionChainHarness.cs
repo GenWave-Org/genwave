@@ -83,18 +83,27 @@ static class ProductionChainHarness
         var mediaCatalog = catalog ?? new FakeMediaCatalog(MakeTrackRef("t1"));
         var musicSelectionPolicy = new MusicSelectionPolicy(mediaCatalog, NullLogger<MusicSelectionPolicy>.Instance);
 
-        var orchestrator = new Orchestrator(
-            identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy,
-            tts, personaAccessor, logger,
-            new FakeRenderBudgetProvider(renderBudget ?? TimeSpan.FromSeconds(5)),
-            queue,
-            time, new FakeBoundaryBiasProvider(lookahead),
-            scheduleResolver: caching,
-            personaStore: personaStore,
-            events: events,
-            catalog: mediaCatalog,
-            patterEstimator: patterEstimator,
-            crosstalkPlanner: crosstalkPlanner);
+        var orchestrator = new OrchestratorBuilder()
+            .WithIdentity(identityProvider)
+            .WithScope(scopeProvider)
+            .WithCadence(cadenceProvider)
+            .WithRotation(rotationProvider)
+            .WithMusicSelectionPolicy(musicSelectionPolicy)
+            .WithTts(tts)
+            .WithPersonaAccessor(personaAccessor)
+            .WithLogger(logger)
+            .WithRenderBudget(renderBudget ?? TimeSpan.FromSeconds(5))
+            .WithDeferralQueue(queue)
+            .WithTime(time)
+            .WithBoundaryBias(new FakeBoundaryBiasProvider(lookahead))
+            .WithScheduleResolver(caching)
+            .WithPersonaStore(personaStore)
+            .WithEvents(events)
+            .WithCatalog(mediaCatalog)
+            .WithPatterEstimator(patterEstimator)
+            .WithCrosstalkPlanner(crosstalkPlanner)
+            .Build()
+            .Orchestrator;
 
         return new ProductionChain(orchestrator, queue, time, scheduleStore, tts, events, logger, mediaCatalog);
     }
