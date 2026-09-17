@@ -6,6 +6,8 @@
 // RED at plan time: every fact is [Fact(Skip = Pending)] with a loud body — remove the Skip only in the
 // task that makes it green. The builder comments name the arrange each scenario needs.
 
+using System.Reflection;
+
 namespace GenWave.Architecture.Tests.Specs;
 
 public static class FeatureConstructionPins
@@ -55,7 +57,20 @@ public static class FeatureConstructionPins
         // Given: GenWave.TestSupport reflected
 
         /// <summary>AC8 — the project carries fakes, not facts</summary>
-        [Fact(Skip = Pending)]
-        public void HasNoFactMethods() => Assert.Fail(Pending);
+        [Fact]
+        public void HasNoFactMethods()
+        {
+            var assembly = typeof(GenWave.TestSupport.AssemblyMarker).Assembly;
+
+            var factMethods = assembly.GetTypes()
+                .SelectMany(type => type.GetMethods(
+                    BindingFlags.Public | BindingFlags.NonPublic
+                    | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly))
+                .Where(method => method.GetCustomAttributes(inherit: true)
+                    .Any(attribute => attribute is Xunit.FactAttribute))
+                .ToList();
+
+            Assert.Empty(factMethods);
+        }
     }
 }

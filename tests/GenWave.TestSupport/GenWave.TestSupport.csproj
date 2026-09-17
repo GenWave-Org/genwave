@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- T510 (STORY-451 AC8, SPEC F184.1): a support library, not a test project — it carries
+         OrchestratorBuilder and its fakes for Orchestration.Tests/Host.Tests to reference, but
+         owns no [Fact] methods of its own. IsTestProject=false keeps the test SDK's discovery
+         and `dotnet test`'s own project-kind heuristics from treating it as one. -->
+    <IsTestProject>false</IsTestProject>
+  </PropertyGroup>
+
+  <!-- Both packages are for the fakes that T511 moves in (FakeTtsSegmentSource rides a
+       FakeTimeProvider; the capturing fakes implement xunit-free contracts but the builder's
+       chain record is consumed by xunit specs). Unused until then by design. -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
+    <PackageReference Include="xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\GenWave.Orchestration\GenWave.Orchestration.csproj" />
+    <ProjectReference Include="..\..\src\GenWave.Core\GenWave.Core.csproj" />
+    <ProjectReference Include="..\..\src\GenWave.Abstractions\GenWave.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

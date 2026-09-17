@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\GenWave.Orchestration\GenWave.Orchestration.csproj" />
+    <ProjectReference Include="..\GenWave.TestSupport\GenWave.TestSupport.csproj" />
   </ItemGroup>
 
 </Project>
