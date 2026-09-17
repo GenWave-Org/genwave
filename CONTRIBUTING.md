@@ -54,6 +54,14 @@ cd admin-ui && npx tsc --noEmit && npm run lint && npm run typecheck:specs && np
 
 See the [README](README.md) for prerequisites and how to run the full stack.
 
+## 🧪 Test tiers
+
+| Tier | What | Filter | Where it runs |
+|---|---|---|---|
+| 1 | Every fact without the trait, including the fixture Postgres facts | `Category!=Integration` | Every PR (`ci.yml`) and every release tag (`release.yml`) |
+| 2 | Needs more than Postgres: a Kokoro container, an ffmpeg stream capture, or a full compose stack | `Category=Integration` | `nightly.yml`, and by hand on a dev box |
+| 3 | `Skip="manual: …"` facts | `manual:` | By hand, checked by listening to the stream |
+
 ## ✅ Pull requests
 
 - One concern per PR; conventional-commit style messages (`feat:`, `fix:`, `docs:`, `chore:`).
