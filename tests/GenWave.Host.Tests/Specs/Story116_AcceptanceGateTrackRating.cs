@@ -78,7 +78,7 @@ public static class FeatureAcceptanceGateTrackRating
         }
 
         const string ClampingSkip =
-            "S8(a) server half — s8smoke, scratch stack, 2026-07-12: the F27 boot-seeded safe row " +
+            "manual: S8(a) server half — s8smoke, scratch stack, 2026-07-12: the F27 boot-seeded safe row " +
             "(media id 1, default score 50) took 60 consecutive POST /api/media/1/vote " +
             "{\"direction\":\"up\"} calls and settled at {\"score\":100} (never 101+); a further " +
             "110 consecutive {\"direction\":\"down\"} calls on the same row settled at " +
@@ -96,7 +96,7 @@ public static class FeatureAcceptanceGateTrackRating
         }
 
         const string EtagSkip =
-            "S8(b) — s8smoke, scratch stack, 2026-07-12: inserted a second row directly via SQL " +
+            "manual: S8(b) — s8smoke, scratch stack, 2026-07-12: inserted a second row directly via SQL " +
             "into the main-scope library (media id 2, library_id=1, state=ready/measurable/" +
             "eligible). GET /api/media/2 returned ETag W/\"934\"; POST /api/media/2/vote " +
             "{\"direction\":\"up\"} returned {\"score\":51} (the F33.2 unrated-default-50, " +
@@ -122,7 +122,7 @@ public static class FeatureAcceptanceGateTrackRating
     public sealed class ScenarioNeverPlayEndToEnd
     {
         const string OutOfScopeSkip =
-            "S8(c) — s8smoke, scratch stack, 2026-07-12 (re-proving S3's own s3smoke shape for " +
+            "manual: S8(c) — s8smoke, scratch stack, 2026-07-12 (re-proving S3's own s3smoke shape for " +
             "the gate record, per this dispatch's instruction): the F27 boot-seeded safe row " +
             "(media id 1, library_id=2 \"safe\", OUTSIDE the default main scope [1]) — PUT " +
             "/api/media/1/never-play {\"neverPlay\":true} returned 200 {\"neverPlay\":true} " +
@@ -141,7 +141,7 @@ public static class FeatureAcceptanceGateTrackRating
         }
 
         const string AgedOutSkip =
-            "S8(h) — the UI half (a row no longer inside the play-history ring becoming " +
+            "manual: S8(h) — the UI half (a row no longer inside the play-history ring becoming " +
             "findable via the Catalog's never-play filter, and the restore control) is pinned by " +
             "S7's jest suite (catalog-rating.spec.tsx, green in this run's admin-ui wall) — the " +
             "dispatch names this as already-proven UI behavior, not to be re-derived here. The " +
@@ -169,7 +169,7 @@ public static class FeatureAcceptanceGateTrackRating
     public sealed class ScenarioStandaloneGuarantee
     {
         const string Skip =
-            "S8(d) — s8smoke, scratch stack, 2026-07-12: inserted two more rows via SQL into the " +
+            "manual: S8(d) — s8smoke, scratch stack, 2026-07-12: inserted two more rows via SQL into the " +
             "safe library (media ids 3, 4), then voted id 3 down to score 1 and id 4 up to score " +
             "100 through the real vote endpoint. `select media_id, score, never_play from " +
             "library.media_rating order by media_id` before any bulk call: (1,0,f) (2,51,f) " +
@@ -198,7 +198,7 @@ public static class FeatureAcceptanceGateTrackRating
     public sealed class ScenarioDegradedModesStillDegrade
     {
         const string Skip =
-            "S8(e) — s8smoke, scratch stack, 2026-07-12: with three eligible, unflagged rows in " +
+            "manual: S8(e) — s8smoke, scratch stack, 2026-07-12: with three eligible, unflagged rows in " +
             "the safe library (GET /api/status showed safeScope.playable=3), PUT .../never-play " +
             "{\"neverPlay\":true} on all three (ids 1, 3, 4) — the VERY NEXT GET /api/status " +
             "showed safeScope.playable drop to 0 (the F31.4/F31.5 badge's truth source, within " +
@@ -257,7 +257,7 @@ public static class FeatureAcceptanceGateTrackRating
         }
 
         const string DistributionSkip =
-            "S8(f) distribution spot-check — s8smoke, scratch stack, 2026-07-12: three unflagged, " +
+            "manual: S8(f) distribution spot-check — s8smoke, scratch stack, 2026-07-12: three unflagged, " +
             "eligible safe-library rows with scores 0 (id 1), 1 (id 3), and 100 (id 4) — a wider " +
             "spread than the dispatch's minimum two. 40 consecutive GET /internal/safe-track " +
             "calls, tallied by track_id: id 1 -> 15, id 3 -> 11, id 4 -> 14 (uniform-random " +
@@ -282,7 +282,7 @@ public static class FeatureAcceptanceGateTrackRating
     public sealed class ScenarioUnvotableEntries
     {
         const string Skip =
-            "S8(g) — the UI half (tts:* rows and the drain card rendering NO vote/never-play " +
+            "manual: S8(g) — the UI half (tts:* rows and the drain card rendering NO vote/never-play " +
             "controls) is pinned by S6's jest suite (live-rating.spec.tsx, green in this run's " +
             "admin-ui wall). The wire half: Story112's F33.9 spec already proves GET " +
             "/api/ratings silently skips a tts:abc id at the controller level. s8smoke, scratch " +
@@ -309,7 +309,7 @@ public static class FeatureAcceptanceGateTrackRating
     public sealed class ScenarioRegressionWall
     {
         const string DotnetEvidence =
-            "S8(i) dotnet half — RUN 2026-07-12. `dotnet build GenWave.sln`: Build succeeded, " +
+            "manual: S8(i) dotnet half — RUN 2026-07-12. `dotnet build GenWave.sln`: Build succeeded, " +
             "0 Warning(s), 0 Error(s). `dotnet test GenWave.sln --filter \"Category!=" +
             "Integration\"`: 541 passed, 0 failed, 69 skipped, 610 total across five projects " +
             "(Core 61/0/0/61, Orchestration 29/0/3/32, Tts 53/0/11/64, MediaLibrary 12/0/26/38, " +
@@ -337,7 +337,7 @@ public static class FeatureAcceptanceGateTrackRating
         }
 
         const string AdminUiEvidence =
-            "S8(i) admin-ui half — RUN 2026-07-12 from admin-ui/. `npx tsc --noEmit`: clean, zero " +
+            "manual: S8(i) admin-ui half — RUN 2026-07-12 from admin-ui/. `npx tsc --noEmit`: clean, zero " +
             "output. `npx jest`: 31 suites passed, 294 passed, 11 todo, 305 total (the one pre-" +
             "existing, harmless React act() warning in catalog-selection-toolbar.spec.tsx carried " +
             "unchanged since Q12/R13 — not a failure, not introduced here). `npm run build`: " +
@@ -362,7 +362,7 @@ public static class FeatureAcceptanceGateTrackRating
     public sealed class ScenarioIssueClosureIsOperatorOwned
     {
         const string Skip =
-            "S8(j) — Gitea state checked 2026-07-12 via the API (read-only; this gate never " +
+            "manual: S8(j) — Gitea state checked 2026-07-12 via the API (read-only; this gate never " +
             "closes issues, per instruction and the MEMORY.md house rule). gitea-#188 \"Implement Track " +
             "Rating\" (label genwave-2.0) is OPEN. Operator to close after reviewing this gate's " +
             "evidence (the runnable wall above + the operator checklist in docs/PLAN.md's Epic S " +

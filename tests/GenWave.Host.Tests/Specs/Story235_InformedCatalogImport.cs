@@ -14,13 +14,13 @@ public static class FeatureInformedCatalogImport
         // Given the same valid card obtained via /api/catalog/entries/{slug} and as a raw
         // file body, When both are POSTed to the F79 import endpoint.
 
-        [Fact(Skip = "Pending (T103)")]
+        [Fact(Skip = "obsolete: T103 shipped or retired")]
         public void BothImportsSucceedWithIdenticalResponses() { }
 
-        [Fact(Skip = "Pending (T103)")]
+        [Fact(Skip = "obsolete: T103 shipped or retired")]
         public void UnresolvableVoiceWarnsIdenticallyOnBothPaths() { }
 
-        [Fact(Skip = "Pending (T103)")]
+        [Fact(Skip = "obsolete: T103 shipped or retired")]
         public void AccruedRowsSurviveBothReImportPaths() { }
     }
 
@@ -28,10 +28,10 @@ public static class FeatureInformedCatalogImport
     {
         // Sad path — F79.6 caps and validation hold identically for catalog-sourced bytes.
 
-        [Fact(Skip = "Pending (T103)")]
+        [Fact(Skip = "obsolete: T103 shipped or retired")]
         public void OversizeCatalogCardIsRejectedTransactionally() { }
 
-        [Fact(Skip = "Pending (T103)")]
+        [Fact(Skip = "obsolete: T103 shipped or retired")]
         public void NewerSchemaMajorFromCatalogIsRejectedNamingBothVersions() { }
     }
 }

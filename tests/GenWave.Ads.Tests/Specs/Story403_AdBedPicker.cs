@@ -107,16 +107,16 @@ public static class FeatureAdBedPickerStampsABedPerSpot
 
     public sealed class ScenarioTheRenderDucksTheBed
     {
-        [Fact(Skip = "pending: T422 wire — AC2 (ffmpeg-provable waveform proof against a real rendered spot; T416 already emits the duck volume filter and passes BedDuckDb through unchanged — this fact needs a genuine rendered artifact, T422's own surface, not a filter-string pin)")]
+        [Fact(Skip = "gate: T422 wire — AC2 (ffmpeg-provable waveform proof against a real rendered spot; T416 already emits the duck volume filter and passes BedDuckDb through unchanged — this fact needs a genuine rendered artifact, T422's own surface, not a filter-string pin)")]
         public void TheRenderedWaveformShowsABedAtTheDuckedLevelUnderTheVoice() { }
 
-        [Fact(Skip = "pending: T422 wire — AC2 (ffmpeg-provable waveform proof; T416 does not change the duck/tail shape at all — F168 only adds a fade ON TOP of the existing tail, this fact needs a genuine rendered artifact, T422's own surface)")]
+        [Fact(Skip = "gate: T422 wire — AC2 (ffmpeg-provable waveform proof; T416 does not change the duck/tail shape at all — F168 only adds a fade ON TOP of the existing tail, this fact needs a genuine rendered artifact, T422's own surface)")]
         public void TheBedRunsUnduckedInTheTailAfterTheVoiceEnds() { }
     }
 
     public sealed class ScenarioTheTailFadeHonorsAdsBedFadeMs
     {
-        [Fact(Skip = "pending: T422 wire — AC3 (ffmpeg silencedetect against a real rendered spot; T416 already proves the afade=t=out filter string is emitted with the configured duration — GenWave.Tts.Tests/Specs/Story391_AdRenderAssembly.cs ScenarioTheTailFadeIsAPureFilterSuffix — this fact needs a genuine rendered artifact, T422's own surface)")]
+        [Fact(Skip = "gate: T422 wire — AC3 (ffmpeg silencedetect against a real rendered spot; T416 already proves the afade=t=out filter string is emitted with the configured duration — GenWave.Tts.Tests/Specs/Story391_AdRenderAssembly.cs ScenarioTheTailFadeIsAPureFilterSuffix — this fact needs a genuine rendered artifact, T422's own surface)")]
         public void TheBedFadesToSilenceAcrossTheTrailingAdsBedFadeMsWindow() { }
     }
 

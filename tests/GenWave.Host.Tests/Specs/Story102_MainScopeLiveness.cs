@@ -261,7 +261,7 @@ public static class FeatureMainScopeLiveness
 
     public sealed class ScenarioLiveRoundTrip
     {
-        [Fact(Skip = "Pending R13 — live stack: PUT widens scope, reenrich + browse succeed with no api restart (the P9 repro); see docs/PLAN.md")]
+        [Fact(Skip = "gate: R13 — live stack: PUT widens scope, reenrich + browse succeed with no api restart (the P9 repro); see docs/PLAN.md")]
         public void ThePNineReproPasses()
         {
             Assert.Fail("pending R13");

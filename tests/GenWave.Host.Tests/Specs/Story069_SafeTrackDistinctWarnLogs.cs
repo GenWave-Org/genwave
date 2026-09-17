@@ -24,7 +24,7 @@ public static class FeatureSafeTrackDistinctWarnLogs
     [Trait("Category", "Integration")]
     public sealed class ScenarioTwoOhFourBranchesLogDistinctMessages
     {
-        const string Skip = "Handler + captured ILogger sink: N2 un-pins these against InternalEndpoints.HandleSafeTrackAsync with a test logger asserting the two WARN messages.";
+        const string Skip = "obsolete: N2 shipped — Handler + captured ILogger sink: N2 un-pins these against InternalEndpoints.HandleSafeTrackAsync with a test logger asserting the two WARN messages.";
 
         [Fact(Skip = Skip)]
         public void AnEmptyScopeCallLogsAWarnNamingF44DegradedMode() { }
@@ -43,7 +43,7 @@ public static class FeatureSafeTrackDistinctWarnLogs
     [Trait("Category", "Integration")]
     public sealed class ScenarioAnnotationPathEmitsNoWarn
     {
-        const string Skip = "Handler + captured ILogger sink: on the 200 (annotate:.../path) branch no WARN is emitted.";
+        const string Skip = "obsolete: N2 shipped — Handler + captured ILogger sink: on the 200 (annotate:.../path) branch no WARN is emitted.";
 
         [Fact(Skip = Skip)]
         public void AReadyRowPathReturnsAnnotateAndLogsNoWarn() { }
@@ -56,7 +56,7 @@ public static class FeatureSafeTrackDistinctWarnLogs
     [Trait("Category", "Integration")]
     public sealed class ScenarioTwoOhFourResponseContractIsUnchanged
     {
-        const string Skip = "Handler contract regression: 204 body is empty and Cache-Control: no-store is stamped on either branch — K2b/K6 shape must survive the log split.";
+        const string Skip = "obsolete: N2 shipped — Handler contract regression: 204 body is empty and Cache-Control: no-store is stamped on either branch — K2b/K6 shape must survive the log split.";
 
         [Fact(Skip = Skip)]
         public void EmptyScopeReturns204WithEmptyBody() { }

@@ -42,7 +42,7 @@ file sealed class SpectatorPageWebFactory() : WebApplicationFactory<Program>
 public static class FeatureSpectatorPage
 {
     const string BrowserGated =
-        "Client-rendered behavior — verified in a real browser against the compose stack (PLAN T16 acceptance).";
+        "manual: Client-rendered behavior — verified in a real browser against the compose stack (PLAN T16 acceptance).";
 
     /// <summary>The page plus every same-origin asset it references (src/href), as raw text.</summary>
     static async Task<IReadOnlyList<(string Path, string Content)>> FetchPageBundleAsync(HttpClient client)

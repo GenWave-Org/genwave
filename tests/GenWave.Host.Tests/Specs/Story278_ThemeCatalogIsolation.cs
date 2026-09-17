@@ -193,7 +193,7 @@ file static class IsolationFixtures
 public static class FeatureThemeCatalogIsolation
 {
     const string DemoGated =
-        "exit-demo — the demo station visibly wears a catalog theme, verified in a browser against " +
+        "manual: exit-demo — the demo station visibly wears a catalog theme, verified in a browser against " +
         "the running compose stack (PLAN T192, operator-gated).";
 
     // ── HAPPY PATH ──────────────────────────────────────────────────────────

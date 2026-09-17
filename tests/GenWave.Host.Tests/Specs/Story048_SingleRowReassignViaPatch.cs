@@ -331,7 +331,7 @@ public static class FeatureSingleRowReassignViaPatchInProcess
 
 public static class FeatureSingleRowReassignViaPatch
 {
-    const string Pending = "Pending L3 — single-row reassign via F18 PATCH + X-Out-Of-Scope; operator-gated live, see docs/PLAN.md Epic J";
+    const string Pending = "manual: L3 — single-row reassign via F18 PATCH + X-Out-Of-Scope; operator-gated live, see docs/PLAN.md Epic J";
 
     // ---------------------------------------------------------------------
     // HAPPY PATH

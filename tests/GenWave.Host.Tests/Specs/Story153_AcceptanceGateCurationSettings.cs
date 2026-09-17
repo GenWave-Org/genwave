@@ -180,7 +180,7 @@ public static class FeatureAcceptanceGateCurationSettings
     public sealed class ScenarioFacetSweepAndExactFilters
     {
         const string SkipSweep =
-            "Y7(a) — y7smoke, scratch stack, 2026-07-15: a 5-row lookalike fixture catalog seeded " +
+            "manual: Y7(a) — y7smoke, scratch stack, 2026-07-15: a 5-row lookalike fixture catalog seeded " +
             "via ffmpeg sine-tone mp3s — Queen/\"One Vision\" (genre Rock, album \"A Kind of Magic\", " +
             "media id=5), Queen/\"The Show Must Go On\" (genre Metal, album \"Innuendo\", media " +
             "id=4), Queensrÿche/\"Silent Lucidity\" (genre Metal, album \"Empire\", media id=3 — the " +
@@ -229,7 +229,7 @@ public static class FeatureAcceptanceGateCurationSettings
         }
 
         const string SkipFourHundreds =
-            "Y7(a) — y7smoke, scratch stack, 2026-07-15: `GET /api/media?artist=Queen&artist-" +
+            "manual: Y7(a) — y7smoke, scratch stack, 2026-07-15: `GET /api/media?artist=Queen&artist-" +
             "exact=Queen` -> 400 `{\"title\":\"Conflicting artist filters.\",\"detail\":\"Name at " +
             "most one of artist or artist-exact.\"}`; `GET /api/media?genre=Metal&genre-" +
             "exact=Metal` -> 400 `{\"title\":\"Conflicting genre filters.\",\"detail\":\"Name at " +
@@ -258,7 +258,7 @@ public static class FeatureAcceptanceGateCurationSettings
     public sealed class ScenarioCeilingsHoldLiveAndBootIsNeverBricked
     {
         const string Skip =
-            "Y7(b) — y7smoke, scratch stack, 2026-07-15: `PUT /api/settings` " +
+            "manual: Y7(b) — y7smoke, scratch stack, 2026-07-15: `PUT /api/settings` " +
             "`[{\"key\":\"Library:EnrichmentConcurrency\",\"value\":\"999999\"}]` (int kind, " +
             "ceiling 32) -> 400 `\"Value '999999' is not valid for " +
             "'Library:EnrichmentConcurrency'. Must be an integer between 1 and 32 (workers).\"` -- " +
@@ -301,7 +301,7 @@ public static class FeatureAcceptanceGateCurationSettings
     public sealed class ScenarioVoiceAndPersonaDropdownsAreReal
     {
         const string Skip =
-            "Y7(c) — y7smoke, scratch stack, 2026-07-15: `GET /api/voices` against the REAL " +
+            "manual: Y7(c) — y7smoke, scratch stack, 2026-07-15: `GET /api/voices` against the REAL " +
             "`ghcr.io/remsky/kokoro-fastapi-cpu:v0.2.1` container returned its actual 67-voice list " +
             "(af_alloy .. zm_yunyang) -- not a stub. `POST /api/personas` " +
             "`{\"name\":\"DJ Nova\",\"voice\":\"af_nova\"}` -> 201, `GET /api/personas` -> " +
@@ -347,7 +347,7 @@ public static class FeatureAcceptanceGateCurationSettings
     public sealed class ScenarioNoBlanksAndEveryKeyExplainsItself
     {
         const string SkipDefaults =
-            "Y7(d) — y7smoke, scratch stack, 2026-07-15: a fresh boot's `GET /api/settings` (30 " +
+            "manual: Y7(d) — y7smoke, scratch stack, 2026-07-15: a fresh boot's `GET /api/settings` (30 " +
             "keys total, matching `SETTINGS_HELP_KEYS`'/`StationSettingsAllowlist.All`'s count " +
             "exactly) showed all four previously-blank keys with real seeded values and " +
             "source=\"default\": Library:YearLookup:Endpoint=\"https://musicbrainz.org/ws/2\", " +
@@ -378,7 +378,7 @@ public static class FeatureAcceptanceGateCurationSettings
         }
 
         const string SkipCoupling =
-            "Y7(d) — y7smoke, scratch stack, 2026-07-15: starting from the defaults " +
+            "manual: Y7(d) — y7smoke, scratch stack, 2026-07-15: starting from the defaults " +
             "(RecentWindow=20, ArtistSeparation=2, uncapped), `PUT " +
             "[{\"key\":\"Station:Rotation:RecentWindow\",\"value\":\"5\"},{\"key\":\"Station:" +
             "Rotation:ArtistSeparation\",\"value\":\"10\"}]` (a deliberately capped shape, " +
@@ -415,7 +415,7 @@ public static class FeatureAcceptanceGateCurationSettings
     public sealed class ScenarioRegressionWall
     {
         const string Skip =
-            "Y7(e) — RUN 2026-07-15. `dotnet build GenWave.sln`: Build succeeded, 0 Warning(s), " +
+            "manual: Y7(e) — RUN 2026-07-15. `dotnet build GenWave.sln`: Build succeeded, 0 Warning(s), " +
             "0 Error(s). `dotnet test GenWave.sln --filter \"Category!=Integration\"`: 0 failed " +
             "across five projects -- Core 83/83, Orchestration 56/59 (3 skipped), MediaLibrary " +
             "32/58 (26 skipped, filtered subset), Tts 117/128 (11 skipped), Host 536/566 (30 " +
@@ -467,7 +467,7 @@ public static class FeatureAcceptanceGateCurationSettings
     public sealed class ScenarioIssueClosureIsTheOperatorsCall
     {
         const string Skip =
-            "Y7(f) — Gitea state checked 2026-07-15 via the API (read-only; this gate never closes " +
+            "manual: Y7(f) — Gitea state checked 2026-07-15 via the API (read-only; this gate never closes " +
             "issues, per instruction and the MEMORY.md house rule). gitea-#189 \"Eligible/Ineligible " +
             "Filtering\", gitea-#221 \"Live-editable int settings have floors but no ceilings (fat-finger " +
             "surface)\", gitea-#224 \"Station:Voice needs to be dropdown like Personas:Voice\", gitea-#225 " +

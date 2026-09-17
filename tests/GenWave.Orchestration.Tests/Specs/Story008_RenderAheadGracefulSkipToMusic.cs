@@ -45,11 +45,11 @@ public static class FeatureRenderAheadGracefulSkipToMusic
 
     public sealed class ScenarioRenderBudgetIsConfigBound
     {
-        [Fact(Skip = "Orchestration assembly cannot reference GenWave.Tts (Core-only dep rule) — RenderBudgetSeconds default is unasserted here")]
+        [Fact(Skip = "obsolete: Orchestration assembly cannot reference GenWave.Tts (Core-only dep rule) — RenderBudgetSeconds default is unasserted here")]
         public void TtsOptionsExposesRenderBudgetSeconds() =>
             Assert.Fail("not reachable");
 
-        [Fact(Skip = "Orchestration assembly cannot reference GenWave.Tts (Core-only dep rule) — RenderBudgetSeconds default is unasserted here")]
+        [Fact(Skip = "obsolete: Orchestration assembly cannot reference GenWave.Tts (Core-only dep rule) — RenderBudgetSeconds default is unasserted here")]
         public void RenderBudgetSecondsDefaultIsThirty() =>
             Assert.Fail("not reachable");
     }
@@ -62,7 +62,7 @@ public static class FeatureRenderAheadGracefulSkipToMusic
         // render invocation and pull times are always in the same synchronous window.
         // Cross-unit lookahead timing would require a redesign of the fake.  Skipping.
 
-        [Fact(Skip = "Cross-unit invocation-time tracking requires fake redesign — not required by current impl scope")]
+        [Fact(Skip = "obsolete: Cross-unit invocation-time tracking requires fake redesign — not required by current impl scope")]
         public void RenderInvocationTimeIsBeforeTheGetNextThatYieldsTheSegment() =>
             Assert.Fail("not reachable");
     }

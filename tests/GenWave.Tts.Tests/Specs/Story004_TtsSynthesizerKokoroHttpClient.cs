@@ -10,7 +10,7 @@ public static class FeatureTtsSynthesizerKokoroHttpClient
 
     public sealed class ScenarioContractLivesInCore
     {
-        [Fact(Skip = "Pending T005 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T005 shipped or retired — see docs/PLAN.md")]
         public void ITtsSynthesizerIsInCoreAbstractions()
         {
             // var t = typeof(GenWave.Core.Abstractions.ITtsSynthesizer);
@@ -18,7 +18,7 @@ public static class FeatureTtsSynthesizerKokoroHttpClient
             Assert.Fail("pending T005");
         }
 
-        [Fact(Skip = "Pending T005 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T005 shipped or retired — see docs/PLAN.md")]
         public void SynthesizeAsyncReturnsTaskOfStringAndTakesTextVoiceAndCancellationToken()
         {
             // var m = typeof(ITtsSynthesizer).GetMethod("SynthesizeAsync")!;
@@ -29,7 +29,7 @@ public static class FeatureTtsSynthesizerKokoroHttpClient
 
     public sealed class ScenarioKokoroImplCallsConfiguredEndpoint
     {
-        [Fact(Skip = "Pending T006 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T006 shipped or retired — see docs/PLAN.md")]
         public void SendsExactlyOnePostRequest()
         {
             // Arrange: spin up a tiny WebApplication on http://127.0.0.1:<port>/v1/audio/speech
@@ -39,14 +39,14 @@ public static class FeatureTtsSynthesizerKokoroHttpClient
             Assert.Fail("pending T006");
         }
 
-        [Fact(Skip = "Pending T006 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T006 shipped or retired — see docs/PLAN.md")]
         public void PostsToTheV1AudioSpeechPath()
         {
             // Assert.Equal("/v1/audio/speech", recorder.LastRequestPath);
             Assert.Fail("pending T006");
         }
 
-        [Fact(Skip = "Pending T006 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T006 shipped or retired — see docs/PLAN.md")]
         public void RequestBodyJsonContainsInputAndVoiceAndResponseFormat()
         {
             // var json = JsonDocument.Parse(recorder.LastRequestBody);
@@ -58,7 +58,7 @@ public static class FeatureTtsSynthesizerKokoroHttpClient
 
     public sealed class ScenarioReturnedPathResolvesUnderSharedTtsMount
     {
-        [Fact(Skip = "Pending T006 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T006 shipped or retired — see docs/PLAN.md")]
         public void ReturnedPathIsUnderTheConfiguredTtsCacheRoot()
         {
             // var path = await synth.SynthesizeAsync("hi", "af_heart", ct);
@@ -66,7 +66,7 @@ public static class FeatureTtsSynthesizerKokoroHttpClient
             Assert.Fail("pending T006");
         }
 
-        [Fact(Skip = "Pending T006 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T006 shipped or retired — see docs/PLAN.md")]
         public void FileAtReturnedPathExistsOnDisk()
         {
             // var path = await synth.SynthesizeAsync("hi", "af_heart", ct);
@@ -77,7 +77,7 @@ public static class FeatureTtsSynthesizerKokoroHttpClient
 
     public sealed class ScenarioEngineVisiblePathIsUsableAsMediaItemLocator
     {
-        [Fact(Skip = "Pending T006 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T006 shipped or retired — see docs/PLAN.md")]
         public void PathIsReadableFromTheEngineMountPerspective()
         {
             // Wire-up acceptance: the rendered path must be readable when /tts is bind-mounted
@@ -94,7 +94,7 @@ public static class FeatureTtsSynthesizerKokoroHttpClient
 
     public sealed class ScenarioHttpFailureSurfacesAsFaultedTask
     {
-        [Fact(Skip = "Pending T006 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T006 shipped or retired — see docs/PLAN.md")]
         public void Throws_WhenServerReturns5xx()
         {
             // Arrange: stub server returns 500.
@@ -106,7 +106,7 @@ public static class FeatureTtsSynthesizerKokoroHttpClient
 
     public sealed class ScenarioCancellationHonored
     {
-        [Fact(Skip = "Pending T006 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T006 shipped or retired — see docs/PLAN.md")]
         public void Throws_OperationCanceledException_WhenTokenCancelled()
         {
             // using var cts = new CancellationTokenSource();
@@ -119,7 +119,7 @@ public static class FeatureTtsSynthesizerKokoroHttpClient
 
     public sealed class ScenarioHttpClientTimeoutSurfacesAsFault
     {
-        [Fact(Skip = "Pending T006 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T006 shipped or retired — see docs/PLAN.md")]
         public void Throws_WhenServerExceedsConfiguredTimeout()
         {
             // Arrange: HttpClient.Timeout = 100ms; server delays 5s before responding.

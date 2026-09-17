@@ -80,7 +80,7 @@ public static class FeatureEngineEnergyAwareCrossfade
 
     public sealed class ScenarioEnergyPairMapsToClampedMonotonicDuration
     {
-        [Fact(Skip = "Deferred (operator-verified live, E9/E10) - automated record+measure harness is a follow-up; see docs/PLAN.md Epic H"), Trait("Category", "Integration")]
+        [Fact(Skip = "gate: (operator-verified live, E9/E10) - automated record+measure harness is a follow-up; see docs/PLAN.md Epic H"), Trait("Category", "Integration")]
         public void HotterPairYieldsShorterFadeThanMellowerPair()
         {
             // Two music→music transitions: a hot pair (high gw_outro/gw_intro_energy) and a mellow pair.
@@ -88,7 +88,7 @@ public static class FeatureEngineEnergyAwareCrossfade
             Assert.Fail("pending E9");
         }
 
-        [Fact(Skip = "Deferred (operator-verified live, E9/E10) - automated record+measure harness is a follow-up; see docs/PLAN.md Epic H"), Trait("Category", "Integration")]
+        [Fact(Skip = "gate: (operator-verified live, E9/E10) - automated record+measure harness is a follow-up; see docs/PLAN.md Epic H"), Trait("Category", "Integration")]
         public void ComputedFadeStaysWithinXfadeMinMax()
         {
             // Every computed fade is within [GW_XFADE_MIN, GW_XFADE_MAX] (defaults 2.0 / 8.0).
@@ -102,21 +102,21 @@ public static class FeatureEngineEnergyAwareCrossfade
 
     public sealed class ScenarioMissingEnergyFallsBack
     {
-        [Fact(Skip = "Deferred (operator-verified live, E9/E10) - automated record+measure harness is a follow-up; see docs/PLAN.md Epic H"), Trait("Category", "Integration")]
+        [Fact(Skip = "gate: (operator-verified live, E9/E10) - automated record+measure harness is a follow-up; see docs/PLAN.md Epic H"), Trait("Category", "Integration")]
         public void MissingEitherEnergyUsesFixedThreeSecondFade()
         {
             // Either gw_*_energy absent/unparseable → cross.simple(fade_in=3., fade_out=3.).
             Assert.Fail("pending E9");
         }
 
-        [Fact(Skip = "Deferred (operator-verified live, E9/E10) - automated record+measure harness is a follow-up; see docs/PLAN.md Epic H")]
+        [Fact(Skip = "gate: (operator-verified live, E9/E10) - automated record+measure harness is a follow-up; see docs/PLAN.md Epic H")]
         public void VoiceBranchesAreUnchanged()
         {
             // music→voice overlay-duck and voice→* butt-splice behave exactly as before.
             Assert.Fail("pending E9");
         }
 
-        [Fact(Skip = "Deferred (operator-verified live, E9/E10) - automated record+measure harness is a follow-up; see docs/PLAN.md Epic H"), Trait("Category", "Integration")]
+        [Fact(Skip = "gate: (operator-verified live, E9/E10) - automated record+measure harness is a follow-up; see docs/PLAN.md Epic H"), Trait("Category", "Integration")]
         public void TransitionNeverProducesSilence()
         {
             // The fallback/mksafe dead-air backstop is intact; no transition outcome yields silence.

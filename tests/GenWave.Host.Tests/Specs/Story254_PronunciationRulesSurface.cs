@@ -390,13 +390,13 @@ public static class FeaturePronunciationRulesSurface
 
     public static class ScenarioTheAdminUiRendersIt
     {
-        [Fact(Skip = "Pending T145 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T145 shipped or retired — see docs/PLAN.md")]
         public static void Rules_render_as_editable_rows_rather_than_a_json_blob()
         {
             Assert.Fail("pending T145");
         }
 
-        [Fact(Skip = "Pending T145 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T145 shipped or retired — see docs/PLAN.md")]
         public static void A_shadowed_rule_is_visibly_not_in_effect()
         {
             Assert.Fail("pending T145");
@@ -408,14 +408,14 @@ public static class FeaturePronunciationRulesSurface
     // -------------------------------------------------------------------------------------
     public static class ScenarioASavedRuleIsLive
     {
-        [Fact(Skip = "Pending T146 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T146 shipped or retired — see docs/PLAN.md")]
         public static void The_next_render_after_a_save_reflects_the_new_rule()
         {
             // Save through the real endpoint, then render — with no restart in between.
             Assert.Fail("pending T146");
         }
 
-        [Fact(Skip = "Pending T146 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T146 shipped or retired — see docs/PLAN.md")]
         public static void No_process_restart_is_required()
         {
             Assert.Fail("pending T146");
@@ -466,7 +466,7 @@ public static class FeaturePronunciationRulesSurface
             Assert.Empty(rows!);
         }
 
-        [Fact(Skip = "Pending T145 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T145 shipped or retired — see docs/PLAN.md")]
         public static void The_offending_field_is_highlighted_in_place()
         {
             Assert.Fail("pending T145");

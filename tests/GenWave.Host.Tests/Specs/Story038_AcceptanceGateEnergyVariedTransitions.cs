@@ -17,14 +17,14 @@ public static class FeatureAcceptanceGateEnergyVariedTransitions
 
     public sealed class ScenarioCrossfadeDurationTracksEnergy
     {
-        [Fact(Skip = "Deferred (operator-verified live, E9/E10) - automated record+measure harness is a follow-up; see docs/PLAN.md Epic H"), Trait("Category", "Integration")]
+        [Fact(Skip = "gate: (operator-verified live, E9/E10) - automated record+measure harness is a follow-up; see docs/PLAN.md Epic H"), Trait("Category", "Integration")]
         public void HotToHotCrossfadeIsMeasurablyShorterThanMellowToMellow()
         {
             // Record a hot→hot and a mellow→mellow transition; measured hot fade < mellow fade.
             Assert.Fail("pending E10");
         }
 
-        [Fact(Skip = "Deferred (operator-verified live, E9/E10) - automated record+measure harness is a follow-up; see docs/PLAN.md Epic H"), Trait("Category", "Integration")]
+        [Fact(Skip = "gate: (operator-verified live, E9/E10) - automated record+measure harness is a follow-up; see docs/PLAN.md Epic H"), Trait("Category", "Integration")]
         public void BothMeasuredFadesAreWithinXfadeBounds()
         {
             // Both fades fall within [GW_XFADE_MIN, GW_XFADE_MAX].
@@ -34,14 +34,14 @@ public static class FeatureAcceptanceGateEnergyVariedTransitions
 
     public sealed class ScenarioExistingGatesStillPass
     {
-        [Fact(Skip = "Deferred (operator-verified live, E9/E10) - automated record+measure harness is a follow-up; see docs/PLAN.md Epic H"), Trait("Category", "Integration")]
+        [Fact(Skip = "gate: (operator-verified live, E9/E10) - automated record+measure harness is a follow-up; see docs/PLAN.md Epic H"), Trait("Category", "Integration")]
         public void Phase1SmokeTestStillPassesWithTheWiderCrossWindow()
         {
             // tools/smoke_test.sh passes with cross(duration=8.) and the matching CROSSFADE.
             Assert.Fail("pending E10");
         }
 
-        [Fact(Skip = "Deferred (operator-verified live, E9/E10) - automated record+measure harness is a follow-up; see docs/PLAN.md Epic H"), Trait("Category", "Integration")]
+        [Fact(Skip = "gate: (operator-verified live, E9/E10) - automated record+measure harness is a follow-up; see docs/PLAN.md Epic H"), Trait("Category", "Integration")]
         public void F13CueGatesStillPass()
         {
             // The Story023 cue-trim / transition-gap measurements still hold.
@@ -55,7 +55,7 @@ public static class FeatureAcceptanceGateEnergyVariedTransitions
 
     public sealed class ScenarioNullEnergyDegradesSafely
     {
-        [Fact(Skip = "Deferred (operator-verified live, E9/E10) - automated record+measure harness is a follow-up; see docs/PLAN.md Epic H"), Trait("Category", "Integration")]
+        [Fact(Skip = "gate: (operator-verified live, E9/E10) - automated record+measure harness is a follow-up; see docs/PLAN.md Epic H"), Trait("Category", "Integration")]
         public void NullEnergyTrackAirsWithFixedFallbackAndNoSilentGap()
         {
             // A track with NULL energy transitions via the fixed 3s/3s fallback; no continuous silent

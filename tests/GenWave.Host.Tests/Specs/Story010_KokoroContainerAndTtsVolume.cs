@@ -14,7 +14,7 @@ public static class FeatureKokoroContainerAndTtsVolumeInCompose
 
     public sealed class ScenarioKokoroServiceDefinedInCompose
     {
-        [Fact(Skip = "Pending T010 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T010 shipped or retired — see docs/PLAN.md")]
         public void ServicesMapContainsKokoroKey()
         {
             // var compose = YamlParser.LoadFile("compose.yaml");
@@ -22,7 +22,7 @@ public static class FeatureKokoroContainerAndTtsVolumeInCompose
             Assert.Fail("pending T010");
         }
 
-        [Fact(Skip = "Pending T010 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T010 shipped or retired — see docs/PLAN.md")]
         public void KokoroServiceUsesAPinnedImageTag()
         {
             // var image = compose["services"]["kokoro"]["image"].Value;
@@ -30,7 +30,7 @@ public static class FeatureKokoroContainerAndTtsVolumeInCompose
             Assert.Fail("pending T010");
         }
 
-        [Fact(Skip = "Pending T010 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T010 shipped or retired — see docs/PLAN.md")]
         public void KokoroServiceIsOnTheCoreNetworkOnly()
         {
             // var nets = compose["services"]["kokoro"]["networks"];
@@ -38,7 +38,7 @@ public static class FeatureKokoroContainerAndTtsVolumeInCompose
             Assert.Fail("pending T010");
         }
 
-        [Fact(Skip = "Pending T010 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T010 shipped or retired — see docs/PLAN.md")]
         public void KokoroServiceHasNoPortsMapping()
         {
             // Assert.False(compose["services"]["kokoro"].HasKey("ports"));
@@ -48,14 +48,14 @@ public static class FeatureKokoroContainerAndTtsVolumeInCompose
 
     public sealed class ScenarioKokoroHasHealthcheckAndApiDependsOnIt
     {
-        [Fact(Skip = "Pending T010 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T010 shipped or retired — see docs/PLAN.md")]
         public void KokoroDefinesAHealthcheck()
         {
             // Assert.True(compose["services"]["kokoro"].HasKey("healthcheck"));
             Assert.Fail("pending T010");
         }
 
-        [Fact(Skip = "Pending T010 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T010 shipped or retired — see docs/PLAN.md")]
         public void ApiDependsOnKokoroWithServiceHealthyCondition()
         {
             // var dep = compose["services"]["api"]["depends_on"]["kokoro"]["condition"].Value;
@@ -66,14 +66,14 @@ public static class FeatureKokoroContainerAndTtsVolumeInCompose
 
     public sealed class ScenarioTtsVolumeDefinedAndMountedIntoApiAndEngine
     {
-        [Fact(Skip = "Pending T010 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T010 shipped or retired — see docs/PLAN.md")]
         public void NamedTtsVolumeExists()
         {
             // Assert.True(compose["volumes"].HasKey("tts"));
             Assert.Fail("pending T010");
         }
 
-        [Fact(Skip = "Pending T010 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T010 shipped or retired — see docs/PLAN.md")]
         public void TtsVolumeMountedRwIntoApi()
         {
             // var apiMounts = compose["services"]["api"]["volumes"].AsList();
@@ -81,7 +81,7 @@ public static class FeatureKokoroContainerAndTtsVolumeInCompose
             Assert.Fail("pending T010");
         }
 
-        [Fact(Skip = "Pending T010 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T010 shipped or retired — see docs/PLAN.md")]
         public void TtsVolumeMountedRoIntoEngine()
         {
             // var engMounts = compose["services"]["engine"]["volumes"].AsList();
@@ -92,7 +92,7 @@ public static class FeatureKokoroContainerAndTtsVolumeInCompose
 
     public sealed class ScenarioExistingFourServicesUnchanged
     {
-        [Fact(Skip = "Pending T010 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T010 shipped or retired — see docs/PLAN.md")]
         public void DbIcecastEngineApiServicesStillPresent()
         {
             // var svcs = compose["services"].Keys;
@@ -102,7 +102,7 @@ public static class FeatureKokoroContainerAndTtsVolumeInCompose
             Assert.Fail("pending T010");
         }
 
-        [Fact(Skip = "Pending T010 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T010 shipped or retired — see docs/PLAN.md")]
         public void ComposeConfigCommandExitsZero()
         {
             // var rc = Process.Start("docker", "compose config").WaitForExit();
@@ -117,7 +117,7 @@ public static class FeatureKokoroContainerAndTtsVolumeInCompose
 
     public sealed class ScenarioKokoroIsNotReachableFromOutsideDocker
     {
-        [Fact(Skip = "Pending T010 — verified by wire-up T014, see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T010 shipped or retired — verified by wire-up T014, see docs/PLAN.md")]
         public void HostCanNotReachLocalhostPort8880()
         {
             // Bring the stack up; attempt localhost:8880 from the host:

@@ -439,7 +439,7 @@ public static class FeatureReenrichmentEndpointsInProcess
 
 public static class FeatureReenrichmentEndpoints
 {
-    const string Pending = "Pending L6 — re-enrichment endpoints; operator-gated live, see docs/PLAN.md Epic J";
+    const string Pending = "manual: L6 — re-enrichment endpoints; operator-gated live, see docs/PLAN.md Epic J";
 
     // ---------------------------------------------------------------------
     // HAPPY PATH — single-row, per-field semantics (F20.10)

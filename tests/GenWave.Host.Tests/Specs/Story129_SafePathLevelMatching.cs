@@ -66,7 +66,7 @@ public static class FeatureSafePathLevelMatching
         // is not a CI-runnable fact: no liquidsoap binary in the test image. Recorded as run, not
         // inferred (S8/T11 evidence-pinned idiom).
         const string Skip =
-            "U3 --check spike run (2026-07-13): `docker run --rm -v \"$PWD/engine/genwave.liq:/genwave.liq:ro\" " +
+            "gate: U3 --check spike run (2026-07-13): `docker run --rm -v \"$PWD/engine/genwave.liq:/genwave.liq:ro\" " +
             "--entrypoint liquidsoap savonet/liquidsoap:v2.4.4 --check /genwave.liq` (savonet/liquidsoap:v2.4.4 " +
             "is the exact base the pinned engine/Dockerfile builds FROM — compose.yaml's `engine` service has " +
             "no top-level `image:`, it's a `build:` context, so this is the pinned tag itself, not a proxy for " +
@@ -95,7 +95,7 @@ public static class FeatureSafePathLevelMatching
         }
 
         // U7-rewritten (2026-07-13, u7smoke) — the live half this Skip text used to defer to U7.
-        const string Skip = "U7 (2026-07-13, u7smoke): PUT Station:SafeScope:LibraryIds=[1] so the "
+        const string Skip = "manual: U7 (2026-07-13, u7smoke): PUT Station:SafeScope:LibraryIds=[1] so the "
             + "drain pulled Quiet Track (stamped gain 20.10 dB, NOT peak-capped — the target-reachable "
             + "row U3's own live half flagged as still owed). GET /api/now-playing during the drain: "
             + "mediaId=1, gainDb=20.1 — exactly Quiet Track's own stamped replay_gain — against U1(b)'s "
@@ -113,7 +113,7 @@ public static class FeatureSafePathLevelMatching
 
     public sealed class ScenarioDrainAirsAtTargetLoudness
     {
-        const string Skip = "U7 (2026-07-13, u7smoke): 110s of the drain stream recorded (ffmpeg against "
+        const string Skip = "gate: U7 (2026-07-13, u7smoke): 110s of the drain stream recorded (ffmpeg against "
             + ":18000/stream) while Quiet Track (gain 20.10 dB, not peak-capped) looped in the SafeScope=[1] "
             + "rotation. ffmpeg silencedetect precisely located the F29.6 7.00s inter-safe gaps, isolating "
             + "a clean single-track window (offset 16.0-29.5s). Full-recording ebur128: -16.4 LUFS. Trimmed "

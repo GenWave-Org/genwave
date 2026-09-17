@@ -12,7 +12,7 @@ public static class FeatureAcceptanceGateOperationalHardening
     [Trait("Category", "Integration")]
     public sealed class ScenarioHardeningEndToEnd
     {
-        const string Skip = "Live stack + operator: M8 acceptance gate — needs the full broadcast stack.";
+        const string Skip = "manual: Live stack + operator: M8 acceptance gate — needs the full broadcast stack.";
 
         [Fact(Skip = Skip)]
         public void ThePrefetchVerdictIsRecordedAndAppliedOrDocumented() { }

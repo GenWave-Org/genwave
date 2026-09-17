@@ -68,13 +68,13 @@ public static class FeatureSafeTrackGap
         // Operator-gated at R13 (E10→Q12 pattern): recorded drain output shows ≈gap seconds
         // of silence between consecutive safe tracks; --check spike verdict recorded.
 
-        [Fact(Skip = "Pending R13 — live drain recording (operator/scratch stack); see docs/PLAN.md")]
+        [Fact(Skip = "gate: R13 — live drain recording (operator/scratch stack); see docs/PLAN.md")]
         public void RecordedDrainShowsTheConfiguredGapBetweenSafeTracks()
         {
             Assert.Fail("pending R13");
         }
 
-        [Fact(Skip = "Pending R13 — live drain recording (operator/scratch stack); see docs/PLAN.md")]
+        [Fact(Skip = "gate: R13 — live drain recording (operator/scratch stack); see docs/PLAN.md")]
         public void CutbackToMainHappensWithinOneSourceSwitchCycleMidGap()
         {
             Assert.Fail("pending R13");

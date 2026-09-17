@@ -204,7 +204,7 @@ public static class FeatureBulkNamedLibraryScope
     [Trait("Category", "Integration")]
     public sealed class ScenarioParkedRowRecoveryOnTheLiveStack
     {
-        const string Skip = "Live stack + operator: M5 wire acceptance — the exact case that required SQL on 2026-07-02.";
+        const string Skip = "manual: Live stack + operator: M5 wire acceptance — the exact case that required SQL on 2026-07-02.";
 
         [Fact(Skip = Skip)]
         public void ARowParkedOutOfScopeRecoversViaBulkReassignWithANamedLibraryFilter() { }

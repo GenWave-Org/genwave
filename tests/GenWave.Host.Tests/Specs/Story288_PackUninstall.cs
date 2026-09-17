@@ -7,19 +7,19 @@ public sealed class FeaturePackUninstall
 {
     public sealed class ScenarioUnreferencedPacksUninstall
     {
-        [Fact(Skip = "pending T208 (STORY-288 AC1)")]
+        [Fact(Skip = "obsolete: T208 shipped or retired — (STORY-288 AC1)")]
         public void AnUnreferencedPackRemovesTransactionally() { }
 
-        [Fact(Skip = "pending T208 (STORY-288 AC1)")]
+        [Fact(Skip = "obsolete: T208 shipped or retired — (STORY-288 AC1)")]
         public void ItsFacesStopServingOnTheNextRequest() { }
     }
 
     public sealed class ScenarioReferencedPacksRefuse
     {
-        [Fact(Skip = "pending T208 (STORY-288 AC2)")]
+        [Fact(Skip = "obsolete: T208 shipped or retired — (STORY-288 AC2)")]
         public void TheRefusalNamesEveryReferencingSavedTheme() { }
 
-        [Fact(Skip = "pending T208 (STORY-288 AC2)")]
+        [Fact(Skip = "obsolete: T208 shipped or retired — (STORY-288 AC2)")]
         public void NothingIsRemovedOnARefusal() { }
     }
 }

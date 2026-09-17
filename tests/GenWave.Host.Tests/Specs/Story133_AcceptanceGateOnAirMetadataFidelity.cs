@@ -69,7 +69,7 @@ public static class FeatureAcceptanceGateOnAirMetadataFidelity
     public sealed class ScenarioBaselinesBeforeAnyFix
     {
         const string SkipA =
-            "U1(a) — u1smoke, scratch stack, 2026-07-13: gitea-#199 bleed NOT reproduced on the pre-fix " +
+            "manual: U1(a) — u1smoke, scratch stack, 2026-07-13: gitea-#199 bleed NOT reproduced on the pre-fix " +
             "build, recorded honest per AC5. Fixture: 3 boot-scanned mp3s (Alpha/Beta artist-tagged " +
             "at -22.0 LUFS, untagged 'Quiet Track' at -36.1 LUFS), cadence env-disabled. Polled " +
             "output.icecast.metadata every 2s over 4 independent api-restart trials (the 3-track " +
@@ -87,7 +87,7 @@ public static class FeatureAcceptanceGateOnAirMetadataFidelity
         }
 
         const string SkipB =
-            "U1(b) — u1smoke, scratch stack, 2026-07-13: F37.3 loudness baseline, un-level-matched, " +
+            "manual: U1(b) — u1smoke, scratch stack, 2026-07-13: F37.3 loudness baseline, un-level-matched, " +
             "confirmed. With the catalog self-exhausted (gitea-#210) the station drained to the F27 boot " +
             "seed (library 'safe' id=2, row id=4). Seed row: integratedLufs=-25.0, truePeakDbtp=" +
             "-6.9; target=-16.0; computed gain min(9.0,5.9)=5.90 dB, confirmed verbatim in the " +
@@ -105,7 +105,7 @@ public static class FeatureAcceptanceGateOnAirMetadataFidelity
         }
 
         const string SkipC =
-            "U1(c) — READ-ONLY against the operator's live deployment, 2026-07-13: F40.1's '7 vs 2' " +
+            "manual: U1(c) — READ-ONLY against the operator's live deployment, 2026-07-13: F40.1's '7 vs 2' " +
             "root-caused as a THIRD mechanism, neither literal hypothesis. Live GET /api/status: " +
             "safeScope={libraryIds:[7],playable:1} (rules out the playable-count hypothesis " +
             "numerically). Live GET /api/settings: Station:SafeScope:LibraryIds=\"[7]\", " +
@@ -135,7 +135,7 @@ public static class FeatureAcceptanceGateOnAirMetadataFidelity
     public sealed class ScenarioExplicitEmptyArtistTravels
     {
         const string Skip =
-            "U7(a) — u7smoke, scratch stack, 2026-07-13: polled output.icecast.metadata every 2s " +
+            "manual: U7(a) — u7smoke, scratch stack, 2026-07-13: polled output.icecast.metadata every 2s " +
             "(the Liquidsoap:OutputMetadataCommand, U1's own telnet technique) across a real Beta " +
             "Artist/Beta Track (track_id=2) -> Quiet Track (track_id=1) music boundary at " +
             "on_air_timestamp 1784001333.64 -> 1784001348.53. Quiet Track's OWN frame carried " +
@@ -180,7 +180,7 @@ public static class FeatureAcceptanceGateOnAirMetadataFidelity
     public sealed class ScenarioDrainLevelMatchedWithHonestTelemetry
     {
         const string Skip =
-            "U7(b) — u7smoke, scratch stack, 2026-07-13: logged in, PUT /api/settings " +
+            "manual: U7(b) — u7smoke, scratch stack, 2026-07-13: logged in, PUT /api/settings " +
             "Station:SafeScope:LibraryIds=[1] so the safe/drain branch could pull the main library " +
             "(U3's own live half had only the peak-capped 5.9 dB seed row available; this run used " +
             "Quiet Track instead — stamped gain 20.10 dB, truePeakDbtp=-35.3, NOT peak-capped, the " +
@@ -241,7 +241,7 @@ public static class FeatureAcceptanceGateOnAirMetadataFidelity
         }
 
         const string Skip =
-            "U7(c) — u7smoke, scratch stack, 2026-07-13: POST /api/personas {name:\"Captain " +
+            "manual: U7(c) — u7smoke, scratch stack, 2026-07-13: POST /api/personas {name:\"Captain " +
             "Wavelength\", backstory:\"A friendly late-night pirate-radio captain...\", style:" +
             "\"warm, a little salty, upbeat\", voice:\"af_heart\"} -> 201 {id:1}; PUT /api/settings " +
             "Station:Persona:ActiveId=1 -> activePersona=\"Captain Wavelength\" (GET /api/status). " +
@@ -290,7 +290,7 @@ public static class FeatureAcceptanceGateOnAirMetadataFidelity
     public sealed class ScenarioSafeBrandingNegative
     {
         const string Skip =
-            "U7(d) — u7smoke, scratch stack, 2026-07-13: created + activated a second persona (POST " +
+            "manual: U7(d) — u7smoke, scratch stack, 2026-07-13: created + activated a second persona (POST " +
             "/api/personas {name:\"DJ Nightowl\",...} -> 201 {id:2}; PUT Station:Persona:ActiveId=2 " +
             "-> activePersona=\"DJ Nightowl\") with Station:SafeScope:LibraryIds reset to [2] (the " +
             "F27 boot seed library). While activePersona=\"DJ Nightowl\" was live, the seeded safe " +
@@ -315,7 +315,7 @@ public static class FeatureAcceptanceGateOnAirMetadataFidelity
     public sealed class ScenarioTileTruth
     {
         const string Skip =
-            "U7(e) — u7smoke, scratch stack, 2026-07-13: with Station:SafeScope:LibraryIds=[2] and " +
+            "manual: U7(e) — u7smoke, scratch stack, 2026-07-13: with Station:SafeScope:LibraryIds=[2] and " +
             "the seed row eligible, GET /api/status showed safeScope={libraryIds:[2],playable:1} — " +
             "matching what U6's tile renders (headline '1 playable tracks', sub-line '1 libraries " +
             "(ids 2)'; jest already pins the component rendering itself, STORY-132/U6 — this is the " +
@@ -380,7 +380,7 @@ public static class FeatureAcceptanceGateOnAirMetadataFidelity
         }
 
         const string DotnetEvidence =
-            "U7(f) dotnet half — RUN 2026-07-13. `dotnet build GenWave.sln`: Build succeeded, " +
+            "manual: U7(f) dotnet half — RUN 2026-07-13. `dotnet build GenWave.sln`: Build succeeded, " +
             "0 Warning(s), 0 Error(s). `dotnet test GenWave.sln --filter \"Category!=" +
             "Integration\"`: 0 failed across five projects — Core 61/61, Orchestration 42/45 (3 " +
             "skipped), MediaLibrary 12/38 (26 skipped, filtered subset), Tts 117/128 (11 skipped), " +
@@ -407,7 +407,7 @@ public static class FeatureAcceptanceGateOnAirMetadataFidelity
         }
 
         const string AdminUiEvidence =
-            "U7(f) admin-ui half — RUN 2026-07-13 from admin-ui/. `npx tsc --noEmit`: clean, zero " +
+            "manual: U7(f) admin-ui half — RUN 2026-07-13 from admin-ui/. `npx tsc --noEmit`: clean, zero " +
             "output. `npx jest`: 34 suites passed, 327 passed, 11 todo, 338 total (adds U6's new " +
             "SafeScope-tile-label specs over T11's 33-suite/317-passed wall; the one pre-existing " +
             "harmless React act() warning in catalog-selection-toolbar.spec.tsx carried unchanged " +
@@ -434,7 +434,7 @@ public static class FeatureAcceptanceGateOnAirMetadataFidelity
     public sealed class ScenarioIssueClosure
     {
         const string Skip =
-            "U7(g) — Gitea state checked 2026-07-13 via the API (read-only; this gate never closes " +
+            "manual: U7(g) — Gitea state checked 2026-07-13 via the API (read-only; this gate never closes " +
             "issues, per instruction and the MEMORY.md house rule). gitea-#199 \"Liquidsoap output " +
             "metadata retains the previous track's fields across boundaries (artist bleed)\", gitea-#200 " +
             "\"Safe plays report gainDb=0 - output metadata frames carry no replay_gain key\", gitea-#212 " +

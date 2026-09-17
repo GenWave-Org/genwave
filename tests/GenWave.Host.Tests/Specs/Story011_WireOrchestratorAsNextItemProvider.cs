@@ -91,7 +91,7 @@ public static class FeatureWireOrchestratorAsNextItemProvider
 
     public sealed class ScenarioWireUpAcceptanceLiveTickProducesARealMediaItem
     {
-        [Fact(Skip = "Pending T014 — wire-up verification; see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T014 shipped or retired — wire-up verification; see docs/PLAN.md")]
         public void OnAirReadSeesStampedTrackIdAfterATick()
         {
             // Wire-up: stack up, library has ≥1 ready track, feeder runs.
@@ -107,7 +107,7 @@ public static class FeatureWireOrchestratorAsNextItemProvider
 
     public sealed class ScenarioKokoroDownAtStartupAppStillBootsMusicOnly
     {
-        [Fact(Skip = "Pending T014 — live verification; see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T014 shipped or retired — live verification; see docs/PLAN.md")]
         public void HostStartupSucceedsEvenWhenKokoroIsUnreachable()
         {
             // Configure Tts:Endpoint to a black-holed address.
@@ -116,7 +116,7 @@ public static class FeatureWireOrchestratorAsNextItemProvider
             Assert.Fail("pending T014");
         }
 
-        [Fact(Skip = "Pending T014 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T014 shipped or retired — see docs/PLAN.md")]
         public void PulledItemsAreMusicWhenKokoroIsUnreachable()
         {
             // Run a tick; the only items produced must have non-tts: ids.

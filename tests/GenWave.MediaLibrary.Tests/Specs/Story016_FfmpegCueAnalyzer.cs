@@ -138,7 +138,7 @@ public static class FeatureFfmpegCueAnalyzer
 
     public sealed class ScenarioThresholdAndMinDurationAreConfigBound
     {
-        [Fact(Skip = "Requires ffmpeg process recorder — no interception facility in this test project")]
+        [Fact(Skip = "gate: Requires ffmpeg process recorder — no interception facility in this test project")]
         public void FfmpegInvocationIncludesConfiguredNoiseThreshold()
         {
             // Use an ffmpeg-process recorder. With opts.SilenceThresholdDb = -50.0,
@@ -146,14 +146,14 @@ public static class FeatureFfmpegCueAnalyzer
             Assert.Fail("pending process-recorder facility");
         }
 
-        [Fact(Skip = "Requires ffmpeg process recorder — no interception facility in this test project")]
+        [Fact(Skip = "gate: Requires ffmpeg process recorder — no interception facility in this test project")]
         public void FfmpegInvocationIncludesConfiguredMinSilenceDuration()
         {
             // With opts.MinSilenceDurationSec = 0.5, assert "duration=0.5".
             Assert.Fail("pending process-recorder facility");
         }
 
-        [Fact(Skip = "Requires ffmpeg process recorder — no interception facility in this test project")]
+        [Fact(Skip = "gate: Requires ffmpeg process recorder — no interception facility in this test project")]
         public void AlteredThresholdReachesFfmpegArgv()
         {
             // With opts.SilenceThresholdDb = -65.0, assert "noise=-65dB" appears.

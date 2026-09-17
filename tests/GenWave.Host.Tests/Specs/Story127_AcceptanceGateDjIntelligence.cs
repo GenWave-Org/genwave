@@ -73,7 +73,7 @@ public static class FeatureAcceptanceGateDjIntelligence
     public sealed class ScenarioBlurbPathEndToEnd
     {
         const string Skip =
-            "T11(a) — t11smoke, scratch stack, 2026-07-13: Llm:Endpoint PUT live to " +
+            "manual: T11(a) — t11smoke, scratch stack, 2026-07-13: Llm:Endpoint PUT live to " +
             "http://llmmock:9000 (a python OpenAI-compatible /v1/chat/completions stub on the " +
             "compose `core` network, request log exposed via GET /__requests) with Kokoro up " +
             "in-stack; two ffmpeg-generated sine-wave mp3s (~20s each, real ID3 tags) enriched into " +
@@ -108,7 +108,7 @@ public static class FeatureAcceptanceGateDjIntelligence
     public sealed class ScenarioFallbackLadderLive
     {
         const string Skip =
-            "T11(b) — t11smoke, scratch stack, 2026-07-13: with music rotating and Llm:Endpoint " +
+            "manual: T11(b) — t11smoke, scratch stack, 2026-07-13: with music rotating and Llm:Endpoint " +
             "live and reachable, `docker compose -p t11smoke stop llmmock` (killing the mock mid-" +
             "run, not a config change) — the very next four LeadIn/BackAnnounce render attempts " +
             "each logged exactly ONE `warn: GenWave.Tts.LlmCopyWriter[0] LLM completion for " +
@@ -152,7 +152,7 @@ public static class FeatureAcceptanceGateDjIntelligence
         }
 
         const string Skip =
-            "T11(c) — t11smoke, scratch stack, 2026-07-13: POST /api/personas " +
+            "manual: T11(c) — t11smoke, scratch stack, 2026-07-13: POST /api/personas " +
             "{\"name\":\"Retro Rick\",\"backstory\":\"A retro AM disc jockey broadcasting from " +
             "1975, remembers the moon landing like it was yesterday.\",\"style\":\"warm, folksy, a " +
             "little nostalgic\",\"voice\":\"am_adam\"} -> 201 {id:1}; PUT /api/settings " +
@@ -187,7 +187,7 @@ public static class FeatureAcceptanceGateDjIntelligence
     public sealed class ScenarioPreviews
     {
         const string Skip =
-            "T11(d) — t11smoke, scratch stack, 2026-07-13: with llmmock and Kokoro both up, POST " +
+            "manual: T11(d) — t11smoke, scratch stack, 2026-07-13: with llmmock and Kokoro both up, POST " +
             "/api/personas/preview {\"kind\":\"LeadIn\",\"backstory\":\"A late-night jazz " +
             "host\",\"style\":\"smooth and low-key\"} -> 200 {\"text\":\"Mock DJ A speaking: great " +
             "tune coming up on the air.\"} (the mock's own canned reply, proving the REAL " +
@@ -245,7 +245,7 @@ public static class FeatureAcceptanceGateDjIntelligence
         }
 
         const string Skip =
-            "T11(e) — t11smoke, scratch stack, 2026-07-13: PUT /api/settings " +
+            "manual: T11(e) — t11smoke, scratch stack, 2026-07-13: PUT /api/settings " +
             "{\"key\":\"Llm:Endpoint\",\"value\":\"http://llmmock2:9000\"}," +
             "{\"key\":\"Llm:Model\",\"value\":\"mock-model-b\"} -> 200; the next LeadIn/" +
             "BackAnnounce render's completions request landed on llmmock2 (model=\"mock-model-" +
@@ -277,7 +277,7 @@ public static class FeatureAcceptanceGateDjIntelligence
     public sealed class ScenarioStatusTruth
     {
         const string Skip =
-            "T11(f) — t11smoke, scratch stack, 2026-07-13: fresh boot, Llm:Endpoint unset -> GET " +
+            "manual: T11(f) — t11smoke, scratch stack, 2026-07-13: fresh boot, Llm:Endpoint unset -> GET " +
             "/api/status llm={enabled:false,lastOutcome:null} (neutral tile per " +
             "StatusTiles.tsx's llmTileVariant). PUT Llm:Endpoint live to http://llmmock:9000 WHILE " +
             "the catalog was still empty of main-scope music (only the F27 boot-seed safe segment " +
@@ -308,7 +308,7 @@ public static class FeatureAcceptanceGateDjIntelligence
     public sealed class ScenarioBlurbGcLive
     {
         const string Skip =
-            "T11(g) — t11smoke, scratch stack, 2026-07-13: `docker compose -p t11smoke exec api " +
+            "manual: T11(g) — t11smoke, scratch stack, 2026-07-13: `docker compose -p t11smoke exec api " +
             "ls -la /tts/genwave-1/blurbs/` showed three fresh LLM-authored blurb files. `touch -d " +
             "'2 days ago'` aged ONE blurb file (older than the default Tts:BlurbRetentionHours=24) " +
             "and, for the control, ONE forever-cache file at /tts/genwave-1's ROOT (a templated-" +
@@ -334,7 +334,7 @@ public static class FeatureAcceptanceGateDjIntelligence
     public sealed class ScenarioRegressionWall
     {
         const string DotnetEvidence =
-            "T11(h) dotnet half — RUN 2026-07-13. `dotnet build GenWave.sln`: Build succeeded, " +
+            "manual: T11(h) dotnet half — RUN 2026-07-13. `dotnet build GenWave.sln`: Build succeeded, " +
             "0 Warning(s), 0 Error(s). `dotnet test GenWave.sln --filter \"Category!=" +
             "Integration\"`: 0 failed across five projects (this file's own Category=Integration " +
             "facts are excluded from this filtered count by design, same as every prior gate; the " +
@@ -363,7 +363,7 @@ public static class FeatureAcceptanceGateDjIntelligence
         }
 
         const string AdminUiEvidence =
-            "T11(h) admin-ui half — RUN 2026-07-13 from admin-ui/. `npx tsc --noEmit`: clean, zero " +
+            "manual: T11(h) admin-ui half — RUN 2026-07-13 from admin-ui/. `npx tsc --noEmit`: clean, zero " +
             "output. `npx jest`: 33 suites passed, 317 passed, 11 todo, 328 total (the one pre-" +
             "existing, harmless React act() warning in catalog-selection-toolbar.spec.tsx carried " +
             "unchanged since Q12/R13/S8 — not a failure, not introduced here). `npm run build`: " +
@@ -388,7 +388,7 @@ public static class FeatureAcceptanceGateDjIntelligence
     public sealed class ScenarioIssueClosure
     {
         const string Skip =
-            "T11(i) — Gitea state checked 2026-07-13 via the API (read-only; this gate never " +
+            "manual: T11(i) — Gitea state checked 2026-07-13 via the API (read-only; this gate never " +
             "closes issues, per instruction and the MEMORY.md house rule). gitea-#175 \"Add LLM support " +
             "for DJ blurbs\", gitea-#176 \"Add DJ 'personas'\", and gitea-#178 \"Add local TTS support (not in " +
             "same stack)\" (all labeled genwave-2.0) are OPEN. Operator to close after reviewing " +

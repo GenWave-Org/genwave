@@ -10,7 +10,7 @@ public static class FeatureLibraryIdColumnAndBackfill
 
     public sealed class ScenarioSchemaAddsLibraryIdColumnOnMedia
     {
-        [Fact(Skip = "Pending T002 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T002 shipped or retired — see docs/PLAN.md")]
         public void ColumnNamedLibraryIdExistsOnMedia()
         {
             // Query information_schema.columns:
@@ -20,7 +20,7 @@ public static class FeatureLibraryIdColumnAndBackfill
             Assert.Fail("pending T002");
         }
 
-        [Fact(Skip = "Pending T002 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T002 shipped or retired — see docs/PLAN.md")]
         public void ColumnLibraryIdIsBigintNotNull()
         {
             // SELECT data_type, is_nullable FROM information_schema.columns ...
@@ -31,7 +31,7 @@ public static class FeatureLibraryIdColumnAndBackfill
 
     public sealed class ScenarioDefaultLibraryRowExists
     {
-        [Fact(Skip = "Pending T002 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T002 shipped or retired — see docs/PLAN.md")]
         public void ExactlyOneDefaultLibraryRowExists()
         {
             // var count = await db.QuerySingleAsync<long>("SELECT count(*) FROM library.library");
@@ -42,7 +42,7 @@ public static class FeatureLibraryIdColumnAndBackfill
 
     public sealed class ScenarioExistingMediaRowsAreBackfilled
     {
-        [Fact(Skip = "Pending T002 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T002 shipped or retired — see docs/PLAN.md")]
         public void EveryMediaRowHasNonNullLibraryId()
         {
             // var nullCount = await db.QuerySingleAsync<long>(
@@ -54,7 +54,7 @@ public static class FeatureLibraryIdColumnAndBackfill
 
     public sealed class ScenarioCoveringIndexForScopeFilteredRandomReady
     {
-        [Fact(Skip = "Pending T002 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T002 shipped or retired — see docs/PLAN.md")]
         public void IndexCoveringLibraryIdExists()
         {
             // SELECT 1 FROM pg_indexes WHERE schemaname='library' AND tablename='media'
@@ -66,7 +66,7 @@ public static class FeatureLibraryIdColumnAndBackfill
 
     public sealed class ScenarioScopeFilterAppliedInSql
     {
-        [Fact(Skip = "Pending T002/T003 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T002/T003 shipped or retired — see docs/PLAN.md")]
         public void OnlyRowsInScopedLibrariesAreReturned()
         {
             // Seed rows in libraries 1 and 2, all 'ready':
@@ -78,7 +78,7 @@ public static class FeatureLibraryIdColumnAndBackfill
 
     public sealed class ScenarioMultiIdScopeIsOrOfLibraries
     {
-        [Fact(Skip = "Pending T002/T003 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T002/T003 shipped or retired — see docs/PLAN.md")]
         public void ReturnsARowWhoseLibraryIdIsInTheScopeSet()
         {
             // var r = await catalog.GetRandomReadyAsync(new LibraryScope([1,2]), [], ct);
@@ -93,7 +93,7 @@ public static class FeatureLibraryIdColumnAndBackfill
 
     public sealed class ScenarioScopeReferencingNonexistentLibraryReturnsNull
     {
-        [Fact(Skip = "Pending T002/T003 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T002/T003 shipped or retired — see docs/PLAN.md")]
         public void ReturnsNullWhenNoRowsMatchTheScope()
         {
             // var r = await catalog.GetRandomReadyAsync(new LibraryScope([999]), [], ct);

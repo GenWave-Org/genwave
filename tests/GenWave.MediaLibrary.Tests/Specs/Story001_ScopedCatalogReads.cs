@@ -14,7 +14,7 @@ public static class FeatureScopedCatalogReadsWithDefaultDeny
 
     public sealed class ScenarioLibraryScopeRecord
     {
-        [Fact(Skip = "Pending T001 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T001 shipped or retired — see docs/PLAN.md")]
         public void ExistsAsASealedRecord()
         {
             // var type = typeof(GenWave.Core.Domain.LibraryScope);
@@ -22,7 +22,7 @@ public static class FeatureScopedCatalogReadsWithDefaultDeny
             Assert.Fail("pending T001");
         }
 
-        [Fact(Skip = "Pending T001 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T001 shipped or retired — see docs/PLAN.md")]
         public void ExposesLibraryIdsAsReadOnlyCollectionOfLong()
         {
             // var scope = new LibraryScope(new long[] { 1 });
@@ -30,7 +30,7 @@ public static class FeatureScopedCatalogReadsWithDefaultDeny
             Assert.Fail("pending T001");
         }
 
-        [Fact(Skip = "Pending T001 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T001 shipped or retired — see docs/PLAN.md")]
         public void HasStaticNoneSentinelThatIsEmpty()
         {
             // Assert.True(LibraryScope.None.IsEmpty);
@@ -40,7 +40,7 @@ public static class FeatureScopedCatalogReadsWithDefaultDeny
 
     public sealed class ScenarioCatalogByIdReadWithScope
     {
-        [Fact(Skip = "Pending T001/T003 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T001/T003 shipped or retired — see docs/PLAN.md")]
         public void ReturnsMediaReferenceWhoseIdEqualsRequested()
         {
             // var scope = new LibraryScope(new long[] { 1 });
@@ -52,7 +52,7 @@ public static class FeatureScopedCatalogReadsWithDefaultDeny
 
     public sealed class ScenarioCatalogRandomReadyReadWithScope
     {
-        [Fact(Skip = "Pending T001/T003 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T001/T003 shipped or retired — see docs/PLAN.md")]
         public void ReturnsANonNullMediaReference()
         {
             // var scope = new LibraryScope(new long[] { 1 });
@@ -68,7 +68,7 @@ public static class FeatureScopedCatalogReadsWithDefaultDeny
 
     public sealed class ScenarioEmptyScopeReturnsNullOnByIdEvenWhenRowExists
     {
-        [Fact(Skip = "Pending T001/T003 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T001/T003 shipped or retired — see docs/PLAN.md")]
         public void ReturnsNull()
         {
             // var result = await catalog.GetByIdAsync(LibraryScope.None, "m1", ct);
@@ -79,7 +79,7 @@ public static class FeatureScopedCatalogReadsWithDefaultDeny
 
     public sealed class ScenarioEmptyScopeReturnsNullOnRandomReadyEvenWhenReadyRowsExist
     {
-        [Fact(Skip = "Pending T001/T003 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T001/T003 shipped or retired — see docs/PLAN.md")]
         public void ReturnsNull()
         {
             // var result = await catalog.GetRandomReadyAsync(LibraryScope.None, [], ct);
@@ -90,7 +90,7 @@ public static class FeatureScopedCatalogReadsWithDefaultDeny
 
     public sealed class ScenarioNoUnscopedOverloadExistsOnInterface
     {
-        [Fact(Skip = "Pending T001 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T001 shipped or retired — see docs/PLAN.md")]
         public void EveryMethodHasLibraryScopeParameter()
         {
             // foreach (var m in typeof(IMediaCatalog).GetMethods())
@@ -101,7 +101,7 @@ public static class FeatureScopedCatalogReadsWithDefaultDeny
 
     public sealed class ScenarioEmptyScopeShortCircuitsBeforeAnySql
     {
-        [Fact(Skip = "Pending T001/T003 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T001/T003 shipped or retired — see docs/PLAN.md")]
         public void IssuesZeroSqlCommandsForEmptyScope()
         {
             // Use an Npgsql command-counter wrapper around the catalog:

@@ -15,7 +15,7 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureEditTagsAndEligibilityViaPatch
 {
-    const string OperatorGated = "Operator-verified live (W2); see docs/PLAN.md Epic I";
+    const string OperatorGated = "manual: Operator-verified live (W2); see docs/PLAN.md Epic I";
 
     // ---------------------------------------------------------------------
     // HAPPY PATH

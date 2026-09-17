@@ -192,7 +192,7 @@ public static class FeatureThemeSelectionAndPersistence
         // fixture into the shipped shelf AND T158's AA gate, which this task is explicitly told not
         // to do — so this stays a live-stack, by-hand verification rather than a faked in-process one.
         const string OperatorGated =
-            "AC5 originally had TWO blockers of different kinds; PLAN T183 resolved one of them. " +
+            "gate: AC5 originally had TWO blockers of different kinds; PLAN T183 resolved one of them. " +
             "(a) RESOLVED (T183): StationSettingsAllowlist/SettingValidator now source Station:Theme's " +
             "choices/acceptance from the DI-registered ThemeCatalog at request time (not a frozen " +
             "shipped-only snapshot), so a WebApplicationFactory test swapping the DI ThemeCatalog " +

@@ -144,7 +144,7 @@ public static class FeatureArtistFidelityEngineInitiatedPlays
         // The residual engine-side "artist bleed across a track boundary" defect found on the
         // same stack (see file header) needs a live drain re-proof once an engine-side fix lands;
         // operator live-stack re-proof at R13.
-        [Fact(Skip = "Verified on scratch stack 2026-07-11 (r6diag): safe-track annotation and " +
+        [Fact(Skip = "manual: Verified on scratch stack 2026-07-11 (r6diag): safe-track annotation and " +
             "engine output metadata both carried artist=\"Gap Smoke FM\"; operator live-stack re-proof at R13")]
         public void SeededSegmentAirsWithTheStationNameAsArtist()
         {

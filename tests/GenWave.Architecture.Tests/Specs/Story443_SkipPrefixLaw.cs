@@ -4,10 +4,10 @@
 // scratch file with a const reason; AC6–AC8 scan the real tests/ tree. AC9 (the audit table in the
 // PR body) is review evidence — no spec.
 //
-// LIVE at T505: the law itself (Classify + Scan, AC1–AC5) is green — LawId.L11. AC6 (zero
-// violations) and AC7/AC8 (zero obsolete/gate facts remaining) stay `pending: T506`/`pending: T507`
-// until the real skip population is rewritten onto the four prefixes and the obsolete/gate facts it
-// surfaces are deleted.
+// LIVE at T505: the law itself (Classify + Scan, AC1–AC5) is green — LawId.L11. LIVE at T506: AC6
+// (zero violations) — every existing skip under tests/ now carries one of the four prefixes. AC7/AC8
+// (zero obsolete/gate facts remaining) stay `pending: T507` until the obsolete/gate facts the
+// rewrite surfaced are deleted.
 //
 // Three extra AC5-style scratch-file scenarios pin real edge cases the Roslyn-based scanner (see
 // SkipReasons's own remarks) must not mishandle: a verbatim string that itself contains a raw-
@@ -25,7 +25,6 @@ namespace GenWave.Architecture.Tests.Specs;
 
 public static class FeatureEverySkipSaysWhy
 {
-    const string PendingRewrite = "pending: T506 — every existing skip rewritten onto the four prefixes (STORY-443)";
     const string PendingDelete = "pending: T507 — obsolete: and gate: facts deleted (STORY-443)";
 
     static string TestsRoot => Path.Combine(SolutionLocator.Root(), "tests");
@@ -205,7 +204,7 @@ public static class FeatureEverySkipSaysWhy
     {
         readonly IReadOnlyList<SkipReason> all = SkipReasons.Scan(TestsRoot);
 
-        [Fact(Skip = PendingRewrite)]
+        [Fact]
         public void ZeroViolations() =>
             Assert.Empty(all.Where(s => s.Class == SkipClass.Violation).Select(s => $"{s.File}: {s.Fact}: {s.Reason}"));
 

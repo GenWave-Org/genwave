@@ -746,7 +746,7 @@ public static class FeatureVoicePackInstallGoesLiveWithoutARestart
 
     public sealed class ScenarioTheNewVoiceIsLiveWithoutARestart
     {
-        [Fact(Skip = "pending: T421 — AC5 (kokoro rescan-per-request wiring is proven above by KokoroReturnsANewVoiceIdInItsVoicesListing; render-time voice selection is T421's own concern)")]
+        [Fact(Skip = "manual: T421 AC5 — (kokoro rescan-per-request wiring is proven above by KokoroReturnsANewVoiceIdInItsVoicesListing; render-time voice selection is T421's own concern)")]
         public void TheNextRenderRequestNamingThePackVoiceReceivesAudio() { }
     }
 

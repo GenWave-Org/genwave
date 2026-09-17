@@ -13,7 +13,7 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureBulkEligibilityEndpoint
 {
-    const string OperatorGated = "Operator-verified live (F3); see docs/PLAN.md";
+    const string OperatorGated = "manual: Operator-verified live (F3); see docs/PLAN.md";
 
     // -------------------------------------------------------------------------
     // HAPPY PATH

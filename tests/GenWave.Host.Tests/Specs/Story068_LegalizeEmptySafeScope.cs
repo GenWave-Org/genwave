@@ -98,7 +98,7 @@ public static class FeatureLegalizeEmptySafeScope
     [Trait("Category", "Integration")]
     public sealed class ScenarioBootWithEmptySafeScopeSucceedsAndWarns
     {
-        const string Skip = "Full host + log sink: N1 boot-time proof — appsettings SafeScope=[] must not fail-fatal and must emit the F25.1 WARN log line naming the F4.4 degraded mode.";
+        const string Skip = "gate: Full host + log sink: N1 boot-time proof — appsettings SafeScope=[] must not fail-fatal and must emit the F25.1 WARN log line naming the F4.4 degraded mode.";
 
         [Fact(Skip = Skip)]
         public void TheHostReachesReadyWithAnEmptySafeScopeInAppsettings() { }
@@ -114,7 +114,7 @@ public static class FeatureLegalizeEmptySafeScope
     [Trait("Category", "Integration")]
     public sealed class ScenarioPutSafeScopeEmptyRoundTripSucceedsAndWarns
     {
-        const string Skip = "Full settings pipeline (Story063-pattern factory): PUT [] must persist, return 200, and emit the F25.2 operator-origin WARN.";
+        const string Skip = "gate: Full settings pipeline (Story063-pattern factory): PUT [] must persist, return 200, and emit the F25.2 operator-origin WARN.";
 
         [Fact(Skip = Skip)]
         public void ThePutReturns200AndPersistsTheOverlay() { }

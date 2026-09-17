@@ -47,7 +47,7 @@ public static class FeatureEngineSafeSourceResilience
     [Trait("Category", "Integration")]
     public sealed class ScenarioApiRestartUnderLiveEngine
     {
-        const string Skip = "Live stack + operator: needs the full broadcast stack (M2 wire acceptance).";
+        const string Skip = "gate: Live stack + operator: needs the full broadcast stack (M2 wire acceptance).";
 
         [Fact(Skip = Skip)]
         public void EngineLogShowsNoSafeLibRequestLeakWarningAcrossAnApiRestart() { }
@@ -59,7 +59,7 @@ public static class FeatureEngineSafeSourceResilience
     [Trait("Category", "Integration")]
     public sealed class ScenarioPrefetchVerdictApplied
     {
-        const string Skip = "Live stack + operator: STORY-061 verdict drives this (M1 -> M2).";
+        const string Skip = "gate: Live stack + operator: STORY-061 verdict drives this (M1 -> M2).";
 
         [Fact(Skip = Skip)]
         public void AScopeEditIsReflectedWithinTheVerdictsPrefetchDepthOnANewDrain() { }

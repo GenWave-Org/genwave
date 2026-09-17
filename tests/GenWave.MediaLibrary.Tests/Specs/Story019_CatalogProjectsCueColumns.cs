@@ -15,7 +15,7 @@ public static class FeatureCatalogProjectsCueColumns
     [Trait("Category", "Integration")]
     public sealed class ScenarioMediaRowExposesNullableCueColumns(DatabaseFixture db)
     {
-        [Fact(Skip = "Pending T021 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T021 shipped or retired — see docs/PLAN.md")]
         public void MediaRowHasNullableCueInSecProperty()
         {
             // var p = typeof(MediaRow).GetProperty("CueInSec")!;
@@ -24,7 +24,7 @@ public static class FeatureCatalogProjectsCueColumns
             Assert.Fail("pending T021");
         }
 
-        [Fact(Skip = "Pending T021 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T021 shipped or retired — see docs/PLAN.md")]
         public void MediaRowHasNullableCueOutSecProperty()
         {
             // Assert.Equal(typeof(double?), typeof(MediaRow).GetProperty("CueOutSec")!.PropertyType);
@@ -37,7 +37,7 @@ public static class FeatureCatalogProjectsCueColumns
     [Trait("Category", "Integration")]
     public sealed class ScenarioGetRandomReadySurfacesCuePoints(DatabaseFixture db)
     {
-        [Fact(Skip = "Pending T021 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T021 shipped or retired — see docs/PLAN.md")]
         public void ReturnedMediaReferenceCueIsNonNull()
         {
             // Seed a ready row with cue_in_sec=3.45, cue_out_sec=187.20.
@@ -47,7 +47,7 @@ public static class FeatureCatalogProjectsCueColumns
             Assert.Fail("pending T021");
         }
 
-        [Fact(Skip = "Pending T021 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T021 shipped or retired — see docs/PLAN.md")]
         public void CueInSecRoundTripsFromTheRow()
         {
             // Assert.Equal(3.45, result!.Cue!.CueInSec);
@@ -55,7 +55,7 @@ public static class FeatureCatalogProjectsCueColumns
             Assert.Fail("pending T021");
         }
 
-        [Fact(Skip = "Pending T021 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T021 shipped or retired — see docs/PLAN.md")]
         public void CueOutSecRoundTripsFromTheRow()
         {
             // Assert.Equal(187.20, result!.Cue!.CueOutSec);
@@ -68,7 +68,7 @@ public static class FeatureCatalogProjectsCueColumns
     [Trait("Category", "Integration")]
     public sealed class ScenarioGetByIdSurfacesCuePoints(DatabaseFixture db)
     {
-        [Fact(Skip = "Pending T021 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T021 shipped or retired — see docs/PLAN.md")]
         public void GetByIdReturnsTheSameCueValues()
         {
             // var result = await catalog.GetByIdAsync(LibraryScope([1]), id, ct);
@@ -82,7 +82,7 @@ public static class FeatureCatalogProjectsCueColumns
     [Trait("Category", "Integration")]
     public sealed class ScenarioRowsWithNullCueColumnsProjectToNullCue(DatabaseFixture db)
     {
-        [Fact(Skip = "Pending T021 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T021 shipped or retired — see docs/PLAN.md")]
         public void MediaReferenceCueIsNullForRowWithBothCueColumnsNull()
         {
             // Seed a ready row with cue_in_sec IS NULL AND cue_out_sec IS NULL.
@@ -101,7 +101,7 @@ public static class FeatureCatalogProjectsCueColumns
     [Trait("Category", "Integration")]
     public sealed class ScenarioAsymmetricNullIsTreatedAsCueNull(DatabaseFixture db)
     {
-        [Fact(Skip = "Pending T021 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T021 shipped or retired — see docs/PLAN.md")]
         public void MediaReferenceCueIsNullWhenOnlyOneCueColumnIsPopulated()
         {
             // Seed cue_in_sec=3.45 but cue_out_sec IS NULL (data-integrity edge).
@@ -111,7 +111,7 @@ public static class FeatureCatalogProjectsCueColumns
             Assert.Fail("pending T021");
         }
 
-        [Fact(Skip = "Pending T021 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T021 shipped or retired — see docs/PLAN.md")]
         public void AsymmetricRowEmitsWarnLogEntry()
         {
             // Capture ILogger writes; assert a WARN entry with the offending row id appears.

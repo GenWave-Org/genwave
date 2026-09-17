@@ -14,7 +14,7 @@ public static class FeatureAcceptanceGateCueTrimAndTransitionGap
 
     public sealed class ScenarioLeadingSilenceTrackPlaysWithinOneSecondOfOnAir
     {
-        [Fact(Skip = "Pending T028 — see docs/PLAN.md"), Trait("Category", "Integration")]
+        [Fact(Skip = "obsolete: T028 shipped or retired — see docs/PLAN.md"), Trait("Category", "Integration")]
         public void FirstAudibleWindowOccursWithinOneSecondOfOnAirTimestamp()
         {
             // Arrange: a music file with ≥2.0s of verified leading silence enriched into the catalog.
@@ -28,7 +28,7 @@ public static class FeatureAcceptanceGateCueTrimAndTransitionGap
 
     public sealed class ScenarioMusicToVoiceTransitionHasNoMoreThanHalfSecondSilentGap
     {
-        [Fact(Skip = "Pending T028 — see docs/PLAN.md"), Trait("Category", "Integration")]
+        [Fact(Skip = "obsolete: T028 shipped or retired — see docs/PLAN.md"), Trait("Category", "Integration")]
         public void NoContinuousSilentWindowAboveHalfSecondAcrossMusicToVoiceTransition()
         {
             // Arrange: music track A with detected trailing-silence cue (cue_out_sec < duration_ms/1000).
@@ -42,7 +42,7 @@ public static class FeatureAcceptanceGateCueTrimAndTransitionGap
 
     public sealed class ScenarioVoiceToMusicTransitionHasNoMoreThanHalfSecondSilentGap
     {
-        [Fact(Skip = "Pending T028 — see docs/PLAN.md"), Trait("Category", "Integration")]
+        [Fact(Skip = "obsolete: T028 shipped or retired — see docs/PLAN.md"), Trait("Category", "Integration")]
         public void NoContinuousSilentWindowAboveHalfSecondAcrossVoiceToMusicTransition()
         {
             // Arrange: TTS segment A with detected trailing-silence cue.
@@ -59,7 +59,7 @@ public static class FeatureAcceptanceGateCueTrimAndTransitionGap
 
     public sealed class ScenarioExistingPhaseOneAcceptanceGatesStillPass
     {
-        [Fact(Skip = "Pending T028 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T028 shipped or retired — see docs/PLAN.md")]
         public void EntireDotnetTestSuiteStaysGreenWithCuePointsStamped()
         {
             // Witness fact — actual gate is CI running `dotnet test GenWave.sln`.

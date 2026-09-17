@@ -88,7 +88,7 @@ file sealed class SettingsApiWebFactory(bool withAdminPassword) : WebApplication
 public static class FeatureSafeScopeLiveEditViaSettingsApi
 {
     const string OperatorGated =
-        "Operator-gated — requires running api + Postgres for the live-apply round-trip; see docs/PLAN.md Epic K";
+        "manual: requires running api + Postgres for the live-apply round-trip; see docs/PLAN.md Epic K";
 
     // Mirrors AllDefaults in Story043; includes Station:SafeScope:LibraryIds as indexed keys
     // (the form ASP.NET Core AddInMemoryCollection requires for arrays).

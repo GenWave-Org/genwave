@@ -113,7 +113,7 @@ public static class FeatureAcceptanceGateSafeLoopAuthoring
         // Story013 lesson, MEMORY.md 2026-07-02). Tear the scratch project down after
         // (`docker compose -p genwave-p9check down -v`). Never run against the production project.
         const string Skip =
-            "Operator gate P9(a) — needs a throwaway compose project (scratch .env/volumes); " +
+            "manual: Operator gate P9(a) — needs a throwaway compose project (scratch .env/volumes); " +
             "forcing a drain on THIS host's live station to prove it is not authorized. Procedure " +
             "documented in this class's comment and docs/PLAN.md Epic P block-quote.";
 
@@ -145,7 +145,7 @@ public static class FeatureAcceptanceGateSafeLoopAuthoring
         // record. Assert (1) recorded integrated LUFS ≈ effective target and (2) voice onset lands
         // at ~BedPadSeconds after the recording start (ffprobe silencedetect or a manual listen).
         const string Skip =
-            "Operator gate P9(b) — bed-segment drain proof; same scratch-stack procedure as " +
+            "manual: Operator gate P9(b) — bed-segment drain proof; same scratch-stack procedure as " +
             "ScenarioFreshDeployDrainAirsTheBrandedAnnouncement, forcing a drain is not authorized " +
             "on this host. See docs/PLAN.md Epic P block-quote.";
 
@@ -170,7 +170,7 @@ public static class FeatureAcceptanceGateSafeLoopAuthoring
     public sealed class ScenarioAuthoredRowsSurviveScanAndTagsReenrich
     {
         const string ScanSurvivalEvidence =
-            "P9(c) first half — VERIFIED live 2026-07-10: SafeScope=[1] (main library only) on " +
+            "manual: P9(c) first half — VERIFIED live 2026-07-10: SafeScope=[1] (main library only) on " +
             "this deployment, confirmed via `select value from station.settings where " +
             "key='Station:SafeScope:LibraryIds'` BEFORE touching anything — the safe library (id 7, " +
             "seeded row id 9087) is out of rotation, so this check cannot affect air. Row 9087 was " +
@@ -189,7 +189,7 @@ public static class FeatureAcceptanceGateSafeLoopAuthoring
         }
 
         const string TagsReenrichEvidence =
-            "P9(c) second half — RUN live 2026-07-10 twice. First run FOUND A REAL DEFECT: TITLE " +
+            "manual: P9(c) second half — RUN live 2026-07-10 twice. First run FOUND A REAL DEFECT: TITLE " +
             "round-tripped ('Please Stand By') but ARTIST came back NULL. Mechanism (corrected " +
             "after the fix investigation): ffmpeg's WAV muxer writes `-metadata artist=` to the " +
             "RIFF INFO IART chunk; TagLibSharp maps IART to Tag.AlbumArtists (its Performers " +
@@ -313,7 +313,7 @@ public static class FeatureAcceptanceGateSafeLoopAuthoring
     public sealed class ScenarioKokoroDownDegradationsHold
     {
         const string BootWarnEvidence =
-            "P9(e) first half — RUN live 2026-07-10: `docker compose stop kokoro && docker compose " +
+            "manual: P9(e) first half — RUN live 2026-07-10: `docker compose stop kokoro && docker compose " +
             "restart api`. `docker compose restart` does NOT re-evaluate `depends_on` (confirmed: api " +
             "came back healthy in ~7s with kokoro stopped, no fallback to `docker restart` needed). " +
             "Host stayed healthy throughout — proves 'boot succeeds' with Kokoro down. The WARN-on-" +
@@ -335,7 +335,7 @@ public static class FeatureAcceptanceGateSafeLoopAuthoring
         }
 
         const string PostFailsEvidence =
-            "P9(e) second half — RUN live 2026-07-10 (re-confirms P6's original live-verification, " +
+            "manual: P9(e) second half — RUN live 2026-07-10 (re-confirms P6's original live-verification, " +
             "see P6's commit message): with kokoro stopped, POST /api/safe-segments returned 502 " +
             "ProblemDetails; library 'safe' mediaCount stayed at 1 and /authored held its original " +
             "single file both before and after — nothing persisted. Not un-pinned: stopping/starting " +
@@ -395,7 +395,7 @@ public static class FeatureAcceptanceGateSafeLoopAuthoring
     public sealed class ScenarioRegressionWallStaysGreen
     {
         const string RegressionEvidence =
-            "P9(g) — RUN live 2026-07-10. `dotnet test GenWave.sln --configuration Release`: " +
+            "manual: P9(g) — RUN live 2026-07-10. `dotnet test GenWave.sln --configuration Release`: " +
             "645 passed, 0 failed, 269 skipped, 914 total across all five projects (Core 60/0/0, " +
             "Orchestration 29/0/3, Tts 52/0/11, MediaLibrary 179/0/47, Host 325/0/208 " +
             "passed/failed/skipped). Story013's known-flake recorded-LUFS gate (measures the LIVE " +
@@ -419,7 +419,7 @@ public static class FeatureAcceptanceGateSafeLoopAuthoring
         }
 
         const string IssueStateEvidence =
-            "P9(h) — Gitea state checked 2026-07-10 via the API (read-only; this gate never closes " +
+            "manual: P9(h) — Gitea state checked 2026-07-10 via the API (read-only; this gate never closes " +
             "issues, per instruction). gitea-#149 'Need more complete safe loop for dead air' is OPEN — " +
             "operator to close after reviewing this gate's evidence. gitea-#172 'Change metadata for safe " +
             "loop' shows CLOSED (closed_at 2026-07-10T14:56:25Z), but that close came from PR gitea-#177's " +

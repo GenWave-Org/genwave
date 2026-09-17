@@ -127,7 +127,7 @@ public static class FeatureWireCueAnalyzerAndLiveVerification
 
     public sealed class ScenarioEndToEndLeadingSilenceTrackPlaysWithoutDeadIntro
     {
-        [Fact(Skip = "Pending T026 — see docs/PLAN.md"), Trait("Category", "Integration")]
+        [Fact(Skip = "obsolete: T026 shipped or retired — see docs/PLAN.md"), Trait("Category", "Integration")]
         public void LibraryRowGainsCueInSecGreaterThanZeroAfterEnrichment()
         {
             // Live stack: docker compose up; drop fixture/known-leading-silence.mp3 into MEDIA_DIR;
@@ -136,7 +136,7 @@ public static class FeatureWireCueAnalyzerAndLiveVerification
             Assert.Fail("pending T026 — wire-up acceptance");
         }
 
-        [Fact(Skip = "Pending T026 — see docs/PLAN.md"), Trait("Category", "Integration")]
+        [Fact(Skip = "obsolete: T026 shipped or retired — see docs/PLAN.md"), Trait("Category", "Integration")]
         public void OnAirAnnotationIncludesLiqCueInForThePushedTrack()
         {
             // Inspect the telnet socket trace (or the Liquidsoap log) for the push command.
@@ -144,7 +144,7 @@ public static class FeatureWireCueAnalyzerAndLiveVerification
             Assert.Fail("pending T026 — wire-up acceptance");
         }
 
-        [Fact(Skip = "Pending T026 — see docs/PLAN.md"), Trait("Category", "Integration")]
+        [Fact(Skip = "obsolete: T026 shipped or retired — see docs/PLAN.md"), Trait("Category", "Integration")]
         public void RecordedAudioOnsetIsWithinOneSecondOfOnAirTimestamp()
         {
             // Record the output stream for ~5 s after on-air; find first window above gate floor.
@@ -159,7 +159,7 @@ public static class FeatureWireCueAnalyzerAndLiveVerification
 
     public sealed class ScenarioTransientFfmpegFailureDoesNotCrashTheStack
     {
-        [Fact(Skip = "Pending T026 — see docs/PLAN.md"), Trait("Category", "Integration")]
+        [Fact(Skip = "obsolete: T026 shipped or retired — see docs/PLAN.md"), Trait("Category", "Integration")]
         public void EnricherLogsWarnAndContinuesProcessingOtherFiles()
         {
             // Inject one bad file; assert: WARN log entry, the row reaches cue_analyzed_at=NOW
@@ -170,7 +170,7 @@ public static class FeatureWireCueAnalyzerAndLiveVerification
 
     public sealed class ScenarioCueAnalyzerIsNotInvokedForUnsupportedFileTypes
     {
-        [Fact(Skip = "Pending T026 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T026 shipped or retired — see docs/PLAN.md")]
         public void ScannerSkipsFilesOutsideSupportedExtensions()
         {
             // Live-stack check: drop foo.txt into MEDIA_DIR and assert it never reaches enrichment.

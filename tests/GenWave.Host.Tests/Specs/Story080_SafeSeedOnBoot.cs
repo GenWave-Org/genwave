@@ -572,7 +572,7 @@ public static class FeatureSafeSeedOnBootInProcess
 public static class FeatureSafeSeedOnBoot
 {
     const string OperatorGated =
-        "Operator-gated live proof (F27.6 boot seed — real Postgres/Kokoro/file); see docs/PLAN.md Epic P (P9)";
+        "manual: Operator-gated live proof (F27.6 boot seed — real Postgres/Kokoro/file); see docs/PLAN.md Epic P (P9)";
 
     // ---------------------------------------------------------------------
     // HAPPY PATH — first boot seeds library, row, and scope

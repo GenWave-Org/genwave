@@ -170,7 +170,7 @@ file sealed class RequiresRealEspeakNgAttribute : FactAttribute
     {
         if (!EspeakNgProbe.IsOnPath.Value)
         {
-            Skip = "espeak-ng is not on PATH on this test host — it is vendored in the api image's "
+            Skip = "gate: espeak-ng is not on PATH on this test host — it is vendored in the api image's "
                 + "runtime stage (SPEC F126.2, PLAN T278), not on a bare dev/CI box. Run inside the "
                 + "built image, or apt-get/brew install espeak-ng locally, to exercise this fact.";
         }

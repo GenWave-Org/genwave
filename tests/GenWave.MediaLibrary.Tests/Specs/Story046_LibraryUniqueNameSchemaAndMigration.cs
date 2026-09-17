@@ -8,7 +8,7 @@ namespace GenWave.MediaLibrary.Tests.Specs;
 
 public static class FeatureLibraryUniqueNameSchemaAndMigration
 {
-    const string Pending = "Pending L1 — UNIQUE(name) on library.library + db/07-library-management-migration.sh; see docs/PLAN.md Epic J";
+    const string Pending = "manual: L1 — UNIQUE(name) on library.library + db/07-library-management-migration.sh; see docs/PLAN.md Epic J";
 
     // ---------------------------------------------------------------------
     // HAPPY PATH — fresh init (db/01-library.sh)

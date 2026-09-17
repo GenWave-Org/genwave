@@ -169,7 +169,7 @@ public static class FeatureAcceptanceGateEnrichment2
     public sealed class ScenarioRealBpmChain
     {
         const string SkipLanding =
-            "X10(a) — x10smoke, scratch stack, 2026-07-14: the exact 128 BPM click+drone fixture " +
+            "manual: X10(a) — x10smoke, scratch stack, 2026-07-14: the exact 128 BPM click+drone fixture " +
             "proven in X3's own smoke (byte-identical copy of x3smoke's fixture-track.mp3, `ffmpeg " +
             "-c copy` re-tagged artist=\"Radio Testers\" title=\"Click Track One\" date=1982, media " +
             "id=3) enriched through the production api image's real ffmpeg-decode-to-WAV -> `aubio " +
@@ -188,7 +188,7 @@ public static class FeatureAcceptanceGateEnrichment2
         }
 
         const string SkipReenrich =
-            "X10(a) — x10smoke, scratch stack, 2026-07-14: `POST /api/media/3/reenrich?fields=bpm` " +
+            "manual: X10(a) — x10smoke, scratch stack, 2026-07-14: `POST /api/media/3/reenrich?fields=bpm` " +
             "(no If-Match required -- ReenrichController takes no concurrency token on this " +
             "endpoint, confirmed against the shipped source) -> 202. Immediately after: bpm NULL, " +
             "state unchanged ('ready') -- the sentinel reset. ~3 minutes later (one backfill tick " +
@@ -212,7 +212,7 @@ public static class FeatureAcceptanceGateEnrichment2
     public sealed class ScenarioTrackEnergyGeneratedColumn
     {
         const string SkipInstant =
-            "X10(b) — x10smoke, scratch stack, 2026-07-14: every one of the 4 boot-time rows (3 " +
+            "manual: X10(b) — x10smoke, scratch stack, 2026-07-14: every one of the 4 boot-time rows (3 " +
             "fixtures + the F27 seed) carried a non-null track_energy the instant loudness landed, " +
             "matching clamp((lufs+36)/30, 0, 1) exactly: row1 lufs=-21.8 -> 0.47333333333333333; " +
             "row2 lufs=-22.0 -> 0.4666666666666667; row3 lufs=-23.8 -> 0.4066666666666666; seed " +
@@ -227,7 +227,7 @@ public static class FeatureAcceptanceGateEnrichment2
         }
 
         const string SkipPreMigrationProof =
-            "X10(b) — x10smoke, scratch stack, 2026-07-14: simulated the pre-existing-DB upgrade " +
+            "manual: X10(b) — x10smoke, scratch stack, 2026-07-14: simulated the pre-existing-DB upgrade " +
             "path on the LIVE running stack -- `ALTER TABLE library.media DROP COLUMN " +
             "track_energy` via `docker compose exec -T db psql` (role library_svc), confirmed gone " +
             "via `\\d library.media` (only intro_energy/outro_energy/energy_analyzed_at remained). " +
@@ -251,7 +251,7 @@ public static class FeatureAcceptanceGateEnrichment2
         }
 
         const string SkipLoudnessReenrich =
-            "X10(b) — x10smoke, scratch stack, 2026-07-14: `POST /api/media/1/reenrich?fields=" +
+            "manual: X10(b) — x10smoke, scratch stack, 2026-07-14: `POST /api/media/1/reenrich?fields=" +
             "loudness` -> 202. Immediately after: integrated_lufs AND track_energy BOTH NULL " +
             "together (the generated column follows its source instantly), state='discovered'. " +
             "~12s later (one enrichment-worker pass reclaimed the 'discovered' row): integrated_lufs " +
@@ -276,7 +276,7 @@ public static class FeatureAcceptanceGateEnrichment2
     public sealed class ScenarioMusicBrainzYearLookup
     {
         const string SkipRealLookup =
-            "X10(c) — x10smoke, scratch stack, 2026-07-14: exactly ONE lookup-eligible row at boot " +
+            "manual: X10(c) — x10smoke, scratch stack, 2026-07-14: exactly ONE lookup-eligible row at boot " +
             "-- \"Bohemian Rhapsody\"/\"Queen\", no date tag (media id=2); the other two fixtures " +
             "were deliberately NOT eligible (a dated 1982 row; a blank-artist row) -- so the real " +
             "kill-switch-enabled Library:YearLookup:Endpoint (default musicbrainz.org) received " +
@@ -313,7 +313,7 @@ public static class FeatureAcceptanceGateEnrichment2
         }
 
         const string SkipKillSwitch =
-            "X10(c) — x10smoke, scratch stack, 2026-07-14: immediately after the one real lookup " +
+            "manual: X10(c) — x10smoke, scratch stack, 2026-07-14: immediately after the one real lookup " +
             "completed, `PUT /api/settings Library:YearLookup:Enabled=false` -> 200. Added a NEW " +
             "year-less tagged fixture (\"Later Arrival\"/\"Late Song\", media id=5) into MEDIA_DIR. " +
             "Waited >4 backfill ticks (Library:ScanIntervalSeconds overlaid to 5s for this scratch " +
@@ -334,7 +334,7 @@ public static class FeatureAcceptanceGateEnrichment2
         }
 
         const string SkipLowConfidence =
-            "X10(c) — x10smoke, scratch stack, 2026-07-14: repointed `Library:YearLookup:Endpoint` " +
+            "manual: X10(c) — x10smoke, scratch stack, 2026-07-14: repointed `Library:YearLookup:Endpoint` " +
             "live to a local stub server (127.0.0.1:19999, host.docker.internal via extra_hosts " +
             "host-gateway) returning score=100 but a DELIBERATELY MISMATCHED artist-credit " +
             "(\"A Totally Different Artist\") regardless of query, then `PUT " +
@@ -368,7 +368,7 @@ public static class FeatureAcceptanceGateEnrichment2
     public sealed class ScenarioYearFiltersAndDtoFields
     {
         const string Skip =
-            "X10(d) — x10smoke, scratch stack, 2026-07-14: `GET /api/media?year=1982` -> exactly " +
+            "manual: X10(d) — x10smoke, scratch stack, 2026-07-14: `GET /api/media?year=1982` -> exactly " +
             "the tagged fixture (media id=3, \"Click Track One\"), carrying bpm=128.1 and " +
             "trackEnergy=0.4066666666666666 on the AdminMediaDto. `GET /api/media?decade=1990` -> " +
             "exactly media id=2 (year=1993, inside the 1990-1999 BETWEEN range). `GET /api/media?" +
@@ -403,7 +403,7 @@ public static class FeatureAcceptanceGateEnrichment2
     public sealed class ScenarioDurationLiveOnPushAndHistory
     {
         const string Skip =
-            "X10(e) — x10smoke, scratch stack, 2026-07-14: a freshly-pushed track's very first " +
+            "manual: X10(e) — x10smoke, scratch stack, 2026-07-14: a freshly-pushed track's very first " +
             "on-air advance and its play-history entry both carried the row's real duration_ms " +
             "(e.g. media id=1/5/6 -> durationMs=15046; media id=3 -> durationMs=30074, matching " +
             "each fixture's own duration_ms exactly), while every tts:* patter segment across 45+ " +
@@ -466,7 +466,7 @@ public static class FeatureAcceptanceGateEnrichment2
     public sealed class ScenarioRegressionWall
     {
         const string DotnetEvidence =
-            "X10(f) dotnet half — RUN 2026-07-14. `dotnet build GenWave.sln`: Build succeeded, " +
+            "manual: X10(f) dotnet half — RUN 2026-07-14. `dotnet build GenWave.sln`: Build succeeded, " +
             "0 Warning(s), 0 Error(s). `dotnet test GenWave.sln --filter \"Category!=" +
             "Integration\"`: 0 failed across five projects -- Core 79/79, Orchestration 56/59 (3 " +
             "skipped), MediaLibrary 32/58 (26 skipped, filtered subset), Tts 117/128 (11 skipped), " +
@@ -495,7 +495,7 @@ public static class FeatureAcceptanceGateEnrichment2
         }
 
         const string AdminUiEvidence =
-            "X10(f) admin-ui half — RUN 2026-07-14 from admin-ui/. `npx tsc --noEmit`: clean, zero " +
+            "manual: X10(f) admin-ui half — RUN 2026-07-14 from admin-ui/. `npx tsc --noEmit`: clean, zero " +
             "output. `npx jest`: 41 suites passed, 379 passed, 11 todo, 390 total (adds X7/X9's new " +
             "specs over V10's own 34-suite/327-passed wall; the one pre-existing harmless React " +
             "act() warning in catalog-selection-toolbar.spec.tsx carried unchanged since Q12/R13/" +
@@ -520,7 +520,7 @@ public static class FeatureAcceptanceGateEnrichment2
     public sealed class ScenarioIssueClosureIsTheOperatorsCall
     {
         const string Skip =
-            "X10(g) — Gitea state checked 2026-07-14 via the API (read-only; this gate never closes " +
+            "manual: X10(g) — Gitea state checked 2026-07-14 via the API (read-only; this gate never closes " +
             "issues, per instruction and the MEMORY.md house rule). gitea-#190 \"Add BPM & energy " +
             "detection to enrichment service\", gitea-#191 \"Scheduled enrichment/metadata service " +
             "runs\", gitea-#208 \"Add release year to metadata if not already present\", and gitea-#218 " +

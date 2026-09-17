@@ -15,7 +15,7 @@ public static class FeatureCueColumnsSchemaAndMigration
     [Trait("Category", "Integration")]
     public sealed class ScenarioColumnsExistOnLibraryMediaAfterInit(DatabaseFixture db)
     {
-        [Fact(Skip = "Pending T020 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T020 shipped or retired — see docs/PLAN.md")]
         public void CueInSecColumnExistsAsDoublePrecisionNullable()
         {
             // var sql = @"SELECT data_type, is_nullable FROM information_schema.columns
@@ -26,14 +26,14 @@ public static class FeatureCueColumnsSchemaAndMigration
             Assert.Fail("pending T020");
         }
 
-        [Fact(Skip = "Pending T020 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T020 shipped or retired — see docs/PLAN.md")]
         public void CueOutSecColumnExistsAsDoublePrecisionNullable()
         {
             _ = db;
             Assert.Fail("pending T020");
         }
 
-        [Fact(Skip = "Pending T020 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T020 shipped or retired — see docs/PLAN.md")]
         public void CueAnalyzedAtColumnExistsAsTimestamptzNullable()
         {
             // var sql = @"SELECT data_type, is_nullable FROM information_schema.columns
@@ -53,7 +53,7 @@ public static class FeatureCueColumnsSchemaAndMigration
     [Trait("Category", "Integration")]
     public sealed class ScenarioMigrationConvergesAnExistingDbToTheSameShape(DatabaseFixture db)
     {
-        [Fact(Skip = "Pending T020 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T020 shipped or retired — see docs/PLAN.md")]
         public void AppliesAllThreeCueColumnsAfterMigrationScript()
         {
             // Arrange: drop the cue columns to simulate a pre-gitea-#161 DB; run the migration script.
@@ -62,7 +62,7 @@ public static class FeatureCueColumnsSchemaAndMigration
             Assert.Fail("pending T020");
         }
 
-        [Fact(Skip = "Pending T020 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T020 shipped or retired — see docs/PLAN.md")]
         public void DoesNotDeleteOrAlterExistingMediaRows()
         {
             // Seed a known set of rows; run migration; assert row count and key fields unchanged.
@@ -70,7 +70,7 @@ public static class FeatureCueColumnsSchemaAndMigration
             Assert.Fail("pending T020");
         }
 
-        [Fact(Skip = "Pending T020 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T020 shipped or retired — see docs/PLAN.md")]
         public void ExistingReadyRowsHaveCueAnalyzedAtNullAfterMigration()
         {
             // Seed a ready row pre-migration; run migration; assert cue_analyzed_at IS NULL
@@ -88,7 +88,7 @@ public static class FeatureCueColumnsSchemaAndMigration
     [Trait("Category", "Integration")]
     public sealed class ScenarioNoIndexIsAddedForCueColumns(DatabaseFixture db)
     {
-        [Fact(Skip = "Pending T020 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T020 shipped or retired — see docs/PLAN.md")]
         public void NoIndexReferencesCueInSecOrCueOutSec()
         {
             // var sql = @"SELECT indexdef FROM pg_indexes WHERE schemaname='library' AND tablename='media'";
@@ -103,7 +103,7 @@ public static class FeatureCueColumnsSchemaAndMigration
     [Trait("Category", "Integration")]
     public sealed class ScenarioRerunningTheMigrationIsIdempotent(DatabaseFixture db)
     {
-        [Fact(Skip = "Pending T020 — see docs/PLAN.md")]
+        [Fact(Skip = "obsolete: T020 shipped or retired — see docs/PLAN.md")]
         public void SecondRunExitsSuccessfullyWithoutColumnAlreadyExistsError()
         {
             // Run migration twice; second run must use IF NOT EXISTS / DO blocks and exit 0.

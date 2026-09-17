@@ -181,7 +181,7 @@ public static class FeatureNowPlayingEngineInitiatedFidelity
     [Trait("Category", "Integration")]
     public sealed class ScenarioLiveDrainFidelity
     {
-        const string Skip = "Live stack + operator: M7 wire acceptance (drain airing one FLAC and one mp3 safe track).";
+        const string Skip = "manual: Live stack + operator: M7 wire acceptance (drain airing one FLAC and one mp3 safe track).";
 
         [Fact(Skip = Skip)]
         public void AFlacSafePlaySurfacesTitleAndGainInNowPlaying() { }
