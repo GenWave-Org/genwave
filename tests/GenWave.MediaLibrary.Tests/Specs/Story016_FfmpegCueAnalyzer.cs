@@ -1,9 +1,10 @@
 // STORY-016 — FfmpegCueAnalyzer (silencedetect parser)
 //
-// BDD specification — xUnit.
-// /build-loop removes the Skip when implementing. See docs/PLAN.md and docs/STORIES.md Epic F.
+// BDD specification — xUnit. The threshold/min-duration trio runs real ffmpeg at tier 1 (T507).
+// See docs/PLAN.md and docs/STORIES.md Epic F.
 
 using GenWave.Core.Abstractions;
+using GenWave.Core.Domain;
 using GenWave.Loudness;
 
 namespace GenWave.MediaLibrary.Tests.Specs;
@@ -136,28 +137,92 @@ public static class FeatureFfmpegCueAnalyzer
         }
     }
 
+    // T507: no ffmpeg-process recorder exists in this test project, but that machinery was only ever
+    // a means to an end — proving the configured CueDetectionOptions values actually reach ffmpeg's
+    // real invocation. A real ffmpeg process against a real fixture proves that more directly than an
+    // argv-string match would: run the SAME quiet-then-loud fixture through two different configured
+    // SilenceThresholdDb values and show the classification flips between a detected leading cue and
+    // no cue at all, and run a fixture with a brief leading gap through two different configured
+    // MinSilenceDurationSec values and show detection flips. Either flip is only possible if the
+    // option value actually reached the ffmpeg argv. ffmpeg is on PATH in the PR tier (CLAUDE.md;
+    // Story345/Story399 in Host already run ffmpeg untraited), so this runs at tier 1 — no
+    // Category=Integration trait.
     public sealed class ScenarioThresholdAndMinDurationAreConfigBound
     {
-        [Fact(Skip = "gate: Requires ffmpeg process recorder — no interception facility in this test project")]
-        public void FfmpegInvocationIncludesConfiguredNoiseThreshold()
+        [Fact]
+        public async Task ALenientThresholdClassifiesTheQuietLeadAsSilenceAndCuesInAtTheLoudTone()
         {
-            // Use an ffmpeg-process recorder. With opts.SilenceThresholdDb = -50.0,
-            // assert the recorded argv contains "silencedetect=noise=-50dB".
-            Assert.Fail("pending process-recorder facility");
+            var dir = TestMedia.NewTempDir();
+            try
+            {
+                // 1 s at a -6dB trim (measured ~-30 dBFS RMS: quieter than a -20dB threshold, so it
+                // registers as silence), then 5 s at a +10dB boost (measured ~-14 dBFS RMS: louder
+                // than -20dB, so playback resumes there — the fixture's own baseline sine sits around
+                // -21..-24 dBFS, too quiet to clear -20dB unboosted).
+                var path = TestMedia.CreateQuietToneThenLoudTone(
+                    dir, "quiet_then_loud.wav", quietSec: 1.0, quietGainDb: -6.0, loudSec: 5.0, loudGainDb: 10.0);
+                var opts = new CueDetectionOptions { SilenceThresholdDb = -20.0 };
+                var analyzer = new FfmpegCueAnalyzer(new FakeOptionsMonitor<CueDetectionOptions>(opts));
+
+                var cue = await analyzer.AnalyzeAsync(path, CancellationToken.None);
+
+                var nonNullCue = Assert.IsType<CuePoints>(cue);
+                Assert.InRange(nonNullCue.CueInSec, 0.9, 1.1);
+            }
+            finally
+            {
+                Directory.Delete(dir, recursive: true);
+            }
         }
 
-        [Fact(Skip = "gate: Requires ffmpeg process recorder — no interception facility in this test project")]
-        public void FfmpegInvocationIncludesConfiguredMinSilenceDuration()
+        [Fact]
+        public async Task AStrictThresholdClassifiesTheSameQuietLeadAsHavingNoSilence()
         {
-            // With opts.MinSilenceDurationSec = 0.5, assert "duration=0.5".
-            Assert.Fail("pending process-recorder facility");
+            var dir = TestMedia.NewTempDir();
+            try
+            {
+                // Same fixture, but -50dB is quieter than the ~-30 dBFS quiet lead, so nothing
+                // registers as silence at all: zero events, cue stays null.
+                var path = TestMedia.CreateQuietToneThenLoudTone(
+                    dir, "quiet_then_loud.wav", quietSec: 1.0, quietGainDb: -6.0, loudSec: 5.0, loudGainDb: 10.0);
+                var opts = new CueDetectionOptions { SilenceThresholdDb = -50.0 };
+                var analyzer = new FfmpegCueAnalyzer(new FakeOptionsMonitor<CueDetectionOptions>(opts));
+
+                var cue = await analyzer.AnalyzeAsync(path, CancellationToken.None);
+
+                Assert.Null(cue);
+            }
+            finally
+            {
+                Directory.Delete(dir, recursive: true);
+            }
         }
 
-        [Fact(Skip = "gate: Requires ffmpeg process recorder — no interception facility in this test project")]
-        public void AlteredThresholdReachesFfmpegArgv()
+        [Fact]
+        public async Task AShortMinSilenceDurationDetectsABriefLeadingGapALongerDurationMisses()
         {
-            // With opts.SilenceThresholdDb = -65.0, assert "noise=-65dB" appears.
-            Assert.Fail("pending process-recorder facility");
+            var dir = TestMedia.NewTempDir();
+            try
+            {
+                // 0.3 s of true silence, then a 5 s tone: long enough to qualify under a 0.1 s
+                // minimum, too short to qualify under a 1.0 s minimum.
+                var path = TestMedia.CreateSilenceThenTone(dir, "brief_leading_gap.wav", silenceSec: 0.3, toneSec: 5.0);
+                var shortMinAnalyzer = new FfmpegCueAnalyzer(
+                    new FakeOptionsMonitor<CueDetectionOptions>(new CueDetectionOptions { MinSilenceDurationSec = 0.1 }));
+                var longMinAnalyzer = new FfmpegCueAnalyzer(
+                    new FakeOptionsMonitor<CueDetectionOptions>(new CueDetectionOptions { MinSilenceDurationSec = 1.0 }));
+
+                var shortMinCue = await shortMinAnalyzer.AnalyzeAsync(path, CancellationToken.None);
+                var longMinCue = await longMinAnalyzer.AnalyzeAsync(path, CancellationToken.None);
+
+                var nonNullShortMinCue = Assert.IsType<CuePoints>(shortMinCue);
+                Assert.InRange(nonNullShortMinCue.CueInSec, 0.2, 0.4);
+                Assert.True(longMinCue is null || longMinCue.CueInSec == 0.0);
+            }
+            finally
+            {
+                Directory.Delete(dir, recursive: true);
+            }
         }
     }
 

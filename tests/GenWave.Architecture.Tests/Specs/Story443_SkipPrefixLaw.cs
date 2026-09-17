@@ -5,9 +5,10 @@
 // PR body) is review evidence — no spec.
 //
 // LIVE at T505: the law itself (Classify + Scan, AC1–AC5) is green — LawId.L11. LIVE at T506: AC6
-// (zero violations) — every existing skip under tests/ now carries one of the four prefixes. AC7/AC8
-// (zero obsolete/gate facts remaining) stay `pending: T507` until the obsolete/gate facts the
-// rewrite surfaced are deleted.
+// (zero violations) — every existing skip under tests/ now carries one of the four prefixes. LIVE
+// at T507: AC7/AC8 (zero obsolete/gate facts remaining) — every obsolete: fact the T506 rewrite
+// surfaced is deleted (with its dead support code); every gate: fact is either a real Category=
+// Integration fact or a `// covered by stack_gate.sh ...` comment naming the assertion.
 //
 // Three extra AC5-style scratch-file scenarios pin real edge cases the Roslyn-based scanner (see
 // SkipReasons's own remarks) must not mishandle: a verbatim string that itself contains a raw-
@@ -19,14 +20,13 @@
 // Story062_EngineSafeSourceResilience.cs and Story133_AcceptanceGateOnAirMetadataFidelity.cs;
 // build-loop review, round 2).
 
+using System.Diagnostics;
 using GenWave.Architecture.Tests.Support;
 
 namespace GenWave.Architecture.Tests.Specs;
 
 public static class FeatureEverySkipSaysWhy
 {
-    const string PendingDelete = "pending: T507 — obsolete: and gate: facts deleted (STORY-443)";
-
     static string TestsRoot => Path.Combine(SolutionLocator.Root(), "tests");
 
     // ---------------------------------------------------------------------
@@ -208,11 +208,59 @@ public static class FeatureEverySkipSaysWhy
         public void ZeroViolations() =>
             Assert.Empty(all.Where(s => s.Class == SkipClass.Violation).Select(s => $"{s.File}: {s.Fact}: {s.Reason}"));
 
-        [Fact(Skip = PendingDelete)]
+        [Fact]
         public void ZeroObsoleteFactsRemain() => Assert.DoesNotContain(all, s => s.Class == SkipClass.Obsolete);
 
-        [Fact(Skip = PendingDelete)]
+        [Fact]
         public void ZeroGateFactsRemain() => Assert.DoesNotContain(all, s => s.Class == SkipClass.Gate);
+    }
+
+    // ---------------------------------------------------------------------
+    // F182.3 — the gate's own manual-evidence line agrees with the scanner
+    // ---------------------------------------------------------------------
+
+    /// <summary>stack_gate.sh's own <c>count_manual_facts</c> (SPEC F182.3) counts Skip= sites by
+    /// text scan, not a real compiler — this pin proves the two never drift apart, run against the
+    /// same real <c>tests/</c> tree <see cref="SkipReasons.Scan"/> reads (T507).</summary>
+    public sealed class ScenarioTheGatesManualCountAgreesWithTheScanner
+    {
+        [Fact]
+        public void TheBashCountEqualsTheScannersManualCount()
+        {
+            var repoRoot = SolutionLocator.Root();
+            var expected = SkipReasons.Counts(SkipReasons.Scan(TestsRoot))[SkipClass.Manual];
+
+            // Sources just the two functions the report line depends on (rather than the whole
+            // script, which parses CLI args and drives a real docker compose stack) — the same
+            // sed range a developer would reach for at a terminal to sanity-check the count.
+            var scriptPath = Path.Combine(repoRoot, "tools", "gate", "stack_gate.sh");
+            var psi = new ProcessStartInfo("bash")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+            };
+            // scriptPath and repoRoot reach bash as real argv entries ($1/$2 below) rather than
+            // interpolated into the script text — a quote in either path (e.g. a checkout under a
+            // oddly-named directory) can't break out of the command string.
+            psi.ArgumentList.Add("-c");
+            psi.ArgumentList.Add(
+                "script=\"$1\"; root=\"$2\"; "
+                + "source <(sed -n '/^count_manual_facts_in_file()/,/^}/p; /^count_manual_facts()/,/^}/p' \"$script\"); "
+                + "count_manual_facts");
+            psi.ArgumentList.Add("_");
+            psi.ArgumentList.Add(scriptPath);
+            psi.ArgumentList.Add(repoRoot);
+
+            using var process = Process.Start(psi)
+                ?? throw new InvalidOperationException("Failed to start bash.");
+            var stdout = process.StandardOutput.ReadToEnd();
+            var stderr = process.StandardError.ReadToEnd();
+            process.WaitForExit();
+
+            Assert.True(process.ExitCode == 0, $"bash exited {process.ExitCode}: {stderr}");
+            Assert.Equal(expected, int.Parse(stdout.Trim()));
+        }
     }
 
     // ---------------------------------------------------------------------

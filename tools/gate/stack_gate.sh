@@ -1227,11 +1227,56 @@ fi
 # its machine twin gate-report.json. Written on every path that reaches here, before exiting.
 # ---------------------------------------------------------------------------------------------
 
-# `"manual: ` occurrences across tests/**/*.cs — the fixed line's N. The inner `|| true` keeps a
-# zero-match day (every fact automated) from tripping `set -e`/pipefail: grep exits 1 when it
-# finds nothing, and pipefail promotes that over wc's own (successful) exit 0.
+# count_manual_facts — the fixed report line's N (SPEC F182.3): the number of `manual:`-classified
+# Skip= FACTS under tests/**/*.cs, matching what SkipReasons.Counts(SkipReasons.Scan(...)) counts
+# on the C# side (pinned by Story443's own new fact) — not a blind count of `"manual: ` substring
+# occurrences, which undercounts every file where several facts share one `const string Skip =`
+# (Story133/141's own acceptance-gate files are the extreme case: dozens of facts, one const each).
+#
+# Story443_SkipPrefixLaw.cs is excluded outright: its own AC5-style scratch fixtures embed
+# `"manual:`/`"gate:`/`"obsolete:` lookalike text inside raw string literals that a real C#
+# compiler (and Roslyn's SkipReasons.Scan) never treats as Skip= sites — a text scan can't tell
+# the difference, so the one file the law itself carves out as the standing exception is skipped
+# by name instead (T507).
+count_manual_facts_in_file() {
+  local file="$1" flat total=0 manual_names name
+  # Whitespace-flattened to one line: `const string Skip =` and its opening quote often sit on
+  # separate source lines (house style wraps long Skip reasons), which a line-anchored regex would
+  # miss entirely.
+  flat="$(tr -s '[:space:]' ' ' <"$file")"
+
+  # Every const name whose OWN literal starts with "manual: " — deduplicated, since several
+  # sibling scenarios in the same acceptance-gate file each declare their own same-named
+  # `const string Skip` (Story133's own real site); counting the same name's usages once per
+  # declaration would multiply the total instead of just resolving it.
+  manual_names="$(grep -oP 'const string \K\w+(?=\s*=\s*"manual: )' <<<"$flat" | sort -u || true)"
+
+  # A literal reason written directly on the Fact/Theory attribute. `|| true` on each pipeline
+  # keeps a zero-match grep (exit 1, promoted by `set -o pipefail`) from tripping `set -e` and
+  # aborting the whole gate mid-count — grep found nothing, wc still correctly reports 0.
+  total=$((total + $(grep -oP '\[(Fact|Theory)\([^)]*?\bSkip\s*=\s*"manual: ' <<<"$flat" | wc -l || true)))
+
+  # A Skip= naming one of this file's own manual: consts.
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    total=$((total + $(grep -oP "\\[(Fact|Theory)\\([^)]*?\\bSkip\\s*=\\s*${name}\\b" <<<"$flat" | wc -l || true)))
+  done <<<"$manual_names"
+
+  printf '%s' "$total"
+}
+
 count_manual_facts() {
-  (grep -rho '"manual: ' "$root/tests" --include='*.cs' || true) | wc -l
+  local total=0 file tests_dir
+  # $root/tests is a symlink whenever the caller runs a scratch copy of the checkout (GateHarness's
+  # own repo copy symlinks every top-level entry) — `find` in its default physical mode does not
+  # descend into a symlinked start-point, so resolving to the real physical directory first (`cd` +
+  # `pwd -P`, unlike `find`, always follows a symlink to reach it) keeps this working from either a
+  # real checkout or a scratch copy alike.
+  tests_dir="$(cd "$root/tests" && pwd -P)"
+  while IFS= read -r -d '' file; do
+    total=$((total + $(count_manual_facts_in_file "$file" || true)))
+  done < <(find "$tests_dir" -name '*.cs' -not -name 'Story443_SkipPrefixLaw.cs' -print0)
+  printf '%s' "$total"
 }
 
 leg_row_md() {
@@ -1431,7 +1476,7 @@ write_report() {
     printf '%s\n' "$(upgrade_measurements_md)"
     printf '%s\n' "$(capture_measurements_md)"
     printf '%s\n\n' "$(chaos_measurements_md)"
-    printf 'Needs manual evidence: the LLL ear — %s facts are manual\n' "$manual_facts"
+    printf 'Needs manual evidence: %s facts need a person listening to the stream\n' "$manual_facts"
   } > "$out_dir/gate-report.md"
 
   local first_failure fresh_json upgrade_json capture_json chaos_json capture_top_json chaos_top_json

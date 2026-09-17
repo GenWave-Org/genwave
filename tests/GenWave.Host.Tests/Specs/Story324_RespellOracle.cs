@@ -8,17 +8,16 @@
 // path. Entry-point discipline: scenarios drive the real route through WebApplicationFactory<Program>
 // with the oracle binary faked at its adapter seam (IRespellOracle) — the exception is
 // ScenarioTheRealBinaryAgreesWithTheContract, which exercises EspeakRespellOracle against the
-// genuine espeak-ng process and dynamically skips (with an honest reason) on a test host that
-// doesn't have it on PATH, mirroring the docker-gated integration facts elsewhere in this solution
-// (dotnet test's own "Category=Integration" lane).
+// genuine espeak-ng process and is plain "Category=Integration" (T507): the api image's runtime
+// stage vendors espeak-ng (SPEC F126.2, PLAN T278), so the integration lane (run inside that image,
+// or with espeak-ng apt-get/brew installed locally) is expected to have it — a bare PR-tier run
+// never reaches these facts at all (dotnet test's own "Category!=Integration" filter).
 //
 // The T280 wire acceptance (derive→audition→save→next-spoken-line in a real browser) is a
 // production check, deliberately not represented here.
 
 namespace GenWave.Host.Tests.Specs;
 
-using System.ComponentModel;
-using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Hosting;
@@ -125,55 +124,6 @@ file sealed class RespellClosureWebFactory : WebApplicationFactory<Program>
         builder.UseSetting("Admin:Password", "test-password-respell-closure");
 
         builder.ConfigureTestServices(services => services.RemoveAll<IHostedService>());
-    }
-}
-
-/// <summary>Probes ONCE (cached) whether the real <c>espeak-ng</c> binary is importable from PATH on
-/// THIS test host — the api image's runtime stage installs it (SPEC F126.2, PLAN T278's Dockerfile
-/// change), but a bare dev/CI box running <c>dotnet test</c> outside that image may not have it.
-/// </summary>
-file static class EspeakNgProbe
-{
-    public static readonly Lazy<bool> IsOnPath = new(Probe);
-
-    static bool Probe()
-    {
-        try
-        {
-            using var process = Process.Start(new ProcessStartInfo("espeak-ng")
-            {
-                ArgumentList = { "--version" },
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-            });
-            if (process is null)
-                return false;
-
-            return process.WaitForExit(2000);
-        }
-        catch (Exception ex) when (ex is Win32Exception or FileNotFoundException)
-        {
-            return false;
-        }
-    }
-}
-
-/// <summary>Runs its target fact only when <see cref="EspeakNgProbe.IsOnPath"/> is true —
-/// dynamically Skip'd with an honest reason otherwise (the docker-gated integration-fact precedent:
-/// a dev/CI box without the vendored binary gets a clean, explained skip, not a red build). xUnit
-/// constructs one attribute instance per decorated method at discovery time and reads
-/// <see cref="Skip"/> then, so setting it in the constructor is sufficient.</summary>
-file sealed class RequiresRealEspeakNgAttribute : FactAttribute
-{
-    public RequiresRealEspeakNgAttribute()
-    {
-        if (!EspeakNgProbe.IsOnPath.Value)
-        {
-            Skip = "gate: espeak-ng is not on PATH on this test host — it is vendored in the api image's "
-                + "runtime stage (SPEC F126.2, PLAN T278), not on a bare dev/CI box. Run inside the "
-                + "built image, or apt-get/brew install espeak-ng locally, to exercise this fact.";
-        }
     }
 }
 
@@ -470,7 +420,7 @@ public static class FeatureRespellOracle
 
     public sealed class ScenarioTheRealBinaryAgreesWithTheContract
     {
-        [RequiresRealEspeakNg, Trait("Category", "Integration")]
+        [Fact, Trait("Category", "Integration")]
         public async Task TheRealEspeakNgBinaryDerivesIpaForARespelling()
         {
             // No fake anywhere here — the actual adapter against the actual binary, proving the
@@ -485,7 +435,7 @@ public static class FeatureRespellOracle
             Assert.True(oracle.IsAvailable);
         }
 
-        [RequiresRealEspeakNg, Trait("Category", "Integration")]
+        [Fact, Trait("Category", "Integration")]
         public async Task An_option_shaped_respelling_is_spoken_as_text_never_file_contents()
         {
             // CWE-88 proof (review round 2 finding F1), against the REAL binary and a REAL file on
@@ -516,7 +466,7 @@ public static class FeatureRespellOracle
             }
         }
 
-        [RequiresRealEspeakNg, Trait("Category", "Integration")]
+        [Fact, Trait("Category", "Integration")]
         public async Task A_comma_bearing_respelling_derives_no_newline_in_the_output()
         {
             // Review round 2 finding F2, against the REAL binary: espeak-ng's own --ipa output is

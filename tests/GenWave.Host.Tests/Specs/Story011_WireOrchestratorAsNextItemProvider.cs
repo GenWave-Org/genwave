@@ -10,8 +10,8 @@ public static class FeatureWireOrchestratorAsNextItemProvider
 {
     // ---------------------------------------------------------------------
     // HAPPY PATH — reflection-based type contract assertions
-    // Full DI resolution requires the compose stack (Postgres, Liquidsoap);
-    // live-wire specs are deferred to T014 with explicit Skip.
+    // Full DI resolution requires the compose stack (Postgres, Liquidsoap); the T014
+    // live-wire acceptance never landed as an automated fact and is retired (T507).
     // ---------------------------------------------------------------------
 
     public sealed class ScenarioOrchestratorReplacesRandomSelectionProvider
@@ -89,38 +89,4 @@ public static class FeatureWireOrchestratorAsNextItemProvider
         }
     }
 
-    public sealed class ScenarioWireUpAcceptanceLiveTickProducesARealMediaItem
-    {
-        [Fact(Skip = "obsolete: T014 shipped or retired — wire-up verification; see docs/PLAN.md")]
-        public void OnAirReadSeesStampedTrackIdAfterATick()
-        {
-            // Wire-up: stack up, library has ≥1 ready track, feeder runs.
-            // Read engine output metadata; assert a numeric track_id is present
-            // (not the DrainToken).
-            Assert.Fail("pending T014");
-        }
-    }
-
-    // ---------------------------------------------------------------------
-    // SAD PATH
-    // ---------------------------------------------------------------------
-
-    public sealed class ScenarioKokoroDownAtStartupAppStillBootsMusicOnly
-    {
-        [Fact(Skip = "obsolete: T014 shipped or retired — live verification; see docs/PLAN.md")]
-        public void HostStartupSucceedsEvenWhenKokoroIsUnreachable()
-        {
-            // Configure Tts:Endpoint to a black-holed address.
-            // var ex = Record.Exception(() => factory.Services.GetRequiredService<INextItemProvider>());
-            // Assert.Null(ex);
-            Assert.Fail("pending T014");
-        }
-
-        [Fact(Skip = "obsolete: T014 shipped or retired — see docs/PLAN.md")]
-        public void PulledItemsAreMusicWhenKokoroIsUnreachable()
-        {
-            // Run a tick; the only items produced must have non-tts: ids.
-            Assert.Fail("pending T014");
-        }
-    }
 }

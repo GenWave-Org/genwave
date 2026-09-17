@@ -261,11 +261,14 @@ public static class FeatureMainScopeLiveness
 
     public sealed class ScenarioLiveRoundTrip
     {
-        [Fact(Skip = "gate: R13 — live stack: PUT widens scope, reenrich + browse succeed with no api restart (the P9 repro); see docs/PLAN.md")]
-        public void ThePNineReproPasses()
-        {
-            Assert.Fail("pending R13");
-        }
+        // The P9 repro (PUT widens scope, reenrich + browse succeed with no api restart): no gate
+        // assertion runs this specific round trip — stack_gate.sh --fresh's health/on-air checks
+        // (SPEC F178.4) only poll /health and the stream's on-air metadata frame after a cold
+        // launch, never a PUT to Station:Scope:LibraryIds followed by a browse. The no-restart-
+        // needed half is proven at the unit level instead: ScenarioConsumersReadTheMonitor above
+        // exercises the same live-monitor read path (widen scope, re-query, no re-construction)
+        // through MediaController/MusicSelectionPolicy directly. Was a Skip-pinned gate: fact
+        // before T507 (former fact ThePNineReproPasses).
     }
 
     // ---------------------------------------------------------------------

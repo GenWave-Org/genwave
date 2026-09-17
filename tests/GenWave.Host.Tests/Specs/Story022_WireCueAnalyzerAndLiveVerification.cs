@@ -2,8 +2,9 @@
 //
 // BDD specification — xUnit.
 // AC1–AC3 and config assertions use reflection-based type-contract assertions (same pattern
-// as Story011). Full DI resolution requires the compose stack (Postgres, ffmpeg); live-wire
-// specs are deferred to T026 with explicit Skip.
+// as Story011). Full DI resolution requires the compose stack (Postgres, ffmpeg); the T026
+// live-wire acceptance (leading-silence onset, transient ffmpeg failure, unsupported file
+// types) never landed as an automated fact and is retired (T507).
 
 using GenWave.Core.Abstractions;
 using GenWave.Loudness;
@@ -118,64 +119,6 @@ public static class FeatureWireCueAnalyzerAndLiveVerification
 
             Assert.NotNull(prop);
             Assert.Equal(typeof(double), prop.PropertyType);
-        }
-    }
-
-    // ---------------------------------------------------------------------
-    // HAPPY PATH — live verification (the wire-up acceptance per /plan contract)
-    // ---------------------------------------------------------------------
-
-    public sealed class ScenarioEndToEndLeadingSilenceTrackPlaysWithoutDeadIntro
-    {
-        [Fact(Skip = "obsolete: T026 shipped or retired — see docs/PLAN.md"), Trait("Category", "Integration")]
-        public void LibraryRowGainsCueInSecGreaterThanZeroAfterEnrichment()
-        {
-            // Live stack: docker compose up; drop fixture/known-leading-silence.mp3 into MEDIA_DIR;
-            // wait for enrichment; query DB.
-            // Assert.True(row.CueInSec > 0.0);
-            Assert.Fail("pending T026 — wire-up acceptance");
-        }
-
-        [Fact(Skip = "obsolete: T026 shipped or retired — see docs/PLAN.md"), Trait("Category", "Integration")]
-        public void OnAirAnnotationIncludesLiqCueInForThePushedTrack()
-        {
-            // Inspect the telnet socket trace (or the Liquidsoap log) for the push command.
-            // Assert.Contains("liq_cue_in=", recordedPush);
-            Assert.Fail("pending T026 — wire-up acceptance");
-        }
-
-        [Fact(Skip = "obsolete: T026 shipped or retired — see docs/PLAN.md"), Trait("Category", "Integration")]
-        public void RecordedAudioOnsetIsWithinOneSecondOfOnAirTimestamp()
-        {
-            // Record the output stream for ~5 s after on-air; find first window above gate floor.
-            // Assert.True(onsetOffsetSeconds <= 1.0);
-            Assert.Fail("pending T026 — wire-up acceptance");
-        }
-    }
-
-    // ---------------------------------------------------------------------
-    // SAD PATH
-    // ---------------------------------------------------------------------
-
-    public sealed class ScenarioTransientFfmpegFailureDoesNotCrashTheStack
-    {
-        [Fact(Skip = "obsolete: T026 shipped or retired — see docs/PLAN.md"), Trait("Category", "Integration")]
-        public void EnricherLogsWarnAndContinuesProcessingOtherFiles()
-        {
-            // Inject one bad file; assert: WARN log entry, the row reaches cue_analyzed_at=NOW
-            // with NULL cues, AND subsequent files still get enriched.
-            Assert.Fail("pending T026 — wire-up acceptance");
-        }
-    }
-
-    public sealed class ScenarioCueAnalyzerIsNotInvokedForUnsupportedFileTypes
-    {
-        [Fact(Skip = "obsolete: T026 shipped or retired — see docs/PLAN.md")]
-        public void ScannerSkipsFilesOutsideSupportedExtensions()
-        {
-            // Live-stack check: drop foo.txt into MEDIA_DIR and assert it never reaches enrichment.
-            // Implemented in T026.
-            Assert.Fail("pending T026");
         }
     }
 }

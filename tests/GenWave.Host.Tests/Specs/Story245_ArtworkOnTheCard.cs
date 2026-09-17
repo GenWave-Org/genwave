@@ -116,8 +116,5 @@ public static class FeatureArtworkOnTheCard
 
             Assert.False(body.TryGetProperty("artworkUrl", out _));
         }
-
-        [Fact(Skip = "obsolete: T126 shipped or retired — browser acceptance — card renders art with station-icon loading/fallback")]
-        public void CardRenderIsBrowserAcceptance() { }
     }
 }
