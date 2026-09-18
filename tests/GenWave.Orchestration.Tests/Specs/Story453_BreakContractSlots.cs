@@ -228,7 +228,7 @@ public static partial class FeatureBreakContract
     public sealed class ScenarioTheFollowUpsOnPrTwo
     {
         // Given: PR-2's body (manual)
-        /// <summary>AC24 — announcements on a ceremony-only unit; ad in a straddle break</summary>
+        /// <summary>AC24 — announcements on a ceremony-only unit (gh-#806); ad in a straddle break (gh-#807)</summary>
         [Fact(Skip = Manual)] public void TwoIssuesExistInProjectThree() => throw new NotImplementedException(Manual);
     }
 }
