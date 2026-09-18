@@ -71,6 +71,46 @@ static class Story452PinnedTables
 
     public static readonly string[] EventKinds = ["HandoffPieceDropped"];
 
+    /// <summary>AC6 (PLAN T522) — one <see cref="BreakPlan.ToTrace"/> line-block per unit, in build order.</summary>
+    public static readonly string[] Traces =
+    [
+        // O1
+        "#1 Announcement verbatim speaker=station res=Announcement:9001\n"
+        + "#2 Announcement verbatim speaker=station res=Announcement:9002\n"
+        + "#3 LeadIn render speaker=Nova res=-",
+        // O2
+        "#1 BackAnnounce render speaker=Nova res=-\n"
+        + "#2 Crosstalk ready speaker=- res=Crosstalk:tts:crosstalk:genwave-story452-crosstalk\n"
+        + "#3 LeadIn render speaker=Nova res=-",
+        // O3
+        "#1 BackAnnounce render speaker=Nova res=-\n"
+        + "#2 Ad ready speaker=- res=AdSpot:ad-spot-1\n"
+        + "#3 LeadIn render speaker=Nova res=-",
+        // O4
+        "#1 BackAnnounce render speaker=Nova res=-\n"
+        + "#2 StationId render speaker=station res=Deferral:StationId\n"
+        + "#3 ContextSegment render speaker=Nova res=-\n"
+        + "#4 LeadIn render speaker=Nova res=-",
+        // O5
+        "#1 SignOff render speaker=Nova res=-",
+        // O6
+        "#1 BackAnnounce render speaker=Nova res=-\n"
+        + "#2 SignOff render speaker=Nova res=-\n"
+        + "#3 LeadIn render speaker=Nova res=-",
+        // O7
+        "#1 BackAnnounce render speaker=Nova res=-\n"
+        + "#2 SignOn render speaker=Nova res=-\n"
+        + "#3 ContextSegment render speaker=Nova res=-\n"
+        + "#4 LeadIn render speaker=Nova res=-",
+        // O8
+        "#1 BackAnnounce render speaker=Nova res=-\n"
+        + "#2 TimeDate render speaker=station res=-\n"
+        + "#3 TimeDate render speaker=station res=-\n"
+        + "#4 LeadIn render speaker=Nova res=-",
+        // O9
+        "#1 SignOff render speaker=Nova res=-",
+    ];
+
     public static readonly string[] Warnings =
     [
         "Handoff piece SignOff dropped (render budget exceeded) — that half of the ceremony airs nothing; the other piece still airs if it rendered, and the next boundary retries the full ceremony (SPEC F92.4).",

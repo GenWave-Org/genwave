@@ -21,10 +21,17 @@ namespace GenWave.Orchestration;
 /// budget (SPEC F186.3's "exceeds the render budget"); <see langword="false"/> for a
 /// <see cref="ReadySource"/> slot, which never renders at air time.
 /// </param>
+/// <param name="ContextProviderKey">
+/// The context provider's own key (SPEC F107.6), carried only by a <see cref="SegmentKind.ContextSegment"/>
+/// slot so a dropped delivery can name its provider (<c>WarnDrop</c>'s own two-kind law) without the
+/// render phase reaching back into the deferral that produced it; <see langword="null"/> for every
+/// other kind.
+/// </param>
 public sealed record PlannedSlot(
     int Ordinal,
     SegmentKind Kind,
     SlotSource Source,
     Reservation? Reservation,
     DropPolicy Drop,
-    bool ObserveDuration);
+    bool ObserveDuration,
+    string? ContextProviderKey = null);

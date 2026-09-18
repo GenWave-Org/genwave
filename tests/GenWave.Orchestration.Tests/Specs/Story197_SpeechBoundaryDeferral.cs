@@ -37,20 +37,32 @@ public static class FeatureSpeechBoundaryDeferral
         StationIdEveryNUnits = 0,
     };
 
-    static Orchestrator BuildOrchestrator(CadenceConfig cadence, SpeechDeferralQueue deferralQueue, TimeProvider clock) =>
-        new(
+    static Orchestrator BuildOrchestrator(CadenceConfig cadence, SpeechDeferralQueue deferralQueue, TimeProvider clock)
+    {
+        var personaAccessor = new FakeActivePersonaAccessor();
+        var scopeProvider = new FakeStationScopeProvider(new LibraryScope([1L]));
+        var planner = new BreakPlanner(
+            personaAccessor,
+            NullLogger<BreakPlanner>.Instance,
+            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
+            deferralQueue,
+            clock,
+            scopeProvider);
+
+        return new(
             new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")),
-            new FakeStationScopeProvider(new LibraryScope([1L])),
+            scopeProvider,
             new FakeCadenceProvider(cadence),
             new FakeRotationSettingsProvider(new RotationSettings()),
             new MusicSelectionPolicy(new FakeMediaCatalog(MakeRef("track")), NullLogger<MusicSelectionPolicy>.Instance),
             new FakeTtsSegmentSource(),
-            new FakeActivePersonaAccessor(),
+            personaAccessor,
             NullLogger<Orchestrator>.Instance,
-            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
             deferralQueue,
             clock,
-            new FakeBoundaryBiasProvider(TimeSpan.Zero));
+            new FakeBoundaryBiasProvider(TimeSpan.Zero),
+            planner);
+    }
 
     static bool IsStationId(MediaItem item) =>
         item.MediaId.StartsWith("tts:stationid", StringComparison.OrdinalIgnoreCase);

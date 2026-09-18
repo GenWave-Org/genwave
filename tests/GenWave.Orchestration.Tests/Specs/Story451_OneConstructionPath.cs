@@ -31,8 +31,11 @@ public static class FeatureOneConstructionPath
     /// Every seam AddGenWaveOrchestration itself does not supply (AC6/AC7's own arrange) — the 12
     /// required Orchestrator constructor params it resolves via GetRequiredService, plus
     /// IMediaCatalog/ILogger&lt;MusicSelectionPolicy&gt; so its own TryAddSingleton&lt;MusicSelectionPolicy&gt;
-    /// can activate. TimeProvider/SpeechDeferralQueue/MusicSelectionPolicy stay unregistered here on
-    /// purpose — AddGenWaveOrchestration TryAdds all three itself.
+    /// can activate, and (PLAN T522) ILogger&lt;BreakPlanner&gt; — a production host gets this for free
+    /// from AddLogging()'s open-generic registration; a bare ServiceCollection like this one needs it
+    /// spelled out, now that AddGenWaveOrchestration resolves it via GetRequiredService rather than a
+    /// NullLogger fallback. TimeProvider/SpeechDeferralQueue/MusicSelectionPolicy stay unregistered
+    /// here on purpose — AddGenWaveOrchestration TryAdds all three itself.
     /// </summary>
     static ServiceCollection RequiredSeamServices()
     {
@@ -53,6 +56,7 @@ public static class FeatureOneConstructionPath
         services.AddSingleton<IBoundaryBiasProvider>(new FakeBoundaryBiasProvider(TimeSpan.Zero));
         services.AddSingleton<ILogger<Orchestrator>>(NullLogger<Orchestrator>.Instance);
         services.AddSingleton<ILogger<MusicSelectionPolicy>>(NullLogger<MusicSelectionPolicy>.Instance);
+        services.AddSingleton<ILogger<BreakPlanner>>(NullLogger<BreakPlanner>.Instance);
         services.AddSingleton<IMediaCatalog>(new FakeMediaCatalog(TestData.MakeTrackRef("t1")));
 
         return services;

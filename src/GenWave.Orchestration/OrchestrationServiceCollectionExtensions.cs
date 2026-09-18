@@ -119,6 +119,37 @@ public static class OrchestrationServiceCollectionExtensions
         // constructor parameter's own remarks).
         services.AddSingleton<ClockAnchoredImagingProducer>();
 
+        // PLAN T522 (SPEC F188): the plan-phase seam, one process-wide instance so the Orchestrator's
+        // render phase and any IBreakPlanObserver see the SAME plans. TryAdd so a module/test wins.
+        // announcementSource is gated on announcementRenderer HERE, at this construction site — the
+        // pre-T522 `announcementSource is {} && announcementRenderer is {}` double-seam gate
+        // (Orchestrator.cs's own step 1.75) that BreakPlanner itself cannot reproduce (it has no
+        // IVerbatimSegmentRenderer dependency, SPEC F188's own "no copy-writer" constraint — see
+        // BreakPlanner's own remarks): a null renderer must still mean NO announcement is ever
+        // claimed, not merely that a claimed one never airs.
+        services.TryAddSingleton(sp => new BreakPlanner(
+            sp.GetRequiredService<IActivePersonaAccessor>(),
+            sp.GetRequiredService<ILogger<BreakPlanner>>(),
+            sp.GetRequiredService<IRenderBudgetProvider>(),
+            sp.GetRequiredService<SpeechDeferralQueue>(),
+            sp.GetRequiredService<TimeProvider>(),
+            sp.GetRequiredService<IStationScopeProvider>(),
+            stationClock: sp.GetService<IStationClockProvider>(),
+            scheduleResolver: sp.GetService<CachingScheduleResolver>(),
+            contextSettings: sp.GetService<IContextSettingsProvider>() ?? NoOpContextSettingsProvider.Instance,
+            catalog: sp.GetService<IMediaCatalog>(),
+            imagingSettings: sp.GetService<IStationImagingSettingsProvider>() ?? NoOpStationImagingSettingsProvider.Instance,
+            crosstalkPlanner: sp.GetService<CrosstalkPlanner>(),
+            announcementSource: sp.GetService<IVerbatimSegmentRenderer>() is not null ? sp.GetService<IAnnouncementSource>() : null,
+            voiceLister: sp.GetService<ITtsVoiceLister>(),
+            adCadenceProvider: sp.GetService<IAdCadenceProvider>() ?? NoOpAdCadenceProvider.Instance,
+            adSpotVend: sp.GetService<IAdSpotVend>() ?? NoOpAdSpotVend.Instance,
+            personaStore: sp.GetService<IPersonaStore>()));
+
+        // PLAN T522: the default IBreakPlanObserver binding — silence. TryAdd so a module/test that
+        // wants to watch every plan (CapturingBreakPlanObserver, tests only) wins.
+        services.TryAddSingleton<IBreakPlanObserver>(NoOpBreakPlanObserver.Instance);
+
         // The production construction site (SPEC F184.3/F184.5, STORY-451, T514). The only other
         // `new Orchestrator(` is GenWave.TestSupport's OrchestratorBuilder; Story451_ConstructionPins
         // pins the pair. A factory, not AddSingleton<INextItemProvider, Orchestrator>(): every seam is
@@ -137,25 +168,19 @@ public static class OrchestrationServiceCollectionExtensions
             sp.GetRequiredService<ITtsSegmentSource>(),
             sp.GetRequiredService<IActivePersonaAccessor>(),
             sp.GetRequiredService<ILogger<Orchestrator>>(),
-            sp.GetRequiredService<IRenderBudgetProvider>(),
             sp.GetRequiredService<SpeechDeferralQueue>(),
             sp.GetRequiredService<TimeProvider>(),
             sp.GetRequiredService<IBoundaryBiasProvider>(),
+            sp.GetRequiredService<BreakPlanner>(),
             scheduleResolver: sp.GetService<CachingScheduleResolver>(),
             personaStore: sp.GetService<IPersonaStore>(),
             events: sp.GetService<IStationEventSink>() ?? NoOpStationEventSink.Instance,
-            stationClock: sp.GetService<IStationClockProvider>(),
             patterEstimator: sp.GetService<IPatterDurationEstimator>(),
-            contextSettings: sp.GetService<IContextSettingsProvider>() ?? NoOpContextSettingsProvider.Instance,
-            catalog: sp.GetService<IMediaCatalog>(),
             imagingSettings: sp.GetService<IStationImagingSettingsProvider>() ?? NoOpStationImagingSettingsProvider.Instance,
             crosstalkPlanner: sp.GetService<CrosstalkPlanner>(),
-            announcementSource: sp.GetService<IAnnouncementSource>(),
             announcementRenderer: sp.GetService<IVerbatimSegmentRenderer>(),
-            voiceLister: sp.GetService<ITtsVoiceLister>(),
             announcementCopyWriter: sp.GetService<IAnnouncementCopyWriter>(),
-            adCadenceProvider: sp.GetService<IAdCadenceProvider>() ?? NoOpAdCadenceProvider.Instance,
-            adSpotVend: sp.GetService<IAdSpotVend>() ?? NoOpAdSpotVend.Instance));
+            observer: sp.GetService<IBreakPlanObserver>()));
 
         return services;
     }

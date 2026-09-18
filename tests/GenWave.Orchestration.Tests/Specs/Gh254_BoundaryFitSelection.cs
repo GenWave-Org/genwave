@@ -45,21 +45,33 @@ public static class FeatureBoundaryFitSelection
         TimeProvider clock,
         TimeSpan lookahead,
         CadenceConfig? cadence = null,
-        IPatterDurationEstimator? estimator = null) =>
-        new(
+        IPatterDurationEstimator? estimator = null)
+    {
+        var personaAccessor = new FakeActivePersonaAccessor();
+        var scopeProvider = new FakeStationScopeProvider(new LibraryScope([1L]));
+        var planner = new BreakPlanner(
+            personaAccessor,
+            NullLogger<BreakPlanner>.Instance,
+            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
+            deferralQueue,
+            clock,
+            scopeProvider);
+
+        return new(
             new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")),
-            new FakeStationScopeProvider(new LibraryScope([1L])),
+            scopeProvider,
             new FakeCadenceProvider(cadence ?? CadenceOff),
             new FakeRotationSettingsProvider(new RotationSettings()),
             new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance),
             new FakeTtsSegmentSource(),
-            new FakeActivePersonaAccessor(),
+            personaAccessor,
             NullLogger<Orchestrator>.Instance,
-            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
             deferralQueue,
             clock,
             new FakeBoundaryBiasProvider(lookahead),
+            planner,
             patterEstimator: estimator);
+    }
 
     public static class ScenarioQueuedAheadDriftIsAccountedFor
     {

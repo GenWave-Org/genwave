@@ -11,6 +11,7 @@
 // BreakPlannerBuilder-built BreakPlanner, pinned from one deterministic run exactly the way
 // Story452PinnedTables's own tables were derived.
 
+using System.Reflection;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Orchestration.Tests.Fakes;
@@ -20,8 +21,6 @@ namespace GenWave.Orchestration.Tests.Specs;
 
 public static class FeatureBreakPlanner
 {
-    const string PendingConsume = "pending: T522 — the Orchestrator consumes the plan and the old path is deleted (STORY-455)";
-
     static readonly StationIdentity Identity = new("station-1", "GenWave", "voice-station");
     static readonly HashSet<SpeechDeferralKind> NoHolds = [];
 
@@ -243,25 +242,57 @@ public static class FeatureBreakPlanner
         // Given: the STORY-452 replay after T522
 
         /// <summary>AC5 — every frozen STORY-452 assertion stays green once the Orchestrator rides the plan.</summary>
-        [Fact(Skip = PendingConsume)]
-        public void KeepsEveryFrozenAssertionGreen() => throw new NotImplementedException(PendingConsume);
+        [Fact]
+        public async Task KeepsEveryFrozenAssertionGreen()
+        {
+            var result = await FeatureBreakCharacterisationReplay.RunScriptAsync();
+
+            Assert.Equal(Story452PinnedTables.BufferedMediaIds, result.BufferedMediaIds);
+            Assert.Equal(Story452PinnedTables.DjNames, result.DjNames);
+            Assert.Equal(Story452PinnedTables.EventKinds, result.EventKinds);
+            Assert.Equal(Story452PinnedTables.Warnings, result.Warnings);
+        }
 
         /// <summary>AC5 — the STORY-452 trace table matches the plan's own <see cref="BreakPlan.ToTrace"/>.</summary>
-        [Fact(Skip = PendingConsume)]
-        public void MatchesThePinnedTraces() => throw new NotImplementedException(PendingConsume);
+        [Fact]
+        public async Task MatchesThePinnedTraces()
+        {
+            var result = await FeatureBreakCharacterisationReplay.RunScriptAsync();
+
+            Assert.Equal(Story452PinnedTables.Traces, result.Traces);
+        }
     }
 
     public sealed class ScenarioTheOldPathReflected
     {
         // Given: typeof(Orchestrator) non-public methods
 
+        static readonly MethodInfo[] NonPublicMethods = typeof(Orchestrator).GetMethods(
+            BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly);
+
         /// <summary>AC6 — EnqueuePatterAsync no longer exists on Orchestrator.</summary>
-        [Fact(Skip = PendingConsume)]
-        public void HasNoEnqueuePatterAsync() => throw new NotImplementedException(PendingConsume);
+        [Fact]
+        public void HasNoEnqueuePatterAsync() =>
+            Assert.DoesNotContain(NonPublicMethods, m => m.Name == "EnqueuePatterAsync");
 
         /// <summary>AC6 — BuildStationIdRequest, BuildAdRequest, BuildHandoffRequest, BuildTimeDateRequest, BuildContextSegmentRequestAsync no longer exist on Orchestrator.</summary>
-        [Fact(Skip = PendingConsume)]
-        public void HasNoBuildRequestMethods() => throw new NotImplementedException(PendingConsume);
+        [Fact]
+        public void HasNoBuildRequestMethods()
+        {
+            string[] deleted =
+            [
+                "BuildStationIdRequest",
+                "BuildAdRequest",
+                "BuildHandoffRequest",
+                "BuildTimeDateRequest",
+                "BuildContextSegmentRequestAsync",
+            ];
+
+            foreach (var name in deleted)
+            {
+                Assert.DoesNotContain(NonPublicMethods, m => m.Name == name);
+            }
+        }
     }
 }
 

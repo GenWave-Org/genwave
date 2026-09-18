@@ -106,7 +106,11 @@ public sealed partial class BreakPlanner
     // an already-armed SignOff/SignOn stays in scope, arming a new one does not — SPEC F190).
     async Task<IReadOnlyList<PlannedSlot>> DrainDueDeferralsAsync(BreakContext context, TimeSpan timeDateStaleBudget, CancellationToken ct)
     {
-        var drainNow = context.DrainAsOf ?? context.Now;
+        // Fresh read, not context.Now (SPEC F186 review, this class's own remarks): EnqueuePatterAsync
+        // re-read the clock here, AFTER its own cadence-enqueue calls immediately above — context.Now
+        // is captured once, before PlanAsync is even invoked, and reusing it here would race a deferral
+        // this SAME unit just armed a moment ago against a stale "now" that predates its own Due.
+        var drainNow = context.DrainAsOf ?? timeProvider.GetUtcNow();
         var slots = new List<PlannedSlot>();
 
         foreach (var deferral in deferralQueue.TryDequeueDue(
@@ -199,7 +203,7 @@ public sealed partial class BreakPlanner
     {
         var built = await BuildContextSegmentRequestAsync(deferral, context.Identity, drainNow, ct);
         return built is { } b
-            ? new PlannedSlot(0, SegmentKind.ContextSegment, new RenderSource(b.Request), Reservation: null, DropPolicyFor(SegmentKind.ContextSegment), ObserveDuration: true)
+            ? new PlannedSlot(0, SegmentKind.ContextSegment, new RenderSource(b.Request), Reservation: null, DropPolicyFor(SegmentKind.ContextSegment), ObserveDuration: true, ContextProviderKey: b.ProviderKey)
             : null;
     }
 

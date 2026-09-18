@@ -49,20 +49,32 @@ public static class FeatureBoundaryAwareSelection
     };
 
     static Orchestrator BuildOrchestrator(
-        FakeMediaCatalog catalog, SpeechDeferralQueue deferralQueue, TimeProvider clock, TimeSpan lookahead) =>
-        new(
+        FakeMediaCatalog catalog, SpeechDeferralQueue deferralQueue, TimeProvider clock, TimeSpan lookahead)
+    {
+        var personaAccessor = new FakeActivePersonaAccessor();
+        var scopeProvider = new FakeStationScopeProvider(new LibraryScope([1L]));
+        var planner = new BreakPlanner(
+            personaAccessor,
+            NullLogger<BreakPlanner>.Instance,
+            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
+            deferralQueue,
+            clock,
+            scopeProvider);
+
+        return new(
             new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")),
-            new FakeStationScopeProvider(new LibraryScope([1L])),
+            scopeProvider,
             new FakeCadenceProvider(CadenceOff),
             new FakeRotationSettingsProvider(new RotationSettings()),
             new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance),
             new FakeTtsSegmentSource(),
-            new FakeActivePersonaAccessor(),
+            personaAccessor,
             NullLogger<Orchestrator>.Instance,
-            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
             deferralQueue,
             clock,
-            new FakeBoundaryBiasProvider(lookahead));
+            new FakeBoundaryBiasProvider(lookahead),
+            planner);
+    }
 
     static bool IsMusic(MediaItem item) =>
         !item.MediaId.StartsWith("tts:", StringComparison.Ordinal);

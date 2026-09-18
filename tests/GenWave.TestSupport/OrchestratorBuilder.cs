@@ -61,6 +61,7 @@ public sealed class OrchestratorBuilder
     IAnnouncementCopyWriter? announcementCopyWriter;
     IAdCadenceProvider? adCadenceProvider;
     IAdSpotVend? adSpotVend;
+    IBreakPlanObserver? planObserver;
 
     // Only meaningful when scheduleResolver is unset — feeds the default schedule-resolver chain's
     // FakeScheduleStore (see WithSchedule).
@@ -177,6 +178,14 @@ public sealed class OrchestratorBuilder
     public OrchestratorBuilder WithAdSpotVend(IAdSpotVend? vend) => With(ref adSpotVend, vend);
 
     /// <summary>
+    /// PLAN T522 — overrides the <see cref="IBreakPlanObserver"/> seam on the shared
+    /// <see cref="BreakPlanner"/> <see cref="Build"/> constructs. Defaults to
+    /// <see cref="NoOpBreakPlanObserver.Instance"/>; a spec that wants to see every unit's own
+    /// <c>BreakPlan</c> (e.g. its trace) passes a <c>CapturingBreakPlanObserver</c> here.
+    /// </summary>
+    public OrchestratorBuilder WithPlanObserver(IBreakPlanObserver? observer) => With(ref planObserver, observer);
+
+    /// <summary>
     /// Resolves every unset seam to its default and constructs the Orchestrator, returning it alongside
     /// every collaborator a spec has ever needed to assert on directly.
     /// </summary>
@@ -231,6 +240,36 @@ public sealed class OrchestratorBuilder
         var resolvedRenderBudgetProvider = renderBudgetProvider ?? new FakeRenderBudgetProvider(TimeSpan.FromSeconds(5));
         var resolvedBoundaryBiasProvider = boundaryBiasProvider ?? new FakeBoundaryBiasProvider(TimeSpan.Zero);
 
+        // PLAN T522 (SPEC F188) — the shared plan-phase seam, built from the SAME resolved locals the
+        // Orchestrator itself is about to take below, so both read the identical instances. The
+        // announcementSource/announcementRenderer double-seam gate (Orchestrator.cs's own pre-T522
+        // step 1.75) now lives HERE, at this construction site — see BreakPlanner's own remarks for
+        // why it cannot reproduce that gate itself.
+        //
+        // BreakPlanner's logger is a ForwardingLogger onto resolvedLogger, not a NullLogger: pre-T522,
+        // every one of BreakPlanner's own WARN/INFO lines (e.g. LogTimeDateExpiry) was logged directly
+        // through Orchestrator's own logger field, and STORY-452's frozen replay asserts against
+        // exactly that logger. Production reaches the same result via DI (both categories resolve from
+        // the same ILoggerFactory); this reproduces it for the single CapturingLogger a spec holds.
+        var resolvedPlanner = new BreakPlanner(
+            resolvedPersonaAccessor,
+            new ForwardingLogger<BreakPlanner>(resolvedLogger),
+            resolvedRenderBudgetProvider,
+            resolvedDeferralQueue,
+            resolvedTime,
+            resolvedScopeProvider,
+            stationClock: stationClock,
+            scheduleResolver: resolvedScheduleResolver,
+            contextSettings: contextSettings,
+            catalog: resolvedCatalog,
+            imagingSettings: imagingSettings,
+            crosstalkPlanner: crosstalkPlanner,
+            announcementSource: announcementRenderer is not null ? announcementSource : null,
+            voiceLister: voiceLister,
+            adCadenceProvider: adCadenceProvider,
+            adSpotVend: adSpotVend,
+            personaStore: resolvedPersonaStore);
+
         var orchestrator = new Orchestrator(
             resolvedIdentityProvider,
             resolvedScopeProvider,
@@ -240,25 +279,19 @@ public sealed class OrchestratorBuilder
             resolvedTts,
             resolvedPersonaAccessor,
             resolvedLogger,
-            resolvedRenderBudgetProvider,
             resolvedDeferralQueue,
             resolvedTime,
             resolvedBoundaryBiasProvider,
+            resolvedPlanner,
             scheduleResolver: resolvedScheduleResolver,
             personaStore: resolvedPersonaStore,
             events: resolvedEvents,
-            stationClock: stationClock,
             patterEstimator: patterEstimator,
-            contextSettings: contextSettings,
-            catalog: resolvedCatalog,
             imagingSettings: imagingSettings,
             crosstalkPlanner: crosstalkPlanner,
-            announcementSource: announcementSource,
             announcementRenderer: announcementRenderer,
-            voiceLister: voiceLister,
             announcementCopyWriter: announcementCopyWriter,
-            adCadenceProvider: adCadenceProvider,
-            adSpotVend: adSpotVend);
+            observer: planObserver);
 
         return new OrchestratorChain(
             orchestrator,
