@@ -18,7 +18,7 @@
     "react": "^19.1.0",
     "react-dom": "^19.2.8",
     "sonner": "^2.0.8",
-    "tailwind-merge": "^3.6.0"
+    "tailwind-merge": "^3.7.0"
   },
   "devDependencies": {
     "@jest/globals": "^30.5.1",
