@@ -1,11 +1,13 @@
 // STORY-453 — The break contract has one fact per cell (gh-#401 · SPEC F186 · PLAN T517–T519)
 //
-// AC10–AC17 (T517, GREEN below) and the drops AC18–AC23/AC24 — the second half of
-// FeatureBreakContract, split from Story453_BreakContract.cs purely for the ~300-line budget
+// AC10–AC17 (T517, GREEN below) and AC24 (manual, T519) — the second of three files
+// FeatureBreakContract spans, split from Story453_BreakContract.cs purely for the ~300-line budget
 // (csharp-best-practices). Shares that file's consts/helpers (PullAsync, PullManyAsync,
-// BuildCrosstalkChain, StockReadyExchange, Handoff, ShowSlug) via the partial class. PendingDrops
-// and Manual are declared in THIS file instead — the Skip-prefix-law scanner resolves a Skip =
-// <const> reference within its own file only, so a const backing a Skip= here must live here too.
+// BuildCrosstalkChain, StockReadyExchange, Handoff, ShowSlug) via the partial class. The drop cells
+// (AC18–AC23, T518) live in Story453_BreakContractDrops.cs instead, un-skipped from the SAD PATH
+// block this file used to carry. Manual is declared in THIS file — the Skip-prefix-law scanner
+// resolves a Skip = <const> reference within its own file only, so a const backing a Skip= here
+// must live here too.
 
 using GenWave.Core.Domain;
 
@@ -14,10 +16,9 @@ namespace GenWave.Orchestration.Tests.Specs;
 public static partial class FeatureBreakContract
 {
     // Skip-prefix-law scanner (GenWave.Architecture.Tests) resolves a Skip = <const> reference within
-    // its own file's syntax tree only — it does not follow a partial class across files. These two
-    // consts are declared here, not in Story453_BreakContract.cs, because every [Fact(Skip = ...)]
-    // usage of them lives in THIS file.
-    const string PendingDrops = "pending: T518 — the drop cells (STORY-453)";
+    // its own file's syntax tree only — it does not follow a partial class across files. Declared
+    // here, not in Story453_BreakContract.cs, because its one [Fact(Skip = ...)] usage lives in THIS
+    // file (AC24, below).
     const string Manual = "manual: two follow-up issues named in SPEC F186.4 — review evidence on PR-2 (STORY-453)";
 
     public sealed class ScenarioAPooledStationId : IAsyncLifetime
@@ -222,53 +223,6 @@ public static partial class FeatureBreakContract
             Assert.NotNull(held);
             Assert.Equal(pullInstant + TimeSpan.FromSeconds(200), held.NotBefore);
         }
-    }
-
-    // SAD PATH — segregated. AC18–AC23 are T518's own cells; AC24 is manual (T519).
-    public sealed class ScenarioAnExpiredTimeDate
-    {
-        // Given: TimeDate due 120 s ago with a 90 s budget
-        /// <summary>AC18 — </summary>
-        [Fact(Skip = PendingDrops)] public void BuffersNoTimeDate() => throw new NotImplementedException(PendingDrops);
-        /// <summary>AC18 — </summary>
-        [Fact(Skip = PendingDrops)] public void LogsOneExpiryLine() => throw new NotImplementedException(PendingDrops);
-    }
-
-    public sealed class ScenarioAnAdVendThatThrows
-    {
-        // Given: the vend throws
-        /// <summary>AC19 — </summary>
-        [Fact(Skip = PendingDrops)] public void AssemblesTheBreakWithoutAnAd() => throw new NotImplementedException(PendingDrops);
-        /// <summary>AC19 — </summary>
-        [Fact(Skip = PendingDrops)] public void LogsOneWarnNamingTheVend() => throw new NotImplementedException(PendingDrops);
-    }
-
-    public sealed class ScenarioANullLeadInRender
-    {
-        // Given: the lead-in render returns null
-        /// <summary>AC20 — the slot drops alone</summary>
-        [Fact(Skip = PendingDrops)] public void KeepsEveryOtherItemInPosition() => throw new NotImplementedException(PendingDrops);
-    }
-
-    public sealed class ScenarioAnOverBudgetBackAnnounce
-    {
-        // Given: the back-announce render exceeds the budget
-        /// <summary>AC21 — the slot drops alone</summary>
-        [Fact(Skip = PendingDrops)] public void KeepsEveryOtherItemInPosition() => throw new NotImplementedException(PendingDrops);
-    }
-
-    public sealed class ScenarioANullSignOffRender
-    {
-        // Given: the SignOff render returns null
-        /// <summary>AC22 — </summary>
-        [Fact(Skip = PendingDrops)] public void PublishesOneHandoffPieceDropped() => throw new NotImplementedException(PendingDrops);
-    }
-
-    public sealed class ScenarioANullAnnouncementRender
-    {
-        // Given: an announcement render returns null
-        /// <summary>AC23 — the claim is not released</summary>
-        [Fact(Skip = PendingDrops)] public void KeepsTheAnnouncementClaimed() => throw new NotImplementedException(PendingDrops);
     }
 
     public sealed class ScenarioTheFollowUpsOnPrTwo

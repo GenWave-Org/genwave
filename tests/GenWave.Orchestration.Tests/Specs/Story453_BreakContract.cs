@@ -1,7 +1,7 @@
 // STORY-453 — The break contract has one fact per cell (gh-#401 · SPEC F186 · PLAN T517–T519)
 //
-// BDD specification — xUnit. One fact per cell of the SPEC F186 table, all against the unsplit code. Rows AC1–AC17 (T517, GREEN
-// below), drops AC18–AC23 (T518, still pending). AC24 (the two follow-up issues) is a manual check on PR-2's body. F186.4: back-announce on a
+// BDD specification — xUnit. One fact per cell of the SPEC F186 table, all against the unsplit code. Rows AC1–AC17 (T517) and
+// drops AC18–AC23 (T518) are GREEN. AC24 (the two follow-up issues) is a manual check on PR-2's body. F186.4: back-announce on a
 // ceremony-only unit STAYS (Dean, 2026-09-17); the other two cells are scripted as-built and filed as follow-ups.
 //
 // Every AC1–AC17 scenario is arranged through OrchestratorBuilder/OrchestratorChain exactly as
@@ -18,8 +18,9 @@ using Microsoft.Extensions.Time.Testing;
 
 namespace GenWave.Orchestration.Tests.Specs;
 
-// This class spans two files (~300-line budget, csharp-best-practices): AC1–AC9 (this file) and
-// AC10–AC24 (Story453_BreakContractSlots.cs) share the same helpers/consts declared below.
+// This class spans three files (~300-line budget, csharp-best-practices): AC1–AC9 (this file),
+// AC10–AC17 + AC24 (Story453_BreakContractSlots.cs) and AC18–AC23 (Story453_BreakContractDrops.cs)
+// share the same helpers declared below.
 public static partial class FeatureBreakContract
 {
     const long HostPersonaId = 10;
