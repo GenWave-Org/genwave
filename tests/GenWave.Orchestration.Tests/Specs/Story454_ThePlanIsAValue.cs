@@ -29,6 +29,7 @@ public static class FeatureThePlanIsAValue
     ];
 
     static BreakContext MinimalContext() => new(
+        UnitOrdinal: 0,
         Previous: null,
         Next: null,
         UnitDjName: "Nova",
@@ -49,8 +50,8 @@ public static class FeatureThePlanIsAValue
     static PlannedSlot RenderSlot(int ordinal, SegmentKind kind, Reservation? reservation = null, DropPolicy? drop = null) =>
         new(ordinal, kind, new RenderSource(BuildRequest(kind)), reservation, drop ?? new WarnDrop(), ObserveDuration: true);
 
-    static PlannedSlot VerbatimSlot(int ordinal, SegmentKind kind, Reservation reservation) =>
-        new(ordinal, kind, new VerbatimSource(BuildRequest(kind), new SegmentCopy($"{kind} copy", FreshPerAiring: false)), reservation, new WarnDrop(), ObserveDuration: true);
+    static PlannedSlot VerbatimSlot(int ordinal, SegmentKind kind, Reservation reservation, bool allowFlavor = true) =>
+        new(ordinal, kind, new VerbatimSource(BuildRequest(kind), new SegmentCopy($"{kind} copy", FreshPerAiring: false), allowFlavor), reservation, new WarnDrop(), ObserveDuration: true);
 
     static PlannedSlot ReadySlot(int ordinal, SegmentKind kind, string mediaId, Reservation reservation) =>
         new(ordinal, kind, new ReadySource(MakeItem(mediaId, kind)), reservation, new WarnDrop(), ObserveDuration: false);

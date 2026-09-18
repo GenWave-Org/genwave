@@ -12,5 +12,9 @@ namespace GenWave.Orchestration;
 /// will capture it here instead.
 /// </summary>
 /// <param name="Request">The request the copy renders under.</param>
-/// <param name="Copy">The already-decided text to render verbatim.</param>
-public sealed record VerbatimSource(SegmentRequest Request, SegmentCopy Copy) : SlotSource;
+/// <param name="Copy">The already-decided text to render verbatim — an announcement's own plain fallback text, whether or not <see cref="AllowFlavor"/> is set.</param>
+/// <param name="AllowFlavor">
+/// When true, the render side resolves flavored copy through the announcement copy writer first and
+/// falls back to <paramref name="Copy"/> on null/throw (SPEC F191.4); false renders <paramref name="Copy"/> verbatim.
+/// </param>
+public sealed record VerbatimSource(SegmentRequest Request, SegmentCopy Copy, bool AllowFlavor) : SlotSource;

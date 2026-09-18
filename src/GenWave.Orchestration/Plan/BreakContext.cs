@@ -7,6 +7,13 @@ namespace GenWave.Orchestration;
 /// renderer, no buffer, no engine: a test can build a <see cref="BreakPlan"/> from this with fakes
 /// only.
 /// </summary>
+/// <param name="UnitOrdinal">
+/// Which unit (music item pull) this break precedes — the cadence divisor's own dividend
+/// (<c>unitCount</c> pre-split): station-id/ad cadence checks fire on <c>UnitOrdinal &gt; 0 &amp;&amp;
+/// UnitOrdinal % N == 0</c>, never on unit zero (SPEC F42.1/F158.3's boot-guard). Incremented by
+/// <c>GetNextAsync</c> after the pull, never by the planner; the cadence guards read it before the
+/// increment.
+/// </param>
 /// <param name="Previous">The track that just finished, or <see langword="null"/> before the first unit.</param>
 /// <param name="Next">The upcoming track, or <see langword="null"/> for a ceremony-only unit (SPEC F186.2e).</param>
 /// <param name="UnitDjName">The persona name on air for this unit, or <see langword="null"/> when none is active.</param>
@@ -20,6 +27,7 @@ namespace GenWave.Orchestration;
 /// <param name="Hold">Deferral kinds held past this break's drain (SPEC F186.2a's held sign-on).</param>
 /// <param name="QueuedAhead">How much audio is already queued ahead, used to clamp a held deferral's earliest re-arm.</param>
 public sealed record BreakContext(
+    int UnitOrdinal,
     MediaItem? Previous,
     MediaItem? Next,
     string? UnitDjName,
