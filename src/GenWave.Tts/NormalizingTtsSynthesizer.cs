@@ -75,12 +75,23 @@ public sealed class NormalizingTtsSynthesizer(
     /// </summary>
     public async Task<string> SynthesizeAsync(TtsRenderContext context, CancellationToken ct)
     {
-        // Real render only (SPEC F71.7): refreshes personaCorrections.Current when its own TTL has
-        // elapsed, then builds the merged snapshot fresh for THIS render — never called from
-        // Preview below, which reads whatever the cache last held with no refresh (see
-        // ActivePersonaCorrectionsCache's own remarks on the two paths' different staleness bounds).
-        await personaCorrections.RefreshIfStaleAsync(ct);
-        var snapshot = SpeechCorrectionProvider.BuildMerged(corrections.Current, personaCorrections.Current);
+        // SPEC F189.3 (STORY-456, PLAN T526): a planned speaker (TtsSegmentSource's snapshot arm)
+        // already resolved its OWN card corrections once, at plan time — carried here on
+        // context.Corrections — so this render merges the station's corrections with THAT list and
+        // never touches personaCorrections at all (no RefreshIfStaleAsync, no Current): an ambient
+        // cache that is stale, or actively faulting, can never affect a snapshot-driven render.
+        // context.Corrections is null for every pre-F189 caller and for every caller that never
+        // resolves a snapshot (F189.6) — the ambient branch below is byte-identical to before this
+        // feature existed.
+        //
+        // Real render only (SPEC F71.7) on the ambient branch: refreshes personaCorrections.Current
+        // when its own TTL has elapsed, then builds the merged snapshot fresh for THIS render —
+        // never called from Preview below, which reads whatever the cache last held with no refresh
+        // (see ActivePersonaCorrectionsCache's own remarks on the two paths' different staleness
+        // bounds).
+        var snapshot = context.Corrections is { } planned
+            ? SpeechCorrectionProvider.BuildMerged(corrections.Current, planned)
+            : await BuildAmbientMergedAsync(ct);
 
         // Rules-over-corrections precedence (gh-#491): a correction whose From names the same word
         // as a resolved pronunciation rule's Pattern is dropped from THIS render's snapshot before
@@ -101,6 +112,17 @@ public sealed class NormalizingTtsSynthesizer(
         var normalized = RunNormalize(context.Text, snapshot);
         ReportFiredCorrections(context.Text, context.Voice, snapshot);
         return await inner.SynthesizeAsync(context with { Text = normalized }, ct);
+    }
+
+    /// <summary>
+    /// The ambient branch <see cref="SynthesizeAsync(TtsRenderContext, CancellationToken)"/> took
+    /// unconditionally before SPEC F189.3 — moved here verbatim so that method's two-arm branch
+    /// reads as two names, not two inlined bodies.
+    /// </summary>
+    async Task<SpeechCorrectionSet> BuildAmbientMergedAsync(CancellationToken ct)
+    {
+        await personaCorrections.RefreshIfStaleAsync(ct);
+        return SpeechCorrectionProvider.BuildMerged(corrections.Current, personaCorrections.Current);
     }
 
     /// <inheritdoc/>

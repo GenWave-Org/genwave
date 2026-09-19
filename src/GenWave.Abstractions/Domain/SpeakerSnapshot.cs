@@ -23,14 +23,22 @@ namespace GenWave.Core.Domain;
 /// applies today).
 /// </param>
 /// <param name="Corrections">
-/// The merged operator/persona corrections in effect for this speaker, same precedence as
-/// <see cref="Rules"/>.
+/// The persona CARD's own corrections — card-only, NOT the merged set, and empty for a station
+/// snapshot. Unlike <see cref="Rules"/>, which the source merges at resolve time, the station side
+/// is re-merged downstream: <c>GenWave.Tts.NormalizingTtsSynthesizer</c> merges these with the
+/// operator's live station corrections through the same <c>BuildMerged</c> seam,
+/// CARD-over-station, exactly as the ambient path does (SPEC F97.4, PLAN T526).
+/// A reader who took this for the merged set would conclude the station corrections are applied
+/// twice; they are not.
 /// </param>
 /// <param name="ContentHash">
 /// A deterministic digest over the same inputs the ambient <c>SpeechCorrectionProvider</c> /
 /// <c>PronunciationRuleProvider</c> / <c>ActivePersonaCorrectionsCache</c> caches hash today (SPEC
-/// F189.3) — folded into the TTS cache key so a render under this snapshot invalidates exactly
-/// when a render under the ambient path would.
+/// F189.3) — folded into the TTS cache key so a render under this snapshot invalidates on exactly
+/// the same changes a render under the ambient path would. It does NOT make the two paths share a
+/// cache ENTRY: the snapshot arm hashes its own formula, so its key space is disjoint from the
+/// ambient arm's (<c>GenWave.Tts.TtsRenderKey</c>). The first snapshot-driven render of an
+/// evergreen clip re-synthesizes rather than reusing the ambient file.
 /// </param>
 public sealed record SpeakerSnapshot(
     long? PersonaId,

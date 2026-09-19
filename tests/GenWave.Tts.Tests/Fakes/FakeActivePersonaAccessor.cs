@@ -18,7 +18,15 @@ public sealed class FakeActivePersonaAccessor : IActivePersonaAccessor
     public Persona? Persona { get; set; }
     public PersonaCard? Card { get; set; }
 
+    /// <summary>
+    /// When set, <see cref="ResolveCardAsync"/> throws this instead of returning <see cref="Card"/>
+    /// (STORY-456 AC3) — simulates a faulting ambient persona-card store so a spec can prove a
+    /// snapshot-driven render never reaches it.
+    /// </summary>
+    public Exception? ThrowOnResolve { get; set; }
+
     public Task<Persona?> ResolveAsync(CancellationToken ct) => Task.FromResult(Persona);
 
-    public Task<PersonaCard?> ResolveCardAsync(CancellationToken ct) => Task.FromResult(Card);
+    public Task<PersonaCard?> ResolveCardAsync(CancellationToken ct) =>
+        ThrowOnResolve is { } ex ? Task.FromException<PersonaCard?>(ex) : Task.FromResult(Card);
 }

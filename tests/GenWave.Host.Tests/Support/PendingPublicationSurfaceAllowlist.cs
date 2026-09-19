@@ -6,10 +6,13 @@ namespace GenWave.Host.Tests.Support;
 /// change, so the NuGet gets a minor bump, gh-#772) landed in <c>src/GenWave.Abstractions</c>
 /// BEFORE PLAN T530 (which regenerates <c>Fixtures/abstractions-5.7.0-surface.txt</c> from the
 /// newly published package and renames it) ships. Until then, <c>Story431</c>'s
-/// <c>ThePackageSurfaceDiffVs570IsEmpty</c> fact tolerates EXACTLY these 16 added lines — named
+/// <c>ThePackageSurfaceDiffVs570IsEmpty</c> fact tolerates EXACTLY these 17 added lines — named
 /// line-by-line, not a type/namespace wildcard — as additions only; any other addition, or any
 /// removal, still fails the fact. PLAN T530 deletes this file in the same PR that regenerates the
 /// baseline.
+///
+/// PLAN T526 adds the one further line below: <see cref="GenWave.Core.Domain.TtsRenderContext.Corrections"/>
+/// (SPEC F189.3) — additive for the identical reason, same tolerance window.
 /// </summary>
 internal static class PendingPublicationSurfaceAllowlist
 {
@@ -31,5 +34,7 @@ internal static class PendingPublicationSurfaceAllowlist
         "GenWave.Core.Domain.SpeechCorrection::PROPERTY System.String WhenFollowedBy { public get; public init; }",
         "GenWave.Core.Domain.SpeechCorrection::PROPERTY System.String WhenPrecededBy { public get; public init; }",
         "GenWave.Core.Domain.SpeechCorrection::TYPE class : none [System.IEquatable<GenWave.Core.Domain.SpeechCorrection>]",
+        // PLAN T526 (SPEC F189.3): the snapshot-driven render's own planned corrections list.
+        "GenWave.Core.Domain.TtsRenderContext::PROPERTY System.Collections.Generic.IReadOnlyList<GenWave.Core.Domain.SpeechCorrection> Corrections { public get; public init; }",
     ];
 }
