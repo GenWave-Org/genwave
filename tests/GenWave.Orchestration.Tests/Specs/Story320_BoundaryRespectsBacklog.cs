@@ -80,20 +80,32 @@ public static class FeatureBoundaryRespectsBacklog
     /// they can inspect <see cref="FakeTtsSegmentSource.Requests"/> after the run.</summary>
     static Orchestrator BuildOrchestrator(
         FakeMediaCatalog catalog, SpeechDeferralQueue deferralQueue, TimeProvider clock, ILogger<Orchestrator> logger,
-        FakeTtsSegmentSource? tts = null) =>
-        new(
+        FakeTtsSegmentSource? tts = null)
+    {
+        var personaAccessor = new FakeActivePersonaAccessor();
+        var scopeProvider = new FakeStationScopeProvider(new LibraryScope([1L]));
+        var planner = new BreakPlanner(
+            personaAccessor,
+            NullLogger<BreakPlanner>.Instance,
+            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
+            deferralQueue,
+            clock,
+            scopeProvider);
+
+        return new(
             new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")),
-            new FakeStationScopeProvider(new LibraryScope([1L])),
+            scopeProvider,
             new FakeCadenceProvider(CadenceOff),
             new FakeRotationSettingsProvider(new RotationSettings()),
             new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance),
             tts ?? new FakeTtsSegmentSource(),
-            new FakeActivePersonaAccessor(),
+            personaAccessor,
             logger,
-            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
             deferralQueue,
             clock,
-            new FakeBoundaryBiasProvider(TimeSpan.FromMinutes(10)));
+            new FakeBoundaryBiasProvider(TimeSpan.FromMinutes(10)),
+            planner);
+    }
 
     // ── HAPPY PATH ──────────────────────────────────────────────────────────
 

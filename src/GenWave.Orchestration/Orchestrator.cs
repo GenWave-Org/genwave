@@ -1,5 +1,6 @@
 namespace GenWave.Orchestration;
 
+using System.Collections.Frozen;
 using System.Globalization;
 using Microsoft.Extensions.Logging;
 using GenWave.Abstractions.Playout;
@@ -28,7 +29,7 @@ using GenWave.Core.Events;
 ///
 /// Cadence is read the same way, through <paramref name="cadenceProvider"/> (gitea-#211 — F30.1's
 /// precedent applied to cadence): read exactly ONCE per unit, into a local, at the top of
-/// <see cref="GetNextAsync"/> (hoisted from <see cref="EnqueuePatterAsync"/> by gh-#254 so the
+/// <see cref="GetNextAsync"/> (hoisted from <c>EnqueuePatterAsync</c> (now on <see cref="BreakPlanner"/>) by gh-#254 so the
 /// boundary fit's patter estimates share the same snapshot) — not once per cadence check within
 /// that unit — so one unit is planned under one consistent cadence snapshot rather than racing
 /// live reads that could straddle a concurrent settings write mid-unit.
@@ -68,7 +69,7 @@ using GenWave.Core.Events;
 /// documented design, not a shortcut to revisit later. <see cref="SegmentKind.StationId"/> is the
 /// one carve-out (gh-#96): station IDs are station imaging — always the station's own voice and
 /// credit, never the persona's — so their build skips the accessor entirely (see the deferral
-/// drain in <see cref="EnqueuePatterAsync"/>).
+/// drain in <c>EnqueuePatterAsync</c> (now on <see cref="BreakPlanner"/>)).
 ///
 /// <see cref="SegmentRequest.PersonaName"/> is stamped from that SAME accessor read (SPEC F39.1,
 /// gitea-#212) — never a second call — so <c>Voice</c> and <c>PersonaName</c> on one <see cref="SegmentRequest"/>
@@ -83,7 +84,7 @@ using GenWave.Core.Events;
 ///
 /// The station-id cadence check (below) never builds its <see cref="SegmentRequest"/> directly
 /// (SPEC F74.1/F74.2, STORY-197): it enqueues a deferral into <paramref name="deferralQueue"/>,
-/// which <see cref="EnqueuePatterAsync"/> drains in the same pass. This planning pass IS the next
+/// which <c>EnqueuePatterAsync</c> (now on <see cref="BreakPlanner"/>) drains in the same pass. This planning pass IS the next
 /// track boundary — a whole unit (back-announce/station-id/lead-in/music) is queued atomically
 /// before the next track ever reaches air — so draining here can never land mid-track. Routing
 /// even an always-immediately-due trigger through the queue formalizes the seam a future deferred
@@ -127,10 +128,10 @@ using GenWave.Core.Events;
 /// re-checked at DRAIN time, not trusted from enqueue time: a stale, content-less, or blank-facts
 /// deferral is skipped with one Information line naming the provider key and cause, never echoing the
 /// provider's own facts (F108.3) — music is unaffected either way. <c>Context:{Key}:PersonaId</c>
-/// (read fresh, per drain, through <paramref name="contextSettings"/>) picks the voice: a positive id
+/// (read fresh, per drain, through <c>contextSettings</c>, now on <see cref="BreakPlanner"/>) picks the voice: a positive id
 /// names an explicit persona (resolved through <paramref name="personaStore"/>, degrading to the
 /// station voice on any miss); zero, negative, or unset defers to the on-air DJ via the SAME
-/// <see cref="ResolvePersonaAsync"/> every LeadIn/BackAnnounce segment already uses — whose own
+/// <c>ResolvePersonaAsync</c> (now on <see cref="BreakPlanner"/>) every LeadIn/BackAnnounce segment already uses — whose own
 /// no-active-persona fallback already IS "music-only segment or gap ⇒ station voice" (the StationId
 /// imaging precedent), so that half of F107.7 needed no new code here. A render that comes back null
 /// (an LLM miss with no templated-filler rung — SPEC F107.6, mirrors F92.4's handoff-drop posture one
@@ -151,7 +152,7 @@ using GenWave.Core.Events;
 /// wired at all) falls through to the ORIGINAL templated TTS ident, byte-identical to pre-F110
 /// behavior. <see cref="SpeechDeferralKind.TimeDate"/> (this enum value's
 /// only producer, <see cref="ClockAnchoredImagingProducer"/>) always renders templated, station-voiced
-/// copy — <see cref="BuildTimeDateRequest"/> reads the hour off the deferral's own <c>Due</c> instant
+/// copy — <c>BuildTimeDateRequest</c> (now on <see cref="BreakPlanner"/>) reads the hour off the deferral's own <c>Due</c> instant
 /// (the top of the hour it was ARMED for), never a fresh drain-time clock read, so a drain landing
 /// minutes after the hour still speaks the right hour and, since the SAME hour always renders the SAME
 /// text, a second announcement within that hour is a forever-cache hit rather than a re-synthesis.
@@ -176,7 +177,7 @@ using GenWave.Core.Events;
 /// armed hour), read fresh at this SAME drain rather than reused from <c>drainNow</c> (which a straddle/
 /// ceremony caller may have forced ahead of real time — the identical reason <see cref="SpeechDeferralQueue.TryDequeueDue"/>'s
 /// own remarks give for checking its expiry budget against real wall-clock time, never the caller's
-/// <c>now</c>). <see cref="BuildTimeDateRequest"/> stamps the result onto the <see cref="SegmentRequest"/>
+/// <c>now</c>). <c>BuildTimeDateRequest</c> (now on <see cref="BreakPlanner"/>) stamps the result onto the <see cref="SegmentRequest"/>
 /// it Kicks; <c>PatterTemplateRenderer</c> reads it to choose between the classic and "just past" lines.
 /// </para>
 ///
@@ -201,7 +202,7 @@ using GenWave.Core.Events;
 /// (<see cref="CrosstalkPlanner.NoteOnAirShow"/> — SPEC F127.8's own "EveryNthAiring counts AIRINGS,
 /// not stock events" ruling depends on this call running EVERY unit, never only when a vend is
 /// attempted, so a transition through a disabled show or a schedule gap is never missed). The vend
-/// attempt itself lives in <see cref="EnqueuePatterAsync"/>, gated on THREE conditions — two structural,
+/// attempt itself lives in <c>EnqueuePatterAsync</c> (now on <see cref="BreakPlanner"/>), gated on THREE conditions — two structural,
 /// one a peek — that together keep banter outside the F92/F124 boundary-ceremony ladder (SPEC F127.8's
 /// own "never inside the boundary-ceremony window" ruling): an ordinary music unit
 /// (<c>next is not null</c> — <see cref="TryServeCeremonyOnlyUnitAsync"/>'s own call passes null), a
@@ -219,17 +220,19 @@ using GenWave.Core.Events;
 /// AFTER the banter it was supposed to structurally precede. A vended exchange supersedes the
 /// F107.5/F116.3 shared-slot lanes for that SAME break (SPEC F127.9) via
 /// <see cref="SegmentRequest.CrosstalkAiredThisBreak"/>, stamped onto that unit's own LeadIn/
-/// BackAnnounce requests — see <see cref="EnqueuePatterAsync"/>'s own remarks for the rest.
+/// BackAnnounce requests — see <c>EnqueuePatterAsync</c> (now on <see cref="BreakPlanner"/>)'s own remarks for the rest.
 /// </para>
 ///
 /// <para>
-/// <b>Owner announcements (SPEC F144.1/F144.2, F145.2, STORY-358, PLAN T341):</b> <paramref name="announcementSource"/>
-/// is the crosstalkPlanner precedent one feature over — an optional constructor dependency, feature
-/// dark whenever null (no Host wiring — every pre-T341 construction site, including every unit
-/// test), so this widening is diff-free for every existing caller. <see cref="EnqueuePatterAsync"/>'s
-/// own announcement step vends up to <see cref="AnnouncementVendCap"/> (a constant on THIS class —
-/// <see cref="IAnnouncementSource.ClaimDeliverableAsync"/> places no ceiling of its own, see that
-/// seam's own remarks) oldest deliverable announcements, atomically claimed the moment this unit
+/// <b>Owner announcements (SPEC F144.1/F144.2, F145.2, STORY-358, PLAN T341):</b> the claim seam
+/// (<c>IAnnouncementSource</c>) is the crosstalkPlanner precedent one feature over — an optional
+/// constructor dependency, feature dark whenever null (no Host wiring). PLAN T522 moves the claim
+/// itself onto <see cref="BreakPlanner"/> (its own <c>announcementSource</c> constructor parameter,
+/// gated on <paramref name="announcementRenderer"/> at the construction site that builds THAT
+/// class, not here — a null renderer must still mean no announcement is ever claimed, not merely
+/// that a claimed one never airs); this class keeps only the render half below. The planner's own
+/// vend cap and claim ordering vends up to its own <c>AnnouncementVendCap</c> (a constant on THAT
+/// class now) oldest deliverable announcements, atomically claimed the moment this unit
 /// decides to vend them, and places each as a <see cref="SegmentKind.Announcement"/> segment after
 /// the back-announce and before the lead-in — exactly like <see cref="SegmentKind.Crosstalk"/>'s own
 /// placement one paragraph up, just a different pair of steps in the SAME unit. The station never
@@ -265,29 +268,14 @@ using GenWave.Core.Events;
 /// </para>
 ///
 /// <para>
-/// <b>Ad cadence (SPEC F158.2/F158.3, STORY-388, PLAN T397):</b> <paramref name="adCadenceProvider"/>
-/// is <paramref name="cadenceProvider"/>'s twin one seam over — read fresh, once, inside
-/// <c>EnqueuePatterAsync</c> (never hoisted alongside <c>cadence</c>/<c>identity</c> at the top of
-/// <see cref="GetNextAsync"/>: unlike the StationId trigger, no boundary-fit estimate ever needs to
-/// account for an ad's patter length ahead of the drain — the vend is pre-rendered, its duration
-/// already fixed the instant it airs, and a null answer costs the boundary nothing to plan around).
-/// <c>unitCount % EveryNUnits == 0</c>, unit 0 never fires — <c>cadence.StationIdEveryNUnits</c>'s own
-/// guard, mirrored exactly. The trigger enqueues a <see cref="SpeechDeferralKind.Ad"/> deferral,
-/// never builds a segment directly (the SAME F74.1/F74.2 queue-not-inline discipline the StationId
-/// trigger already follows); the SAME drain loop picks it up and vends through
-/// <paramref name="adSpotVend"/> — <see cref="IAdSpotVend.GetNextSpotAsync"/>'s pre-rendered
-/// <see cref="MediaItem"/>, routed through <c>KickResolved</c> (zero render at air, the pool-first
-/// StationId item's own precedent). <see cref="SpeechDeferralKind.Ad"/>'s own declared-LAST position
-/// in that enum is what actually orders "ident → spot → back to the music" (SPEC F158.3) whenever
-/// both cadences coincide on the SAME unit — see that member's own remarks for the full tiebreak
-/// argument. <paramref name="adSpotVend"/> throwing is caught at this drain arm's own boundary (WARN,
-/// no ad this break, never a faulted unit); a null answer is one INFO, never a WARN — an empty Ads
-/// library is a normal day (F158.3). Both seams default to a permanent no-op (zero/null) for any
-/// composition that never wires <c>GenWave.Ads</c>' own <c>AddGenWaveAds</c> — every pre-T397
-/// construction site, including every unit test, stays byte-identical.
+/// <b>Ad cadence (SPEC F158.2/F158.3, STORY-388, PLAN T397):</b> moved to <see cref="BreakPlanner"/>
+/// at PLAN T522 — the trigger (<c>EnqueueAdCadence</c>) and the drain-time vend
+/// (<c>BuildAdDrainSlotAsync</c>, <see cref="IAdSpotVend.GetNextSpotAsync"/>) both live there now,
+/// verbatim copies of this method's own pre-T522 shape. <paramref name="planner"/> owns both seams;
+/// this constructor no longer takes <c>adCadenceProvider</c>/<c>adSpotVend</c> directly.
 /// </para>
 /// </summary>
-public sealed class Orchestrator(
+public sealed partial class Orchestrator(
     IStationIdentityProvider identityProvider,
     IStationScopeProvider scopeProvider,
     ICadenceProvider cadenceProvider,
@@ -296,25 +284,19 @@ public sealed class Orchestrator(
     ITtsSegmentSource tts,
     IActivePersonaAccessor personaAccessor,
     ILogger<Orchestrator> logger,
-    IRenderBudgetProvider renderBudgetProvider,
     SpeechDeferralQueue deferralQueue,
     TimeProvider timeProvider,
     IBoundaryBiasProvider boundaryBiasProvider,
+    BreakPlanner planner,
     CachingScheduleResolver? scheduleResolver = null,
     IPersonaStore? personaStore = null,
     IStationEventSink? events = null,
-    IStationClockProvider? stationClock = null,
     IPatterDurationEstimator? patterEstimator = null,
-    IContextSettingsProvider? contextSettings = null,
-    IMediaCatalog? catalog = null,
     IStationImagingSettingsProvider? imagingSettings = null,
     CrosstalkPlanner? crosstalkPlanner = null,
-    IAnnouncementSource? announcementSource = null,
     IVerbatimSegmentRenderer? announcementRenderer = null,
-    ITtsVoiceLister? voiceLister = null,
     IAnnouncementCopyWriter? announcementCopyWriter = null,
-    IAdCadenceProvider? adCadenceProvider = null,
-    IAdSpotVend? adSpotVend = null) : INextItemProvider, IBoundaryFitLog
+    IBreakPlanObserver? observer = null) : INextItemProvider, IBoundaryFitLog
 {
     // gh-#254 — how far from the boundary a candidate may land and still count as a WIN ("±30s of
     // the boundary is a win"), widened as the gh-#253 estimate's confidence tier drops: the fit's
@@ -325,16 +307,6 @@ public sealed class Orchestrator(
     static readonly TimeSpan FitToleranceExact = TimeSpan.FromSeconds(30);
     static readonly TimeSpan FitToleranceHistorical = TimeSpan.FromSeconds(45);
     static readonly TimeSpan FitToleranceHeuristic = TimeSpan.FromSeconds(60);
-
-    /// <summary>
-    /// gh-#117 — the ONE stamp every <see cref="SegmentRequest.LocalNow"/> this Orchestrator builds
-    /// goes through: station-local now via the live <see cref="IStationClockProvider"/> seam
-    /// (<c>Station:Timezone</c>, read fresh per call) when the composition supplies one, otherwise
-    /// <paramref name="timeProvider"/>'s UTC now — the pre-gh-#117 behavior (the old raw
-    /// <c>DateTimeOffset.UtcNow</c>), unchanged for every rig that never registers the seam, and
-    /// what the templated time/date patter and the LLM's "Local time" line both render from.
-    /// </summary>
-    DateTimeOffset StationLocalNow() => stationClock?.LocalNow ?? timeProvider.GetUtcNow();
 
     /// <summary>
     /// How far ahead of the resolved boundary the SignOff half of a handoff ceremony is due (SPEC
@@ -385,12 +357,6 @@ public sealed class Orchestrator(
     static readonly IReadOnlySet<SpeechDeferralKind> HoldSignOnAtStraddle =
         new HashSet<SpeechDeferralKind> { SpeechDeferralKind.SignOn };
 
-    // SPEC F144.1 (STORY-358, PLAN T341) — the vend CEILING belongs to the caller, not the seam:
-    // IAnnouncementSource.ClaimDeliverableAsync places none of its own (see that method's own
-    // remarks). A plain positive constant, the same posture SignOffLeadTime/TimeDateHonestyThreshold
-    // immediately above carry — not a live-tunable SPEC knob.
-    const int AnnouncementVendCap = 2;
-
     // SPEC F92.4 (PLAN T124): the same null-coalesced-default idiom MusicSelectionPolicy's own
     // envelope/persona/request-fulfillment seams use (F112, STORY-295) — a dropped handoff piece
     // still needs somewhere to publish to even when no host binds a real sink (every pre-T124
@@ -403,32 +369,21 @@ public sealed class Orchestrator(
     // (or one hypothetical second station's) observed history into another's estimates.
     readonly IPatterDurationEstimator patterEstimator = patterEstimator ?? new RollingPatterDurationEstimator();
 
-    // SPEC F107.7 (STORY-297, PLAN T224): the Context:{Key}:PersonaId seam — same null-coalesced-
-    // default idiom as events/patterEstimator above. A host that has not yet wired T226's real
-    // IOptionsMonitor-backed implementation (every pre-T226 construction site, including every unit
-    // test) reads back "no explicit persona configured for any key", which the drain arm's own
-    // resolution degrades to the on-air DJ — never a null-check, never a stall.
-    readonly IContextSettingsProvider contextSettings = contextSettings ?? NoOpContextSettingsProvider.Instance;
-
-    // SPEC F124.4 (PLAN T269): same null-coalesced-default idiom as contextSettings immediately
-    // above. A host that has not yet wired the real IOptionsMonitor-backed implementation (every
+    // SPEC F124.4 (PLAN T269): same null-coalesced-default idiom as events/patterEstimator above.
+    // A host that has not yet wired the real IOptionsMonitor-backed implementation (every
     // pre-T269 construction site, including every unit test) reads back NoOpStationImagingSettingsProvider's
     // both-false/5-minute answer — the shipped SPEC F124.4 default — never a null-check, never a stall.
     readonly IStationImagingSettingsProvider imagingSettings = imagingSettings ?? NoOpStationImagingSettingsProvider.Instance;
 
-    // SPEC F158.3 (STORY-388, PLAN T397): the ad cadence trigger's own live knob
-    // (Station:Ads:EveryNUnits) — same null-coalesced-default idiom as imagingSettings immediately
-    // above. A host that has not yet wired the real IOptionsMonitor-backed implementation (every
-    // pre-T397 construction site, including every unit test) reads back NoOpAdCadenceProvider's own
-    // zero (disabled) answer — never a null-check, never a stall.
-    readonly IAdCadenceProvider adCadenceProvider = adCadenceProvider ?? NoOpAdCadenceProvider.Instance;
+    // PLAN T522: same null-coalesced-default idiom as imagingSettings immediately above. A host that
+    // never registers a real IBreakPlanObserver (every production host today, and every pre-T522
+    // test) reads back silence — never a null-check, never a stall.
+    readonly IBreakPlanObserver planObserver = observer ?? NoOpBreakPlanObserver.Instance;
 
-    // SPEC F158.2/F158.3 (STORY-388, PLAN T397): the ad drain's own vend seam — same
-    // null-coalesced-default idiom immediately above. A host that has not yet wired GenWave.Ads'
-    // real AdSpotPipeline (every pre-T397 construction site, including every unit test) reads back
-    // NoOpAdSpotVend's own permanent-null answer — "no ad ever airs" — never a null-check, never a
-    // stall.
-    readonly IAdSpotVend adSpotVend = adSpotVend ?? NoOpAdSpotVend.Instance;
+    // SPEC F186.2a — SpeechDeferralQueue.TryDequeueDue treats a null hold and an empty set
+    // identically (neither holds anything back); this sentinel exists purely so BreakContext.Hold,
+    // a non-nullable member, never needs a null-check of its own downstream.
+    static readonly IReadOnlySet<SpeechDeferralKind> EmptyHold = FrozenSet<SpeechDeferralKind>.Empty;
 
     readonly Queue<MediaItem> buffer = new();
     MediaItem? previousTrack;
@@ -692,9 +647,9 @@ public sealed class Orchestrator(
             }
         }
 
-        await EnqueuePatterAsync(
-            previousTrack, track, unitDjName, cadence, identity, ct, drainAsOf, hold,
-            queuedAhead: TimeSpan.FromMilliseconds(ctx.QueuedAheadMs ?? 0));
+        await PlanAndRenderAsync(
+            previousTrack, track, unitDjName, cadence, identity, drainAsOf, hold,
+            queuedAhead: TimeSpan.FromMilliseconds(ctx.QueuedAheadMs ?? 0), ct);
 
         buffer.Enqueue(track);
 
@@ -996,11 +951,52 @@ public sealed class Orchestrator(
             hold = HoldSignOnAtStraddle;
         }
 
-        await EnqueuePatterAsync(
-            previousTrack, next: null, unitDjName, cadence, identity, ct, boundary, hold,
-            queuedAhead: fit.QueuedAhead);
+        await PlanAndRenderAsync(
+            previousTrack, next: null, unitDjName, cadence, identity, boundary, hold,
+            queuedAhead: fit.QueuedAhead, ct);
 
         return buffer.Count > 0 ? buffer.Dequeue() : null;
+    }
+
+    /// <summary>
+    /// PLAN T522 — the ONE call every <see cref="GetNextAsync"/>/<see cref="TryServeCeremonyOnlyUnitAsync"/>
+    /// unit makes to plan and render its break: builds this unit's <see cref="BreakContext"/>, hands
+    /// it to <see cref="planner"/> (SPEC F188), publishes the result to <see cref="planObserver"/>,
+    /// arms/clears the handoff-ceremony producer (SPEC F190 — this stays here, never migrated to
+    /// <see cref="BreakPlanner"/>, and must run AFTER the plan's own drain so it never clears a piece
+    /// the drain was about to fire this same unit), then renders every slot (<see cref="RenderPlanAsync"/>,
+    /// declared in Orchestrator.Render.cs).
+    /// </summary>
+    async Task PlanAndRenderAsync(
+        MediaItem? prev, MediaItem? next, string? unitDjName, CadenceConfig cadence, StationIdentity identity,
+        DateTimeOffset? drainAsOf, IReadOnlySet<SpeechDeferralKind>? hold, TimeSpan queuedAhead, CancellationToken ct)
+    {
+        // SPEC F141.1/F141.4 (STORY-355, PLAN T326) — the boot-log config echo, unchanged from
+        // EnqueuePatterAsync's own first line (see timeDateBudgetLoggedOnce's own remarks for why it
+        // lives here rather than on a bystander Host service).
+        if (!timeDateBudgetLoggedOnce)
+        {
+            timeDateBudgetLoggedOnce = true;
+            logger.LogInformation(
+                "TimeDate honesty budget bound: {TimeAnnouncementBudgetSeconds}s (SPEC F141.1)",
+                imagingSettings.Current.TimeAnnouncementBudgetSeconds);
+        }
+
+        var context = new BreakContext(
+            unitCount, prev, next, unitDjName, cadence, identity, timeProvider.GetUtcNow(),
+            drainAsOf, hold ?? EmptyHold, queuedAhead);
+
+        var plan = await planner.PlanAsync(context, ct);
+        planObserver.Planned(plan);
+
+        // 2.5. Handoff ceremony producer (SPEC F92.1-F92.6, STORY-243, PLAN T124/T190) — runs every
+        // unit, AFTER the plan's own drain immediately above, for the exact reason EnqueuePatterAsync's
+        // own remarks always gave: draining first, then arming/clearing for what comes next, means an
+        // already-due ceremony always gets its chance to air before this producer ever re-evaluates the
+        // (now different) boundary ahead.
+        await EnqueueHandoffCeremonyAsync(identity.Voice, ct);
+
+        await RenderPlanAsync(plan, ct);
     }
 
     /// <summary>
@@ -1056,735 +1052,6 @@ public sealed class Orchestrator(
         BoundaryFitPlan fit, string outcome, BoundaryOutcome rung, IReadOnlyList<TimeSpan> sampled,
         TimeSpan? chosenDiff) =>
         LogBoundaryFit(fit, outcome, rung, sampled, chosenDiff);
-
-    /// <param name="cadence">
-    /// The unit's ONE cadence snapshot (gitea-#211) — read by <see cref="GetNextAsync"/> at the top
-    /// of the unit (hoisted there by gh-#254 so the boundary fit shares it) and handed in, so this
-    /// unit's back-announce/station-id/lead-in decisions all see the same snapshot even if a live
-    /// PUT /api/settings edit lands mid-unit. Never read <see cref="cadenceProvider"/> in here.
-    /// </param>
-    /// <param name="identity">
-    /// The unit's ONE station-identity snapshot (SPEC F44.1, gitea-#196) — same discipline, same
-    /// gh-#254 hoist as <paramref name="cadence"/>: a live Station:Name/Station:Voice edit must not
-    /// straddle a single unit's segment builds. Never read <see cref="identityProvider"/> in here.
-    /// </param>
-    /// <param name="next">
-    /// The music this unit is planning patter around — <see langword="null"/> on gh-#300's
-    /// ceremony-only unit, where there is no music to lead into. Null suppresses exactly two things:
-    /// the lead-in (nothing to introduce) and the station-ID cadence check (a ceremony is not a
-    /// music unit, and firing that check here would both wedge an ident into the handoff and, since
-    /// <see cref="unitCount"/> deliberately does not advance, fire it again on the very next unit).
-    /// The back-announce still runs: the track that just played deserves its outro, and
-    /// <see cref="BuildBoundaryFit"/> has already reserved the time for it.
-    /// </param>
-    /// <param name="drainAsOf">
-    /// The instant the deferral drain is evaluated against — <see langword="null"/> means "now",
-    /// every pre-gh-#300 caller's behavior. The ceremony-only unit passes the BOUNDARY instead; see
-    /// <see cref="TryServeCeremonyOnlyUnitAsync"/> for why an as-of-now drain is the exact shape of
-    /// the bug. The straddle unit (SPEC F111.2, PLAN T235) passes a pending SignOff's own Due for the
-    /// identical reason — see <see cref="GetNextAsync"/>'s own straddle branch.
-    /// </param>
-    /// <param name="hold">
-    /// SPEC F111.2 (PLAN T235) — forwarded verbatim to <see cref="SpeechDeferralQueue.TryDequeueDue"/>;
-    /// see that method's own remarks. <see langword="null"/> (nothing held) for every caller except the
-    /// straddle branch.
-    /// </param>
-    /// <param name="queuedAhead">
-    /// SPEC F124.4 (PLAN T269) — forwarded verbatim to <see cref="SpeechDeferralQueue.TryDequeueDue"/>'s
-    /// own TimeDate elapsed-due expiry math (air-time lateness, never wall-clock-vs-Due alone — see
-    /// that method's own remarks). <see cref="GetNextAsync"/>'s ordinary unit path passes
-    /// <c>PlayoutContext.QueuedAheadMs</c> (coalesced null-to-zero); <see cref="TryServeCeremonyOnlyUnitAsync"/>
-    /// passes the SAME <c>fit.QueuedAhead</c> its own drain-instant arithmetic reads — the feeder's raw,
-    /// UNCLAMPED estimate in both cases, never the window-clamped local either method may compute for
-    /// its own, separate purpose. Defaults to <see langword="default"/> (zero), harmless on its own —
-    /// the expiry math never runs unless a non-null budget is also in play (see
-    /// <see cref="SpeechDeferralQueue.TryDequeueDue"/>'s own remarks).
-    /// </param>
-    async Task EnqueuePatterAsync(
-        MediaItem? prev, MediaItem? next, string? unitDjName, CadenceConfig cadence, StationIdentity identity,
-        CancellationToken ct, DateTimeOffset? drainAsOf = null, IReadOnlySet<SpeechDeferralKind>? hold = null,
-        TimeSpan queuedAhead = default)
-    {
-        // Read the render budget ONCE per unit, up front (SPEC F44.2, gitea-#197) — the same
-        // per-unit-snapshot discipline cadence/identity arrive under (see the params above): a
-        // live Tts:RenderBudgetSeconds edit must not straddle a single unit's renders. Never read
-        // renderBudgetProvider.Current again below this line.
-        var renderBudget = renderBudgetProvider.Current;
-
-        // SPEC F124.4/F141.1 (PLAN T269/T326) — the SAME per-unit-snapshot discipline applied to the
-        // live TimeDate elapsed-due expiry budget: a live Station:Imaging:TimeAnnouncementBudgetSeconds
-        // edit must not straddle a single unit's drain. Converted to a TimeSpan here, at the point of
-        // use — GenWave.Orchestration references only GenWave.Core/GenWave.Abstractions and stays
-        // options/config-agnostic, so SpeechDeferralQueue itself never sees the raw seconds shape.
-        var timeDateStaleBudget = TimeSpan.FromSeconds(imagingSettings.Current.TimeAnnouncementBudgetSeconds);
-
-        // SPEC F141.1/F141.4 (STORY-355, PLAN T326, review advisory) — the boot-log config echo (see
-        // timeDateBudgetLoggedOnce's own remarks for why it lives here rather than on a bystander
-        // Host service): logs the bound value exactly once, on this Orchestrator's first unit, then
-        // never again — every later unit still reads imagingSettings.Current fresh above, live-edits
-        // included, this flag only silences the REPEAT logging.
-        if (!timeDateBudgetLoggedOnce)
-        {
-            timeDateBudgetLoggedOnce = true;
-            logger.LogInformation(
-                "TimeDate honesty budget bound: {TimeAnnouncementBudgetSeconds}s (SPEC F141.1)",
-                imagingSettings.Current.TimeAnnouncementBudgetSeconds);
-        }
-
-        // Each segment's voice+persona-name pair is resolved (a fast, local accessor call — SPEC
-        // F35.3, F39.1) immediately before that segment's SegmentRequest is built, so the actual TTS
-        // renders below still all kick off back-to-back with no render awaited in between
-        // (render-ahead is unaffected — the accessor call is negligible next to a real render's
-        // synthesis+mix+measure latency). ResolvePersonaAsync reads personaAccessor exactly ONCE per
-        // call, returning both values from the same read (F39.1) — never resolve Voice and
-        // PersonaName from two separate accessor calls, which could straddle a concurrent
-        // activate/deactivate and pair a stale name with a fresh voice or vice versa.
-        // Carried exception (T224 review, accepted as-is): a SpeechDeferralKind.Context drain with a
-        // positive Context:{Key}:PersonaId resolves through a genuine personaStore.GetByIdAsync round
-        // trip between two Kicks instead — not the negligible accessor read every other kind gets.
-        // The full request rides alongside each render task — Kind for the F92.4 drop
-        // classification (SPEC F92.4, PLAN T124: the await loop below tells a handoff-kind drop,
-        // WARN + booth row, from every other kind's ordinary silent skip), and Voice/PersonaName for
-        // the gh-#253 measured-duration observation a successful render feeds the estimator — the
-        // render itself is still kicked off immediately here, nothing awaited in between.
-        // ContextProviderKey (T224 review finding — the WARN this key ultimately feeds must name
-        // WHICH provider dropped, not just "a context segment") rides alongside for exactly one
-        // kind: null for every other kind's render, the drain arm's own providerKey for
-        // SpeechDeferralKind.Context's Kick call below.
-        // ObserveDuration (SPEC F110.2, PLAN T232) gates the gh-#253 estimator feed below — true for
-        // every genuine TTS render (unchanged), false for a pool-first StationId item (KickResolved):
-        // an authored ident's measured duration reflects whatever the operator produced, not a
-        // synthesis the estimator should learn from — blending it into a templated-TTS StationId
-        // bucket would skew future boundary-fit estimates for the fallback rung, which is still a
-        // real TTS render with its own, separate duration profile. "A templated-TTS StationId bucket"
-        // is now plural, not singular (SPEC F117.2, PLAN T250 review finding F1): the estimator keys
-        // its Exact tier on (voice, show-or-null), so the plain ident and each show's own templated
-        // line each land in their OWN bucket — a pool-first item still observes into NONE of them.
-        // AnnouncementId (T341 review finding F8) rides alongside for exactly one kind — same
-        // shape as ContextProviderKey immediately to its left: null for every other kind's render,
-        // the claimed row's own id for SegmentKind.Announcement's Kick call below, so a drop this
-        // unit's own drain WARN can name WHICH claimed row is still sitting undelivered.
-        var pendingRenders =
-            new List<(SegmentRequest Request, Task<MediaItem?> Render, string? ContextProviderKey, bool ObserveDuration, long? AnnouncementId)>();
-
-        // Starts one render and remembers the request alongside the Task (T124 review simplify) —
-        // every call site below used to repeat the Add call verbatim; the render itself is still
-        // kicked off immediately, nothing awaited in between.
-        void Kick(SegmentRequest request, string? contextProviderKey = null) =>
-            pendingRenders.Add((request, tts.RenderAsync(request, ct), contextProviderKey, true, null));
-
-        // SPEC F110.2 (STORY-301, PLAN T232) — the pool-first sibling of Kick: no render to start,
-        // but the SAME ordering guarantee every other segment gets. The render-await loop below
-        // enqueues buffer items strictly in Kick/KickResolved CALL order (never completion order —
-        // see that loop's own remarks), which is what keeps a pool-first ident from ever jumping
-        // ahead of a back-announce or behind a lead-in Kicked on either side of it. An already-
-        // completed Task stands in for the (nonexistent) render, so Task.WhenAny below resolves it
-        // instantly, no render-budget delay spent on an item that never needed one.
-        void KickResolved(SegmentRequest request, MediaItem item) =>
-            pendingRenders.Add((request, Task.FromResult<MediaItem?>(item), null, false, null));
-
-        // SPEC F127.1/.7/.8/.9 (STORY-329, PLAN T287) — the crosstalk vend attempt: gated on THREE
-        // conditions (see this class's own "Crosstalk" remarks above for why the third exists) — next
-        // is not null (an ordinary music unit; gh-#300's ceremony-only call passes null), drainAsOf is
-        // null (excludes the straddle branch's own forced-ahead SignOff drain — the only OTHER caller
-        // that sets it), AND CeremonyDrainsThisBreak() is false. The third is a PEEK, not a structural
-        // exclusion like the first two: a SignOff/SignOn already due (or overdue) never gets a
-        // BoundaryFitPlan at all, so the first two conditions alone never see it, yet it still drains a
-        // few lines below via the ordinary TryDequeueDue(drainNow) call regardless (SPEC F127.8 review
-        // F2). Decided BEFORE step 1 below, never after: SPEC F127.9's supersede must already be known
-        // before this SAME unit's BackAnnounce/LeadIn requests are built, a few lines down.
-        var vendedCrosstalk = next is not null && drainAsOf is null && !CeremonyDrainsThisBreak()
-            ? TryVendCrosstalkForThisBreak()
-            : null;
-        var crosstalkAiredThisBreak = vendedCrosstalk is not null;
-
-        // SPEC F127.8 review F2 — mirrors SpeechDeferralQueue.TryDequeueDue's own Due/NotBefore
-        // eligibility check (its Pass 1) for exactly the two handoff kinds ever drained here
-        // (SignOff/SignOn), without dequeuing anything: true when either would ACTUALLY leave the
-        // queue at THIS SAME unit's own drain, a few lines below (drainAsOf ?? now — collapses to
-        // plain "now" on every path that reaches this branch, since the caller above already proved
-        // drainAsOf is null before ever calling this). The hold parameter TryDequeueDue itself takes is
-        // never consulted here: hold is non-null ONLY together with a non-null drainAsOf (the straddle
-        // branch), which the caller's own drainAsOf-is-null check already excludes before this runs.
-        bool CeremonyDrainsThisBreak()
-        {
-            var realNow = timeProvider.GetUtcNow();
-            var drainNow = drainAsOf ?? realNow;
-            return WouldDrainAt(deferralQueue.Peek(SpeechDeferralKind.SignOff), drainNow, realNow)
-                || WouldDrainAt(deferralQueue.Peek(SpeechDeferralKind.SignOn), drainNow, realNow);
-        }
-
-        static bool WouldDrainAt(SpeechDeferral? deferral, DateTimeOffset drainNow, DateTimeOffset realNow) =>
-            deferral is not null
-            && deferral.Due <= drainNow
-            && (deferral.NotBefore is not { } notBefore || notBefore <= realNow);
-
-        // Local to this method (mirrors Kick/KickResolved's own placement one function up) —
-        // CrosstalkPlanner.TryVend is pure, in-memory, synchronous state; there is no render to await,
-        // so nothing here needs async. The failure-path delete this integration owns (PLAN T287
-        // rider): TryVend has ALREADY removed exchange from stock the instant it hands it back, so a
-        // vanished asset (deleted out of band, or a race with a fresh CrosstalkStockWorker's own
-        // startup purge) must not silently leak.
-        StockedCrosstalkExchange? TryVendCrosstalkForThisBreak()
-        {
-            if (crosstalkPlanner is null) return null;
-            if (scheduleResolver?.TryGetCurrent() is not { Segment: { } hostBlock, Show: { Slug.Length: > 0 } show })
-                return null;
-            if (scheduleResolver.TryGetCurrentWeekSnapshot() is not { } week) return null;
-            if (crosstalkPlanner.TryVend(show.Slug, hostBlock, week) is not { } exchange) return null;
-
-            if (!File.Exists(exchange.AssetPath))
-            {
-                crosstalkPlanner.DiscardUnaired(exchange, "asset missing at vend");
-                return null;
-            }
-
-            return exchange;
-        }
-
-        // 1. Back-announce for the previous track
-        if (cadence.BackAnnounceAfterEachTrack && prev is not null)
-        {
-            var (voice, personaName) = await ResolvePersonaAsync(identity.Voice, ct);
-            var req = new SegmentRequest(
-                SegmentKind.BackAnnounce,
-                voice,
-                identity.Name,
-                prev,
-                StationLocalNow(),
-                identity.Id,
-                personaName)
-            {
-                CrosstalkAiredThisBreak = crosstalkAiredThisBreak,
-            };
-            Kick(req);
-        }
-
-        // 1.5. Crosstalk banter (SPEC F127.1/.6/.11, STORY-329, PLAN T287) — one cached asset the
-        // feeder treats as a normal item (SPEC F66.1's shape, exactly like a pool-first StationId
-        // ident's own KickResolved precedent): no render, the exchange was already fully mixed and
-        // measured ahead of air (T284/T286's off-clock generation). Kicked AFTER the back-announce and
-        // BEFORE the station-id/lead-in steps below, so it airs as this break's own mid-block color:
-        // the outgoing track's back-announce, then banter, then whatever imaging/lead-in follows.
-        //
-        // MediaItem presentation (build-time decision, T287): Title is the STATION name and Artist is
-        // "unitDjName ?? identity.Name" — the SAME shape every other TTS-kind segment already presents
-        // (TtsSegmentSource.RenderAsync's own Title/Artist stamp) — never the neighbor persona's name,
-        // which would be a NEW disclosure the spectator now-playing surface has never carried for any
-        // kind. DjName is the unit's own on-air host persona (unitDjName) — the host's own voice opens
-        // the exchange (SPEC F127.2), so Now Playing attribution stays exactly what the rest of this
-        // unit already carries; the neighbor voice is audible on air but never a NEW distinct
-        // attribution field (F127.11's own booth-log stamp, not the spectator surface, is where "who
-        // else spoke" is answerable). MediaId keeps the tts: prefix (excluded from the recent-ids list
-        // the SAME way every other TTS segment already is, SPEC F12.6) even though it is not a
-        // TtsSegmentSource cache key — the asset's own filename (a GUID, CrosstalkAssembler.AssembleAsync)
-        // is unique per exchange, so no second id-uniqueness scheme is needed.
-        if (vendedCrosstalk is { } exchangeToAir)
-        {
-            var crosstalkMediaId = $"tts:crosstalk:{Path.GetFileNameWithoutExtension(exchangeToAir.AssetPath)}";
-            var crosstalkRequest = new SegmentRequest(
-                SegmentKind.Crosstalk,
-                identity.Voice,
-                identity.Name,
-                null,
-                StationLocalNow(),
-                identity.Id,
-                PersonaName: unitDjName);
-            var crosstalkItem = new MediaItem(
-                crosstalkMediaId, exchangeToAir.AssetPath, identity.Name, exchangeToAir.Loudness,
-                Artist: unitDjName ?? identity.Name, Cue: exchangeToAir.Cue, DurationMs: exchangeToAir.DurationMs,
-                DjName: unitDjName, SegmentKind: SegmentKind.Crosstalk)
-            {
-                CrosstalkScript = exchangeToAir.Script,
-            };
-            crosstalkPlanner?.MarkVended(crosstalkMediaId, exchangeToAir);
-            KickResolved(crosstalkRequest, crosstalkItem);
-        }
-
-        // 1.75. Owner announcements (SPEC F144.1/F144.2, STORY-358, PLAN T341) — up to
-        // AnnouncementVendCap oldest deliverable, atomically claimed the moment this unit decides to
-        // vend them (pending -> claimed, IAnnouncementSource's own SQL), placed after the
-        // back-announce and before the lead-in (F144.1) — Kicked here, after crosstalk, before the
-        // station-id/lead-in steps below, the SAME slot crosstalk's own remarks describe one step up.
-        // A null announcementSource OR announcementRenderer (no Host wiring, or a pre-T341
-        // construction site) makes this whole step a permanent no-op — the crosstalkPlanner
-        // precedent. See this class's own remarks for the full feature (privacy, voice validation,
-        // the id-in-MediaId carry).
-        //
-        // CADENCE-INDEPENDENT (T341 review ruling): this step runs on EVERY unit, gated only on the
-        // two seams being wired — unlike the back-announce/station-id/lead-in steps around it, no
-        // CadenceConfig knob can turn it off or on, so "after the back-announce" degrades to "same
-        // slot in unit order" when the cadence airs no back-announce at all, and the vend also runs
-        // on the ceremony-only unit path. An owner's message must never be hostage to a cadence flag.
-        if (announcementSource is { } source && announcementRenderer is { } renderer)
-        {
-            async Task<MediaItem?> RenderAnnouncementAsync(SegmentRequest announcementRequest, AnnouncementItem announcement)
-            {
-                // SPEC F144.3/F144.4 (STORY-358, PLAN T342) — THE FALLBACK LAW, in one `??`:
-                // Verbatim:false attempts the flavored path FIRST, through the dedicated
-                // IAnnouncementCopyWriter seam (never tts/ISegmentCopyWriter — see this class's own
-                // remarks); ANY failure there (feature dark, a disabled/unreachable LLM, a blown
-                // render budget, or the F138.4 ladder exhausting on either a fabrication or the F144.3
-                // containment check) resolves to null, and the owner's own verbatim message airs
-                // instead. Verbatim:true skips the attempt entirely — the owner asked for their own
-                // unflavored words.
-                var flavoredText = announcement.Verbatim
-                    ? null
-                    : await ResolveFlavoredAnnouncementCopyAsync(announcementRequest, announcement.Message, ct);
-
-                // FreshPerAiring: true is THE contract TtsSegmentSource's own drop guard pins (SPEC
-                // F144.2/F144.4, the T338 review carry-forward): per-announcement owner text — flavored
-                // or verbatim alike — is fresh by definition (the operator's own words, or the active
-                // persona's own in-character rendering of them, never a templated fixed phrase) and
-                // must land in the swept blurbs/ dir, never the forever-cache.
-                var copy = new SegmentCopy(flavoredText ?? announcement.Message, FreshPerAiring: true);
-                var rendered = await renderer.RenderAsync(announcementRequest, copy, ct);
-
-                // The announcement id rides the rendered segment's own MediaId (SPEC F144.1's carry
-                // requirement) rather than a new member on SegmentRequest/MediaItem — see
-                // AnnouncementMediaId's own remarks for why, and for T343's own lookup this enables.
-                return rendered is { } item
-                    ? item with { MediaId = AnnouncementMediaId.Wrap(announcement.Id, item.MediaId) }
-                    : null;
-            }
-
-            void KickAnnouncement(AnnouncementItem announcement, string voice)
-            {
-                var req = new SegmentRequest(
-                    SegmentKind.Announcement, voice, identity.Name, null, StationLocalNow(), identity.Id);
-                pendingRenders.Add((req, RenderAnnouncementAsync(req, announcement), null, true, announcement.Id));
-            }
-
-            var deliverable = await ClaimAnnouncementsAsync(source, ct);
-            foreach (var announcement in deliverable)
-            {
-                var voice = await ResolveAnnouncementVoiceAsync(announcement.RequestedVoice, identity.Voice, ct);
-                KickAnnouncement(announcement, voice);
-            }
-        }
-
-        // 2. Station ID every N units (checked BEFORE incrementing unitCount). unitCount > 0 joins
-        // the guard (SPEC F42.1, STORY-136, closes gitea-#216): the FIRST station ID airs only once N
-        // units have elapsed, never at boot — unitCount == 0 % N == 0 used to fire on the very
-        // first unit, which is exactly the boot-blast this guard now excludes.
-        //
-        // The trigger no longer builds the segment itself (SPEC F74.1/F74.2, STORY-197): it
-        // enqueues a deferral, and the drain immediately below picks it up in this SAME boundary
-        // pass (see class remarks for why that is still "never mid-track"). Supersede (F74.2) is
-        // the queue's job, not this check's — a second same-kind enqueue before the next drain
-        // would simply replace this one.
-        // next is null on gh-#300's ceremony-only unit — see this method's own param remarks for why
-        // an ident must not be triggered by a unit that plans no music.
-        if (next is not null
-            && cadence.StationIdEveryNUnits > 0
-            && unitCount > 0
-            && unitCount % cadence.StationIdEveryNUnits == 0)
-        {
-            deferralQueue.Enqueue(SpeechDeferralKind.StationId, "cadence: Station:Cadence:StationIdEveryNUnits");
-        }
-
-        // 2.25. Ad cadence every N units (SPEC F158.3, STORY-388, PLAN T397) — the StationId
-        // trigger's own twin, one field up: SAME unitCount > 0 boot-guard, SAME "enqueue a deferral,
-        // let the drain immediately below pick it up" shape (F74.1/F74.2's queue-not-inline
-        // discipline applies here too). Read into a local ONCE — never adCadenceProvider.Current
-        // twice — and reuse it for both the guard and the divisor: a second, independent read here
-        // could race a live Station:Ads:EveryNUnits reload between the two (5 -> 0), turning
-        // `unitCount % adCadenceProvider.Current` into a DivideByZeroException the guard just
-        // proved wouldn't happen. SpeechDeferralKind.Ad is declared LAST in that enum specifically
-        // so its own Kind tiebreak sorts AFTER StationId whenever both fire on the exact same
-        // instant (the common case: both triggers enqueue with Due = now on THIS unit) — see that
-        // enum member's own remarks for why that, not enqueue-call order, is what actually orders
-        // the drain "ident → spot".
-        var adEveryNUnits = adCadenceProvider.Current;
-        if (next is not null
-            && adEveryNUnits > 0
-            && unitCount > 0
-            && unitCount % adEveryNUnits == 0)
-        {
-            deferralQueue.Enqueue(SpeechDeferralKind.Ad, "cadence: Station:Ads:EveryNUnits");
-        }
-
-        // Drain every deferral due at this boundary — BEFORE the handoff producer below runs (T124
-        // review finding). Reads the SAME injected clock GetNextAsync compares NextDue against
-        // (SPEC F74.3) — one clock for both halves of this seam, never a mix of a real and a fake
-        // one. Written for ANY due deferral, including one enqueued several units ago (SPEC
-        // F74.1 — "regardless of wall-clock slip"). Hoisted into a local (T224) so the
-        // SpeechDeferralKind.Context arm's own freshness re-check below compares against the EXACT
-        // same instant the dequeue decision itself was made against, rather than a second, later
-        // clock read.
-        var drainNow = drainAsOf ?? timeProvider.GetUtcNow();
-        foreach (var deferral in deferralQueue.TryDequeueDue(
-            drainNow, hold, queuedAhead, timeDateStaleBudget,
-            onExpired: (expiredDeferral, lateness) => LogTimeDateExpiry(expiredDeferral, lateness, timeDateStaleBudget)))
-        {
-            switch (deferral.Kind)
-            {
-                case SpeechDeferralKind.StationId:
-                {
-                    // SPEC F110.2 (STORY-301, PLAN T232) — pool-first: an authored station_id row
-                    // from the operator's own imaging collection airs ahead of the templated TTS
-                    // ident whenever one is ready. The DB call happens HERE, at drain time inside
-                    // this render-ahead section — the SAME discipline exception T224 ruled for the
-                    // Context arm's persona-id lookup two cases down: a genuine catalog round trip
-                    // rather than the fast per-unit accessor read every other kind gets, safe
-                    // because a drain only ever runs at a boundary (SPEC F74.1 — never mid-track).
-                    // A null catalog (no IMediaCatalog wired — an older host, or a test double that
-                    // never scripts one) skips the pool outright, same as a genuinely empty one.
-                    //
-                    // SPEC F117.2 (STORY-309, PLAN T250) — the on-air show, read via the SAME
-                    // CachingScheduleResolver.TryGetCurrent() synchronous snapshot
-                    // OnAirPersonaAccessor's own hot path already trusts: no extra store round trip,
-                    // and a null scheduleResolver or a not-yet-warm cache both degrade to "no show" —
-                    // exactly the branch below that keeps this arm byte-identical to F110.2. Read
-                    // ONCE into a local, never twice: the Id handed to the pool query below and the
-                    // Name that may decide the templated floor further down must describe the SAME
-                    // on-air show, not two snapshots straddling a boundary flip.
-                    var currentShow = scheduleResolver?.TryGetCurrent()?.Show;
-
-                    // The pool query itself now carries the WHOLE show-scope preference ladder
-                    // (MediaRepository.GetRandomReadyByImagingKindAsync's own remarks, T250):
-                    // show-scoped rows win when currentShow is set, the station-wide (unscoped) pool
-                    // is the fallback, and a foreign-show row is never a candidate — currentShow?.Id
-                    // is exactly "no show" (null) on the F110.2 path this arm has always had.
-                    var pooled = catalog is null
-                        ? null
-                        : await catalog.GetRandomReadyByImagingKindAsync(
-                            scopeProvider.Current, ImagingKind.StationId, currentShow?.Id, ct);
-                    var stationIdReq = BuildStationIdRequest(identity);
-                    if (pooled is not null)
-                    {
-                        KickResolved(stationIdReq, BuildPooledStationIdItem(pooled));
-                        break;
-                    }
-
-                    // SPEC F117.2 — the templated show line is the floor for a show with no ready
-                    // pool row at all (scoped or station-wide): the SAME SegmentKind.StationId
-                    // request, ShowName additionally stamped, so PatterTemplateRenderer's StationId
-                    // arm renders "You're listening to {show} on {station}." instead of the plain
-                    // ident — station-voiced, zero LLM, forever-cached exactly like every other
-                    // StationId render (BuildStationIdRequest's own remarks), no new SegmentKind
-                    // needed. currentShow null (no show on the air) falls straight through to the
-                    // ORIGINAL plain ident — byte-identical to F110.2, the required outside-show
-                    // posture.
-                    Kick(ShowIdentRequest.For(stationIdReq, currentShow));
-                    break;
-                }
-
-                case SpeechDeferralKind.Ad:
-                {
-                    // SPEC F158.2/F158.3 (STORY-388, PLAN T397) — the vend IS the whole segment: a
-                    // pre-rendered MediaItem, zero render at air, routed through KickResolved exactly
-                    // like the pool-first StationId item above (the SAME buffer-ordering guarantee,
-                    // so an ad can never jump ahead of a back-announce Kicked earlier this unit, nor
-                    // behind the lead-in Kicked below). A throwing vend is caught HERE, at this
-                    // seam's own boundary — never letting an IAdSpotVend fault this whole unit — and
-                    // logged WARN with no ad this break (F158.3's own "never a failed unit" contract);
-                    // AdSpotPipeline itself already never throws (every source's own exception is
-                    // WARN-skipped inside the pipeline), but this drain arm does not assume today's
-                    // one implementation is the only one that will ever back this seam.
-                    //
-                    // Review fold: SegmentKind is stamped HERE, defensively, on the vended item
-                    // itself (the SAME `with` expression BuildPooledStationIdItem uses one arm up) —
-                    // never trusted from the vend alone. AdSpotPipeline's own floor
-                    // (LibraryAdSpotSource) already stamps it, but IAdSpotVend is a seam a future
-                    // second implementation (a plugin-backed source, or a different pipeline) could
-                    // back too; an unstamped item reaching this line would silently miss the
-                    // render-await loop's own DjName carve-out (`kind is SegmentKind.StationId or
-                    // Announcement or Ad`) below — a booth-log/now-playing honesty gap, not a
-                    // playability one (SPEC F158.4's own DB-level rotation fence is enforced at the
-                    // SQL layer regardless of what this in-memory stamp holds).
-                    MediaItem? spot;
-                    try
-                    {
-                        spot = await adSpotVend.GetNextSpotAsync(ct).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
-                    {
-                        throw; // Caller cancellation, not a vend fault.
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogWarning(
-                            ex, "Ad spot vend threw {ExceptionType}; no ad this break (SPEC F158.3)",
-                            ex.GetType().Name);
-                        spot = null;
-                    }
-
-                    if (spot is null)
-                    {
-                        // F158.3: a null answer is a normal day, one INFO — never a WARN. An empty
-                        // Ads library (or no AddGenWaveAds wiring at all, the NoOpAdSpotVend default)
-                        // is not an error.
-                        logger.LogInformation(
-                            "No ad spot available this break — the ads library is empty or has " +
-                            "nothing ready (SPEC F158.3).");
-                        break;
-                    }
-
-                    KickResolved(BuildAdRequest(identity), spot with { SegmentKind = SegmentKind.Ad });
-                    break;
-                }
-
-                case SpeechDeferralKind.SignOff:
-                case SpeechDeferralKind.SignOn:
-                    // SPEC F92.2 (PLAN T124): built from the deferral's OWN captured HandoffContext —
-                    // NEVER a fresh ResolvePersonaAsync/accessor read here — see HandoffContext's own
-                    // remarks for why (a piece can drain after the wall clock has already flipped past
-                    // the boundary, when the accessor would answer with the WRONG persona). A deferral
-                    // of this kind is never enqueued without one (EnqueueHandoffCeremonyAsync always
-                    // supplies it) — the null-check below is defensive only.
-                    if (deferral.Handoff is not { } handoff) break;
-                    Kick(BuildHandoffRequest(deferral.Kind, handoff, identity));
-                    break;
-
-                case SpeechDeferralKind.TimeDate:
-                {
-                    // SPEC F110.3 (STORY-302, PLAN T232) — the clock-anchored time announcement:
-                    // always the templated rung (TimeDate is not one of LlmCopyWriter.IsLlmAuthored's
-                    // kinds, so there is no LLM rung above it to miss). See BuildTimeDateRequest's
-                    // own remarks for why the hour comes from the deferral's Due, not StationLocalNow.
-                    //
-                    // SPEC F141.2 (STORY-355, PLAN T326) — the honesty classification: the SAME
-                    // SpeechDeferralQueue.AirTimeLateness formula TryDequeueDue's own budget-expiry
-                    // check uses (real now plus already-queued runtime, minus the armed hour; the
-                    // shared static, not a re-typed copy — review advisory, connascence of algorithm),
-                    // read fresh here rather than reused from drainNow — a straddle/ceremony caller may
-                    // have forced drainNow ahead of real time, and a forced-forward "now" must never
-                    // make a genuinely punctual TimeDate read as late (the identical reason that queue
-                    // method's own remarks give for checking its expiry budget against real wall-clock
-                    // time, never the caller's now). Always OnTime or Late here: a deferral this stale
-                    // never reaches this arm at all — TryDequeueDue's own expiry check above already
-                    // dropped it, unchanged by this feature (SPEC F141.3/F124.4).
-                    var timeDateLateness = SpeechDeferralQueue.AirTimeLateness(
-                        timeProvider.GetUtcNow(), queuedAhead, deferral.Due);
-                    var timeDateFreshness = timeDateLateness > TimeDateHonestyThreshold
-                        ? TimeAnnouncementFreshness.Late
-                        : TimeAnnouncementFreshness.OnTime;
-                    Kick(BuildTimeDateRequest(deferral, identity, timeDateFreshness));
-                    break;
-                }
-
-                case SpeechDeferralKind.Context:
-                {
-                    var built = await BuildContextSegmentRequestAsync(deferral, identity, drainNow, ct);
-                    if (built is { } b) Kick(b.Request, b.ProviderKey);
-                    break;
-                }
-            }
-        }
-
-        // 2.5. Handoff ceremony producer (SPEC F92.1-F92.6, STORY-243, PLAN T124) — runs every unit,
-        // independent of the cadence config above, AFTER the drain just above (T124 review finding):
-        // the moment the wall clock reaches an already-armed boundary, the resolver's own "current
-        // segment" flips to the INCOMING one, which makes the NEXT boundary (that new segment's own
-        // end) look far away and out of window — evaluating this producer first would clear the very
-        // SignOff/SignOn the drain above was about to fire, the instant they became due. Draining
-        // first, then arming/clearing for what comes next, means an already-due ceremony always gets
-        // its chance to air before this producer ever re-evaluates the (now different) boundary
-        // ahead. See the method's own remarks for the F92.3 dedupe rules and the window-exit clear.
-        await EnqueueHandoffCeremonyAsync(identity.Voice, ct);
-
-        // 3. Lead-in for the next track — skipped entirely on a ceremony-only unit (gh-#300): there
-        // is no next track to introduce, and the sign-on's own copy is the handoff's lead-in.
-        if (next is not null && cadence.LeadInBeforeEachTrack)
-        {
-            var (voice, personaName) = await ResolvePersonaAsync(identity.Voice, ct);
-            var req = new SegmentRequest(
-                SegmentKind.LeadIn,
-                voice,
-                identity.Name,
-                next,
-                StationLocalNow(),
-                identity.Id,
-                personaName)
-            {
-                CrosstalkAiredThisBreak = crosstalkAiredThisBreak,
-            };
-            Kick(req);
-        }
-
-        // Await each render with the budget; skip any that time out, fault, or return null. A
-        // handoff-kind (SignOff/SignOn) drop additionally logs a WARN + booth-log entry (SPEC F92.4);
-        // a ContextSegment drop logs a WARN only, no booth-log entry (SPEC F107.6, PLAN T224 — the
-        // F107 epic has no booth-log-drop event of its own, and this drop is expected, ordinary
-        // skip-never-silence operation rather than the handoff ladder's own two-piece degrade); every
-        // OTHER kind's drop stays the pre-existing silent skip (StationId today). Classified from the
-        // COMPLETED task's own state below, never from which race member <c>Task.WhenAny</c> named
-        // the winner (T124 review finding F6): <c>Task.WhenAny</c> completes successfully the moment
-        // EITHER task completes, fault or not — it never throws or otherwise signals "the winner
-        // faulted," so a ternary keyed on "did renderTask win the race" mislabeled every synth outage
-        // that happened to beat the budget delay as "render returned null" instead of "render
-        // faulted".
-        foreach (var (request, renderTask, contextProviderKey, observeDuration, announcementId) in pendingRenders)
-        {
-            var kind = request.Kind;
-            // The budget delay rides the injected timeProvider (gh-#554) — behavior-identical under
-            // TimeProvider.System, but it lets a spec drive this race off a fake clock's due-order
-            // instead of wall-clock timer scheduling, which full-suite load contention can skew.
-            var winner = await Task.WhenAny(renderTask, Task.Delay(renderBudget, timeProvider, ct));
-
-            if (winner != renderTask)
-            {
-                if (kind is SegmentKind.SignOff or SegmentKind.SignOn)
-                    LogHandoffDrop(kind, "render budget exceeded");
-                else if (kind == SegmentKind.ContextSegment)
-                    LogContextSegmentDrop(contextProviderKey, "render budget exceeded");
-                else if (kind == SegmentKind.Announcement)
-                    LogAnnouncementDrop(announcementId, "render budget exceeded");
-                continue; // timed out — the still-running render is left unawaited, unchanged behavior
-            }
-
-            if (renderTask.IsCompletedSuccessfully && renderTask.Result is { } seg)
-            {
-                // gh-#253: feed the MEASURED duration (F66.1's cue-derived stamp — null when cue
-                // analysis failed, in which case nothing is observed: never fabricated) back into
-                // the estimation seam, keyed by the request's own kind/persona/voice — and, as of
-                // SPEC F117.2 (PLAN T250 review finding F1), request.ShowName too, so the Exact tier's
-                // (voice, show) memo never lets a show-branded StationId render's duration stand in
-                // for a DIFFERENT show's (or the plain ident's) airing under the SAME voice. ShowName
-                // is null for every non-StationId kind and for a showless/pool-served StationId
-                // airing, which the estimator treats as its own (voice, null) bucket — byte-identical
-                // to pre-F117 behavior for every one of those. The historical tier self-improves with
-                // every segment that actually rendered. observeDuration is false only for a
-                // KickResolved pool-first item (SPEC F110.2, PLAN T232) — see pendingRenders' own
-                // remarks for why that duration must not join this bucket.
-                if (observeDuration && seg.DurationMs is int measuredMs)
-                    patterEstimator.ObserveRendered(
-                        kind, request.PersonaName, request.Voice, TimeSpan.FromMilliseconds(measuredMs), request.ShowName);
-
-                // gh-#259: a station ID keeps the station's CREDIT (Artist, gh-#96 untouched) but
-                // still airs inside the unit's show — stamp the unit persona so Now Playing
-                // attribution never flickers to "no DJ" for a few seconds of imaging mid-show.
-                // Every other kind already carries its own speaker's name from TtsSegmentSource
-                // (SegmentRequest.PersonaName — the handoff kinds' outgoing/incoming included).
-                // Announcement (SPEC F144.1, PLAN T341) joins this SAME carve-out for the SAME
-                // reason: it has no DJ of its own either (the station voice, or the owner's own
-                // requested voice — never a persona identity), yet still airs inside the unit's show.
-                // Ad (SPEC F158.2/F158.3, PLAN T397) joins on the identical reasoning one more time:
-                // it is imaging, not DJ content (F161.4), yet still airs inside the unit's show.
-                if (kind is SegmentKind.StationId or SegmentKind.Announcement or SegmentKind.Ad)
-                    seg = seg with { DjName = unitDjName };
-                buffer.Enqueue(seg);
-            }
-            else if (kind is SegmentKind.SignOff or SegmentKind.SignOn)
-            {
-                LogHandoffDrop(kind, renderTask.IsFaulted ? "render faulted" : "render returned null");
-            }
-            else if (kind == SegmentKind.ContextSegment)
-            {
-                LogContextSegmentDrop(contextProviderKey, renderTask.IsFaulted ? "render faulted" : "render returned null");
-            }
-            else if (kind == SegmentKind.Announcement)
-            {
-                LogAnnouncementDrop(announcementId, renderTask.IsFaulted ? "render faulted" : "render returned null");
-            }
-            // else: renderTask completed with a null segment → silently skip (every other kind)
-        }
-    }
-
-    /// <summary>
-    /// The ONE <see cref="SegmentKind.StationId"/> request shape (SPEC F110.2): station's own voice
-    /// and credit, never the active persona's — real-radio convention, the ID is the brand speaking,
-    /// not the DJ. Deliberately no <see cref="ResolvePersonaAsync"/> here (LeadIn/BackAnnounce stay
-    /// persona-voiced), and deliberately not solved by touching <c>Station:Persona:ActiveId</c> — a
-    /// future multi-DJ scheduler slots personas in and out, and imaging must stay the station's voice
-    /// regardless of who is in the chair. <see cref="SegmentRequest.PersonaName"/> stays null so the
-    /// airing credits the station (<c>TtsSegmentSource</c>: <c>Artist = PersonaName ?? StationName</c>).
-    ///
-    /// <para>
-    /// Serves BOTH StationId rungs, not just the templated fallback its pre-F110 name implied: a
-    /// direct <c>Kick</c> for the templated TTS ident (the TTS cache key contains the voice, so a
-    /// live <c>Station:Voice</c> edit re-keys and re-renders it at its next slot with no regen
-    /// tooling), or <c>KickResolved</c>'s classification tag for a pool-first authored item (SPEC
-    /// F110.2, PLAN T232) — the render-await loop below reads only this request's own <c>Kind</c>
-    /// off a resolved item, so the SAME shape serves as an honest, non-garbage tag rather than
-    /// inventing a second one.
-    /// </para>
-    ///
-    /// <para>
-    /// SPEC F117.2 (STORY-309, PLAN T250) — the StationId drain arm passes this SAME shape through
-    /// <see cref="ShowIdentRequest.For"/> for the templated show-line floor, never a second
-    /// request-builder: <see cref="SegmentRequest.ShowName"/> is additive and <see langword="null"/>
-    /// here, so a null on-air show keeps producing the original plain-ident request unchanged.
-    /// </para>
-    /// </summary>
-    SegmentRequest BuildStationIdRequest(StationIdentity identity) =>
-        new(
-            SegmentKind.StationId,
-            identity.Voice,
-            identity.Name,
-            null,
-            StationLocalNow(),
-            identity.Id,
-            PersonaName: null);
-
-    /// <summary>
-    /// SPEC F110.2 (STORY-301, PLAN T232) — the pool-first rung: an authored <c>station_id</c> row
-    /// airs verbatim, no TTS render involved. <see cref="MediaReferenceExtensions.ToMediaItem"/>'s
-    /// own 12-arg mapping never sets <see cref="MediaItem.SegmentKind"/> (its only OTHER production
-    /// caller is the music pick, where a null SegmentKind is correct) — a <c>with</c> expression
-    /// stamps it honestly here instead of silently leaving the F113 booth-log stamp off an ident that
-    /// plainly has one. <see cref="MediaItem.DjName"/> (gh-#259) is deliberately NOT stamped here:
-    /// this item is routed through <c>KickResolved</c>, so the render-await loop's own
-    /// <c>if (kind == SegmentKind.StationId) seg = seg with { DjName = unitDjName };</c> line stamps
-    /// it at the exact same point the templated fallback's own render result would have — one
-    /// stamping site for both rungs, never two copies of the same rule.
-    /// </summary>
-    static MediaItem BuildPooledStationIdItem(MediaReference pooled) =>
-        pooled.ToMediaItem() with { SegmentKind = SegmentKind.StationId };
-
-    /// <summary>
-    /// SPEC F158.2/F158.3 (STORY-388, PLAN T397) — the ONE <see cref="SegmentKind.Ad"/> request
-    /// shape, the <see cref="BuildStationIdRequest"/> precedent one member up: station's own voice
-    /// and credit, never the active persona's (an ad is imaging, not DJ content — F161.4's own
-    /// "parody spots are visibly station content" ruling). Deliberately no
-    /// <see cref="ResolvePersonaAsync"/> call. Every field past <see cref="SegmentRequest.Kind"/>
-    /// goes unread by the render-await loop below — this request is routed through
-    /// <c>KickResolved</c>, whose loop reads only <c>Kind</c> off a resolved item (the SAME "honest,
-    /// non-garbage tag" posture <see cref="BuildStationIdRequest"/>'s own remarks describe for its
-    /// pool-first rung).
-    /// </summary>
-    SegmentRequest BuildAdRequest(StationIdentity identity) =>
-        new(
-            SegmentKind.Ad,
-            identity.Voice,
-            identity.Name,
-            null,
-            StationLocalNow(),
-            identity.Id,
-            PersonaName: null);
-
-    /// <summary>
-    /// Builds a <see cref="SegmentKind.SignOff"/>/<see cref="SegmentKind.SignOn"/> request from the
-    /// deferral's own captured <paramref name="handoff"/> (SPEC F92.2, PLAN T124) — see
-    /// <see cref="HandoffContext"/>'s own remarks for why this is never a fresh
-    /// <see cref="ResolvePersonaAsync"/>/accessor read. <see cref="HandoffContext.CrossingTrackTitle"/>/
-    /// <see cref="HandoffContext.CrossingTrackArtist"/> (SPEC F111.3, PLAN T235) ride straight across
-    /// onto <see cref="SegmentRequest.CrossingTrackTitle"/>/<see cref="SegmentRequest.CrossingTrackArtist"/>
-    /// — null for every non-straddle piece, exactly like every other optional field here.
-    /// <see cref="HandoffContext.ShowName"/>/<see cref="HandoffContext.ShowFlavor"/>/
-    /// <see cref="HandoffContext.CounterpartShowName"/> (SPEC F116.2, PLAN T248) ride across the same
-    /// way, onto <see cref="SegmentRequest.ShowName"/>/<see cref="SegmentRequest.ShowFlavor"/>/
-    /// <see cref="SegmentRequest.CounterpartShowName"/>.
-    /// </summary>
-    SegmentRequest BuildHandoffRequest(SpeechDeferralKind kind, HandoffContext handoff, StationIdentity identity)
-    {
-        var handoffKind = kind == SpeechDeferralKind.SignOff ? SegmentKind.SignOff : SegmentKind.SignOn;
-        return new SegmentRequest(
-            handoffKind,
-            handoff.Voice,
-            identity.Name,
-            null,
-            StationLocalNow(),
-            identity.Id,
-            handoff.PersonaName,
-            handoff.CounterpartName,
-            CrossingTrackTitle: handoff.CrossingTrackTitle,
-            CrossingTrackArtist: handoff.CrossingTrackArtist,
-            ShowName: handoff.ShowName,
-            ShowFlavor: handoff.ShowFlavor,
-            CounterpartShowName: handoff.CounterpartShowName);
-    }
 
     /// <summary>
     /// SPEC F111.3 (PLAN T235) — captures the crossing track's title/artist into the HELD SignOn's own
@@ -1907,108 +1174,6 @@ public sealed class Orchestrator(
     }
 
     /// <summary>
-    /// SPEC F110.3 (STORY-302, PLAN T232) — the clock-anchored time announcement: templated,
-    /// station-voiced (<see cref="SegmentRequest.PersonaName"/> stays null, the StationId imaging
-    /// precedent), zero LLM (<c>TimeDate</c> is not one of <c>LlmCopyWriter.IsLlmAuthored</c>'s
-    /// kinds, so this always reaches <see cref="PatterTemplateRenderer"/> — there is no LLM rung
-    /// above it to miss). <see cref="SegmentRequest.LocalNow"/> carries <paramref name="deferral"/>'s
-    /// own <see cref="SpeechDeferral.Due"/> — the station-local top of the hour this announcement was
-    /// ARMED for — deliberately NOT <see cref="StationLocalNow"/>'s drain-time read: a drain landing
-    /// at 14:02 must still speak "two o'clock" (the 14:00 top), not whatever hour the wall clock
-    /// happens to read once the boundary is finally reached. <c>Due</c> is already a real,
-    /// correctly-offset instant (<see cref="WallClockInstantResolver.Resolve"/>, via
-    /// <c>ClockAnchoredImagingProducer</c>), so formatting it directly names the right station-local
-    /// hour with no second zone conversion here. This is also what makes SPEC F110.3's cache-hit
-    /// acceptance true: the SAME hour always renders the SAME text
-    /// (<see cref="PatterTemplateRenderer.Expand"/> reads only the hour component), so a second
-    /// drain within that hour hashes identically and hits the forever-cache
-    /// (<c>TtsSegmentSource</c>'s <c>FreshPerAiring=false</c> path) rather than re-synthesizing — the
-    /// SAME cache-hit reasoning holds for the late variant (SPEC F141.2) too, since the rendered TEXT
-    /// (not <paramref name="freshness"/> itself) is the cache key.
-    /// </summary>
-    /// <param name="freshness">
-    /// SPEC F141.2 (STORY-355, PLAN T326) — the caller's own honesty classification for this drain,
-    /// stamped verbatim onto <see cref="SegmentRequest.TimeDateFreshness"/>; never re-derived here.
-    /// </param>
-    static SegmentRequest BuildTimeDateRequest(
-        SpeechDeferral deferral, StationIdentity identity, TimeAnnouncementFreshness freshness) =>
-        new(
-            SegmentKind.TimeDate,
-            identity.Voice,
-            identity.Name,
-            null,
-            deferral.Due,
-            identity.Id,
-            PersonaName: null)
-        {
-            TimeDateFreshness = freshness,
-        };
-
-    /// <summary>
-    /// Builds the <see cref="SegmentKind.ContextSegment"/> request for a due
-    /// <see cref="SpeechDeferralKind.Context"/> <paramref name="deferral"/> (SPEC
-    /// F107.3/F107.6/F107.7, STORY-297, PLAN T224), or <see langword="null"/> when the drain-time
-    /// re-check finds nothing to build from — no captured content, a stale
-    /// <see cref="ContextSegmentFacts.FreshUntil"/>, or blank <see cref="ContextSegmentFacts.SegmentFacts"/> —
-    /// each logged at Information, naming the provider and cause (T224 review finding), never echoing
-    /// the provider's own facts (F108.3).
-    /// </summary>
-    async Task<(SegmentRequest Request, string ProviderKey)?> BuildContextSegmentRequestAsync(
-        SpeechDeferral deferral, StationIdentity identity, DateTimeOffset drainNow, CancellationToken ct)
-    {
-        // SPEC F107.3/F107.6 (STORY-297, PLAN T224): re-verify freshness HERE, at drain time — the
-        // payload was captured by the T226 ticker at ENQUEUE time (see SpeechDeferral.Context's own
-        // remarks), and the boundary this drain actually fires at can land well after that.
-        // Discriminator is always the originating provider's own Key for this kind (SpeechDeferral's
-        // own doc) — "(unknown)" is a defensive fallback only, never expected to appear in production.
-        var providerKey = deferral.Discriminator ?? "(unknown)";
-
-        if (deferral.Context is not { } content)
-        {
-            logger.LogInformation(
-                "Context segment for provider {ProviderKey} skipped at drain time: no " +
-                "content captured (SPEC F107.6).", providerKey);
-            return null;
-        }
-
-        if (content.FreshUntil <= drainNow)
-        {
-            logger.LogInformation(
-                "Context segment for provider {ProviderKey} skipped at drain time: stale " +
-                "(past FreshUntil) — music continues (SPEC F107.6).", providerKey);
-            return null;
-        }
-
-        // T222 ruling (F125.2 keeps it honest): a blank SegmentFacts should never actually reach
-        // here — ContextPipeline only ever constructs a ContextSegmentFacts from a non-empty window
-        // join — but the type itself guarantees nothing at construction time, so this stays a
-        // defense-in-depth guard rather than an assumed invariant.
-        if (string.IsNullOrWhiteSpace(content.SegmentFacts))
-        {
-            logger.LogInformation(
-                "Context segment for provider {ProviderKey} skipped at drain time: no " +
-                "segment facts (SPEC F107.6).", providerKey);
-            return null;
-        }
-
-        // SPEC F107.7 — Context:{Key}:PersonaId picks the voice; see this class's own remarks and
-        // ResolveContextSegmentVoiceAsync for the full resolution table.
-        var contextProviderSettings = contextSettings.For(providerKey);
-        var (contextVoice, contextPersonaName) = await ResolveContextSegmentVoiceAsync(
-            contextProviderSettings.PersonaId, providerKey, identity.Voice, ct);
-        var contextReq = new SegmentRequest(
-            SegmentKind.ContextSegment,
-            contextVoice,
-            identity.Name,
-            null,
-            StationLocalNow(),
-            identity.Id,
-            PersonaName: contextPersonaName,
-            ContextFacts: content.SegmentFacts);
-        return (contextReq, providerKey);
-    }
-
-    /// <summary>
     /// SPEC F92.1/F92.3 (STORY-243, PLAN T124): arms the two-piece handoff ceremony once
     /// <paramref name="scheduleResolver"/>'s resolved <c>OnAirSnapshot.BoundaryAt</c> enters
     /// <paramref name="boundaryBiasProvider"/>'s F74.3 lookahead window — the SAME window
@@ -2051,7 +1216,7 @@ public sealed class Orchestrator(
     /// </para>
     ///
     /// <para>
-    /// <b>Why <see cref="EnqueuePatterAsync"/> calls this AFTER the deferral drain, not before (T124
+    /// <b>Why <c>EnqueuePatterAsync</c> (now on <see cref="BreakPlanner"/>) calls this AFTER the deferral drain, not before (T124
     /// review finding):</b> the resolver's <c>OnAirSnapshot</c> is defined by wall-clock "now," so the
     /// instant "now" reaches an already-armed boundary, <c>ResolveAsync</c>'s own idea of the CURRENT
     /// segment flips to the INCOMING one — which makes the boundary THIS method would compute next
@@ -2303,7 +1468,7 @@ public sealed class Orchestrator(
     /// throws (F12.4): a null <paramref name="personaId"/> (no DJ on this side), an unwired
     /// <paramref name="personaStore"/>, a missing row (deleted out of band), or any store fault all
     /// degrade to <see langword="null"/>, which <see cref="EnqueueHandoffCeremonyAsync"/> treats as
-    /// "this half is music-only" (SPEC F92.3). Voice mirrors <see cref="ResolvePersonaAsync"/>'s own
+    /// "this half is music-only" (SPEC F92.3). Voice mirrors <c>ResolvePersonaAsync</c> (now on <see cref="BreakPlanner"/>)'s own
     /// empty-sentinel rule: the persona's own voice when set, else <paramref name="stationVoice"/>.
     /// </summary>
     async Task<(string Voice, string Name)?> ResolveHandoffPersonaAsync(
@@ -2405,38 +1570,10 @@ public sealed class Orchestrator(
             announcementId?.ToString(CultureInfo.InvariantCulture) ?? "(unknown)", cause);
 
     /// <summary>
-    /// SPEC F124.4 (PLAN T269) — the callback <see cref="EnqueuePatterAsync"/> wires into
-    /// <see cref="SpeechDeferralQueue.TryDequeueDue"/>'s own <c>onExpired</c> parameter (closing over
-    /// the SAME <c>timeDateStaleBudget</c> that call already threaded in — see that local's own
-    /// remarks): the ONE WARN a dropped, elapsed-due <see cref="SpeechDeferralKind.TimeDate"/> deferral
-    /// gets, naming the armed hour and the lateness PAST IT, distinctly from the budget it exceeded
-    /// (round-3 review finding F2 — the original wording mislabeled the lateness figure as "past the
-    /// budget", when it is actually the full lateness past <c>Due</c>; the budget is a SEPARATE
-    /// number, now stated separately rather than conflated with it). <paramref name="deferral"/>'s own
-    /// <see cref="SpeechDeferral.Due"/> is the armed hour — the SAME station-local top-of-hour instant
-    /// <see cref="BuildTimeDateRequest"/> would have spoken had this drain landed in time (see that
-    /// method's own remarks for why <c>Due</c>, never a drain-time clock read, names the hour).
-    /// <paramref name="lateness"/> is the air-time figure <see cref="SpeechDeferralQueue.TryDequeueDue"/>
-    /// already computed (<c>realNow + queuedAhead - Due</c>, never the naive wall-clock-only
-    /// difference); <paramref name="budget"/> is the live value that lateness was judged against. No
-    /// <see cref="events"/> publish and no music impact either way — this drop never blocks the next
-    /// hour's <see cref="SpeechDeferralQueue.EnqueueIfAbsent"/> re-arm (the T230-F1 keep-alive), it
-    /// simply speaks nothing this hour instead of an invented one (F124.4's own "idents are exempt, a
-    /// late time check is not" ruling — this callback only ever fires for
-    /// <see cref="SpeechDeferralKind.TimeDate"/>, by <see cref="SpeechDeferralQueue.TryDequeueDue"/>'s
-    /// own kind-scoped contract).
-    /// </summary>
-    void LogTimeDateExpiry(SpeechDeferral deferral, TimeSpan lateness, TimeSpan budget) =>
-        logger.LogWarning(
-            "TimeDate deferral armed for {ArmedHour:HH:mm} dropped undrained — {LatenessSeconds:F0}s " +
-            "past its armed hour (budget {BudgetSeconds:F0}s); a late time check would invent the hour.",
-            deferral.Due, lateness.TotalSeconds, budget.TotalSeconds);
-
-    /// <summary>
     /// gh-#259 — resolves the display name the whole UNIT's items are attributed to (the music
     /// track's <see cref="MediaItem.DjName"/> stamp, and the StationId segment's), from ONE
     /// <paramref name="personaAccessor"/> read per unit. Deliberately separate from
-    /// <see cref="ResolvePersonaAsync"/>'s per-segment voice+name reads (SPEC F35.3/F39.1 —
+    /// <c>ResolvePersonaAsync</c> (now on <see cref="BreakPlanner"/>)'s per-segment voice+name reads (SPEC F35.3/F39.1 —
     /// unchanged): this read never influences a voice, only the attribution stamp. Same F12.4
     /// never-fault posture: any accessor fault degrades to "no DJ", never a lost slot.
     /// </summary>
@@ -2457,123 +1594,10 @@ public sealed class Orchestrator(
     }
 
     /// <summary>
-    /// Resolves the voice AND persona name for one segment render from a SINGLE
-    /// <paramref name="personaAccessor"/> read (SPEC F35.3, F39.1) — never two separate calls, so
-    /// the returned pair always describes the same persona even mid-switch. Voice is the active
-    /// persona's voice when non-empty, else <paramref name="stationVoice"/> (SPEC F44.1 — the
-    /// caller's single per-unit <see cref="IStationIdentityProvider"/> read, never a second live
-    /// read from in here); persona name is the active persona's <see cref="Persona.Name"/> whenever
-    /// a persona resolved (regardless of whether its own <see cref="Persona.Voice"/> is the empty
-    /// sentinel), else <see langword="null"/>.
-    ///
-    /// Re-read fresh per call — never cached in a field — so a live activate/deactivate (F35.5)
-    /// reaches the very next segment. <paramref name="personaAccessor"/>'s own contract never
-    /// throws, but this Orchestrator stays defensive per F12.4 regardless: any unexpected fault
-    /// still degrades to <c>(stationVoice, null)</c> rather than costing the segment.
-    /// </summary>
-    async Task<(string Voice, string? PersonaName)> ResolvePersonaAsync(string stationVoice, CancellationToken ct)
-    {
-        try
-        {
-            var persona = await personaAccessor.ResolveAsync(ct);
-            if (persona is not null)
-                return (VoiceOf(persona, stationVoice), persona.Name);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception)
-        {
-            // Falls through to (stationVoice, null) below — an accessor fault must never cost the slot.
-        }
-
-        return (stationVoice, null);
-    }
-
-    /// <summary>
-    /// SPEC F144.1 (STORY-358, PLAN T341, review finding F1) — fault-isolates the claim itself: an
-    /// <see cref="IAnnouncementSource.ClaimDeliverableAsync"/> fault (a Host-side decorator's own DB
-    /// round trip, or the SpectatorMode guard's <c>IOptionsMonitor</c> read, either of which can throw)
-    /// must never cost the whole unit — the exact SAME "genuinely unreachable degrades, never faults
-    /// unit assembly" shape <see cref="ResolveAnnouncementVoiceAsync"/> immediately below already
-    /// carries for the voice registry (SPEC F12.4's standing defensiveness). Degrades to an empty
-    /// claim — indistinguishable from "nothing deliverable" or a SPEC F145.2 refusal, which is already
-    /// the seam's own documented shape (<see cref="IAnnouncementSource.ClaimDeliverableAsync"/>'s own
-    /// remarks) — so this unit still assembles its music/back-announce/lead-in normally; only the
-    /// announcement step itself goes dark for this one pull, and the next unit's own claim retries.
-    /// </summary>
-    async Task<IReadOnlyList<AnnouncementItem>> ClaimAnnouncementsAsync(IAnnouncementSource source, CancellationToken ct)
-    {
-        try
-        {
-            return await source.ClaimDeliverableAsync(AnnouncementVendCap, ct);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(
-                ex,
-                "Announcement claim failed — treating as an empty claim this unit; music is unaffected (SPEC F12.4).");
-            return [];
-        }
-    }
-
-    /// <summary>
-    /// SPEC F144.2 (STORY-358, PLAN T341) — resolves the voice an owner announcement airs with:
-    /// <paramref name="requestedVoice"/> (SPEC F143.1's own <c>voice</c> field — UNTRUSTED free text,
-    /// already length-bounded upstream but never otherwise validated) when it names a voice the TTS
-    /// backend's own <see cref="voiceLister"/> currently reports installed, else
-    /// <paramref name="stationVoice"/> — the station's own default, never an error either way. This
-    /// is the ONLY place <see cref="AnnouncementItem.RequestedVoice"/> is ever compared against
-    /// anything: an unknown/invalid value is simply not equal to any entry in the list, so no
-    /// separate "is this shaped like a voice id" check exists, and the raw string is NEVER
-    /// interpolated into a path or any other structural position anywhere downstream — accepted
-    /// verbatim as <see cref="SegmentRequest.Voice"/> only once it has matched a KNOWN id, at which
-    /// point it is no longer meaningfully "untrusted" free text.
-    ///
-    /// <para>
-    /// A null <paramref name="requestedVoice"/> (the "station's own default" submission, F143.1) skips
-    /// the registry entirely — no network call for the common case. A null <see cref="voiceLister"/>
-    /// (no Host wiring) or the registry itself faulting (a live network call —
-    /// <see cref="ITtsVoiceLister.ListVoicesAsync"/>'s own contract, unlike every OTHER per-unit
-    /// accessor this Orchestrator reads) both degrade to the station voice, logged once per
-    /// occurrence: an unreachable voice backend must never cost the announcement its air time, and
-    /// must never surface as an unhandled fault out of unit assembly (SPEC F12.4's standing
-    /// defensiveness, the SAME posture <see cref="ResolvePersonaAsync"/> immediately above carries).
-    /// </para>
-    /// </summary>
-    async Task<string> ResolveAnnouncementVoiceAsync(string? requestedVoice, string stationVoice, CancellationToken ct)
-    {
-        if (string.IsNullOrEmpty(requestedVoice) || voiceLister is null)
-            return stationVoice;
-
-        try
-        {
-            var known = await voiceLister.ListVoicesAsync(ct);
-            return known.Contains(requestedVoice, StringComparer.Ordinal) ? requestedVoice : stationVoice;
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(
-                ex,
-                "Announcement voice registry unreachable — falling back to the station voice (SPEC F144.2)");
-            return stationVoice;
-        }
-    }
-
-    /// <summary>
     /// SPEC F144.3/F144.4 (STORY-358, PLAN T342) — attempts the flavored render through
     /// <see cref="announcementCopyWriter"/>, fault-isolating it the SAME way
-    /// <see cref="ResolveAnnouncementVoiceAsync"/>/<see cref="ClaimAnnouncementsAsync"/> immediately
-    /// above already do (SPEC F12.4): a null seam (no Host wiring — the crosstalkPlanner precedent,
+    /// <c>ResolveAnnouncementVoiceAsync</c>/<c>ClaimAnnouncementsAsync</c> (now on
+    /// <see cref="BreakPlanner"/>) already do (SPEC F12.4): a null seam (no Host wiring — the crosstalkPlanner precedent,
     /// feature dark) or any exception the writer's own never-throws contract still lets slip both
     /// degrade to <see langword="null"/>, never a faulted unit.
     /// <see cref="IAnnouncementCopyWriter.WriteAnnouncementAsync"/> itself already resolves EVERY
@@ -2607,77 +1631,7 @@ public sealed class Orchestrator(
     }
 
     /// <summary>
-    /// SPEC F107.7 (STORY-297, PLAN T224) — resolves the voice/name a <see cref="SegmentKind.ContextSegment"/>
-    /// airs with, from <c>Context:{Key}:PersonaId</c> (<paramref name="configuredPersonaId"/>, the
-    /// drain arm's own <see cref="contextSettings"/> read). A positive value names an EXPLICIT
-    /// persona, resolved through <see cref="ResolveContextPersonaAsync"/> and degrading to the
-    /// station voice on any miss (unresolvable id, no <paramref name="personaStore"/> wired, or a
-    /// store fault — F12.4). Zero, negative, or unset (an unconfigured provider binds the same as
-    /// zero) means the on-air DJ — delegated straight to <see cref="ResolvePersonaAsync"/>, whose own
-    /// no-active-persona fallback already IS "music-only segment or gap ⇒ station voice, PersonaName
-    /// null" (the StationId imaging precedent), so that half of F107.7 needs no code of its own here.
-    /// </summary>
-    async Task<(string Voice, string? PersonaName)> ResolveContextSegmentVoiceAsync(
-        long? configuredPersonaId, string providerKey, string stationVoice, CancellationToken ct)
-    {
-        if (configuredPersonaId is { } explicitPersonaId && explicitPersonaId > 0)
-        {
-            var resolved = await ResolveContextPersonaAsync(explicitPersonaId, providerKey, stationVoice, ct);
-            if (resolved is { } r) return (r.Voice, r.Name);
-
-            return (stationVoice, null); // unresolvable explicit persona id — station voice, never a stall
-        }
-
-        return await ResolvePersonaAsync(stationVoice, ct);
-    }
-
-    /// <summary>
-    /// Resolves an EXPLICITLY configured context-provider persona (<c>Context:{Key}:PersonaId &gt; 0</c>,
-    /// SPEC F107.7) from <paramref name="personaStore"/> — never throws (F12.4): a missing row
-    /// (deleted out of band), an unwired <paramref name="personaStore"/>, or any store fault all
-    /// degrade to <see langword="null"/>, which <see cref="ResolveContextSegmentVoiceAsync"/> treats
-    /// as "fall back to the station voice". Mirrors <see cref="ResolveHandoffPersonaAsync"/>'s own
-    /// shape one call up (same never-throws contract, same <see cref="VoiceOf"/> empty-sentinel rule)
-    /// but kept as its own method rather than shared: the two log different, context-appropriate WARN
-    /// wording on a miss — a context provider's misconfigured persona id is not "a handoff boundary
-    /// names" anything, and reusing that method's wording verbatim here would misdescribe the cause.
-    /// </summary>
-    async Task<(string Voice, string Name)?> ResolveContextPersonaAsync(
-        long personaId, string providerKey, string stationVoice, CancellationToken ct)
-    {
-        if (personaStore is null) return null;
-
-        try
-        {
-            var persona = await personaStore.GetByIdAsync(personaId, ct);
-            if (persona is null)
-            {
-                logger.LogWarning(
-                    "Context provider {ProviderKey} names persona id={PersonaId} with no matching " +
-                    "persona row — falling back to the station voice (SPEC F107.7 degrade).",
-                    providerKey, personaId);
-                return null;
-            }
-
-            return (VoiceOf(persona, stationVoice), persona.Name);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(
-                ex,
-                "Failed to resolve context provider {ProviderKey}'s persona id={PersonaId} — " +
-                "falling back to the station voice (F12.4).",
-                providerKey, personaId);
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// The empty-sentinel voice rule <see cref="ResolvePersonaAsync"/> and
+    /// The empty-sentinel voice rule <c>ResolvePersonaAsync</c> (now on <see cref="BreakPlanner"/>) and
     /// <see cref="ResolveHandoffPersonaAsync"/> both apply (SPEC F35.2/F92.2): a persona's own
     /// <see cref="Persona.Voice"/> when set, else <paramref name="stationVoice"/> — <c>""</c> is
     /// <see cref="Persona"/>'s own documented "use the station's default" sentinel, never "unset".

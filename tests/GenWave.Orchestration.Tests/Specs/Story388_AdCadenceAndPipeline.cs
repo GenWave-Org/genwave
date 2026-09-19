@@ -54,22 +54,40 @@ public static class FeatureAdCadenceAndPipeline
         FakeAdCadenceProvider adCadenceProvider,
         FakeAdSpotVend adSpotVend,
         FakeTtsSegmentSource? tts = null,
-        ILogger<Orchestrator>? logger = null) =>
-        new(
+        ILogger<Orchestrator>? logger = null)
+    {
+        var personaAccessor = new FakeActivePersonaAccessor();
+        var scopeProvider = new FakeStationScopeProvider(new LibraryScope([1L]));
+
+        // PLAN T522 — BreakPlanner now owns the ad-drain arm's own INFO/WARN lines (SPEC F158.3/
+        // F188.2's "same arguments" law), so it must log through the SAME sink this file's own
+        // CapturingLogger<Orchestrator> facts (below) assert against, not a NullLogger that would
+        // make those lines unobservable — mirrors OrchestratorBuilder's own ForwardingLogger wiring.
+        var resolvedLogger = logger ?? NullLogger<Orchestrator>.Instance;
+        var planner = new BreakPlanner(
+            personaAccessor,
+            new ForwardingLogger<BreakPlanner>(resolvedLogger),
+            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
+            deferralQueue,
+            clock,
+            scopeProvider,
+            adCadenceProvider: adCadenceProvider,
+            adSpotVend: adSpotVend);
+
+        return new(
             new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")),
-            new FakeStationScopeProvider(new LibraryScope([1L])),
+            scopeProvider,
             new FakeCadenceProvider(cadence),
             new FakeRotationSettingsProvider(new RotationSettings()),
             new MusicSelectionPolicy(new FakeMediaCatalog(MakeRef("track")), NullLogger<MusicSelectionPolicy>.Instance),
             tts ?? new FakeTtsSegmentSource(),
-            new FakeActivePersonaAccessor(),
-            logger ?? NullLogger<Orchestrator>.Instance,
-            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
+            personaAccessor,
+            resolvedLogger,
             deferralQueue,
             clock,
             new FakeBoundaryBiasProvider(TimeSpan.Zero),
-            adCadenceProvider: adCadenceProvider,
-            adSpotVend: adSpotVend);
+            planner);
+    }
 
     static SpeechDeferralQueue NewQueue(TimeProvider clock) => new(clock);
 

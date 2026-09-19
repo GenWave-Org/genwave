@@ -71,20 +71,32 @@ public static class FeatureDeclineTheFinalUnit
         TimeProvider clock,
         FakeTtsSegmentSource tts,
         ILogger<Orchestrator> logger,
-        CadenceConfig? cadence = null) =>
-        new(
+        CadenceConfig? cadence = null)
+    {
+        var personaAccessor = new FakeActivePersonaAccessor();
+        var scopeProvider = new FakeStationScopeProvider(new LibraryScope([1L]));
+        var planner = new BreakPlanner(
+            personaAccessor,
+            NullLogger<BreakPlanner>.Instance,
+            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
+            deferralQueue,
+            clock,
+            scopeProvider);
+
+        return new(
             new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")),
-            new FakeStationScopeProvider(new LibraryScope([1L])),
+            scopeProvider,
             new FakeCadenceProvider(cadence ?? CadenceOff),
             new FakeRotationSettingsProvider(new RotationSettings()),
             new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance),
             tts,
-            new FakeActivePersonaAccessor(),
+            personaAccessor,
             logger,
-            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
             deferralQueue,
             clock,
-            new FakeBoundaryBiasProvider(TimeSpan.FromMinutes(10)));
+            new FakeBoundaryBiasProvider(TimeSpan.FromMinutes(10)),
+            planner);
+    }
 
     /// <summary>
     /// The 19:59:29 pull, reproduced: the sign-off comes due in 30s (boundary 45s out, given the

@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **121 seams across 7 projects.**
+> **122 seams across 7 projects.**
 
 ## GenWave.Ads (2 seams)
 
@@ -168,7 +168,7 @@
 | `GenWave.Core.Abstractions.IVoicePackStore` | `GenWave.MediaLibrary.Station.VoicePackRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IYearLookup` | `GenWave.MediaLibrary.YearLookup.MusicBrainzYearLookup` | Singleton | — |
 
-## GenWave.Orchestration (8 seams)
+## GenWave.Orchestration (9 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -177,6 +177,7 @@
 | `GenWave.Core.Abstractions.INextItemProvider` | `GenWave.Orchestration.Orchestrator` | Singleton | — |
 | `GenWave.Core.Abstractions.IPatterDurationEstimator` | `GenWave.Orchestration.RollingPatterDurationEstimator` | Singleton | — |
 | `GenWave.Core.Abstractions.IShowFlavorLineSource` | `GenWave.Orchestration.ShowFlavorLineGate` | Singleton | — |
+| `GenWave.Orchestration.IBreakPlanObserver` | `GenWave.Orchestration.NoOpBreakPlanObserver` | Singleton | — |
 | `GenWave.Orchestration.IPersonaPickProvider` | `GenWave.Orchestration.RankerPersonaPickProvider` | Singleton | also registered: `GenWave.Orchestration.NoOpPersonaPickProvider` (GenWave.Orchestration) |
 | `GenWave.Orchestration.IRandomSource` | `GenWave.Orchestration.SystemRandomSource` | Singleton | — |
 | `GenWave.Orchestration.IRequestFulfillmentSource` | `GenWave.Orchestration.RequestFulfillmentProvider` | Singleton | also registered: `GenWave.Orchestration.NoOpRequestFulfillmentSource` (GenWave.Orchestration) |

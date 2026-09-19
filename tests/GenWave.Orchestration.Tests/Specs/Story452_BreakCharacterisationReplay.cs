@@ -43,19 +43,25 @@ public static class FeatureBreakCharacterisationReplay
     /// <summary>The one handoff pairing every ceremony beat (O5, O6, O9) hands off across.</summary>
     static readonly HandoffContext Handoff = new("af_flip", "Nova", "Milo");
 
-    /// <summary>Everything AC1–AC4 assert on, captured from one deterministic run of the script.</summary>
-    sealed record ReplayResult(
+    /// <summary>
+    /// Everything AC1–AC4 assert on, captured from one deterministic run of the script, plus AC6's
+    /// per-unit <see cref="BreakPlan.ToTrace"/> lines (PLAN T522). Internal, not private — Story455's
+    /// own AC5 facts (<c>ScenarioTheOrchestratorRidesThePlan</c>) call <see cref="RunScriptAsync"/>
+    /// directly rather than duplicating this script.
+    /// </summary>
+    internal sealed record ReplayResult(
         IReadOnlyList<string> BufferedMediaIds,
         IReadOnlyList<string> DjNames,
         IReadOnlyList<string> EventKinds,
-        IReadOnlyList<string> Warnings);
+        IReadOnlyList<string> Warnings,
+        IReadOnlyList<string> Traces);
 
     /// <summary>
     /// Builds the F185.1 script through <see cref="OrchestratorBuilder"/> against the real, unsplit
     /// <see cref="Orchestrator"/> and serves it unit by unit — see this file's header for the
     /// nine-vs-six-units disclosure.
     /// </summary>
-    static async Task<ReplayResult> RunScriptAsync()
+    internal static async Task<ReplayResult> RunScriptAsync()
     {
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 3, 2, 10, 0, 0, TimeSpan.Zero));
         var cadence = new FakeCadenceProvider(new CadenceConfig
@@ -71,6 +77,7 @@ public static class FeatureBreakCharacterisationReplay
         var fakeTts = new FakeTtsSegmentSource { TimeProvider = clock };
         var events = new CapturingStationEventSink();
         var logger = new CapturingLogger<Orchestrator>();
+        var planObserver = new CapturingBreakPlanObserver();
 
         var personaStore = new FakePersonaStore();
         personaStore.Add(TestData.MakePersona(HostPersonaId, "Nova", "af_nova"));
@@ -113,6 +120,7 @@ public static class FeatureBreakCharacterisationReplay
             .WithEvents(events)
             .WithLogger(logger)
             .WithLookahead(TimeSpan.FromMinutes(10))
+            .WithPlanObserver(planObserver)
             .Build();
 
         var orchestrator = chain.Orchestrator;
@@ -225,7 +233,8 @@ public static class FeatureBreakCharacterisationReplay
             [.. units.SelectMany(unit => unit.Select(item => item.MediaId))],
             [.. units.SelectMany(unit => unit.Select(item => item.DjName ?? "(none)"))],
             [.. events.Events.Select(evt => evt.GetType().Name)],
-            [.. logger.Warnings]);
+            [.. logger.Warnings],
+            [.. planObserver.Plans.Select(plan => plan.ToTrace())]);
     }
 
     public sealed class ScenarioTheScriptServedEndToEnd
@@ -288,12 +297,15 @@ public static class FeatureBreakCharacterisationReplay
 
     public sealed class ScenarioThePlanTraces
     {
-        const string Pending = "pending: T522 — BreakPlan.ToTrace() per unit (STORY-452)";
-
-        // Given: the same run once BreakPlan exists (T522)
+        // Given: the same run, BreakPlan now exists (T522)
 
         /// <summary>AC6 — ToTrace() per unit equals the pinned table.</summary>
-        [Fact(Skip = Pending)]
-        public void MatchThePinnedTraceTable() => throw new NotImplementedException(Pending);
+        [Fact]
+        public async Task MatchThePinnedTraceTable()
+        {
+            var result = await RunScriptAsync();
+
+            Assert.Equal(Story452PinnedTables.Traces, result.Traces);
+        }
     }
 }
