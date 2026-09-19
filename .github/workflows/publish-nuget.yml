@@ -37,10 +37,12 @@ jobs:
 
       # ffmpeg: the F88 artwork specs (Story222) drive the REAL binary (gh-#105) — same step
       # as ci.yml's build-test; this gate runs its own test pass and needs it too.
-      # gh-#588: the retry loop itself lives in .github/actions/install-ffmpeg (was
+      # gh-#588: the retry loop itself lives in .github/actions/install-apt-packages (was
       # inlined identically here, in ci.yml, and in release.yml).
       - name: Install ffmpeg (artwork specs drive the real binary)
-        uses: ./.github/actions/install-ffmpeg
+        uses: ./.github/actions/install-apt-packages
+        with:
+          packages: ffmpeg
       - name: Build + test first — never publish from a red tree
         run: |
           dotnet build GenWave.sln --configuration Release

@@ -42,10 +42,12 @@ jobs:
       # stream capture or a full compose stack (nightly.yml); tier 3 = Skip="manual: …", checked by ear.
       # ffmpeg: the F88 artwork specs (Story222) drive the REAL binary — both fixture generation
       # and the extraction under test — matching the api image, which ships ffmpeg (gh-#105).
-      # gh-#588: the retry loop itself lives in .github/actions/install-ffmpeg (was
+      # gh-#588: the retry loop itself lives in .github/actions/install-apt-packages (was
       # inlined identically here, in release.yml, and in publish-nuget.yml).
       - name: Install ffmpeg (artwork specs drive the real binary)
-        uses: ./.github/actions/install-ffmpeg
+        uses: ./.github/actions/install-apt-packages
+        with:
+          packages: ffmpeg
       - name: Test
         run: dotnet test GenWave.sln --no-build --configuration Release --filter "Category!=Integration"
 

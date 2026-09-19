@@ -75,30 +75,57 @@ public static class FeatureSafePathLevelMatching
             // this is the pinned tag itself, not a proxy for it. No -e env dummies are needed: every
             // environment.get(...) call in the script already carries a default=. House R4/T11
             // convention: silence on stdout/stderr + exit code 0 = pass (F37.1).
+            //
+            // gh-#817: the pull is its OWN step. `docker run` writes its image-pull progress
+            // ("Unable to find image '<tag>' locally …") to stderr, and the assertion below reads
+            // stderr as liquidsoap's — so on a cold runner a passing check (exit 0, no liquidsoap
+            // output) still went red. Pulling first and then running --pull=never guarantees the
+            // checked run's streams carry nothing but liquidsoap's own words.
+            const string image = "savonet/liquidsoap:v2.4.4";
             var engineDir = Path.Combine(RepoRoot, "engine");
 
-            using var process = Process.Start(new ProcessStartInfo("docker")
+            static (int ExitCode, string Stdout, string Stderr) Docker(params string[] args)
             {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                ArgumentList =
+                var info = new ProcessStartInfo("docker")
                 {
-                    "run", "--rm",
-                    "-v", $"{engineDir}:/engine:ro",
-                    "--entrypoint", "liquidsoap",
-                    "savonet/liquidsoap:v2.4.4",
-                    "--check", "/engine/genwave.liq",
-                },
-            }) ?? throw new InvalidOperationException("Failed to start docker.");
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                };
 
-            var stdout = process.StandardOutput.ReadToEnd();
-            var stderr = process.StandardError.ReadToEnd();
-            process.WaitForExit();
+                foreach (var arg in args)
+                {
+                    info.ArgumentList.Add(arg);
+                }
+
+                using var process = Process.Start(info)
+                    ?? throw new InvalidOperationException("Failed to start docker.");
+
+                var stdout = process.StandardOutput.ReadToEnd();
+                var stderr = process.StandardError.ReadToEnd();
+                process.WaitForExit();
+                return (process.ExitCode, stdout, stderr);
+            }
+
+            // Arrange, not assert: a failed pull is an environment problem, so it throws with the
+            // reason rather than reporting itself as a liquidsoap type error.
+            var pull = Docker("pull", image);
+            if (pull.ExitCode != 0)
+            {
+                throw new InvalidOperationException(
+                    $"docker pull {image} failed (exit {pull.ExitCode}): {pull.Stderr}");
+            }
+
+            var check = Docker(
+                "run", "--rm", "--pull", "never",
+                "-v", $"{engineDir}:/engine:ro",
+                "--entrypoint", "liquidsoap",
+                image,
+                "--check", "/engine/genwave.liq");
 
             Assert.True(
-                process.ExitCode == 0 && stdout.Length == 0 && stderr.Length == 0,
-                $"liquidsoap --check failed (exit {process.ExitCode}): stdout=[{stdout}] stderr=[{stderr}]");
+                check.ExitCode == 0 && check.Stdout.Length == 0 && check.Stderr.Length == 0,
+                $"liquidsoap --check failed (exit {check.ExitCode}): stdout=[{check.Stdout}] stderr=[{check.Stderr}]");
         }
     }
 
