@@ -16,7 +16,127 @@ namespace GenWave.Orchestration.Tests.Specs;
 
 public static class FeatureSpeakerTravelsWithThePlan
 {
-    const string Manual = "manual: dev-station wire, T529 — booth_log rows + stereo capture (STORY-456)";
+    // AC13 — dev-station wire evidence, ROUND 2 (T529 review finding F5): the round-1 run flipped
+    // day 6's personaId every ~1s for 13 minutes, which oscillated across each cited row's own
+    // occurred_at and could not tell a correct implementation from a broken one. This run instead
+    // flips ONCE per trial and HOLDS — never back — in both directions. Round-2 finding B1: that
+    // still does not discriminate, because the ~8s flip-to-row gap sits inside the card caches' 30s
+    // StalenessBound and inside the per-unit-plan ResolveAsync horizon. What the consts DO establish
+    // is by construction (the snapshot arm ran; pace was frozen at plan time), not by timing. The two
+    // consts below carry the full timeline, row table, sampling method, and that limit; nothing here
+    // restates them.
+    // NOTE: the "manual: " prefix lives on BoothLogEvidence/PaceEvidence themselves (not here) —
+    // stack_gate.sh's count_manual_facts_in_file (SPEC F182.1's prefix law; F182.3 ties the count to
+    // gate-report.md's line) text-scans for a const whose OWN literal starts with `"manual: `; a
+    // shared Preamble that itself carried the prefix would leave the two consts that are actually
+    // named in Skip= unmatched by that scan (round-2 gate finding).
+    const string Preamble =
+        "dev-station wire, T529 round 2 (STORY-456, review finding F5) — verified live " +
+        "2026-09-19 on the local docker dev stack, this branch (not Dean's demo box). Two personas, " +
+        "distinct voice AND pace (T529r2 Alpha: hf_alpha@0.85, T529r2 Beta: hf_beta@1.15) on " +
+        "segment_schedule day 6. ";
+
+    const string Coda = " A real engine render cannot be a CI fact.";
+
+    const string BoothLogEvidence = "manual: " + Preamble +
+        "Redesign: flip ONCE and HOLD, never oscillate — landed each flip inside the narrow plan-" +
+        "render window by pausing the kokoro container (docker pause, a cgroup freeze that stalls " +
+        "the in-flight TTS call without killing the socket) the instant the api log showed it kick " +
+        "off (\"Start processing HTTP request POST http://kokoro:8880/v1/audio/speech\"), firing the " +
+        "PUT /api/schedule flip immediately, then unpausing seconds later to let the stalled render " +
+        "complete and publish — zero production-code changes, a genuine (if artificially delayed) " +
+        "Kokoro call. Sampling method for \"persona the schedule was written to, and when\": " +
+        "CachingScheduleResolver invalidates synchronously and exclusively inside ScheduleRepository's " +
+        "own write, so a PUT's HTTP 200 proves only that the write landed at that timestamp — it does " +
+        "NOT prove the new persona is active yet: the subscriber is `void OnWeekChanged() => " +
+        "dirty = true` (CachingScheduleResolver.cs:249), which marks the cache stale and nothing " +
+        "more; activation lags until the next ResolveAsync (at most one unit plan away, per the " +
+        "class's own remarks at :201-206) and, for the three card caches (ActivePersonaPaceCache, " +
+        "ActivePersonaPronunciationRulesCache, ActivePersonaCorrectionsCache), until their 30s " +
+        "StalenessBound elapses. Each write below is confirmed, where possible, by the FIRST later " +
+        "row naming a persona voice that is not itself one of the four rows under test — step 3 is " +
+        "the exception (see below). Timeline: 08:54:40.267 PUT->alpha (confirmed by row 94729, " +
+        "08:55:39.831, settle 59s); 08:57:51.689 PUT->beta (row 94735, 08:59:05.967, settle 74s); " +
+        "09:02:24.336 PUT->alpha, HELD (no independent confirmation — the nearest candidate, row " +
+        "94745, is itself one of the four rows under test below, and its occurred_at of 09:10:01.597 " +
+        "falls AFTER the next PUT, so using it to bound this step assumes the very \"the row's voice " +
+        "names the planned persona\" proposition this fact is testing); 09:09:53.822 PUT->beta, HELD " +
+        "(confirmed by the following control row 94751, 09:13:50.839). Trial 2: break planned under " +
+        "BETA (active 08:57:51-09:02:24, settled 4m33s before its own plan). Rows 94739 (LeadIn) and " +
+        "94740 (BackAnnounce), occurred_at 09:02:32.653014/.656709, both read \"voice: hf_beta\" — " +
+        "8.32s AFTER the 09:02:24.336 PUT wrote the schedule to ALPHA (held, never reverted, through " +
+        "09:09:53). TtsSegmentSource.LogRenderOutcome corroborates at the same instant: " +
+        "persona=\"T529r2 Beta\" for both kinds at 09:02:32.653. Trial 3 (the mirror): break planned " +
+        "under ALPHA (active 09:02:24-09:09:53, settled 7m29s). Rows 94744 (BackAnnounce) and 94745 " +
+        "(LeadIn), occurred_at 09:10:01.593212/.597099, both read \"voice: hf_alpha\" — 7.77s AFTER " +
+        "the 09:09:53.822 PUT wrote the schedule to BETA (held through 09:13:50+). LogRenderOutcome: " +
+        "persona=\"T529r2 Alpha\" for both kinds at 09:10:01.592-594. Per-row table (id | occurred_at " +
+        "| voice term | persona the schedule was written to, and when | how sampled): 94739 | " +
+        "09:02:32.653014 | hf_beta | Alpha, written 09:02:24.336 | schedule-write timestamp, not an " +
+        "activation sample; 94740 | 09:02:32.656709 | hf_beta | Alpha, written 09:02:24.336 | same; " +
+        "94744 | 09:10:01.593212 | hf_alpha | Beta, written 09:09:53.822 | same; 94745 | " +
+        "09:10:01.597099 | hf_alpha | Beta, written 09:09:53.822 | same (persona_id is null by design " +
+        "on all four rows — not queried as evidence). Consequently: at this ~8s gap (8.32s for " +
+        "94739/94740, 7.77s for 94744/94745) the flip sits inside BOTH the ResolveAsync-per-unit-plan " +
+        "horizon and the three card caches' 30s StalenessBound — well under the 59s/74s settle times " +
+        "this same run measured directly at steps 1 and 2 (rows 94729, 94735) — so a broken, still-" +
+        "re-resolving implementation would have returned the identical pre-flip persona these four " +
+        "rows show: the rows do not discriminate the snapshot arm from the ambient one, and stand " +
+        "only as a plan-time-stamp regression guard, not as timing evidence for which arm rendered " +
+        "them. F3 positive witness (round-2 finding): request.Speaker was non-null for all " +
+        "four requests by construction, not by an absent-WARN inference — GenWave.Tts's service " +
+        "collection registers ISpeakerSnapshotSource as a TryAddSingleton (never absent in this " +
+        "Host), BreakPlanner.PlanAsync builds a SpeakerResolution whenever that source is non-null " +
+        "(BreakPlanner.cs:91), day 6 named a real persona id (9 or 10, never a station-only slot) " +
+        "for the whole run, and the api logs carry zero \"has no card\"/\"card lookup failed\" " +
+        "degrade warnings. TtsSegmentSource.RenderCopyAsync (:249-251) branches on exactly " +
+        "request.Speaker is {} — non-null routes to ResolveFromSnapshot (frozen speaker.Pace/Rules, " +
+        "key ComputeSnapshotHash(text, voice, stationId, speaker.ContentHash)); null routes to " +
+        "ResolveFromAmbientAsync (live personaPace.Current, key TtsSegmentSource's own five-term " +
+        "ComputeHash) — a structurally disjoint key space. So the snapshot arm, not the ambient " +
+        "re-resolving one, is what rendered all four cited rows. Honest scope: the row's voice is " +
+        "request.Voice, stamped by BreakPlanner inside PlanAsync — a mechanism that predates F189 " +
+        "(SPEC F35.3/F39.1's ResolvePersonaAsync) — and the cited rows are BackAnnounce/LeadIn, both " +
+        "stamped in the SAME PlanAsync as their own break. A good regression guard, but it does not " +
+        "exercise the seam T524-527 actually moved to a deferred read; AC6/AC7's SignOn/Context " +
+        "drain is covered separately, in-process, by ScenarioASignOnArmedForBWhileAIsActive and " +
+        "ScenarioAContextSegmentPlannedUnderA above." + Coda;
+
+    const string PaceEvidence = "manual: " + Preamble +
+        "Route (a), same copy through both personas: no production door reaches TtsSegmentSource " +
+        "with arbitrary text under a chosen persona without a code change. POST /api/tts/preview and " +
+        "POST /api/safe-segments both call ITtsSynthesizer directly, bypassing TtsSegmentSource's " +
+        "two-arm branch entirely — the exact below-the-graph shortcut round-2 finding F1 ruled out — " +
+        "though not identically: TtsPreviewController.BuildAuditionContextAsync (:178-188) still " +
+        "awaits personaPace.RefreshIfStaleAsync and passes personaPace.Current, so /preview routes " +
+        "through the ambient pace cache and NormalizingTtsSynthesizer rather than hitting kokoro-" +
+        "fastapi bare. Either way it cannot reach the snapshot arm, and SafeSegmentAuthor " +
+        "additionally leaves pace at TtsRenderContext's default of 1.0, never reading any persona's " +
+        "Voice.Pace. Route (a) was not available. Route (b), character-normalised rates: captured " +
+        "the real synthesis artifacts for the SAME break each trial straddled — the render whose " +
+        "outbound Kokoro POST was deliberately stalled (docker pause) until after that trial's flip, " +
+        "then released — genuine BreakPlanner-driven renders, not a direct Kokoro hit. Trial 2 " +
+        "(planned beta@1.15): two cache files, ffprobe durations 1.971792s and 2.396042s. Trial 3 " +
+        "(planned alpha@0.85): 2.812792s and 4.134958s — right direction (alpha slower) but I am " +
+        "declining a seconds-per-character ratio: SegmentGenerated publishes at render completion " +
+        "(TtsSegmentSource.cs:337), not air time, and this stack's own feeder can render a break " +
+        "measurably ahead of the boundary it narrates (observed directly on an untouched control " +
+        "break: rendered 08:55:39, but the track its own LeadIn would name did not start until " +
+        "08:59:04, 3m25s later) — so I cannot safely reconstruct which cache file is LeadIn vs " +
+        "BackAnnounce, or which real track's title/artist populates its copy text, from booth_log " +
+        "adjacency alone; both trials' two candidate files also share an identical filesystem mtime " +
+        "to the microsecond, so file metadata cannot break the tie either. Rather than dress up an " +
+        "uncertain pairing as a clean ~1.35x proof, I am reporting the durations only, with no " +
+        "derived ratio: AC13's pace conjunct has no clean independently-measured wire ratio from " +
+        "this run. What IS proven, by construction rather than measurement: ResolveFromSnapshot " +
+        "returns (speaker.Rules, speaker.Pace, hash) as ONE tuple (TtsSegmentSource.cs:364-382), and " +
+        "RenderCopyAsync consumes rules/pace/hash from exactly one of its two branches, never a mix " +
+        "— so the same non-null-Speaker fact the BoothLogEvidence const establishes for all four " +
+        "cited requests also means pace for all four was speaker.Pace, frozen at plan time, never " +
+        "personaPace.Current (the live read T527 closed), regardless of the flip. TtsSegmentSource's " +
+        "voice-mismatch WARN (\"differs from the request voice\") never appeared in the api logs " +
+        "across the whole run (08:36:49 onward) — consistent, though absence alone is not proof " +
+        "(round-2 finding F3)." + Coda;
 
     static readonly StationIdentity Identity = new("station-1", "GenWave", "voice-station");
     static readonly HashSet<SpeechDeferralKind> NoHolds = [];
@@ -354,14 +474,16 @@ public static class FeatureSpeakerTravelsWithThePlan
 
     public sealed class ScenarioTheDevStationWire
     {
-        // Given: two personas of different pace, flip mid-break (manual, T529)
+        // Given: two personas of different pace and voice; flip the SCHEDULE's active persona ONCE
+        // after a break is planned but before it renders, then HOLD — never flip back. The write is
+        // what flips; activation lags it (round-2 finding B1, see BoothLogEvidence). (manual, T529 rd 3)
 
-        /// <summary>AC13 — </summary>
-        [Fact(Skip = Manual)]
-        public void TheBoothLogNamesThePlannedPersona() => Assert.Fail(Manual);
+        /// <summary>AC13 — a break's speech rows name the persona that was PLANNED, not one flipped to mid-render</summary>
+        [Fact(Skip = BoothLogEvidence)]
+        public void TheBoothLogNamesThePlannedPersona() => Assert.Fail(BoothLogEvidence);
 
-        /// <summary>AC13 — </summary>
-        [Fact(Skip = Manual)]
-        public void TheAudioPaceMatchesThePlan() => Assert.Fail(Manual);
+        /// <summary>AC13 — the rendered audio's pace matches the planned persona's, not a pace flipped to mid-render</summary>
+        [Fact(Skip = PaceEvidence)]
+        public void TheAudioPaceMatchesThePlan() => Assert.Fail(PaceEvidence);
     }
 }
