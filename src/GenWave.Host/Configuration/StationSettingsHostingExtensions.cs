@@ -65,6 +65,12 @@ static class StationSettingsHostingExtensions
         // actually resolves IPersonaStore.
         builder.Services.AddPersonaStore(stationConnStr);
 
+        // Card-by-id seam (SPEC F189.2, gh-#772, PLAN T525) — the narrow read GenWave.Tts's
+        // SpeakerSnapshotSource needs (ISP: never the whole IPersonaStore CRUD surface). A thin
+        // adapter over the SAME IPersonaStore singleton just registered above — resolving it opens
+        // no connection of its own.
+        builder.Services.AddSingleton<IPersonaCardByIdSource, PersonaCardByIdStore>();
+
         // Persona memory store (SPEC F71.4-F71.6, STORY-194) — same station_svc connection string,
         // same lazy-data-source story as AddPersonaStore just above. STORY-194 shipped this
         // registration deliberately without a Host call site ("no consumer lands with this seam");

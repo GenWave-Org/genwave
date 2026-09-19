@@ -186,6 +186,12 @@ public static class TtsServiceCollectionExtensions
         // time (TtsPace.Clamp, WarnOnce-latched) rather than at the engine.
         services.AddSingleton<ActivePersonaPaceCache>();
 
+        // Speaker-snapshot seam (SPEC F189.2, gh-#772, PLAN T525) — reads a persona's card ONCE
+        // into one SpeakerSnapshot rather than the ambient ActivePersona*Cache trio re-read at
+        // render time. TryAdd: IPersonaCardByIdSource has no default here (Host owns the only
+        // production binding); a test/host that never resolves this seam pays nothing.
+        services.TryAddSingleton<ISpeakerSnapshotSource, SpeakerSnapshotSource>();
+
         // Fired-rule observability (SPEC F68.7, STORY-186 AC3) — one counter set for the process
         // lifetime, incremented by NormalizingTtsSynthesizer and read by GET /api/tts/corrections-stats.
         services.AddSingleton<CorrectionsFiredStats>();

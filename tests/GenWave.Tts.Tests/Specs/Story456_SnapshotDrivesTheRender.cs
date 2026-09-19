@@ -6,6 +6,10 @@
 // RED at plan time: every fact is [Fact(Skip = Pending)] with a loud body — remove the Skip only in the
 // task that makes it green. The builder comments name the arrange each scenario needs.
 
+using Microsoft.Extensions.Logging.Abstractions;
+using GenWave.Core.Domain;
+using GenWave.Tts.Tests.Fakes;
+
 namespace GenWave.Tts.Tests.Specs;
 
 public static class FeatureSnapshotDrivesTheRender
@@ -60,16 +64,41 @@ public static class FeatureSnapshotDrivesTheRender
     // SAD PATH — segregated
     // ---------------------------------------------------------------------
 
-    public sealed class ScenarioAnUnknownPersonaId
+    public sealed class ScenarioAnUnknownPersonaId : IAsyncLifetime
     {
         // Given: the snapshot source resolves an id that does not exist
+        const long UnknownPersonaId = 4242;
 
-        /// <summary>AC12 — </summary>
-        [Fact(Skip = Pending)]
-        public void FallsBackToTheStationSnapshot() => Assert.Fail(Pending);
+        readonly CapturingLogger<SpeakerSnapshotSource> logger = new();
+        SpeakerSnapshot snapshot = new(null, null, "", TtsPace.EngineDefault, [], [], "");
 
-        /// <summary>AC12 — </summary>
-        [Fact(Skip = Pending)]
-        public void LogsOneWarnNamingTheId() => Assert.Fail(Pending);
+        public async Task InitializeAsync()
+        {
+            var identityProvider = new FakeStationIdentityProvider(new StationIdentity("genwave-1", "Test", "af_heart"));
+            var cards = new FakePersonaCardByIdSource();
+            var pronunciations = new PronunciationRuleProvider(
+                new TestOptionsMonitor<TtsPronunciationsOptions>(new TtsPronunciationsOptions()),
+                NullLogger<PronunciationRuleProvider>.Instance);
+            var corrections = new SpeechCorrectionProvider(
+                new TestOptionsMonitor<TtsCorrectionsOptions>(new TtsCorrectionsOptions()),
+                NullLogger<SpeechCorrectionProvider>.Instance);
+
+            var source = new SpeakerSnapshotSource(cards, identityProvider, pronunciations, corrections, logger);
+            snapshot = await source.ForPersonaAsync(UnknownPersonaId, CancellationToken.None);
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        /// <summary>AC12 — the unknown id degrades to the station's own snapshot.</summary>
+        [Fact]
+        public void FallsBackToTheStationSnapshot()
+        {
+            Assert.Null(snapshot.PersonaId);
+            Assert.Equal("af_heart", snapshot.Voice);
+        }
+
+        /// <summary>AC12 — exactly one WARN, naming the id.</summary>
+        [Fact]
+        public void LogsOneWarnNamingTheId() => Assert.Single(logger.Warnings, w => w.Contains("4242"));
     }
 }
