@@ -17,6 +17,7 @@
 // From) — that's what the fact below proves; the widened catch remains the safety net for
 // malformed shapes the Create-layer fix does not cover.
 
+using GenWave.Core.Domain;
 using GenWave.Tts.Tests.Fakes;
 using Xunit;
 

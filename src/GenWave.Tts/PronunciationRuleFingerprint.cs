@@ -3,6 +3,8 @@ namespace GenWave.Tts;
 using System.Security.Cryptography;
 using System.Text;
 
+using GenWave.Core.Domain;
+
 /// <summary>
 /// Shared canonicalization for a pronunciation-rule content fingerprint (SPEC F97.3), the rule-set
 /// sibling of <see cref="CorrectionsFingerprint"/> — same delimiter, same short-digest shape, same

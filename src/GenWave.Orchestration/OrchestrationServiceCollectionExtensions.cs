@@ -144,7 +144,8 @@ public static class OrchestrationServiceCollectionExtensions
             voiceLister: sp.GetService<ITtsVoiceLister>(),
             adCadenceProvider: sp.GetService<IAdCadenceProvider>() ?? NoOpAdCadenceProvider.Instance,
             adSpotVend: sp.GetService<IAdSpotVend>() ?? NoOpAdSpotVend.Instance,
-            personaStore: sp.GetService<IPersonaStore>()));
+            personaStore: sp.GetService<IPersonaStore>(),
+            speakerSnapshots: sp.GetService<ISpeakerSnapshotSource>()));
 
         // PLAN T522: the default IBreakPlanObserver binding — silence. TryAdd so a module/test that
         // wants to watch every plan (CapturingBreakPlanObserver, tests only) wins.
@@ -180,7 +181,8 @@ public static class OrchestrationServiceCollectionExtensions
             crosstalkPlanner: sp.GetService<CrosstalkPlanner>(),
             announcementRenderer: sp.GetService<IVerbatimSegmentRenderer>(),
             announcementCopyWriter: sp.GetService<IAnnouncementCopyWriter>(),
-            observer: sp.GetService<IBreakPlanObserver>()));
+            observer: sp.GetService<IBreakPlanObserver>(),
+            speakerSnapshots: sp.GetService<ISpeakerSnapshotSource>()));
 
         return services;
     }

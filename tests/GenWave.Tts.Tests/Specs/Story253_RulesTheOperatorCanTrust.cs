@@ -38,6 +38,7 @@ using Persona = GenWave.Core.Domain.Persona;
 using PersonaCard = GenWave.Core.Domain.PersonaCard;
 using VoiceSpec = GenWave.Core.Domain.VoiceSpec;
 using ContextPronunciationRule = GenWave.Core.Domain.PronunciationRule;
+using SpeechCorrection = GenWave.Core.Domain.SpeechCorrection;
 
 public static class FeatureRulesTheOperatorCanTrust
 {

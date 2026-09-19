@@ -270,7 +270,7 @@ public static class FeatureOneConstructionPath
         // Given: the Orchestration.Tests assembly reflected — every [Fact]/[Theory]-decorated METHOD
         // (not each Theory row) counted once, mirroring how the pre-move baseline was measured.
 
-        const int FactMethodCount = 556; // reflected [Fact]/[Theory] methods, measured before T512 moved any site (the move adds and removes no attribute, so pre = post); the runner reports 562 cases = 556 + theory rows
+        const int FactMethodCount = 559; // 557 (556 pre-T512 + 1, PLAN T527 round 1's TheBackAnnounceVoiceMatchesItsSnapshot, ruling 9) + 2 (PLAN T527 round 2, review findings F1/F3: Story456's TheStampedVoiceIsThePlannerResolvedOne + VoiceAndSpeakerAgree — both genuinely new facts, not moved ones); the runner reports 565 cases for these 559 fact methods (two theory methods contributing eight rows, six cases beyond the method count), exactly as the old 562/556 and 563/557 did
 
         static IReadOnlyList<(MethodInfo Method, FactAttribute Attribute)> ReflectFactMethods() =>
             typeof(FeatureOneConstructionPath).Assembly

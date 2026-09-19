@@ -62,6 +62,7 @@ public sealed class OrchestratorBuilder
     IAdCadenceProvider? adCadenceProvider;
     IAdSpotVend? adSpotVend;
     IBreakPlanObserver? planObserver;
+    ISpeakerSnapshotSource? speakerSnapshotSource;
 
     // Only meaningful when scheduleResolver is unset — feeds the default schedule-resolver chain's
     // FakeScheduleStore (see WithSchedule).
@@ -185,6 +186,9 @@ public sealed class OrchestratorBuilder
     /// </summary>
     public OrchestratorBuilder WithPlanObserver(IBreakPlanObserver? observer) => With(ref planObserver, observer);
 
+    /// <summary>Overrides the speaker snapshot source seam (PLAN T527, SPEC F188.4). Defaults to <see langword="null"/> (feature-dark — no slot's request is ever stamped, SPEC F189.6). Wired into BOTH the shared <see cref="BreakPlanner"/> and the <see cref="Orchestrator"/> itself <see cref="Build"/> constructs.</summary>
+    public OrchestratorBuilder WithSpeakerSnapshotSource(ISpeakerSnapshotSource? source) => With(ref speakerSnapshotSource, source);
+
     /// <summary>
     /// Resolves every unset seam to its default and constructs the Orchestrator, returning it alongside
     /// every collaborator a spec has ever needed to assert on directly.
@@ -268,7 +272,8 @@ public sealed class OrchestratorBuilder
             voiceLister: voiceLister,
             adCadenceProvider: adCadenceProvider,
             adSpotVend: adSpotVend,
-            personaStore: resolvedPersonaStore);
+            personaStore: resolvedPersonaStore,
+            speakerSnapshots: speakerSnapshotSource);
 
         var orchestrator = new Orchestrator(
             resolvedIdentityProvider,
@@ -291,7 +296,8 @@ public sealed class OrchestratorBuilder
             crosstalkPlanner: crosstalkPlanner,
             announcementRenderer: announcementRenderer,
             announcementCopyWriter: announcementCopyWriter,
-            observer: planObserver);
+            observer: planObserver,
+            speakerSnapshots: speakerSnapshotSource);
 
         return new OrchestratorChain(
             orchestrator,

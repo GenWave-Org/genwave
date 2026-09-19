@@ -1,9 +1,11 @@
-namespace GenWave.Tts;
+namespace GenWave.Core.Domain;
 
 /// <summary>
 /// One operator-authored pronunciation correction: replace <see cref="From"/> with <see cref="To"/>
-/// wherever it appears in booth-bound text. Compiled and matched by <see cref="SpeechCorrectionSet"/>;
-/// this record only carries the raw operator data (SPEC F68.5).
+/// wherever it appears in booth-bound text. Compiled and matched by <c>GenWave.Tts.SpeechCorrectionSet</c>;
+/// this record only carries the raw operator data (SPEC F68.5). Moved into this project at PLAN T524
+/// (SPEC F189.1, gh-#772) so a <see cref="SpeakerSnapshot"/> can carry a speaker's corrections on the
+/// published contract; the compiled, regex-matched runtime type stays in <c>GenWave.Tts</c>.
 ///
 /// <para>
 /// The two optional context conditions (gh-#161) make a rule heteronym-safe: when
@@ -13,7 +15,7 @@ namespace GenWave.Tts;
 /// literal words/phrases — operator text, never a pattern; both null/blank (the wire shape every
 /// pre-gh-#161 rule has) means the rule is unconditional and behaves exactly as before. When both
 /// are set, both must hold. Compilation semantics (word boundaries, case-insensitivity,
-/// sentence-boundary limits) live in <see cref="SpeechCorrectionSet"/>.
+/// sentence-boundary limits) live in <c>GenWave.Tts.SpeechCorrectionSet</c>.
 /// </para>
 /// </summary>
 public sealed record SpeechCorrection(string From, string To)

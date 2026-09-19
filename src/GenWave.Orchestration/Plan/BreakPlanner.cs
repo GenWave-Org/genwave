@@ -29,9 +29,11 @@ using GenWave.Core.Domain;
 /// </para>
 ///
 /// <para>
-/// Does not resolve speaker snapshots (SPEC F189, a later PR-4 story) — a slot's speaker still reads
-/// off its own <see cref="SegmentRequest.PersonaName"/> at trace time, the same interim rule
-/// <see cref="BreakPlan.ToTrace"/> already documents.
+/// Resolves speaker snapshots (SPEC F189, PLAN T527) when an <see cref="ISpeakerSnapshotSource"/> is
+/// wired — every Render/Verbatim slot's request carries the <see cref="SpeakerSnapshot"/> the plan
+/// named it with (SPEC F187.4), memoized per plan by <see cref="SpeakerResolution"/> so the same
+/// station or persona id resolves once however many slots name it (SPEC F188.4). A caller that passes
+/// no source leaves every request's Speaker null — the pre-T527 ambient path, unchanged (SPEC F189.6).
 /// </para>
 ///
 /// <para>
@@ -62,7 +64,8 @@ public sealed partial class BreakPlanner(
     ITtsVoiceLister? voiceLister = null,
     IAdCadenceProvider? adCadenceProvider = null,
     IAdSpotVend? adSpotVend = null,
-    IPersonaStore? personaStore = null)
+    IPersonaStore? personaStore = null,
+    ISpeakerSnapshotSource? speakerSnapshots = null)
 {
     static readonly TimeSpan TimeDateHonestyThreshold = TimeSpan.FromSeconds(90);
     const int AnnouncementVendCap = 2;
@@ -83,6 +86,10 @@ public sealed partial class BreakPlanner(
         var renderBudget = renderBudgetProvider.Current;
         var timeDateStaleBudget = TimeSpan.FromSeconds(imagingSettings.Current.TimeAnnouncementBudgetSeconds);
 
+        // SPEC F187.4/F188.4 (PLAN T527): one memo per plan — null when no ISpeakerSnapshotSource is
+        // wired, so every Render/Verbatim slot stays unstamped (SPEC F189.6, the ambient path).
+        var speakers = speakerSnapshots is null ? null : new SpeakerResolution(speakerSnapshots);
+
         var vendedCrosstalk = context.Next is not null && context.DrainAsOf is null && !CeremonyDrainsThisBreak(context)
             ? TryVendCrosstalkForThisBreak()
             : null;
@@ -90,20 +97,20 @@ public sealed partial class BreakPlanner(
 
         var slots = new List<PlannedSlot>();
 
-        if (await BuildBackAnnounceSlotAsync(context, crosstalkAiredThisBreak, ct) is { } backAnnounce)
+        if (await BuildBackAnnounceSlotAsync(context, crosstalkAiredThisBreak, speakers, ct) is { } backAnnounce)
             slots.Add(backAnnounce);
 
         if (BuildCrosstalkSlot(vendedCrosstalk, context) is { } crosstalk)
             slots.Add(crosstalk);
 
-        slots.AddRange(await BuildAnnouncementSlotsAsync(context, ct));
+        slots.AddRange(await BuildAnnouncementSlotsAsync(context, speakers, ct));
 
         EnqueueStationIdCadence(context);
         EnqueueAdCadence(context);
 
-        slots.AddRange(await DrainDueDeferralsAsync(context, timeDateStaleBudget, ct));
+        slots.AddRange(await DrainDueDeferralsAsync(context, timeDateStaleBudget, speakers, ct));
 
-        if (await BuildLeadInSlotAsync(context, crosstalkAiredThisBreak, ct) is { } leadIn)
+        if (await BuildLeadInSlotAsync(context, crosstalkAiredThisBreak, speakers, ct) is { } leadIn)
             slots.Add(leadIn);
 
         var numbered = slots.Select((slot, i) => slot with { Ordinal = i + 1 }).ToList();

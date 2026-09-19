@@ -64,12 +64,13 @@ public sealed record BreakPlan(
         SlotSource => throw new UnreachableException($"Unhandled {nameof(SlotSource)} case: {source.GetType()}"),
     };
 
-    // Interim (PLAN T520/T527): reads the speaker straight off the request's PersonaName until
-    // SpeakerSnapshot exists (SPEC F189) and travels with the plan instead.
+    // SPEC F187.4: a Render/Verbatim slot's speaker is its stamped SpeakerSnapshot's own name when
+    // one was resolved (PLAN T527), falling back to the request's own PersonaName for a caller that
+    // passes no ISpeakerSnapshotSource (SPEC F189.6, Speaker stays null) — a Ready slot carries none.
     static string Speaker(SlotSource source) => source switch
     {
-        RenderSource render => render.Request.PersonaName ?? "station",
-        VerbatimSource verbatim => verbatim.Request.PersonaName ?? "station",
+        RenderSource render => render.Request.Speaker?.PersonaName ?? render.Request.PersonaName ?? "station",
+        VerbatimSource verbatim => verbatim.Request.Speaker?.PersonaName ?? verbatim.Request.PersonaName ?? "station",
         ReadySource => "-",
         SlotSource => throw new UnreachableException($"Unhandled {nameof(SlotSource)} case: {source.GetType()}"),
     };

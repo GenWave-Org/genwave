@@ -11,17 +11,23 @@ using GenWave.Core.Domain;
 public sealed partial class BreakPlanner
 {
     // Step 1 — SPEC F186's BackAnnounce row: only when the previous track exists and the cadence
-    // asks for one (verbatim copy of EnqueuePatterAsync's own step 1).
-    async Task<PlannedSlot?> BuildBackAnnounceSlotAsync(BreakContext context, bool crosstalkAiredThisBreak, CancellationToken ct)
+    // asks for one (verbatim copy of EnqueuePatterAsync's own step 1). Speaker (PLAN T527, SPEC
+    // F188.4/F189.4) resolves off the SAME PersonaId ResolvePersonaAsync just named — id, PersonaAsync;
+    // null, StationAsync — and, per round-2 review finding F1, the request's stamped Voice is this
+    // method's own already-resolved `voice` term; the snapshot aligns to it, never the reverse.
+    async Task<PlannedSlot?> BuildBackAnnounceSlotAsync(
+        BreakContext context, bool crosstalkAiredThisBreak, SpeakerResolution? speakers, CancellationToken ct)
     {
         if (!context.Cadence.BackAnnounceAfterEachTrack || context.Previous is not { } prev)
             return null;
 
-        var (voice, personaName) = await ResolvePersonaAsync(context.Identity.Voice, ct);
+        var (voice, personaName, personaId) = await ResolvePersonaAsync(context.Identity.Voice, ct);
+        var speaker = await ResolveSpeakerAsync(speakers, personaId, context.Identity, voice, ct);
         var request = new SegmentRequest(
             SegmentKind.BackAnnounce, voice, context.Identity.Name, prev, StationLocalNow(), context.Identity.Id, personaName)
         {
             CrosstalkAiredThisBreak = crosstalkAiredThisBreak,
+            Speaker = speaker,
         };
 
         return new PlannedSlot(0, SegmentKind.BackAnnounce, new RenderSource(request), Reservation: null, DropPolicyFor(SegmentKind.BackAnnounce), ObserveDuration: true);
@@ -53,7 +59,7 @@ public sealed partial class BreakPlanner
     // VerbatimSource.AllowFlavor from !announcement.Verbatim instead, carrying the fallback law (SPEC
     // F191.4) forward for the render phase to apply; the owner's own plain Message always rides as
     // Copy, ready to air unflavored on its own.
-    async Task<IReadOnlyList<PlannedSlot>> BuildAnnouncementSlotsAsync(BreakContext context, CancellationToken ct)
+    async Task<IReadOnlyList<PlannedSlot>> BuildAnnouncementSlotsAsync(BreakContext context, SpeakerResolution? speakers, CancellationToken ct)
     {
         if (announcementSource is not { } source)
             return [];
@@ -63,7 +69,12 @@ public sealed partial class BreakPlanner
         foreach (var announcement in deliverable)
         {
             var voice = await ResolveAnnouncementVoiceAsync(announcement.RequestedVoice, context.Identity.Voice, ct);
-            var request = new SegmentRequest(SegmentKind.Announcement, voice, context.Identity.Name, null, StationLocalNow(), context.Identity.Id);
+            var speaker = await ResolveSpeakerAsync(speakers, personaId: null, context.Identity, voice, ct);
+
+            var request = new SegmentRequest(SegmentKind.Announcement, voice, context.Identity.Name, null, StationLocalNow(), context.Identity.Id)
+            {
+                Speaker = speaker,
+            };
             var copy = new SegmentCopy(announcement.Message, FreshPerAiring: true);
             var reservation = new Reservation(ReservationKind.Announcement, announcement.Id.ToString(CultureInfo.InvariantCulture));
 
@@ -104,7 +115,8 @@ public sealed partial class BreakPlanner
     // The drain — SPEC F186's five drained rows, in TryDequeueDue's own due order (verbatim copy of
     // EnqueuePatterAsync's own drain foreach/switch, minus step 2.5's handoff-ceremony ARM: draining
     // an already-armed SignOff/SignOn stays in scope, arming a new one does not — SPEC F190).
-    async Task<IReadOnlyList<PlannedSlot>> DrainDueDeferralsAsync(BreakContext context, TimeSpan timeDateStaleBudget, CancellationToken ct)
+    async Task<IReadOnlyList<PlannedSlot>> DrainDueDeferralsAsync(
+        BreakContext context, TimeSpan timeDateStaleBudget, SpeakerResolution? speakers, CancellationToken ct)
     {
         // Fresh read, not context.Now (SPEC F186 review, this class's own remarks): EnqueuePatterAsync
         // re-read the clock here, AFTER its own cadence-enqueue calls immediately above — context.Now
@@ -119,11 +131,11 @@ public sealed partial class BreakPlanner
         {
             var slot = deferral.Kind switch
             {
-                SpeechDeferralKind.StationId => await BuildStationIdDrainSlotAsync(context, ct),
+                SpeechDeferralKind.StationId => await BuildStationIdDrainSlotAsync(context, speakers, ct),
                 SpeechDeferralKind.Ad => await BuildAdDrainSlotAsync(ct),
                 SpeechDeferralKind.SignOff or SpeechDeferralKind.SignOn => BuildHandoffDrainSlot(deferral, context.Identity),
-                SpeechDeferralKind.TimeDate => BuildTimeDateDrainSlot(deferral, context),
-                SpeechDeferralKind.Context => await BuildContextDrainSlotAsync(deferral, context, drainNow, ct),
+                SpeechDeferralKind.TimeDate => await BuildTimeDateDrainSlotAsync(deferral, context, speakers, ct),
+                SpeechDeferralKind.Context => await BuildContextDrainSlotAsync(deferral, context, drainNow, speakers, ct),
                 _ => null,
             };
 
@@ -133,7 +145,7 @@ public sealed partial class BreakPlanner
         return slots;
     }
 
-    async Task<PlannedSlot?> BuildStationIdDrainSlotAsync(BreakContext context, CancellationToken ct)
+    async Task<PlannedSlot?> BuildStationIdDrainSlotAsync(BreakContext context, SpeakerResolution? speakers, CancellationToken ct)
     {
         var currentShow = scheduleResolver?.TryGetCurrent()?.Show;
         var pooled = catalog is null
@@ -146,7 +158,14 @@ public sealed partial class BreakPlanner
             return new PlannedSlot(0, SegmentKind.StationId, new ReadySource(item), new Reservation(ReservationKind.StationIdPool, item.MediaId), DropPolicyFor(SegmentKind.StationId), ObserveDuration: false);
         }
 
-        var templatedRequest = ShowIdentRequest.For(BuildStationIdRequest(context.Identity), currentShow);
+        // PLAN T527 (SPEC F188.4 ruling 2): StationId (templated) always names the STATION snapshot;
+        // stamped BEFORE ShowIdentRequest.For, whose own `with` expression preserves every field it
+        // doesn't itself set. BuildStationIdRequest already stamps Voice = identity.Voice, and (per
+        // round-2 review finding F1) the resolved snapshot is aligned to that same voice, so no
+        // separate Voice override is needed here.
+        var speaker = await ResolveSpeakerAsync(speakers, personaId: null, context.Identity, context.Identity.Voice, ct);
+        var stamped = BuildStationIdRequest(context.Identity) with { Speaker = speaker };
+        var templatedRequest = ShowIdentRequest.For(stamped, currentShow);
         var templatedReservation = new Reservation(ReservationKind.Deferral, nameof(SpeechDeferralKind.StationId));
         return new PlannedSlot(0, SegmentKind.StationId, new RenderSource(templatedRequest), templatedReservation, DropPolicyFor(SegmentKind.StationId), ObserveDuration: true);
     }
@@ -190,35 +209,42 @@ public sealed partial class BreakPlanner
         return new PlannedSlot(0, kind, new RenderSource(request), Reservation: null, DropPolicyFor(kind), ObserveDuration: true);
     }
 
-    PlannedSlot BuildTimeDateDrainSlot(SpeechDeferral deferral, BreakContext context)
+    async Task<PlannedSlot> BuildTimeDateDrainSlotAsync(
+        SpeechDeferral deferral, BreakContext context, SpeakerResolution? speakers, CancellationToken ct)
     {
         var lateness = SpeechDeferralQueue.AirTimeLateness(context.Now, context.QueuedAhead, deferral.Due);
         var freshness = lateness > TimeDateHonestyThreshold ? TimeAnnouncementFreshness.Late : TimeAnnouncementFreshness.OnTime;
-        var request = BuildTimeDateRequest(deferral, context.Identity, freshness);
+        var speaker = await ResolveSpeakerAsync(speakers, personaId: null, context.Identity, context.Identity.Voice, ct);
+        var request = BuildTimeDateRequest(deferral, context.Identity, freshness, speaker);
 
         return new PlannedSlot(0, SegmentKind.TimeDate, new RenderSource(request), Reservation: null, DropPolicyFor(SegmentKind.TimeDate), ObserveDuration: true);
     }
 
-    async Task<PlannedSlot?> BuildContextDrainSlotAsync(SpeechDeferral deferral, BreakContext context, DateTimeOffset drainNow, CancellationToken ct)
+    async Task<PlannedSlot?> BuildContextDrainSlotAsync(
+        SpeechDeferral deferral, BreakContext context, DateTimeOffset drainNow, SpeakerResolution? speakers, CancellationToken ct)
     {
-        var built = await BuildContextSegmentRequestAsync(deferral, context.Identity, drainNow, ct);
+        var built = await BuildContextSegmentRequestAsync(deferral, context.Identity, drainNow, speakers, ct);
         return built is { } b
             ? new PlannedSlot(0, SegmentKind.ContextSegment, new RenderSource(b.Request), Reservation: null, DropPolicyFor(SegmentKind.ContextSegment), ObserveDuration: true, ContextProviderKey: b.ProviderKey)
             : null;
     }
 
     // Step 3 — SPEC F186's LeadIn row: only when the next track exists and the cadence asks for one
-    // (verbatim copy of EnqueuePatterAsync's own step 3).
-    async Task<PlannedSlot?> BuildLeadInSlotAsync(BreakContext context, bool crosstalkAiredThisBreak, CancellationToken ct)
+    // (verbatim copy of EnqueuePatterAsync's own step 3). Speaker resolution mirrors BackAnnounce's
+    // own (PLAN T527, SPEC F188.4/F189.4, round-2 review finding F1).
+    async Task<PlannedSlot?> BuildLeadInSlotAsync(
+        BreakContext context, bool crosstalkAiredThisBreak, SpeakerResolution? speakers, CancellationToken ct)
     {
         if (!context.Cadence.LeadInBeforeEachTrack || context.Next is not { } next)
             return null;
 
-        var (voice, personaName) = await ResolvePersonaAsync(context.Identity.Voice, ct);
+        var (voice, personaName, personaId) = await ResolvePersonaAsync(context.Identity.Voice, ct);
+        var speaker = await ResolveSpeakerAsync(speakers, personaId, context.Identity, voice, ct);
         var request = new SegmentRequest(
             SegmentKind.LeadIn, voice, context.Identity.Name, next, StationLocalNow(), context.Identity.Id, personaName)
         {
             CrosstalkAiredThisBreak = crosstalkAiredThisBreak,
+            Speaker = speaker,
         };
 
         return new PlannedSlot(0, SegmentKind.LeadIn, new RenderSource(request), Reservation: null, DropPolicyFor(SegmentKind.LeadIn), ObserveDuration: true);

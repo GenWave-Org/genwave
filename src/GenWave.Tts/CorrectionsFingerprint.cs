@@ -3,6 +3,8 @@ namespace GenWave.Tts;
 using System.Security.Cryptography;
 using System.Text;
 
+using GenWave.Core.Domain;
+
 /// <summary>
 /// Shared canonicalization for a correction-rule content fingerprint (SPEC F68.5, F71.7). Both
 /// <see cref="SpeechCorrectionProvider"/> (station rules) and <see cref="ActivePersonaCorrectionsCache"/>

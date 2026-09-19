@@ -131,10 +131,30 @@ public sealed record SegmentRequest(
     /// Orchestrator's own <c>TimeDate</c> drain arm (the ONLY writer) stamps it.
     ///
     /// <para>
-    /// <b>Declared as a defaulted body property, not a 16th primary-constructor parameter</b> — the
+    /// <b>Declared as a defaulted body property, not a 15th primary-constructor parameter</b> — the
     /// SAME <see cref="CrosstalkAiredThisBreak"/> precedent immediately above, for the identical
     /// published-NuGet-arity reason (that member's own remarks carry the full rationale).
     /// </para>
     /// </summary>
     public TimeAnnouncementFreshness TimeDateFreshness { get; init; } = TimeAnnouncementFreshness.OnTime;
+
+    /// <summary>
+    /// SPEC F189.1/F189.3 (STORY-456, PLAN T524, gh-#772) — the speaker this request should render
+    /// with, captured once by the planner rather than re-read from the ambient caches at render
+    /// time. <see langword="null"/> (the default) for every pre-F189 caller and for every caller
+    /// that never resolves one (auditions, PA/House Voice, plugin renders, F189.6) — those keep
+    /// today's ambient-cache render exactly as is. The contract PLAN T526 delivers (SPEC F189.3):
+    /// when non-null, <c>TtsSegmentSource.RenderAsync</c> uses the snapshot's pace, rules and
+    /// corrections and folds its <see cref="SpeakerSnapshot.ContentHash"/> into the cache key
+    /// instead of touching the ambient caches. T524 ships the contract only; nothing sets it yet.
+    ///
+    /// <para>
+    /// <b>Declared as a defaulted body property, not a 15th primary-constructor parameter</b> — the
+    /// SAME <see cref="CrosstalkAiredThisBreak"/> precedent above, for the identical
+    /// published-NuGet-arity reason: this record already shipped with a 14-arg <c>ctor</c> and
+    /// 14-arity <c>Deconstruct</c>, so every construction site that sets this uses an
+    /// object-initializer/<c>with</c> expression, never a positional/named constructor argument.
+    /// </para>
+    /// </summary>
+    public SpeakerSnapshot? Speaker { get; init; }
 }

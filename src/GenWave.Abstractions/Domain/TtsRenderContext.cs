@@ -82,4 +82,15 @@ public sealed record TtsRenderContext(string Text, string Voice, SegmentKind? Ki
     /// </para>
     /// </summary>
     public bool IsAudition { get; init; }
+
+    /// <summary>
+    /// SPEC F189.3 (STORY-456, PLAN T526) — the planned speaker's own card corrections when a
+    /// <see cref="SegmentRequest.Speaker"/> drove this render; <see langword="null"/> means the
+    /// ambient path (<c>GenWave.Tts.NormalizingTtsSynthesizer</c> merges the station's own
+    /// corrections with <c>ActivePersonaCorrectionsCache.Current</c> exactly as it always has —
+    /// refreshing that cache first). When non-null, <c>NormalizingTtsSynthesizer</c> merges the
+    /// station's corrections with THIS list instead, and never refreshes or reads the ambient
+    /// persona-corrections cache for this render.
+    /// </summary>
+    public IReadOnlyList<SpeechCorrection>? Corrections { get; init; }
 }
