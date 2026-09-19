@@ -45,6 +45,7 @@ public sealed class BreakPlannerBuilder
     IAdCadenceProvider? adCadenceProvider;
     IAdSpotVend? adSpotVend;
     IPersonaStore? personaStore;
+    ISpeakerSnapshotSource? speakerSnapshotSource;
 
     // Only meaningful when scheduleResolver is unset — feeds the default schedule-resolver chain's
     // FakeScheduleStore (see WithSchedule).
@@ -124,6 +125,9 @@ public sealed class BreakPlannerBuilder
     /// <summary>Overrides the persona store seam. Defaults to an empty <see cref="FakePersonaStore"/>.</summary>
     public BreakPlannerBuilder WithPersonaStore(IPersonaStore store) => With(ref personaStore, store);
 
+    /// <summary>Overrides the speaker snapshot source seam (PLAN T527, SPEC F188.4). Defaults to <see langword="null"/> (feature-dark — no slot's request is ever stamped, SPEC F189.6).</summary>
+    public BreakPlannerBuilder WithSpeakerSnapshotSource(ISpeakerSnapshotSource? source) => With(ref speakerSnapshotSource, source);
+
     /// <summary>
     /// Resolves every unset seam to its default and constructs the <see cref="BreakPlanner"/>,
     /// returning it alongside every collaborator a spec has ever needed to assert on directly.
@@ -177,7 +181,8 @@ public sealed class BreakPlannerBuilder
             voiceLister: voiceLister,
             adCadenceProvider: adCadenceProvider,
             adSpotVend: adSpotVend,
-            personaStore: resolvedPersonaStore);
+            personaStore: resolvedPersonaStore,
+            speakerSnapshots: speakerSnapshotSource);
 
         return new BreakPlannerChain(
             planner,

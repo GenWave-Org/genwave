@@ -296,7 +296,8 @@ public sealed partial class Orchestrator(
     CrosstalkPlanner? crosstalkPlanner = null,
     IVerbatimSegmentRenderer? announcementRenderer = null,
     IAnnouncementCopyWriter? announcementCopyWriter = null,
-    IBreakPlanObserver? observer = null) : INextItemProvider, IBoundaryFitLog
+    IBreakPlanObserver? observer = null,
+    ISpeakerSnapshotSource? speakerSnapshots = null) : INextItemProvider, IBoundaryFitLog
 {
     // gh-#254 — how far from the boundary a candidate may land and still count as a WIN ("±30s of
     // the boundary is a win"), widened as the gh-#253 estimate's confidence tier drops: the fit's
@@ -1381,7 +1382,18 @@ public sealed partial class Orchestrator(
                 // Round-2 review finding F4: a live hold on the SignOn slot must survive being
                 // overwritten here — see this branch's sibling below (the two-DJ handoff re-arm) for
                 // the full ruling; both call sites share the identical carry-forward.
-                var heldNotBefore = deferralQueue.Peek(SpeechDeferralKind.SignOn)?.NotBefore;
+                var held = deferralQueue.Peek(SpeechDeferralKind.SignOn);
+                var heldNotBefore = held?.NotBefore;
+
+                // SPEC F189.5 (PLAN T527, AC8): a re-arm that keeps the SAME incoming persona (this
+                // branch, by construction — outgoingId == incomingId) reuses the ALREADY-HELD
+                // snapshot rather than resolving again, so the counterpart's rendered voice never
+                // drifts across a re-arm that only changed the show. A held snapshot for a DIFFERENT
+                // persona (a genuine incoming-persona change elsewhere) is never reused.
+                var speaker = held?.Handoff?.Speaker is { } heldSpeaker && heldSpeaker.PersonaId == incomingId
+                    ? heldSpeaker
+                    : await ForPersonaOrNullAsync(incomingId, ct);
+
                 deferralQueue.Enqueue(
                     SpeechDeferralKind.SignOn,
                     "handoff: same-persona show transition (SPEC F116.2)",
@@ -1391,7 +1403,8 @@ public sealed partial class Orchestrator(
                         transitionPersona.Value.Name,
                         CounterpartName: null, // no OTHER DJ to name — it is the same persona
                         ShowName: onAir.NextSegment?.Show?.Name,
-                        ShowFlavor: onAir.NextSegment?.Show?.Flavor),
+                        ShowFlavor: onAir.NextSegment?.Show?.Flavor,
+                        Speaker: speaker),
                     notBefore: heldNotBefore);
             }
 
@@ -1418,7 +1431,8 @@ public sealed partial class Orchestrator(
                 new HandoffContext(
                     outgoing.Value.Voice, outgoing.Value.Name, incoming?.Name,
                     ShowName: onAir.Show?.Name,
-                    CounterpartShowName: onAir.NextSegment?.Show?.Name));
+                    CounterpartShowName: onAir.NextSegment?.Show?.Name,
+                    Speaker: await ForPersonaOrNullAsync(outgoingId, ct)));
         }
 
         if (incoming is null || boundaryAt.Value <= now)
@@ -1450,7 +1464,15 @@ public sealed partial class Orchestrator(
             // stamps with the fresh, correctly-computed Due for whatever boundary this evaluation
             // resolved — carrying NotBefore forward on the SignOn half changes nothing about what Due
             // that guard ever sees.
-            var heldNotBefore = deferralQueue.Peek(SpeechDeferralKind.SignOn)?.NotBefore;
+            var held = deferralQueue.Peek(SpeechDeferralKind.SignOn);
+            var heldNotBefore = held?.NotBefore;
+
+            // SPEC F189.5 (PLAN T527, AC8) — same reuse rule as the same-persona transition branch
+            // above: a held snapshot for the SAME incoming persona survives the re-arm untouched.
+            var speaker = held?.Handoff?.Speaker is { } heldSpeaker && heldSpeaker.PersonaId == incomingId
+                ? heldSpeaker
+                : await ForPersonaOrNullAsync(incomingId, ct);
+
             deferralQueue.Enqueue(
                 SpeechDeferralKind.SignOn,
                 "handoff: boundary entered the F74.3 window",
@@ -1458,7 +1480,8 @@ public sealed partial class Orchestrator(
                 new HandoffContext(
                     incoming.Value.Voice, incoming.Value.Name, outgoing?.Name,
                     ShowName: onAir.NextSegment?.Show?.Name,
-                    ShowFlavor: onAir.NextSegment?.Show?.Flavor),
+                    ShowFlavor: onAir.NextSegment?.Show?.Flavor,
+                    Speaker: speaker),
                 notBefore: heldNotBefore);
         }
     }
@@ -1499,6 +1522,41 @@ public sealed partial class Orchestrator(
             logger.LogWarning(
                 ex,
                 "Failed to resolve handoff persona id={PersonaId} — treating that half as music-only (F12.4).",
+                personaId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// SPEC F189.5 (PLAN T527): resolves the <see cref="SpeakerSnapshot"/> one arm-time half of a
+    /// handoff carries — never throws, the SAME degrade family <see cref="ResolveHandoffPersonaAsync"/>
+    /// applies immediately above (a null <paramref name="personaId"/>, no source wired, or any source
+    /// fault all degrade to <see langword="null"/>, WARN-logged on a fault). Speaker resolution reads a
+    /// genuinely different seam than <see cref="ResolveHandoffPersonaAsync"/>'s own Voice/Name (the
+    /// persona CARD here, the persona ROW there) — the two ARE captured from different seams, and they
+    /// CAN diverge (two shipped data states prove it: F79.4's blanked import voice; the card-less
+    /// default persona <c>PersonaCardMigrator.EnsureDefaultPersonaAsync</c> writes). Round-2 review
+    /// finding F3: <c>BreakPlanner.BuildHandoffRequest</c> is where that gets resolved — it aligns
+    /// this snapshot's Voice to <see cref="HandoffContext.Voice"/> (the row's) when it builds the
+    /// drained request, so a render never sees the two disagree.
+    /// </summary>
+    async Task<SpeakerSnapshot?> ForPersonaOrNullAsync(long? personaId, CancellationToken ct)
+    {
+        if (personaId is null || speakerSnapshots is null) return null;
+
+        try
+        {
+            return await speakerSnapshots.ForPersonaAsync(personaId.Value, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Failed to resolve handoff persona id={PersonaId}'s speaker snapshot — this half arms without one (SPEC F189.6-adjacent degrade).",
                 personaId);
             return null;
         }

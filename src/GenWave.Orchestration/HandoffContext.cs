@@ -1,5 +1,7 @@
 namespace GenWave.Orchestration;
 
+using GenWave.Core.Domain;
+
 /// <summary>
 /// The rendering inputs a handoff-kind <see cref="SpeechDeferral"/> (<see cref="SpeechDeferralKind.SignOff"/>/
 /// <see cref="SpeechDeferralKind.SignOn"/>) carries in ADDITION to Kind/Due/Reason (SPEC F92.1/F92.2,
@@ -73,6 +75,18 @@ namespace GenWave.Orchestration;
 /// license to name the show it is leaving). <see langword="null"/> on a <see cref="SpeechDeferralKind.SignOn"/>
 /// deferral's context, and whenever no next show is named.
 /// </param>
+/// <param name="Speaker">
+/// SPEC F189.5 (PLAN T527): this piece's own <see cref="SpeakerSnapshot"/>, captured by
+/// <see cref="Orchestrator"/> at the SAME arm-time instant as <see cref="Voice"/>/<see cref="PersonaName"/>
+/// — <see langword="null"/> when no <c>ISpeakerSnapshotSource</c> is wired (SPEC F189.6). A re-armed
+/// ceremony (the <c>heldNotBefore</c> path) reuses the ALREADY-HELD snapshot rather than resolving
+/// again, so the counterpart's rendered voice never drifts across a re-arm (AC8).
+/// <see cref="Voice"/> (the persona ROW) and this snapshot's own Voice (the persona CARD) are read
+/// from different seams and can diverge (round-2 review finding F3) — <c>BreakPlanner.BuildHandoffRequest</c>
+/// forwards this value onto the drained <c>SegmentRequest</c>, ALIGNING its Voice to <see cref="Voice"/>
+/// when it does: the planner never independently RESOLVES a handoff counterpart's snapshot itself,
+/// it only aligns the one already captured here.
+/// </param>
 public sealed record HandoffContext(
     string Voice,
     string? PersonaName,
@@ -81,4 +95,5 @@ public sealed record HandoffContext(
     string? CrossingTrackArtist = null,
     string? ShowName = null,
     string? ShowFlavor = null,
-    string? CounterpartShowName = null);
+    string? CounterpartShowName = null,
+    SpeakerSnapshot? Speaker = null);
