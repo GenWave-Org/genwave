@@ -13,8 +13,10 @@
 // a non-allowlisted key is rejected before either the store or the DB is ever touched). AC7 reads
 // DEPLOYMENT.md from the repo root the Story174_PublicTopologyDocs way. AC6 diffs the live-built
 // GenWave.Abstractions assembly's public surface (GenWave.Host.Tests.Support.PublicSurface.Of)
-// against the committed 5.7.0 baseline — proving a release that never touched
-// src/GenWave.Abstractions shipped a byte-identical package surface.
+// against the committed baseline for the package's current version — this release DID touch
+// src/GenWave.Abstractions (SPEC F189.1), so AC6 proves the surface is exactly the regenerated
+// one this same PR produced, and every release after this one proves the surface held steady
+// since the last regeneration.
 
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Hosting;
@@ -211,11 +213,11 @@ public static class FeatureSponsorSettingsOptionsLawsAndTheRelease
     public sealed class ScenarioAbstractionsUnchanged
     {
         static string BaselinePath() =>
-            Path.Combine(AppContext.BaseDirectory, "Fixtures", "abstractions-5.7.0-surface.txt");
+            Path.Combine(AppContext.BaseDirectory, "Fixtures", "abstractions-5.10.0-surface.txt");
 
         /// <summary>
         /// The committed baseline's own lines, minus its first-line provenance comment (see
-        /// <c>Fixtures/abstractions-5.7.0-surface.txt</c>'s own header).
+        /// <c>Fixtures/abstractions-5.10.0-surface.txt</c>'s own header).
         /// </summary>
         static IReadOnlyList<string> BaselineLines()
         {
@@ -224,22 +226,29 @@ public static class FeatureSponsorSettingsOptionsLawsAndTheRelease
             return File.ReadAllLines(path).Skip(1).ToList();
         }
 
-        // AC6 (SPEC F176.4): a release that never touched src/GenWave.Abstractions must ship a
-        // byte-identical package public surface. PublicSurface.Of enumerates the LIVE-built
-        // Abstractions assembly (any exported type reaches the same assembly, so IAdSpotSource is
-        // just a convenient anchor) the same way the baseline was generated from the published
-        // 5.7.0 nupkg's own dll — a real Abstractions edit changes what this Fact reads, not a
+        // AC6 (SPEC F176.4): the package public surface must stay byte-identical between
+        // regenerations — so a release that leaves src/GenWave.Abstractions alone ships the surface
+        // it shipped last time, and one that touches it may move this baseline only by regenerating
+        // it. PublicSurface.Of enumerates the LIVE-built Abstractions assembly (any exported type
+        // reaches the same assembly, so IAdSpotSource is just a convenient anchor) the same way the
+        // baseline was generated — a real Abstractions edit changes what this Fact reads, not a
         // hand-maintained expectation. PLAN T453 ruling: a legitimate Abstractions bump regenerates
-        // Fixtures/abstractions-5.7.0-surface.txt from the newly published package in the same PR
-        // that makes the bump, rather than this Fact ever being hand-edited to tolerate a diff.
+        // Fixtures/abstractions-<version>-surface.txt in the same PR that makes the bump, rather
+        // than this Fact ever being hand-edited to tolerate a diff — and a regeneration is itself
+        // diffed against the previous baseline by hand, removals accounted for at zero, because
+        // this Fact cannot fail at the commit that regenerates it (Fixtures/README.md states both
+        // permitted provenances and that check).
         //
-        // PLAN T524 round-2 F1 amendment: an additive contract change (SPEC F189.1, gh-#772) can
-        // land BEFORE its own Abstractions package publishes. That gap is tolerated ONLY by the
-        // named, line-by-line PendingPublicationSurfaceAllowlist.Lines below — never by a wildcard
-        // or a hand-edit of this fixture — and closes the moment PLAN T530 regenerates the fixture
-        // from the newly published package and deletes the allowlist.
+        // PLAN T530 closed the one tolerance window this law has ever needed: SPEC F189.1's
+        // additive contract change (gh-#772) landed in src/GenWave.Abstractions across T524–T529,
+        // ahead of the package bump, so PLAN T524 round-2 named a temporary, line-by-line allowlist
+        // for exactly those additions. T530 is the version-bump PR itself — it regenerates this
+        // baseline from the release commit's own Release build of src/GenWave.Abstractions (the
+        // published 5.10.0 nupkg does not exist yet; it publishes on the v5.10.0 tag, PLAN T531,
+        // which cuts this same tree) and deletes the allowlist in the same PR, so the fact below
+        // again compares directly with no third tolerance list.
         [Fact]
-        public void ThePackageSurfaceDiffVs570IsEmpty()
+        public void ThePackageSurfaceDiffVs5100IsEmpty()
         {
             var baseline = BaselineLines();
             Assert.True(baseline.Count > 20, $"the baseline fixture has only {baseline.Count} lines — too small to be a real enumeration.");
@@ -249,18 +258,13 @@ public static class FeatureSponsorSettingsOptionsLawsAndTheRelease
             var added = ExcessOf(current, baseline);
             var removed = ExcessOf(baseline, current);
 
-            // PLAN T524 round-2 F1: only an addition matching the named pending-publication
-            // allowlist is tolerated — a removal, or any addition NOT on that list (including a
-            // duplicate occurrence of an allowlisted line), still fails below.
-            var unexpectedAdded = ExcessOf(added, PendingPublicationSurfaceAllowlist.Lines);
-
-            if (unexpectedAdded.Count == 0 && removed.Count == 0)
+            if (added.Count == 0 && removed.Count == 0)
                 return;
 
             var message = string.Join(
                 Environment.NewLine,
-                new[] { "GenWave.Abstractions public surface differs from the 5.7.0 baseline:" }
-                    .Concat(unexpectedAdded.Select(l => $"+ {l}"))
+                new[] { "GenWave.Abstractions public surface differs from the 5.10.0 baseline:" }
+                    .Concat(added.Select(l => $"+ {l}"))
                     .Concat(removed.Select(l => $"- {l}")));
             Assert.Fail(message);
         }

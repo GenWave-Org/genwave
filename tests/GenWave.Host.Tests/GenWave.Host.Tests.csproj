@@ -44,10 +44,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- STORY-431 AC6 (SPEC F176.4): the committed Abstractions 5.7.0 public-surface baseline
+    <!-- STORY-431 AC6 (SPEC F176.4): the committed Abstractions 5.10.0 public-surface baseline
          Story431_SponsorSettingsAndRelease.cs's ScenarioAbstractionsUnchanged diffs the live build
          against, at the build-output path the Fact reads from. -->
-    <None Include="Fixtures\abstractions-5.7.0-surface.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Fixtures\abstractions-5.10.0-surface.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
