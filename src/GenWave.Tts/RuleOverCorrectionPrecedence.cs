@@ -1,5 +1,6 @@
 namespace GenWave.Tts;
 
+using GenWave.Core.Domain;
 using ContextPronunciationRule = GenWave.Core.Domain.PronunciationRule;
 
 /// <summary>

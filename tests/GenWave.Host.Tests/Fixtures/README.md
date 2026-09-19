@@ -190,3 +190,15 @@ a release that never touched `src/GenWave.Abstractions` ships a byte-identical p
 **Regenerate ONLY by** running `PublicSurface.Of` against the newly published package's dll when a
 legitimate Abstractions bump ships, renaming the file to that version in the same PR. Never hand-edit
 this file to tolerate a diff.
+
+### ⏳ Pending-publication amendment (PLAN T524, round-2 F1)
+
+An additive Abstractions contract change (SPEC F189.1, gh-#772) can land in `src/GenWave.Abstractions`
+BEFORE the package that carries it is published — the bump itself is a later PLAN item (T530). This
+fixture still stays byte-identical to the published 5.7.0 surface (never hand-edited); the gap is
+tolerated only in `Specs/Story431_SponsorSettingsAndRelease.cs`'s
+`ThePackageSurfaceDiffVs570IsEmpty` fact, by a named, line-by-line allowlist
+(`Support/PendingPublicationSurfaceAllowlist.cs`) that lists EXACTLY the added lines the in-flight
+change introduces. Any addition not on that list, or any removal at all, still fails the fact.
+🗑️ PLAN T530 regenerates this fixture from the newly published package, renames it, and deletes the
+allowlist in the same PR.

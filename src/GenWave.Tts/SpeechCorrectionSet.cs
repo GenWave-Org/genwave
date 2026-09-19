@@ -2,6 +2,8 @@ using System.Text.RegularExpressions;
 
 namespace GenWave.Tts;
 
+using GenWave.Core.Domain;
+
 /// <summary>
 /// Immutable, precompiled collection of operator pronunciation corrections (SPEC F68.5). Each
 /// rule's <see cref="SpeechCorrection.From"/> is <see cref="Regex.Escape"/>d before compilation —

@@ -232,6 +232,12 @@ public static class FeatureSponsorSettingsOptionsLawsAndTheRelease
         // hand-maintained expectation. PLAN T453 ruling: a legitimate Abstractions bump regenerates
         // Fixtures/abstractions-5.7.0-surface.txt from the newly published package in the same PR
         // that makes the bump, rather than this Fact ever being hand-edited to tolerate a diff.
+        //
+        // PLAN T524 round-2 F1 amendment: an additive contract change (SPEC F189.1, gh-#772) can
+        // land BEFORE its own Abstractions package publishes. That gap is tolerated ONLY by the
+        // named, line-by-line PendingPublicationSurfaceAllowlist.Lines below — never by a wildcard
+        // or a hand-edit of this fixture — and closes the moment PLAN T530 regenerates the fixture
+        // from the newly published package and deletes the allowlist.
         [Fact]
         public void ThePackageSurfaceDiffVs570IsEmpty()
         {
@@ -243,13 +249,18 @@ public static class FeatureSponsorSettingsOptionsLawsAndTheRelease
             var added = ExcessOf(current, baseline);
             var removed = ExcessOf(baseline, current);
 
-            if (added.Count == 0 && removed.Count == 0)
+            // PLAN T524 round-2 F1: only an addition matching the named pending-publication
+            // allowlist is tolerated — a removal, or any addition NOT on that list (including a
+            // duplicate occurrence of an allowlisted line), still fails below.
+            var unexpectedAdded = ExcessOf(added, PendingPublicationSurfaceAllowlist.Lines);
+
+            if (unexpectedAdded.Count == 0 && removed.Count == 0)
                 return;
 
             var message = string.Join(
                 Environment.NewLine,
                 new[] { "GenWave.Abstractions public surface differs from the 5.7.0 baseline:" }
-                    .Concat(added.Select(l => $"+ {l}"))
+                    .Concat(unexpectedAdded.Select(l => $"+ {l}"))
                     .Concat(removed.Select(l => $"- {l}")));
             Assert.Fail(message);
         }

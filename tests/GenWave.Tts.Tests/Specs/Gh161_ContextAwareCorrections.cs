@@ -11,6 +11,7 @@
 // flatten never disturbs.)
 
 using System.Text.Json;
+using GenWave.Core.Domain;
 using Xunit;
 
 namespace GenWave.Tts.Tests.Specs;

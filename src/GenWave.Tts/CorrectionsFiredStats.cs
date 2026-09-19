@@ -2,6 +2,8 @@ namespace GenWave.Tts;
 
 using System.Collections.Concurrent;
 
+using GenWave.Core.Domain;
+
 /// <summary>
 /// Process-lifetime, per-rule fired counters for operator pronunciation corrections (SPEC F68.7,
 /// STORY-186 AC3) — how many times each <see cref="SpeechCorrection.From"/> (case-insensitive) has

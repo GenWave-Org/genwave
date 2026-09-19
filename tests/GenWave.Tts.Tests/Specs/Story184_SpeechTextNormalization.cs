@@ -4,6 +4,7 @@
 
 using System.Reflection;
 using System.Text.Json;
+using GenWave.Core.Domain;
 using GenWave.Tts;
 using Xunit;
 

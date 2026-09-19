@@ -11,6 +11,8 @@
 // BDD specification — xUnit. Every scenario drives SpeechText.Normalize with an empty correction
 // set: the flatten is a fixed pass, not an operator rule, and must hold with nothing configured.
 
+using GenWave.Core.Domain;
+
 namespace GenWave.Tts.Tests.Specs;
 
 public static class FeatureSpeakabilityFlatten

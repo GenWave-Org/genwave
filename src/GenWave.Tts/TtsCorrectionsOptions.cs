@@ -1,5 +1,7 @@
 namespace GenWave.Tts;
 
+using GenWave.Core.Domain;
+
 /// <summary>
 /// Binds the raw <c>Tts:Corrections</c> configuration leaf (SPEC F68.5) — a JSON-encoded array of
 /// <c>{from, to}</c> operator pronunciation corrections, e.g.

@@ -3,6 +3,7 @@ namespace GenWave.Tts;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using GenWave.Core.Domain;
 
 /// <summary>
 /// Live settings subscriber for <c>Tts:Corrections</c> (SPEC F68.5, STORY-185 AC1). Subscribes to

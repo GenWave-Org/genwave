@@ -8,8 +8,9 @@ namespace GenWave.Core.Domain;
 ///
 /// Mirrors <c>GenWave.Tts.PronunciationRule</c>'s identical <c>{Pattern, Word, Ipa}</c> shape by
 /// deliberate instruction rather than by shared type — the same posture <see cref="PersonaCorrection"/>
-/// already takes on <c>GenWave.Tts.SpeechCorrection</c> (SPEC F71.1): this project (the MIT contract
-/// surface, zero dependencies) cannot reference <c>GenWave.Tts</c>, where the compiled,
+/// already takes on <see cref="SpeechCorrection"/> (SPEC F71.1; PLAN T524 has since moved that type
+/// into this project, so that precedent no longer needs a mirror at all): this project (the MIT
+/// contract surface, zero dependencies) cannot reference <c>GenWave.Tts</c>, where the compiled,
 /// regex-matched runtime type (<c>PronunciationRuleSet</c>) lives. A caller that needs the compiled
 /// matcher (the Kokoro adapters, <c>GenWave.Tts</c>) converts this plain data into
 /// <c>PronunciationRuleSet.Create</c>'s own input shape; this record carries nothing but the
@@ -17,7 +18,7 @@ namespace GenWave.Core.Domain;
 ///
 /// <para>
 /// <b>The precedent cited above has already drifted — cite it honestly, not as a clean success.</b>
-/// <c>GenWave.Tts.SpeechCorrection</c> gained <c>WhenPrecededBy</c>/<c>WhenFollowedBy</c> at gh-#161;
+/// <see cref="SpeechCorrection"/> (then <c>GenWave.Tts.SpeechCorrection</c>) gained <c>WhenPrecededBy</c>/<c>WhenFollowedBy</c> at gh-#161;
 /// <see cref="PersonaCorrection"/> never did. <c>ActivePersonaCorrectionsCache</c> converts every
 /// card correction to a <c>SpeechCorrection</c> with both left null, so a persona card cannot
 /// express a conditional correction a station rule can — lossy today, silently, because nothing
