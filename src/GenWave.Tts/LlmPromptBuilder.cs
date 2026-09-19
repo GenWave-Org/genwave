@@ -829,7 +829,7 @@ static class LlmPromptBuilder
 
         // SPEC F111.3 (PLAN T235): the straddle back-announce rides ONLY the SignOn half — the piece
         // held at the straddle seam until the crossing track has actually aired (SPEC F111.2). A
-        // SignOff piece's own CrossingTrackTitle is always null (Orchestrator.CaptureCrossingTrackForHeldSignOn
+        // SignOff piece's own CrossingTrackTitle is always null (HandoffCeremonyProducer.CaptureCrossingTrack
         // only ever enriches the pending SignOn), so this Kind gate is defense-in-depth as much as it
         // is routing, mirroring this method's own established per-kind-arm idiom (the ContextSegment
         // facts block and the patter-fact line both re-check their own kind the same way).

@@ -36,7 +36,7 @@ using GenWave.Core.Domain;
 /// SPEC F111.3 (PLAN T235), additive and optional (default <see langword="null"/> — every pre-T235
 /// construction site, including the SignOff half of every ceremony, stays diff-free): the deliberately
 /// boundary-crossing track's own <c>MediaItem.Title</c>, captured into the HELD SignOn's context at
-/// straddle plan time (<c>Orchestrator.CaptureCrossingTrackForHeldSignOn</c>) — the SAME
+/// straddle plan time (<c>HandoffCeremonyProducer.CaptureCrossingTrack</c>) — the SAME
 /// immutable-capture pattern this whole record already establishes for Voice/PersonaName/
 /// CounterpartName, just captured one straddle-seam later than the rest of them. <see langword="null"/>
 /// for every non-straddle handoff (both pieces of an ordinary boundary, and the SignOff half of a
@@ -50,7 +50,7 @@ using GenWave.Core.Domain;
 /// SPEC F116.1/F116.2 (STORY-307, PLAN T248): this piece's OWN show — the ending show's name for a
 /// <see cref="SpeechDeferralKind.SignOff"/> deferral, the incoming show's name for a
 /// <see cref="SpeechDeferralKind.SignOn"/> one — mirrors <see cref="PersonaName"/>'s own
-/// self/counterpart split. Captured at <c>Orchestrator.EnqueueHandoffCeremonyAsync</c> ENQUEUE time
+/// self/counterpart split. Captured at <c>HandoffCeremonyProducer.ArmAsync</c> ENQUEUE time
 /// straight off the resolver's own <c>OnAirSnapshot.Show</c>/<c>OnAirSnapshot.NextSegment.Show</c>
 /// (SPEC F116.1's chokepoint — never re-derived), the SAME immutable-capture pattern this whole
 /// record already establishes for Voice/PersonaName/CounterpartName. <see langword="null"/> for an

@@ -30,16 +30,17 @@ public static class OrchestrationServiceCollectionExtensions
     /// templated TTS ident, same as an empty pool would.
     ///
     /// <para>
-    /// <b>Handoff ceremony seams (SPEC F92.1, STORY-243, PLAN T124) — deliberately NOT registered
-    /// here:</b> <see cref="Orchestrator"/>'s optional <c>CachingScheduleResolver</c>/<c>IPersonaStore</c>
-    /// constructor parameters come from whatever the HOST wired for the format-clock feature —
+    /// <b>Handoff ceremony seams (SPEC F92.1/F190, STORY-243/457, PLAN T124/T532) — deliberately NOT
+    /// registered here:</b> <see cref="HandoffCeremonyProducer"/>'s optional
+    /// <c>CachingScheduleResolver</c>/<c>IPersonaStore</c>/<c>ISpeakerSnapshotSource</c> constructor
+    /// parameters come from whatever the HOST wired for the format-clock feature —
     /// <c>StationSettingsHostingExtensions.AddGenWaveStationSettings</c> (GenWave.Host) registers the
     /// singleton <c>CachingScheduleResolver</c>; <c>PersonaServiceCollectionExtensions.AddPersonaStore</c>
     /// (GenWave.MediaLibrary) registers <c>IPersonaStore</c>. This method owns neither registration —
     /// a host that never calls <c>AddGenWaveStationSettings</c> (no format-clock schedule) simply
     /// leaves both parameters at their constructor default (<see langword="null"/>) rather than
-    /// failing composition; <see cref="Orchestrator"/>'s handoff producer then logs ONE WARN on its
-    /// first unit and stays a permanent, silent-after-that no-op (the pre-F91 station shape).
+    /// failing composition; <see cref="HandoffCeremonyProducer"/> then logs ONE WARN on its first unit
+    /// and stays a permanent, silent-after-that no-op (the pre-F91 station shape).
     /// </para>
     ///
     /// <para>
@@ -147,6 +148,17 @@ public static class OrchestrationServiceCollectionExtensions
             personaStore: sp.GetService<IPersonaStore>(),
             speakerSnapshots: sp.GetService<ISpeakerSnapshotSource>()));
 
+        // PLAN T532 (SPEC F190): the handoff ceremony producer, extracted off Orchestrator — TryAdd so
+        // a module/test wins. Reads the SAME optional format-clock/persona/speaker-snapshot seams the
+        // pre-T532 Orchestrator itself read directly (see this method's own remarks above).
+        services.TryAddSingleton(sp => new HandoffCeremonyProducer(
+            sp.GetRequiredService<SpeechDeferralQueue>(),
+            sp.GetRequiredService<IBoundaryBiasProvider>(),
+            sp.GetRequiredService<ILogger<HandoffCeremonyProducer>>(),
+            scheduleResolver: sp.GetService<CachingScheduleResolver>(),
+            personaStore: sp.GetService<IPersonaStore>(),
+            speakerSnapshots: sp.GetService<ISpeakerSnapshotSource>()));
+
         // PLAN T522: the default IBreakPlanObserver binding — silence. TryAdd so a module/test that
         // wants to watch every plan (CapturingBreakPlanObserver, tests only) wins.
         services.TryAddSingleton<IBreakPlanObserver>(NoOpBreakPlanObserver.Instance);
@@ -173,16 +185,15 @@ public static class OrchestrationServiceCollectionExtensions
             sp.GetRequiredService<TimeProvider>(),
             sp.GetRequiredService<IBoundaryBiasProvider>(),
             sp.GetRequiredService<BreakPlanner>(),
+            sp.GetRequiredService<HandoffCeremonyProducer>(),
             scheduleResolver: sp.GetService<CachingScheduleResolver>(),
-            personaStore: sp.GetService<IPersonaStore>(),
             events: sp.GetService<IStationEventSink>() ?? NoOpStationEventSink.Instance,
             patterEstimator: sp.GetService<IPatterDurationEstimator>(),
             imagingSettings: sp.GetService<IStationImagingSettingsProvider>() ?? NoOpStationImagingSettingsProvider.Instance,
             crosstalkPlanner: sp.GetService<CrosstalkPlanner>(),
             announcementRenderer: sp.GetService<IVerbatimSegmentRenderer>(),
             announcementCopyWriter: sp.GetService<IAnnouncementCopyWriter>(),
-            observer: sp.GetService<IBreakPlanObserver>(),
-            speakerSnapshots: sp.GetService<ISpeakerSnapshotSource>()));
+            observer: sp.GetService<IBreakPlanObserver>()));
 
         return services;
     }
