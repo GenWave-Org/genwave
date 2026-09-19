@@ -39,8 +39,15 @@ jobs:
         run: dotnet restore GenWave.sln
       - name: Build (Release)
         run: dotnet build GenWave.sln --no-restore --configuration Release
-      - name: Install ffmpeg (integration specs drive the real binary)
-        uses: ./.github/actions/install-ffmpeg
+      # ffmpeg: the integration specs drive the real binary, same as ci.yml's tier-1 job.
+      # espeak-ng: Story324's ScenarioTheRealBinaryAgreesWithTheContract runs EspeakRespellOracle
+      # against the genuine binary. The api image vendors espeak-ng (SPEC F126.2, PLAN T278) but
+      # this job runs on a bare runner, not inside that image — gh-#817: T507 removed the PATH
+      # probe that used to skip those facts, so without this the lane goes red on a null IPA.
+      - name: Install ffmpeg + espeak-ng (integration specs drive the real binaries)
+        uses: ./.github/actions/install-apt-packages
+        with:
+          packages: ffmpeg espeak-ng
       - name: Test (Category=Integration — needs Docker + ffmpeg, on-demand here, never in ci.yml)
         run: dotnet test GenWave.sln --no-build --configuration Release --filter "Category=Integration" --logger trx
       # SPEC F180.2 says "Artifacts: trx + fixture logs"; only the trx is uploaded below — the
@@ -64,7 +71,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Install ffmpeg (stack_gate.sh's own capture leg needs the real binary)
-        uses: ./.github/actions/install-ffmpeg
+        uses: ./.github/actions/install-apt-packages
+        with:
+          packages: ffmpeg
       - name: Resolve the newest published release tag
         run: |
           TAG="$(gh release list --exclude-drafts --exclude-pre-releases --limit 20 --json tagName -q '[.[] | select(.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))][0].tagName')"

@@ -9,9 +9,12 @@
 // with the oracle binary faked at its adapter seam (IRespellOracle) — the exception is
 // ScenarioTheRealBinaryAgreesWithTheContract, which exercises EspeakRespellOracle against the
 // genuine espeak-ng process and is plain "Category=Integration" (T507): the api image's runtime
-// stage vendors espeak-ng (SPEC F126.2, PLAN T278), so the integration lane (run inside that image,
-// or with espeak-ng apt-get/brew installed locally) is expected to have it — a bare PR-tier run
-// never reaches these facts at all (dotnet test's own "Category!=Integration" filter).
+// stage vendors espeak-ng (SPEC F126.2, PLAN T278), and nightly.yml's `integration` job installs it
+// on the runner for the same reason (gh-#817 — that install is what keeps these facts green; T507
+// removed the PATH probe that used to skip them, and the lane went red until the install landed).
+// Locally, `apt-get install espeak-ng` / `brew install espeak-ng` before running the Integration
+// filter. A bare PR-tier run never reaches these facts at all (dotnet test's own
+// "Category!=Integration" filter).
 //
 // The T280 wire acceptance (derive→audition→save→next-spoken-line in a real browser) is a
 // production check, deliberately not represented here.
