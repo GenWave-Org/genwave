@@ -1,15 +1,22 @@
-name: Install ffmpeg
+name: Install apt packages
 description: >-
-  Installs ffmpeg via apt with a hang-safe, IPv4-forced retry loop (gh-#581,
+  Installs apt packages via a hang-safe, IPv4-forced retry loop (gh-#581,
   hardened further at review-round-1). Extracted (gh-#588) from ci.yml,
   release.yml, and publish-nuget.yml, which previously carried three
   byte-identical copies of this step — see those workflows' call sites for
-  why each job needs ffmpeg.
+  why each job needs what it asks for. Generalised past ffmpeg (gh-#817),
+  because nightly.yml's integration lane needs espeak-ng on the same
+  hardened path.
+
+inputs:
+  packages:
+    description: Space-separated apt package names to install.
+    required: true
 
 runs:
   using: composite
   steps:
-    - name: Install ffmpeg (artwork specs drive the real binary)
+    - name: Install ${{ inputs.packages }}
       shell: bash
       run: |
         # gh-#581: this step has wedged solid against the apt mirror three times (v5.2.2
@@ -23,11 +30,14 @@ runs:
         # backoff, refreshing the package index each attempt in case the first handshake is
         # the one that's stuck.
         set -euo pipefail
+        # Deliberately unquoted on use below: `packages` is a space-separated list that apt-get
+        # must see as separate argv entries.
+        packages="${{ inputs.packages }}"
         apt_opts=(-o Acquire::ForceIPv4=true -o Acquire::Retries=3 -o DPkg::Lock::Timeout=60)
         max_attempts=3
         attempt=1
         until [ "$attempt" -gt "$max_attempts" ]; do
-          echo "Installing ffmpeg (attempt $attempt of $max_attempts)..."
+          echo "Installing $packages (attempt $attempt of $max_attempts)..."
 
           # A SIGTERM'd leg (our own timeout below, or a cancelled run) can leave dpkg mid
           # transaction with its lock held — clear that first so the next attempt fails on
@@ -42,8 +52,8 @@ runs:
           fi
 
           if timeout -k 10s 180s sudo apt-get update "${quiet_opts[@]}" "${apt_opts[@]}" \
-            && timeout -k 10s 180s sudo apt-get install -y "${quiet_opts[@]}" --no-install-recommends "${apt_opts[@]}" ffmpeg; then
-            echo "Installed ffmpeg."
+            && timeout -k 10s 180s sudo apt-get install -y "${quiet_opts[@]}" --no-install-recommends "${apt_opts[@]}" $packages; then
+            echo "Installed $packages."
             exit 0
           fi
 
@@ -53,5 +63,5 @@ runs:
             sleep 5
           fi
         done
-        echo "::error::All $max_attempts ffmpeg install attempts failed — this is the gh-#581 apt-mirror hang. Failing fast instead of wedging the runner; rerun the job."
+        echo "::error::All $max_attempts apt install attempts failed — this is the gh-#581 apt-mirror hang. Failing fast instead of wedging the runner; rerun the job."
         exit 1
