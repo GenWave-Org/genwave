@@ -293,6 +293,15 @@ public sealed class OrchestratorBuilder
         // WithAnnouncementCopyWriter.
         var resolvedBreakRenderer = new BreakRenderer(resolvedTts, resolvedTime, announcementRenderer, announcementCopyWriter);
 
+        // PLAN T536 (SPEC F192): the delivery-phase seam, extracted off Orchestrator — shares the
+        // SAME resolvedEvents sink BreakPlanner/Orchestrator itself read, and the SAME estimator
+        // instance the Orchestrator's own patterEstimator: argument below passes, so a spec that reads
+        // ObserveRendered calls through one sees them from the other too (see this class's own remarks
+        // for why patterEstimator itself never defaults to a fake).
+        var resolvedPatterEstimator = patterEstimator ?? new RollingPatterDurationEstimator();
+        var resolvedBreakDelivery = new BreakDelivery(
+            new ForwardingLogger<BreakDelivery>(resolvedLogger), resolvedEvents, resolvedPatterEstimator);
+
         var orchestrator = new Orchestrator(
             resolvedIdentityProvider,
             resolvedScopeProvider,
@@ -307,9 +316,10 @@ public sealed class OrchestratorBuilder
             resolvedPlanner,
             resolvedHandoffCeremonyProducer,
             resolvedBreakRenderer,
+            resolvedBreakDelivery,
             scheduleResolver: resolvedScheduleResolver,
             events: resolvedEvents,
-            patterEstimator: patterEstimator,
+            patterEstimator: resolvedPatterEstimator,
             imagingSettings: imagingSettings,
             crosstalkPlanner: crosstalkPlanner,
             observer: planObserver);

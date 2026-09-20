@@ -78,7 +78,7 @@ public sealed partial class BreakPlanner
             var copy = new SegmentCopy(announcement.Message, FreshPerAiring: true);
             var reservation = new Reservation(ReservationKind.Announcement, announcement.Id.ToString(CultureInfo.InvariantCulture));
 
-            slots.Add(new PlannedSlot(0, SegmentKind.Announcement, new VerbatimSource(request, copy, AllowFlavor: !announcement.Verbatim), reservation, DropPolicyFor(SegmentKind.Announcement), ObserveDuration: true));
+            slots.Add(new PlannedSlot(0, SegmentKind.Announcement, new VerbatimSource(request, copy, AllowFlavor: !announcement.Verbatim), reservation, new WarnDrop(new AnnouncementWarnSubject()), ObserveDuration: true));
         }
 
         return slots;
@@ -225,7 +225,7 @@ public sealed partial class BreakPlanner
     {
         var built = await BuildContextSegmentRequestAsync(deferral, context.Identity, drainNow, speakers, ct);
         return built is { } b
-            ? new PlannedSlot(0, SegmentKind.ContextSegment, new RenderSource(b.Request), Reservation: null, DropPolicyFor(SegmentKind.ContextSegment), ObserveDuration: true, ContextProviderKey: b.ProviderKey)
+            ? new PlannedSlot(0, SegmentKind.ContextSegment, new RenderSource(b.Request), Reservation: null, new WarnDrop(new ContextProviderWarnSubject(b.ProviderKey)), ObserveDuration: true)
             : null;
     }
 

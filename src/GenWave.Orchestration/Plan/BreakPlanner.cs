@@ -119,12 +119,14 @@ public sealed partial class BreakPlanner(
     }
 
     // SPEC F186.3's per-kind drop-report assignment (T521 review, cross-referenced against
-    // Orchestrator.EnqueuePatterAsync's render-await loop): an announcement (its claimed id) and a
-    // context segment (its provider key) warn; a dropped sign-off/sign-on also publishes
-    // HandoffPieceDropped; every other kind drops silently.
+    // Orchestrator.EnqueuePatterAsync's render-await loop): a dropped sign-off/sign-on also publishes
+    // HandoffPieceDropped; every other kind drops silently. An announcement (its claimed id) and a
+    // context segment (its provider key) warn too, but each builds its own WarnDrop with a Subject
+    // inline at its own construction site (BreakPlanner.Slots.cs) instead of through this switch —
+    // SPEC F192.2, PLAN T536 review finding F3 — so this switch never has to mint the subject-less
+    // WarnDrop that used to crash BreakDelivery.ReportDrop.
     static DropPolicy DropPolicyFor(SegmentKind kind) => kind switch
     {
-        SegmentKind.Announcement or SegmentKind.ContextSegment => new WarnDrop(),
         SegmentKind.SignOff or SegmentKind.SignOn => new WarnAndEventDrop(),
         _ => new SilentDrop(),
     };

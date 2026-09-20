@@ -1,7 +1,6 @@
 namespace GenWave.Orchestration;
 
 using System.Diagnostics;
-using System.Globalization;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 
@@ -28,9 +27,9 @@ using GenWave.Core.Domain;
 /// the two optional verbatim-announcement seams (SPEC F191.5) — no logger, no
 /// <see cref="IStationEventSink"/>, no <see cref="IPatterDurationEstimator"/>, no buffer: it is
 /// testable with a scripted TTS fake and a fake clock alone. Reporting a drop's cause, observing a
-/// measured duration, DJ-name stamping, and enqueueing the result all stay on
-/// <see cref="Orchestrator"/>, which consumes the returned outcome list in slot order (PLAN T536/
-/// SPEC F192 finishes moving those onto their own seam).
+/// measured duration, DJ-name/MediaId stamping, and settling reservations all moved onto
+/// <c>BreakDelivery</c> at PLAN T536 (SPEC F192) — this class's own <see cref="RenderAsync"/> return
+/// is that seam's own input, consumed in the SAME ordinal order it was produced.
 /// </summary>
 public sealed class BreakRenderer(
     ITtsSegmentSource tts,
@@ -82,7 +81,7 @@ public sealed class BreakRenderer(
     Task<MediaItem?> KickSlot(PlannedSlot slot, CancellationToken ct) => slot.Source switch
     {
         RenderSource render => tts.RenderAsync(render.Request, ct),
-        VerbatimSource verbatim => RenderVerbatimAsync(verbatim, slot, ct),
+        VerbatimSource verbatim => RenderVerbatimAsync(verbatim, ct),
         ReadySource ready => Task.FromResult<MediaItem?>(ready.Item), // Ready slots stand in as completed (SPEC F191.2)
         SlotSource => throw new UnreachableException($"Unhandled {nameof(SlotSource)} case: {slot.Source.GetType()}"),
     };
@@ -90,11 +89,11 @@ public sealed class BreakRenderer(
     /// <summary>
     /// SPEC F191.4's verbatim law: <see cref="VerbatimSource.AllowFlavor"/> true tries the
     /// announcement copy writer first, falling back to <see cref="VerbatimSource.Copy"/> on null or
-    /// throw; false renders the plain copy directly. Every <see cref="VerbatimSource"/> slot is an
-    /// Announcement (SPEC F188 — no other kind ever carries one), so the rendered id always wraps
-    /// with the claimed announcement's own id (SPEC F144.1's carry requirement).
+    /// throw; false renders the plain copy directly. The rendered item's MediaId is NOT wrapped with
+    /// the claimed announcement's own id here (PLAN T536 moved that stamp, alongside DJ-name
+    /// attribution, onto <c>BreakDelivery</c> — see that class's own remarks).
     /// </summary>
-    async Task<MediaItem?> RenderVerbatimAsync(VerbatimSource verbatim, PlannedSlot slot, CancellationToken ct)
+    async Task<MediaItem?> RenderVerbatimAsync(VerbatimSource verbatim, CancellationToken ct)
     {
         if (announcementRenderer is not { } renderer)
             return null;
@@ -104,11 +103,7 @@ public sealed class BreakRenderer(
             : null;
 
         var copy = flavoredText is { } text ? verbatim.Copy with { Text = text } : verbatim.Copy;
-        var rendered = await renderer.RenderAsync(verbatim.Request, copy, ct);
-
-        return rendered is { } item
-            ? item with { MediaId = AnnouncementMediaId.Wrap(AnnouncementIdOf(slot), item.MediaId) }
-            : null;
+        return await renderer.RenderAsync(verbatim.Request, copy, ct);
     }
 
     /// <summary>
@@ -137,9 +132,4 @@ public sealed class BreakRenderer(
             return null;
         }
     }
-
-    static long AnnouncementIdOf(PlannedSlot slot) =>
-        slot.Reservation is { Kind: ReservationKind.Announcement, Key: var key }
-            ? long.Parse(key, CultureInfo.InvariantCulture)
-            : throw new UnreachableException("Announcement slot without an Announcement reservation (SPEC F187.3)");
 }

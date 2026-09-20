@@ -289,6 +289,7 @@ public sealed partial class Orchestrator(
     BreakPlanner planner,
     HandoffCeremonyProducer handoffCeremonyProducer,
     BreakRenderer breakRenderer,
+    BreakDelivery breakDelivery,
     CachingScheduleResolver? scheduleResolver = null,
     IStationEventSink? events = null,
     IPatterDurationEstimator? patterEstimator = null,
@@ -1041,71 +1042,6 @@ public sealed partial class Orchestrator(
         BoundaryFitPlan fit, string outcome, BoundaryOutcome rung, IReadOnlyList<TimeSpan> sampled,
         TimeSpan? chosenDiff) =>
         LogBoundaryFit(fit, outcome, rung, sampled, chosenDiff);
-
-    /// <summary>
-    /// SPEC F92.4: a handoff piece that failed to render (budget exceeded, faulted, or a null result
-    /// — e.g. <c>TtsSegmentSource</c>'s own drop of non-LLM-authored handoff copy, PLAN T123)
-    /// degrades that HALF of the ceremony only. WARN here, plus a booth-log entry via
-    /// <see cref="events"/> (mirrors the <c>DegradationModeChanged</c>/<c>SegmentGenerated</c> event
-    /// idiom <c>BoothLogWriter</c> already reacts to) so an operator sees it without grepping logs.
-    /// The OTHER piece of the same boundary still airs if it rendered — this method never touches
-    /// <c>pendingRenders</c>/<c>buffer</c> itself — and the next boundary retries the full ceremony
-    /// from scratch: nothing here latches a failure.
-    /// </summary>
-    void LogHandoffDrop(SegmentKind kind, string cause)
-    {
-        logger.LogWarning(
-            "Handoff piece {Kind} dropped ({Cause}) — that half of the ceremony airs nothing; the " +
-            "other piece still airs if it rendered, and the next boundary retries the full ceremony " +
-            "(SPEC F92.4).",
-            kind, cause);
-        events.Publish(new HandoffPieceDropped(kind.ToString(), cause));
-    }
-
-    /// <summary>
-    /// SPEC F107.6 (STORY-297, PLAN T224) — a context segment that failed to render (budget
-    /// exceeded, faulted, or a null result — e.g. <c>TtsSegmentSource</c>'s own drop of non-LLM-
-    /// authored context copy, mirroring PLAN T123's handoff precedent) never airs and never blocks
-    /// music: WARN only, one line, naming the provider and cause (T224 review finding — the earlier
-    /// shape named only the cause, leaving an operator unable to tell which provider dropped when
-    /// more than one is configured; <paramref name="providerKey"/> is the SAME discriminator the
-    /// Information-level freshness/blank-facts skips two calls up already name, threaded through
-    /// <c>pendingRenders</c> alongside the request so this AFTER-render drop can name it too — see
-    /// this class's own <c>Kick</c> local for where it rides in). No <see cref="events"/> publish —
-    /// unlike <see cref="LogHandoffDrop"/>'s F92.4 booth-log entry, F107 defines no drop-specific
-    /// booth-log event, and a render miss here is ordinary skip-never-silence operation (the SAME
-    /// posture the drain arm's own freshness/blank-facts skips already log at Information one call
-    /// up), not a ceremony half going dark. The next boundary's own drain simply gets another chance.
-    /// </summary>
-    void LogContextSegmentDrop(string? providerKey, string cause) =>
-        logger.LogWarning(
-            "Context segment for provider {ProviderKey} dropped ({Cause}) — no context item reaches " +
-            "air this boundary; music continues, and the next drain retries (SPEC F107.6).",
-            providerKey ?? "(unknown)", cause);
-
-    /// <summary>
-    /// SPEC F144.5 (STORY-358, PLAN T341) — an announcement segment that failed to render (budget
-    /// exceeded, faulted, or a null result) never airs and never blocks music: WARN only, mirroring
-    /// <see cref="LogContextSegmentDrop"/>'s own posture one method up — no booth-log entry (a later
-    /// task's mark-aired/re-arm guardian owns that surface, reading <c>station.announcement</c>
-    /// directly; this Orchestrator only ever vends, never transitions the row). The claimed row
-    /// itself is untouched by this drop — SPEC F144.5's own re-arm (claimed -&gt; pending after one
-    /// break cycle with no air) is that guardian's job, not this log line's.
-    ///
-    /// <paramref name="announcementId"/> names WHICH claimed row dropped (T341 review finding F8 —
-    /// the SAME <see cref="LogContextSegmentDrop"/> providerKey precedent immediately above: an
-    /// operator staring at this WARN with more than one announcement claimed this unit needs to know
-    /// which row is still sitting claimed, not merely that "an" announcement dropped), threaded
-    /// through <c>pendingRenders</c> alongside the request exactly like <c>ContextProviderKey</c>
-    /// already is — see that field's own remarks. <see langword="null"/> only for a hypothetical
-    /// caller that reaches this method without ever having claimed a row; today's one call site
-    /// (<c>KickAnnouncement</c>) always supplies the claimed <see cref="AnnouncementItem.Id"/>.
-    /// </summary>
-    void LogAnnouncementDrop(long? announcementId, string cause) =>
-        logger.LogWarning(
-            "Announcement {AnnouncementId} dropped ({Cause}) — the claimed row does not air this unit; " +
-            "music continues (SPEC F144.5).",
-            announcementId?.ToString(CultureInfo.InvariantCulture) ?? "(unknown)", cause);
 
     /// <summary>
     /// gh-#259 — resolves the display name the whole UNIT's items are attributed to (the music
