@@ -79,7 +79,7 @@ public static class FeatureRequestShoutOut
         // request line's own listener-supplied wish text this pin guards against.
         // CrossingTrackTitle/CrossingTrackArtist (SPEC F111.3, PLAN T235) joined the SegmentRequest
         // whitelist deliberately: the deliberately boundary-crossing track's own catalog title/artist,
-        // carried verbatim from Orchestrator.CaptureCrossingTrackForHeldSignOn's capture of the very
+        // carried verbatim from HandoffCeremonyProducer.CaptureCrossingTrack's capture of the very
         // MediaItem this same pick ladder just selected — the same station/catalog-owned metadata
         // family as MediaItem's own Title/Artist below, never anything a listener typed.
         // ShowName/ShowFlavor/CounterpartShowName (SPEC F116.2, STORY-307, PLAN T248) joined the

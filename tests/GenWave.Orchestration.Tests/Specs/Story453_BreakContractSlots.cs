@@ -203,7 +203,7 @@ public static partial class FeatureBreakContract
         // shape as AC15/AC16, but with a SignOn also pending so HoldSignOnPastQueuedTail has a live
         // target. This is TryServeCeremonyOnlyUnitAsync's own decline-Straddle rung, not
         // GetNextAsync's track-selection straddle branch (that branch never sets NotBefore — see
-        // CaptureCrossingTrackForHeldSignOn's own remarks) — no catalog/crossing-track wiring is
+        // CaptureCrossingTrack's own remarks) — no catalog/crossing-track wiring is
         // needed since next is always null on this path.
         /// <summary>AC17 — NotBefore at or after now plus the tail</summary>
         [Fact]

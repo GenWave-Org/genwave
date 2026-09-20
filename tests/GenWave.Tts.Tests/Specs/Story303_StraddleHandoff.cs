@@ -88,7 +88,7 @@ public static class FeatureStraddleHandoff
         [Fact]
         public void SignOffPromptNeverNamesACrossingTrack()
         {
-            // F111.3 only ever enriches the HELD SignOn (Orchestrator.CaptureCrossingTrackForHeldSignOn) —
+            // F111.3 only ever enriches the HELD SignOn (HandoffCeremonyProducer.CaptureCrossingTrack) —
             // a SignOff request carries no crossing-track fields in production, and even if one
             // somehow did, the Kind gate below keeps the line SignOn-only.
             var signOffWithFields = new SegmentRequest(

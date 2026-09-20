@@ -82,6 +82,9 @@ public static class FeatureDeclineTheFinalUnit
             deferralQueue,
             clock,
             scopeProvider);
+        var boundaryBias = new FakeBoundaryBiasProvider(TimeSpan.FromMinutes(10));
+        var handoffCeremonyProducer = new HandoffCeremonyProducer(
+            deferralQueue, boundaryBias, NullLogger<HandoffCeremonyProducer>.Instance);
 
         return new(
             new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")),
@@ -94,8 +97,9 @@ public static class FeatureDeclineTheFinalUnit
             logger,
             deferralQueue,
             clock,
-            new FakeBoundaryBiasProvider(TimeSpan.FromMinutes(10)),
-            planner);
+            boundaryBias,
+            planner,
+            handoffCeremonyProducer);
     }
 
     /// <summary>

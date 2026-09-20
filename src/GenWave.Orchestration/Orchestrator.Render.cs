@@ -12,7 +12,7 @@ using GenWave.Core.Domain;
 // purely for the ~300-line budget (csharp-best-practices) — shares that file's ctor-level fields via
 // the partial class.
 //
-// Before T522 every kick except LeadIn started before EnqueueHandoffCeremonyAsync; now every kick
+// Before T522 every kick except LeadIn started before the handoff arm; now every kick
 // starts only after it (PlanAndRenderAsync runs PlanAsync and then the handoff arm before this method
 // kicks anything), so a real TTS render loses the arm's own scheduleResolver.ResolveAsync latency off
 // its render-ahead window — an interim cost PR-6 removes, with no fake-clock spec effect.

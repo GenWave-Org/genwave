@@ -275,6 +275,18 @@ public sealed class OrchestratorBuilder
             personaStore: resolvedPersonaStore,
             speakerSnapshots: speakerSnapshotSource);
 
+        // PLAN T532 (SPEC F190) — the handoff ceremony producer, built from the SAME resolved locals
+        // BreakPlanner just took above, mirroring that construction's own ForwardingLogger idiom so
+        // this producer's own WARN/INFO lands on the SAME CapturingLogger a spec already asserts
+        // against via WithLogger/OrchestratorChain.Logger.
+        var resolvedHandoffCeremonyProducer = new HandoffCeremonyProducer(
+            resolvedDeferralQueue,
+            resolvedBoundaryBiasProvider,
+            new ForwardingLogger<HandoffCeremonyProducer>(resolvedLogger),
+            scheduleResolver: resolvedScheduleResolver,
+            personaStore: resolvedPersonaStore,
+            speakerSnapshots: speakerSnapshotSource);
+
         var orchestrator = new Orchestrator(
             resolvedIdentityProvider,
             resolvedScopeProvider,
@@ -288,16 +300,15 @@ public sealed class OrchestratorBuilder
             resolvedTime,
             resolvedBoundaryBiasProvider,
             resolvedPlanner,
+            resolvedHandoffCeremonyProducer,
             scheduleResolver: resolvedScheduleResolver,
-            personaStore: resolvedPersonaStore,
             events: resolvedEvents,
             patterEstimator: patterEstimator,
             imagingSettings: imagingSettings,
             crosstalkPlanner: crosstalkPlanner,
             announcementRenderer: announcementRenderer,
             announcementCopyWriter: announcementCopyWriter,
-            observer: planObserver,
-            speakerSnapshots: speakerSnapshotSource);
+            observer: planObserver);
 
         return new OrchestratorChain(
             orchestrator,

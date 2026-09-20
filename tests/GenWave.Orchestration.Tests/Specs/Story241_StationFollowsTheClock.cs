@@ -61,7 +61,7 @@ public static class FeatureStationFollowsTheClock
         // The builder's own default (an empty-snapshot CachingScheduleResolver) resolves no boundary
         // and no current show for every one of Orchestrator's own scheduleResolver reads, which is
         // externally indistinguishable from Orchestrator's true null default here (both leave
-        // EnqueueHandoffCeremonyAsync a permanent no-op and every Show-name read null) — the only
+        // ArmAsync a permanent no-op and every Show-name read null) — the only
         // difference is one unasserted "No CachingScheduleResolver wired" WARN line the null path logs
         // once, which this file's facts never assert on.
         var orchestrator = new OrchestratorBuilder()

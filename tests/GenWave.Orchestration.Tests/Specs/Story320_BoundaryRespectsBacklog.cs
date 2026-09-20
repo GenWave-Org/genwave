@@ -19,7 +19,7 @@
 //
 // Round-1 review findings F1/F2 (gh-#469 verbatim, reproduced live): the hold's own mechanism —
 // re-stamping the held SignOn's Due to max(Due, now + queuedAhead) — lasted exactly zero seconds
-// (F1), and once it DID survive to the boundary, EnqueueHandoffCeremonyAsync's own window-exit clear
+// (F1), and once it DID survive to the boundary, ArmAsync's own window-exit clear
 // destroyed it outright (F2). The fix moves the hold into SpeechDeferralQueue itself as a
 // SpeechDeferral.NotBefore gate, checked against REAL wall-clock time regardless of any caller's own
 // forced-forward "as of" instant — Due is left untouched (it keeps meaning "the boundary this
@@ -91,6 +91,9 @@ public static class FeatureBoundaryRespectsBacklog
             deferralQueue,
             clock,
             scopeProvider);
+        var boundaryBias = new FakeBoundaryBiasProvider(TimeSpan.FromMinutes(10));
+        var handoffCeremonyProducer = new HandoffCeremonyProducer(
+            deferralQueue, boundaryBias, NullLogger<HandoffCeremonyProducer>.Instance);
 
         return new(
             new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")),
@@ -103,8 +106,9 @@ public static class FeatureBoundaryRespectsBacklog
             logger,
             deferralQueue,
             clock,
-            new FakeBoundaryBiasProvider(TimeSpan.FromMinutes(10)),
-            planner);
+            boundaryBias,
+            planner,
+            handoffCeremonyProducer);
     }
 
     // ── HAPPY PATH ──────────────────────────────────────────────────────────
@@ -205,7 +209,7 @@ public static class FeatureBoundaryRespectsBacklog
         public static async Task The_held_SignOns_Due_stays_the_original_boundary()
         {
             // Due keeps meaning "the boundary this deferral belongs to" (round-1 review) — the hold
-            // never touches it, only NotBefore, so EnqueueHandoffCeremonyAsync's own reconcile/window
+            // never touches it, only NotBefore, so ArmAsync's own reconcile/window
             // logic keeps reading a truthful boundary for a held SignOn.
             var heldSignOn = await RunAsync();
 

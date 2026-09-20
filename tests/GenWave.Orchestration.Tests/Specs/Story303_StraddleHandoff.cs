@@ -58,6 +58,9 @@ public static class FeatureStraddleHandoff
             deferralQueue,
             clock,
             scopeProvider);
+        var boundaryBias = new FakeBoundaryBiasProvider(TimeSpan.FromMinutes(10));
+        var handoffCeremonyProducer = new HandoffCeremonyProducer(
+            deferralQueue, boundaryBias, NullLogger<HandoffCeremonyProducer>.Instance);
 
         return new(
             new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")),
@@ -70,8 +73,9 @@ public static class FeatureStraddleHandoff
             logger,
             deferralQueue,
             clock,
-            new FakeBoundaryBiasProvider(TimeSpan.FromMinutes(10)),
-            planner);
+            boundaryBias,
+            planner,
+            handoffCeremonyProducer);
     }
 
     /// <summary>Shared straddle-boundary deferral setup for the ScenarioSignOffTrackSignOnInThatOrder/
@@ -524,7 +528,7 @@ public static class FeatureStraddleHandoff
     }
 
     // ---------------------------------------------------------------------
-    // Round-3 review — CaptureCrossingTrackForHeldSignOn's own notBefore carry
+    // Round-3 review — CaptureCrossingTrack's own notBefore carry
     // ---------------------------------------------------------------------
 
     public sealed class ScenarioCaptureCrossingTrackPreservesALiveHold
@@ -532,7 +536,7 @@ public static class FeatureStraddleHandoff
         [Fact]
         public async Task TheGateSurvivesEnrichmentOfAPreviouslyHeldSignOn()
         {
-            // Round-3 review — pins CaptureCrossingTrackForHeldSignOn's own
+            // Round-3 review — pins CaptureCrossingTrack's own
             // "notBefore: signOn.NotBefore" carry (Orchestrator.cs), now reachable: a SignOn already
             // HELD by an EARLIER, unrelated ceremony sits in the queue while a fresh, UNGATED SignOff
             // (a different, later boundary) heads an ordinary — never declined — straddle.
@@ -554,7 +558,7 @@ public static class FeatureStraddleHandoff
             // A fresh, UNGATED SignOff for a LATER, unrelated boundary — mirrors ArmStraddleCeremony's
             // own numbers (6 minutes out, comfortably above the music floor on its own) so this is an
             // ORDINARY straddle, never a decline — the straddle branch, not TryServeCeremonyOnlyUnitAsync,
-            // is what calls CaptureCrossingTrackForHeldSignOn.
+            // is what calls CaptureCrossingTrack.
             queue.Enqueue(
                 SpeechDeferralKind.SignOff, "test: fresh ceremony", clock.GetUtcNow() + TimeSpan.FromMinutes(6), Handoff);
 
@@ -567,7 +571,7 @@ public static class FeatureStraddleHandoff
             var enriched = queue.Peek(SpeechDeferralKind.SignOn);
             Assert.NotNull(enriched);
 
-            // The content enriched — proof CaptureCrossingTrackForHeldSignOn actually ran on this slot.
+            // The content enriched — proof CaptureCrossingTrack actually ran on this slot.
             Assert.Equal(crossing.Title, enriched.Handoff?.CrossingTrackTitle);
 
             // The PRE-EXISTING hold survived the enrichment untouched.
@@ -581,7 +585,7 @@ public static class FeatureStraddleHandoff
 
     public sealed class ScenarioReconciliationDuringPlan
     {
-        // GetNextAsync's straddle branch calls EnqueueHandoffCeremonyAsync a SECOND time — ahead of
+        // GetNextAsync's straddle branch calls ArmAsync a SECOND time — ahead of
         // EnqueuePatterAsync's own step 2.5 — purely to reconcile the ceremony's arm-once state against
         // whatever the schedule resolver says RIGHT NOW, before trusting the peeked SignOff as
         // forceable. ArmStraddleCeremony's manually-seeded queue (every other fact in this file) has no
@@ -631,7 +635,7 @@ public static class FeatureStraddleHandoff
             return store;
         }
 
-        // Round-3 review — the two per-half SignOn ClearStale sites (Orchestrator.EnqueueHandoffCeremonyAsync)
+        // Round-3 review — the two per-half SignOn ClearStale sites (HandoffCeremonyProducer.ArmAsync)
         // each need their OWN reachable shape with a live hold already sitting in the slot:
         //
         //   - the GENERAL branch's ClearStale fires on "incoming is null" — a real persona-less next
@@ -740,7 +744,7 @@ public static class FeatureStraddleHandoff
         public async Task AScheduleWriteThatRetractsTheBoundaryPlansAnOrdinaryUnit()
         {
             // T235 review finding F3 — the retraction half: the schedule write moves the boundary
-            // clean OUT of the F74.3 window, so EnqueueHandoffCeremonyAsync's own ClearCeremony wipes
+            // clean OUT of the F74.3 window, so ArmAsync's own ClearCeremony wipes
             // BOTH pieces on reconciliation. Nothing is left to force — this unit plans as an ordinary
             // music unit, exactly as if no ceremony had ever been in play.
             var crossing = MakeTrack("crossing-retract", TimeSpan.FromMinutes(9));
@@ -767,7 +771,7 @@ public static class FeatureStraddleHandoff
         {
             // Round-1 review finding F2's own reproduction, on the REAL CachingScheduleResolver chain
             // (this class's own harness, not ArmStraddleCeremony's manually-seeded queue — the defect
-            // lives in EnqueueHandoffCeremonyAsync's window-exit branch, which only ever runs off a
+            // lives in ArmAsync's window-exit branch, which only ever runs off a
             // genuine schedule resolve). A queued tail requested LARGER than the F74.3 lookahead window
             // (20 minutes queued, 10-minute window) — round-2 review finding F5 clamps
             // HoldSignOnPastQueuedTail's own GATE to that SAME window (SPEC F124.6's own watch item: a
@@ -775,7 +779,7 @@ public static class FeatureStraddleHandoff
             // whole fit machinery reasons inside of), so the actual hold lands at 11:55 + 10min = 12:05,
             // not the raw 12:15 a naive "now + queuedAhead" would have used. The pre-fix (round-1) defect
             // this fact still reproduces: the SignOn survives past the boundary (real "now" > noon), the
-            // resolver's own "current" flips to DJ Beta, EnqueueHandoffCeremonyAsync's window-exit fires
+            // resolver's own "current" flips to DJ Beta, ArmAsync's window-exit fires
             // (Beta's own boundary — midnight — is nowhere near the 10-minute window), and its
             // ClearCeremony wipes the still-held, not-yet-airable SignOn outright: the incoming DJ never
             // signs on. The fix: a held deferral (NotBefore in the future) is LIVE, not stale, so it
@@ -803,7 +807,7 @@ public static class FeatureStraddleHandoff
             // Real wall-clock time now crosses noon — well before the CLAMPED held estimate (12:05) —
             // while the queued tail is still nowhere near drained. The resolver's own "current" flips to
             // DJ Beta (running to midnight), pushing the next boundary far outside the window: this
-            // unit's own step 2.5 fires EnqueueHandoffCeremonyAsync's window-exit branch, the exact call
+            // unit's own step 2.5 fires ArmAsync's window-exit branch, the exact call
             // round-1 wiped the held SignOn from.
             time.Advance(TimeSpan.FromMinutes(7)); // 11:55 -> 12:02 (past noon, still short of 12:05)
             await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
@@ -822,7 +826,7 @@ public static class FeatureStraddleHandoff
         [Fact]
         public async Task ARearmDuringALiveHoldPreservesTheGateRatherThanBypassingIt()
         {
-            // SPEC F124.1/F124.2 round-2 review finding F4 — EnqueueHandoffCeremonyAsync's own SignOn
+            // SPEC F124.1/F124.2 round-2 review finding F4 — ArmAsync's own SignOn
             // re-arm (the ordinary "boundary entered the F74.3 window" Enqueue call) must not silently
             // drop a LIVE hold already sitting on that queue slot. This reproduces the natural way a
             // re-arm lands mid-hold with no admin schedule edit at all: once real wall-clock time passes
@@ -876,7 +880,7 @@ public static class FeatureStraddleHandoff
         {
             // Round-3 review — pins the GENERAL branch's ClearStale (not the shared window-exit
             // ClearCeremony call, and not the same-persona-transition branch's own sibling below):
-            // reached when EnqueueHandoffCeremonyAsync's "incoming is null" arm fires for a genuine
+            // reached when ArmAsync's "incoming is null" arm fires for a genuine
             // persona-less next block (SPEC F91.1). Reverting this ONE call site back to the blind
             // Clear must turn this fact red — the shared ClearCeremony call at window-exit is
             // deliberately never exercised here (Beta's own next block still resolves within the

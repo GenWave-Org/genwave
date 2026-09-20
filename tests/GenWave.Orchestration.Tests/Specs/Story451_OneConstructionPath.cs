@@ -28,14 +28,17 @@ public static class FeatureOneConstructionPath
     // ---------------------------------------------------------------------
 
     /// <summary>
-    /// Every seam AddGenWaveOrchestration itself does not supply (AC6/AC7's own arrange) — the 12
+    /// Every seam AddGenWaveOrchestration itself does not supply (AC6/AC7's own arrange) — the 13
     /// required Orchestrator constructor params it resolves via GetRequiredService, plus
     /// IMediaCatalog/ILogger&lt;MusicSelectionPolicy&gt; so its own TryAddSingleton&lt;MusicSelectionPolicy&gt;
     /// can activate, and (PLAN T522) ILogger&lt;BreakPlanner&gt; — a production host gets this for free
     /// from AddLogging()'s open-generic registration; a bare ServiceCollection like this one needs it
     /// spelled out, now that AddGenWaveOrchestration resolves it via GetRequiredService rather than a
-    /// NullLogger fallback. TimeProvider/SpeechDeferralQueue/MusicSelectionPolicy stay unregistered
-    /// here on purpose — AddGenWaveOrchestration TryAdds all three itself.
+    /// NullLogger fallback. PLAN T532 widens this the same way: ILogger&lt;HandoffCeremonyProducer&gt;
+    /// is spelled out here too, now that Orchestrator's own former CachingScheduleResolver/IPersonaStore
+    /// handoff seams moved onto that producer's TryAddSingleton. TimeProvider/SpeechDeferralQueue/
+    /// MusicSelectionPolicy stay unregistered here on purpose — AddGenWaveOrchestration TryAdds all
+    /// three itself.
     /// </summary>
     static ServiceCollection RequiredSeamServices()
     {
@@ -57,6 +60,7 @@ public static class FeatureOneConstructionPath
         services.AddSingleton<ILogger<Orchestrator>>(NullLogger<Orchestrator>.Instance);
         services.AddSingleton<ILogger<MusicSelectionPolicy>>(NullLogger<MusicSelectionPolicy>.Instance);
         services.AddSingleton<ILogger<BreakPlanner>>(NullLogger<BreakPlanner>.Instance);
+        services.AddSingleton<ILogger<HandoffCeremonyProducer>>(NullLogger<HandoffCeremonyProducer>.Instance);
         services.AddSingleton<IMediaCatalog>(new FakeMediaCatalog(TestData.MakeTrackRef("t1")));
 
         return services;

@@ -48,6 +48,9 @@ public static class FeatureSpeechBoundaryDeferral
             deferralQueue,
             clock,
             scopeProvider);
+        var boundaryBias = new FakeBoundaryBiasProvider(TimeSpan.Zero);
+        var handoffCeremonyProducer = new HandoffCeremonyProducer(
+            deferralQueue, boundaryBias, NullLogger<HandoffCeremonyProducer>.Instance);
 
         return new(
             new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")),
@@ -60,8 +63,9 @@ public static class FeatureSpeechBoundaryDeferral
             NullLogger<Orchestrator>.Instance,
             deferralQueue,
             clock,
-            new FakeBoundaryBiasProvider(TimeSpan.Zero),
-            planner);
+            boundaryBias,
+            planner,
+            handoffCeremonyProducer);
     }
 
     static bool IsStationId(MediaItem item) =>

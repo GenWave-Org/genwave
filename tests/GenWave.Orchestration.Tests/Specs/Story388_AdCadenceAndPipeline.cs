@@ -73,6 +73,9 @@ public static class FeatureAdCadenceAndPipeline
             scopeProvider,
             adCadenceProvider: adCadenceProvider,
             adSpotVend: adSpotVend);
+        var boundaryBias = new FakeBoundaryBiasProvider(TimeSpan.Zero);
+        var handoffCeremonyProducer = new HandoffCeremonyProducer(
+            deferralQueue, boundaryBias, NullLogger<HandoffCeremonyProducer>.Instance);
 
         return new(
             new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")),
@@ -85,8 +88,9 @@ public static class FeatureAdCadenceAndPipeline
             resolvedLogger,
             deferralQueue,
             clock,
-            new FakeBoundaryBiasProvider(TimeSpan.Zero),
-            planner);
+            boundaryBias,
+            planner,
+            handoffCeremonyProducer);
     }
 
     static SpeechDeferralQueue NewQueue(TimeProvider clock) => new(clock);

@@ -8,8 +8,9 @@ using GenWave.Core.Domain;
 /// Builds one break's <see cref="BreakPlan"/> from a <see cref="BreakContext"/> (SPEC F188, PLAN
 /// T521) — today's <c>Orchestrator.EnqueuePatterAsync</c> cadence/drain steps moved verbatim, minus
 /// rendering (no <c>ITtsSegmentSource</c>/<c>IVerbatimSegmentRenderer</c>/copy-writer dependency
-/// exists here) and minus the handoff-ceremony ARM (SPEC F190 — <c>EnqueueHandoffCeremonyAsync</c>,
-/// "step 2.5," stays on <see cref="Orchestrator"/>). DRAINING an already-armed SignOff/SignOn stays
+/// exists here) and minus the handoff-ceremony ARM (SPEC F190 — <c>HandoffCeremonyProducer.ArmAsync</c>,
+/// "step 2.5," which <see cref="Orchestrator"/> calls rather than performs, since T532 extracted it).
+/// DRAINING an already-armed SignOff/SignOn stays
 /// in scope — one drain-switch arm among five — only ARMING a new one does not. Every side effect
 /// the old path performs (crosstalk <c>MarkVended</c>, an announcement claim, deferral-queue cadence
 /// enqueues, the <see cref="SpeechDeferralQueue.TryDequeueDue"/> drain with the same
