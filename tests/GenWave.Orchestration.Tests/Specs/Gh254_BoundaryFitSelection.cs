@@ -61,6 +61,16 @@ public static class FeatureBoundaryFitSelection
             deferralQueue, boundaryBias, NullLogger<HandoffCeremonyProducer>.Instance);
         var breakRenderer = new BreakRenderer(new FakeTtsSegmentSource(), clock);
 
+        // Shared with the Orchestrator's own patterEstimator: argument below (mirrors
+        // OrchestratorBuilder's resolvedPatterEstimator) — the SAME instance so a fact that seeds
+        // history via ObserveRendered before construction and a fact that reads Estimate through the
+        // boundary-fit consumer after a real delivery see one rolling history, not two. events has no
+        // per-fact variance here, so it is a plain shared NoOp (PLAN T536 review finding F5 — both are
+        // required constructor parameters on BreakDelivery now).
+        var resolvedEstimator = estimator ?? new RollingPatterDurationEstimator();
+        var events = NoOpStationEventSink.Instance;
+        var breakDelivery = new BreakDelivery(NullLogger<BreakDelivery>.Instance, events, resolvedEstimator);
+
         return new(
             new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")),
             scopeProvider,
@@ -75,7 +85,8 @@ public static class FeatureBoundaryFitSelection
             planner,
             handoffCeremonyProducer,
             breakRenderer,
-            patterEstimator: estimator);
+            breakDelivery,
+            patterEstimator: resolvedEstimator);
     }
 
     public static class ScenarioQueuedAheadDriftIsAccountedFor

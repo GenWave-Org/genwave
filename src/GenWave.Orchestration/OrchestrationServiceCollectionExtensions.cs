@@ -175,6 +175,17 @@ public static class OrchestrationServiceCollectionExtensions
             sp.GetService<IVerbatimSegmentRenderer>(),
             sp.GetService<IAnnouncementCopyWriter>()));
 
+        // PLAN T536 (SPEC F192): the delivery-phase seam, extracted off Orchestrator — TryAdd so a
+        // module/test wins. Reads the SAME IStationEventSink/IPatterDurationEstimator seams
+        // Orchestrator itself used to read directly; BOTH are required constructor parameters here
+        // (PLAN T536 review finding F5 — no seam on this class defaults), so this call site — not the
+        // constructor — is what falls back to the NoOp sink when no module registered one, the SAME
+        // fallback Orchestrator's own optional constructor parameter below still applies.
+        services.TryAddSingleton(sp => new BreakDelivery(
+            sp.GetRequiredService<ILogger<BreakDelivery>>(),
+            sp.GetService<IStationEventSink>() ?? NoOpStationEventSink.Instance,
+            sp.GetRequiredService<IPatterDurationEstimator>()));
+
         // The production construction site (SPEC F184.3/F184.5, STORY-451, T514). The only other
         // `new Orchestrator(` is GenWave.TestSupport's OrchestratorBuilder; Story451_ConstructionPins
         // pins the pair. A factory, not AddSingleton<INextItemProvider, Orchestrator>(): every seam is
@@ -198,8 +209,8 @@ public static class OrchestrationServiceCollectionExtensions
             sp.GetRequiredService<BreakPlanner>(),
             sp.GetRequiredService<HandoffCeremonyProducer>(),
             sp.GetRequiredService<BreakRenderer>(),
+            sp.GetRequiredService<BreakDelivery>(),
             scheduleResolver: sp.GetService<CachingScheduleResolver>(),
-            events: sp.GetService<IStationEventSink>() ?? NoOpStationEventSink.Instance,
             patterEstimator: sp.GetService<IPatterDurationEstimator>(),
             imagingSettings: sp.GetService<IStationImagingSettingsProvider>() ?? NoOpStationImagingSettingsProvider.Instance,
             crosstalkPlanner: sp.GetService<CrosstalkPlanner>(),

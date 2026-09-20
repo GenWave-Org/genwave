@@ -17,6 +17,12 @@ public static class FeatureThePlanIsAValue
     // Shared builders — one script-shaped plan, arranged once per fact.
     // ---------------------------------------------------------------------
 
+    /// <summary>A placeholder <see cref="WarnDropSubject"/> for facts that only exercise plan SHAPE
+    /// (ordinals, traces, reservations) and never drive a real drop report — the specific subject is
+    /// irrelevant to what these facts assert, but <see cref="WarnDrop.Subject"/> is required (PLAN
+    /// T536 review finding F4), so every slot below needs one.</summary>
+    static readonly WarnDropSubject UnusedWarnSubject = new ContextProviderWarnSubject("unused");
+
     /// <summary>Kinds SPEC F186/F187.3 name as carrying no reservation.</summary>
     static readonly SegmentKind[] UnreservedKinds =
     [
@@ -48,13 +54,13 @@ public static class FeatureThePlanIsAValue
         new(mediaId, $"/media/{mediaId}.mp3", mediaId, new Loudness(-16.0, -1.0, true), SegmentKind: kind);
 
     static PlannedSlot RenderSlot(int ordinal, SegmentKind kind, Reservation? reservation = null, DropPolicy? drop = null) =>
-        new(ordinal, kind, new RenderSource(BuildRequest(kind)), reservation, drop ?? new WarnDrop(), ObserveDuration: true);
+        new(ordinal, kind, new RenderSource(BuildRequest(kind)), reservation, drop ?? new WarnDrop(UnusedWarnSubject), ObserveDuration: true);
 
     static PlannedSlot VerbatimSlot(int ordinal, SegmentKind kind, Reservation reservation, bool allowFlavor = true) =>
-        new(ordinal, kind, new VerbatimSource(BuildRequest(kind), new SegmentCopy($"{kind} copy", FreshPerAiring: false), allowFlavor), reservation, new WarnDrop(), ObserveDuration: true);
+        new(ordinal, kind, new VerbatimSource(BuildRequest(kind), new SegmentCopy($"{kind} copy", FreshPerAiring: false), allowFlavor), reservation, new WarnDrop(UnusedWarnSubject), ObserveDuration: true);
 
     static PlannedSlot ReadySlot(int ordinal, SegmentKind kind, string mediaId, Reservation reservation) =>
-        new(ordinal, kind, new ReadySource(MakeItem(mediaId, kind)), reservation, new WarnDrop(), ObserveDuration: false);
+        new(ordinal, kind, new ReadySource(MakeItem(mediaId, kind)), reservation, new WarnDrop(UnusedWarnSubject), ObserveDuration: false);
 
     /// <summary>
     /// A full break, hand-built in kick order straight off the F186 table / T520's own dispatch
@@ -170,7 +176,7 @@ public static class FeatureThePlanIsAValue
     {
         // Given: Render slot LeadIn, speaker Ada, no reservation
         readonly BreakPlan plan = new(1, MinimalContext(), TimeSpan.FromSeconds(5),
-            [new PlannedSlot(1, SegmentKind.LeadIn, new RenderSource(BuildRequest(SegmentKind.LeadIn, "Ada")), Reservation: null, Drop: new WarnDrop(), ObserveDuration: true)]);
+            [new PlannedSlot(1, SegmentKind.LeadIn, new RenderSource(BuildRequest(SegmentKind.LeadIn, "Ada")), Reservation: null, Drop: new WarnDrop(UnusedWarnSubject), ObserveDuration: true)]);
 
         /// <summary>AC4 — #1 LeadIn render speaker=Ada res=-</summary>
         [Fact]
@@ -181,7 +187,7 @@ public static class FeatureThePlanIsAValue
     {
         // Given: Ready slot Ad with reservation AdSpot:42
         readonly BreakPlan plan = new(1, MinimalContext(), TimeSpan.FromSeconds(5),
-            [new PlannedSlot(1, SegmentKind.Ad, new ReadySource(MakeItem("any-ad-spot", SegmentKind.Ad)), new Reservation(ReservationKind.AdSpot, "42"), new WarnDrop(), ObserveDuration: false)]);
+            [new PlannedSlot(1, SegmentKind.Ad, new ReadySource(MakeItem("any-ad-spot", SegmentKind.Ad)), new Reservation(ReservationKind.AdSpot, "42"), new WarnDrop(UnusedWarnSubject), ObserveDuration: false)]);
 
         /// <summary>AC5 — #1 Ad ready speaker=- res=AdSpot:42</summary>
         [Fact]

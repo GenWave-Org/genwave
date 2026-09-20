@@ -96,6 +96,14 @@ public static class FeatureBoundaryRespectsBacklog
             deferralQueue, boundaryBias, NullLogger<HandoffCeremonyProducer>.Instance);
         var breakRenderer = new BreakRenderer(tts ?? new FakeTtsSegmentSource(), clock);
 
+        // PLAN T536 review finding F5 — BreakDelivery's IStationEventSink/IPatterDurationEstimator
+        // are required constructor parameters now (no seam here defaults), so this helper shares ONE
+        // instance of each with the Orchestrator it also builds below, rather than letting the two
+        // classes silently resolve their own separate defaults.
+        var events = NoOpStationEventSink.Instance;
+        var patterEstimator = new RollingPatterDurationEstimator();
+        var breakDelivery = new BreakDelivery(new ForwardingLogger<BreakDelivery>(logger), events, patterEstimator);
+
         return new(
             new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")),
             scopeProvider,
@@ -109,7 +117,9 @@ public static class FeatureBoundaryRespectsBacklog
             boundaryBias,
             planner,
             handoffCeremonyProducer,
-            breakRenderer);
+            breakRenderer,
+            breakDelivery,
+            patterEstimator: patterEstimator);
     }
 
     // ── HAPPY PATH ──────────────────────────────────────────────────────────

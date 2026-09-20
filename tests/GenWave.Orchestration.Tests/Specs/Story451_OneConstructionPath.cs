@@ -61,6 +61,7 @@ public static class FeatureOneConstructionPath
         services.AddSingleton<ILogger<MusicSelectionPolicy>>(NullLogger<MusicSelectionPolicy>.Instance);
         services.AddSingleton<ILogger<BreakPlanner>>(NullLogger<BreakPlanner>.Instance);
         services.AddSingleton<ILogger<HandoffCeremonyProducer>>(NullLogger<HandoffCeremonyProducer>.Instance);
+        services.AddSingleton<ILogger<BreakDelivery>>(NullLogger<BreakDelivery>.Instance);
         services.AddSingleton<IMediaCatalog>(new FakeMediaCatalog(TestData.MakeTrackRef("t1")));
 
         return services;
@@ -274,7 +275,7 @@ public static class FeatureOneConstructionPath
         // Given: the Orchestration.Tests assembly reflected — every [Fact]/[Theory]-decorated METHOD
         // (not each Theory row) counted once, mirroring how the pre-move baseline was measured.
 
-        const int FactMethodCount = 559; // 557 (556 pre-T512 + 1, PLAN T527 round 1's TheBackAnnounceVoiceMatchesItsSnapshot, ruling 9) + 2 (PLAN T527 round 2, review findings F1/F3: Story456's TheStampedVoiceIsThePlannerResolvedOne + VoiceAndSpeakerAgree — both genuinely new facts, not moved ones); the runner reports 565 cases for these 559 fact methods (two theory methods contributing eight rows, six cases beyond the method count), exactly as the old 562/556 and 563/557 did
+        const int FactMethodCount = 561; // 559 (557 (556 pre-T512 + 1, PLAN T527 round 1's TheBackAnnounceVoiceMatchesItsSnapshot, ruling 9) + 2, PLAN T527 round 2 review findings F1/F3: Story456's TheStampedVoiceIsThePlannerResolvedOne + VoiceAndSpeakerAgree) + 2 (PLAN T536 round 2 review Notes — Story459's AbandonsEveryReservation split into itself (Items only) + AbandonsTheAdReservation + AbandonsTheAnnouncementReservation, one assertion per fact, net +2 facts); the runner reports 567 cases for these 561 fact methods (two theory methods contributing eight rows, six cases beyond the method count), exactly as the old 565/559, 562/556, and 563/557 did
 
         static IReadOnlyList<(MethodInfo Method, FactAttribute Attribute)> ReflectFactMethods() =>
             typeof(FeatureOneConstructionPath).Assembly

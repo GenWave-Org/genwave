@@ -21,18 +21,11 @@ public static class FeatureConstructionPins
 
     public sealed class ScenarioTheTextScanForConstruction
     {
-        // Given: every .cs under src/ and tests/ (bin/obj excluded) scanned for the literal below —
-        // split, mirroring Story442_FakeClockPins.cs's own hand-rolled-clock-declaration split, so
-        // this file's own source text never spells the literal out contiguously and self-matches
-        // the scan (and never spells THAT pin's own literal out contiguously either).
-        const string ConstructorCallLiteral = "new " + "Orchestrator(";
-
-        static readonly string[] hits = new[] { "src", "tests" }
-            .SelectMany(dir => Directory.EnumerateFiles(
-                Path.Combine(SolutionLocator.Root(), dir), "*.cs", SearchOption.AllDirectories))
-            .Where(path => !path.Split('/', '\\').Any(segment => segment is "bin" or "obj"))
-            .Where(path => File.ReadAllText(path).Contains(ConstructorCallLiteral, StringComparison.Ordinal))
-            .ToArray();
+        // Given: every .cs under src/ and tests/ (bin/obj excluded) scanned for the Orchestrator's
+        // own construction call — the scan itself now lives in Support/ConstructorCallScan.cs
+        // (lifted at STORY-460, PLAN T537) so this file and Story460_TheOrchestratorAfter.cs's own
+        // set-equality fact read the SAME scan rather than two copies that could drift apart.
+        static readonly IReadOnlyList<string> hits = ConstructorCallScan.Hits;
 
         /// <summary>AC4 — the builder is one site</summary>
         [Fact]
@@ -46,7 +39,7 @@ public static class FeatureConstructionPins
 
         /// <summary>AC4 — exactly two files hit</summary>
         [Fact]
-        public void HitsNothingElse() => Assert.Equal(2, hits.Length);
+        public void HitsNothingElse() => Assert.Equal(2, hits.Count);
     }
 
     public sealed class ScenarioHostTestsAfterTheMove
