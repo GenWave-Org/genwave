@@ -59,6 +59,7 @@ public static class FeatureBoundaryFitSelection
         var boundaryBias = new FakeBoundaryBiasProvider(lookahead);
         var handoffCeremonyProducer = new HandoffCeremonyProducer(
             deferralQueue, boundaryBias, NullLogger<HandoffCeremonyProducer>.Instance);
+        var breakRenderer = new BreakRenderer(new FakeTtsSegmentSource(), clock);
 
         return new(
             new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")),
@@ -66,7 +67,6 @@ public static class FeatureBoundaryFitSelection
             new FakeCadenceProvider(cadence ?? CadenceOff),
             new FakeRotationSettingsProvider(new RotationSettings()),
             new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance),
-            new FakeTtsSegmentSource(),
             personaAccessor,
             NullLogger<Orchestrator>.Instance,
             deferralQueue,
@@ -74,6 +74,7 @@ public static class FeatureBoundaryFitSelection
             boundaryBias,
             planner,
             handoffCeremonyProducer,
+            breakRenderer,
             patterEstimator: estimator);
     }
 

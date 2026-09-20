@@ -85,6 +85,7 @@ public static class FeatureDeclineTheFinalUnit
         var boundaryBias = new FakeBoundaryBiasProvider(TimeSpan.FromMinutes(10));
         var handoffCeremonyProducer = new HandoffCeremonyProducer(
             deferralQueue, boundaryBias, NullLogger<HandoffCeremonyProducer>.Instance);
+        var breakRenderer = new BreakRenderer(tts, clock);
 
         return new(
             new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")),
@@ -92,14 +93,14 @@ public static class FeatureDeclineTheFinalUnit
             new FakeCadenceProvider(cadence ?? CadenceOff),
             new FakeRotationSettingsProvider(new RotationSettings()),
             new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance),
-            tts,
             personaAccessor,
             logger,
             deferralQueue,
             clock,
             boundaryBias,
             planner,
-            handoffCeremonyProducer);
+            handoffCeremonyProducer,
+            breakRenderer);
     }
 
     /// <summary>

@@ -227,9 +227,10 @@ using GenWave.Core.Events;
 /// (<c>IAnnouncementSource</c>) is the crosstalkPlanner precedent one feature over — an optional
 /// constructor dependency, feature dark whenever null (no Host wiring). PLAN T522 moves the claim
 /// itself onto <see cref="BreakPlanner"/> (its own <c>announcementSource</c> constructor parameter,
-/// gated on <paramref name="announcementRenderer"/> at the construction site that builds THAT
-/// class, not here — a null renderer must still mean no announcement is ever claimed, not merely
-/// that a claimed one never airs); this class keeps only the render half below. The planner's own
+/// gated on <c>IVerbatimSegmentRenderer</c> at the construction site that builds THAT class, not
+/// here — a null renderer must still mean no announcement is ever claimed, not merely that a
+/// claimed one never airs); this class keeps only the render half below, and PLAN T534 moved even
+/// that onto <see cref="BreakRenderer"/> (<paramref name="breakRenderer"/>). The planner's own
 /// vend cap and claim ordering vends up to its own <c>AnnouncementVendCap</c> (a constant on THAT
 /// class now) oldest deliverable announcements, atomically claimed the moment this unit
 /// decides to vend them, and places each as a <see cref="SegmentKind.Announcement"/> segment after
@@ -238,23 +239,23 @@ using GenWave.Core.Events;
 /// reads <c>Station:SpectatorMode</c> to decide whether to vend (SPEC F145.2's "the Orchestrator
 /// never reads privacy state" ruling): an empty claim — refused because the station is public, or
 /// genuinely nothing pending — looks identical from here, and needs no different handling either way.
-/// <paramref name="announcementRenderer"/> renders each claimed item's exact message text with ZERO
-/// LLM involvement (SPEC F144.2) — a SEPARATE seam from <paramref name="tts"/>, never routed through
-/// it, because neither <see cref="SegmentRequest"/> nor <see cref="ISegmentCopyWriter"/> can carry a
-/// caller-supplied exact text without either widening the published Abstractions record or forcing
-/// the render through the SAME copy-writer chain an LLM writer sits in front of (see
-/// <see cref="IVerbatimSegmentRenderer"/>'s own remarks).
+/// <see cref="BreakRenderer"/>'s own <c>IVerbatimSegmentRenderer</c> seam renders each claimed item's
+/// exact message text with ZERO LLM involvement (SPEC F144.2) — a SEPARATE seam from
+/// <c>ITtsSegmentSource</c>, never routed through it, because neither <see cref="SegmentRequest"/>
+/// nor <see cref="ISegmentCopyWriter"/> can carry a caller-supplied exact text without either
+/// widening the published Abstractions record or forcing the render through the SAME copy-writer
+/// chain an LLM writer sits in front of (see <see cref="IVerbatimSegmentRenderer"/>'s own remarks).
 ///
 /// <b>The flavored path (SPEC F144.3/F144.4, PLAN T342):</b> a <c>Verbatim: false</c> announcement
-/// FIRST attempts <paramref name="announcementCopyWriter"/> — its OWN dedicated seam, the
-/// crosstalkPlanner precedent one feature over (optional, feature-dark whenever null), never
-/// <paramref name="tts"/>/<see cref="ISegmentCopyWriter"/> either. THE FALLBACK LAW is exactly one
-/// <c>??</c> at the vend step below: any failure there (a disabled/unreachable LLM, a blown render
-/// budget, or the F138.4 re-ask ladder exhausting on either a fabrication or the F144.3 containment
-/// check) resolves to <see langword="null"/>, and the owner's own message renders verbatim instead —
-/// through this SAME <paramref name="announcementRenderer"/>, since flavored copy IS exact once
-/// written and needs no different rendering path from a verbatim read. A <c>Verbatim: true</c>
-/// announcement never even asks <paramref name="announcementCopyWriter"/>, the owner having asked for
+/// FIRST attempts <see cref="BreakRenderer"/>'s own <c>IAnnouncementCopyWriter</c> seam — its OWN
+/// dedicated seam, the crosstalkPlanner precedent one feature over (optional, feature-dark whenever
+/// null), never <c>ITtsSegmentSource</c>/<see cref="ISegmentCopyWriter"/> either. THE FALLBACK LAW is
+/// exactly one <c>??</c> at the vend step below: any failure there (a disabled/unreachable LLM, a
+/// blown render budget, or the F138.4 re-ask ladder exhausting on either a fabrication or the F144.3
+/// containment check) resolves to <see langword="null"/>, and the owner's own message renders
+/// verbatim instead — through this SAME <c>IVerbatimSegmentRenderer</c> seam, since flavored copy IS
+/// exact once written and needs no different rendering path from a verbatim read. A
+/// <c>Verbatim: true</c> announcement never even asks the copy writer, the owner having asked for
 /// their own unflavored words. <paramref name="voiceLister"/> (SPEC F144.2's own "when
 /// known" clause) validates <see cref="AnnouncementItem.RequestedVoice"/> — untrusted free text —
 /// against the TTS backend's own installed voice ids before ever stamping it onto a
@@ -280,7 +281,6 @@ public sealed partial class Orchestrator(
     ICadenceProvider cadenceProvider,
     IRotationSettingsProvider rotationProvider,
     MusicSelectionPolicy musicSelectionPolicy,
-    ITtsSegmentSource tts,
     IActivePersonaAccessor personaAccessor,
     ILogger<Orchestrator> logger,
     SpeechDeferralQueue deferralQueue,
@@ -288,13 +288,12 @@ public sealed partial class Orchestrator(
     IBoundaryBiasProvider boundaryBiasProvider,
     BreakPlanner planner,
     HandoffCeremonyProducer handoffCeremonyProducer,
+    BreakRenderer breakRenderer,
     CachingScheduleResolver? scheduleResolver = null,
     IStationEventSink? events = null,
     IPatterDurationEstimator? patterEstimator = null,
     IStationImagingSettingsProvider? imagingSettings = null,
     CrosstalkPlanner? crosstalkPlanner = null,
-    IVerbatimSegmentRenderer? announcementRenderer = null,
-    IAnnouncementCopyWriter? announcementCopyWriter = null,
     IBreakPlanObserver? observer = null) : INextItemProvider, IBoundaryFitLog
 {
     // gh-#254 — how far from the boundary a candidate may land and still count as a WIN ("±30s of
@@ -1132,40 +1131,8 @@ public sealed partial class Orchestrator(
         }
     }
 
-    /// <summary>
-    /// SPEC F144.3/F144.4 (STORY-358, PLAN T342) — attempts the flavored render through
-    /// <see cref="announcementCopyWriter"/>, fault-isolating it the SAME way
-    /// <c>ResolveAnnouncementVoiceAsync</c>/<c>ClaimAnnouncementsAsync</c> (now on
-    /// <see cref="BreakPlanner"/>) already do (SPEC F12.4): a null seam (no Host wiring — the crosstalkPlanner precedent,
-    /// feature dark) or any exception the writer's own never-throws contract still lets slip both
-    /// degrade to <see langword="null"/>, never a faulted unit.
-    /// <see cref="IAnnouncementCopyWriter.WriteAnnouncementAsync"/> itself already resolves EVERY
-    /// F144.3/F144.4 failure mode (a disabled/unreachable LLM, a blown render budget, an exhausted
-    /// re-ask ladder on either a fabrication or the F144.3 containment check) to
-    /// <see langword="null"/> internally — this wrapper's own catch exists purely as the SAME
-    /// belt-and-suspenders defense every other external seam call in this class already carries, not
-    /// because that contract is expected to be broken.
-    /// </summary>
-    async Task<string?> ResolveFlavoredAnnouncementCopyAsync(
-        SegmentRequest announcementRequest, string message, CancellationToken ct)
-    {
-        if (announcementCopyWriter is not { } writer)
-            return null;
-
-        try
-        {
-            return await writer.WriteAnnouncementAsync(announcementRequest, message, ct);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(
-                ex,
-                "Announcement flavor render faulted — falling back to the verbatim read (SPEC F144.4)");
-            return null;
-        }
-    }
+    // SPEC F144.3/F144.4's flavored-render fallback moved to BreakRenderer.ResolveFlavoredCopyAsync
+    // at PLAN T534 — quiet there (SPEC F191.5, no logger dependency) rather than logging its own WARN
+    // on a caught fault, since a null announcementCopyWriter seam or the writer's own never-throws
+    // contract slipping both still degrade to the plain verbatim read either way.
 }

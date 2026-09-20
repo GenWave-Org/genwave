@@ -76,6 +76,7 @@ public static class FeatureAdCadenceAndPipeline
         var boundaryBias = new FakeBoundaryBiasProvider(TimeSpan.Zero);
         var handoffCeremonyProducer = new HandoffCeremonyProducer(
             deferralQueue, boundaryBias, NullLogger<HandoffCeremonyProducer>.Instance);
+        var breakRenderer = new BreakRenderer(tts ?? new FakeTtsSegmentSource(), clock);
 
         return new(
             new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")),
@@ -83,14 +84,14 @@ public static class FeatureAdCadenceAndPipeline
             new FakeCadenceProvider(cadence),
             new FakeRotationSettingsProvider(new RotationSettings()),
             new MusicSelectionPolicy(new FakeMediaCatalog(MakeRef("track")), NullLogger<MusicSelectionPolicy>.Instance),
-            tts ?? new FakeTtsSegmentSource(),
             personaAccessor,
             resolvedLogger,
             deferralQueue,
             clock,
             boundaryBias,
             planner,
-            handoffCeremonyProducer);
+            handoffCeremonyProducer,
+            breakRenderer);
     }
 
     static SpeechDeferralQueue NewQueue(TimeProvider clock) => new(clock);
