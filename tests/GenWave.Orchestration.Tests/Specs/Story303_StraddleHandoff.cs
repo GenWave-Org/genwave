@@ -61,6 +61,7 @@ public static class FeatureStraddleHandoff
         var boundaryBias = new FakeBoundaryBiasProvider(TimeSpan.FromMinutes(10));
         var handoffCeremonyProducer = new HandoffCeremonyProducer(
             deferralQueue, boundaryBias, NullLogger<HandoffCeremonyProducer>.Instance);
+        var breakRenderer = new BreakRenderer(tts ?? new FakeTtsSegmentSource(), clock);
 
         return new(
             new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")),
@@ -68,14 +69,14 @@ public static class FeatureStraddleHandoff
             new FakeCadenceProvider(CadenceOff),
             new FakeRotationSettingsProvider(new RotationSettings()),
             new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance),
-            tts ?? new FakeTtsSegmentSource(),
             personaAccessor,
             logger,
             deferralQueue,
             clock,
             boundaryBias,
             planner,
-            handoffCeremonyProducer);
+            handoffCeremonyProducer,
+            breakRenderer);
     }
 
     /// <summary>Shared straddle-boundary deferral setup for the ScenarioSignOffTrackSignOnInThatOrder/

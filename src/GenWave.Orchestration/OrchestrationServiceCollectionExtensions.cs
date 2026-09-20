@@ -16,9 +16,10 @@ public static class OrchestrationServiceCollectionExtensions
     /// SEAM 1: <see cref="Orchestrator"/> is the <see cref="INextItemProvider"/> — interleaved
     /// music + TTS patter per the live cadence config. Every constructor dependency is a seam the
     /// host (or a module) has already registered: identity/scope/cadence/rotation/render-budget/
-    /// boundary-bias providers, <see cref="MusicSelectionPolicy"/>, <c>ITtsSegmentSource</c>,
-    /// <c>IActivePersonaAccessor</c>, and the <see cref="SpeechDeferralQueue"/>/<see cref="TimeProvider"/>
-    /// this method also registers. <see cref="MusicSelectionPolicy"/> itself (F112, STORY-295) owns
+    /// boundary-bias providers, <see cref="MusicSelectionPolicy"/>, <c>IActivePersonaAccessor</c>,
+    /// and the <see cref="SpeechDeferralQueue"/>/<see cref="TimeProvider"/> this method also
+    /// registers — <c>ITtsSegmentSource</c> itself moved off this constructor at PLAN T534, onto
+    /// <see cref="BreakRenderer"/>'s own (registered immediately below). <see cref="MusicSelectionPolicy"/> itself (F112, STORY-295) owns
     /// the pick ladder — <c>IEnvelopeProvider</c>/<see cref="IPersonaPickProvider"/>/
     /// <see cref="IRequestFulfillmentSource"/> moved with it off <see cref="Orchestrator"/>'s own
     /// constructor. <c>IMediaCatalog</c> itself is registered by <c>AddMediaLibrary</c> (GenWave.MediaLibrary),
@@ -163,6 +164,17 @@ public static class OrchestrationServiceCollectionExtensions
         // wants to watch every plan (CapturingBreakPlanObserver, tests only) wins.
         services.TryAddSingleton<IBreakPlanObserver>(NoOpBreakPlanObserver.Instance);
 
+        // PLAN T534 (SPEC F191): the render-phase seam, extracted off Orchestrator — TryAdd so a
+        // module/test wins. Takes only the seams a render needs (no logger, no event sink, no
+        // estimator, no buffer — see BreakRenderer's own remarks); the announcementRenderer/
+        // announcementCopyWriter seams are read here exactly as Orchestrator itself used to read
+        // them directly, both still optional (feature-dark whenever null).
+        services.TryAddSingleton(sp => new BreakRenderer(
+            sp.GetRequiredService<ITtsSegmentSource>(),
+            sp.GetRequiredService<TimeProvider>(),
+            sp.GetService<IVerbatimSegmentRenderer>(),
+            sp.GetService<IAnnouncementCopyWriter>()));
+
         // The production construction site (SPEC F184.3/F184.5, STORY-451, T514). The only other
         // `new Orchestrator(` is GenWave.TestSupport's OrchestratorBuilder; Story451_ConstructionPins
         // pins the pair. A factory, not AddSingleton<INextItemProvider, Orchestrator>(): every seam is
@@ -170,7 +182,7 @@ public static class OrchestrationServiceCollectionExtensions
         // That is load-bearing — Program.cs registers IPersonaPickProvider, IRequestFulfillmentSource,
         // IStationEventSink, IContextSettingsProvider and IAdSpotVend AFTER AddGenWaveOrchestration so
         // they beat the TryAdd defaults above; a resolve-time read sees the last registration, exactly
-        // as constructor injection did. Optional seams with a NoOp type coalesce to it; the other ten
+        // as constructor injection did. Optional seams with a NoOp type coalesce to it; the other four
         // pass GetService's null through to the Orchestrator's own null handling, unchanged.
         services.AddSingleton<INextItemProvider>(sp => new Orchestrator(
             sp.GetRequiredService<IStationIdentityProvider>(),
@@ -178,7 +190,6 @@ public static class OrchestrationServiceCollectionExtensions
             sp.GetRequiredService<ICadenceProvider>(),
             sp.GetRequiredService<IRotationSettingsProvider>(),
             sp.GetRequiredService<MusicSelectionPolicy>(),
-            sp.GetRequiredService<ITtsSegmentSource>(),
             sp.GetRequiredService<IActivePersonaAccessor>(),
             sp.GetRequiredService<ILogger<Orchestrator>>(),
             sp.GetRequiredService<SpeechDeferralQueue>(),
@@ -186,13 +197,12 @@ public static class OrchestrationServiceCollectionExtensions
             sp.GetRequiredService<IBoundaryBiasProvider>(),
             sp.GetRequiredService<BreakPlanner>(),
             sp.GetRequiredService<HandoffCeremonyProducer>(),
+            sp.GetRequiredService<BreakRenderer>(),
             scheduleResolver: sp.GetService<CachingScheduleResolver>(),
             events: sp.GetService<IStationEventSink>() ?? NoOpStationEventSink.Instance,
             patterEstimator: sp.GetService<IPatterDurationEstimator>(),
             imagingSettings: sp.GetService<IStationImagingSettingsProvider>() ?? NoOpStationImagingSettingsProvider.Instance,
             crosstalkPlanner: sp.GetService<CrosstalkPlanner>(),
-            announcementRenderer: sp.GetService<IVerbatimSegmentRenderer>(),
-            announcementCopyWriter: sp.GetService<IAnnouncementCopyWriter>(),
             observer: sp.GetService<IBreakPlanObserver>()));
 
         return services;

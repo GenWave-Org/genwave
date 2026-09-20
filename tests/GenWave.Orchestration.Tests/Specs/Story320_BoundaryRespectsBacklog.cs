@@ -94,6 +94,7 @@ public static class FeatureBoundaryRespectsBacklog
         var boundaryBias = new FakeBoundaryBiasProvider(TimeSpan.FromMinutes(10));
         var handoffCeremonyProducer = new HandoffCeremonyProducer(
             deferralQueue, boundaryBias, NullLogger<HandoffCeremonyProducer>.Instance);
+        var breakRenderer = new BreakRenderer(tts ?? new FakeTtsSegmentSource(), clock);
 
         return new(
             new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")),
@@ -101,14 +102,14 @@ public static class FeatureBoundaryRespectsBacklog
             new FakeCadenceProvider(CadenceOff),
             new FakeRotationSettingsProvider(new RotationSettings()),
             new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance),
-            tts ?? new FakeTtsSegmentSource(),
             personaAccessor,
             logger,
             deferralQueue,
             clock,
             boundaryBias,
             planner,
-            handoffCeremonyProducer);
+            handoffCeremonyProducer,
+            breakRenderer);
     }
 
     // ── HAPPY PATH ──────────────────────────────────────────────────────────

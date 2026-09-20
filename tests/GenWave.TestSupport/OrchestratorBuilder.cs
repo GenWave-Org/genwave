@@ -12,7 +12,7 @@ namespace GenWave.TestSupport;
 /// <summary>
 /// Builds a real <see cref="Orchestrator"/> one seam at a time (SPEC F184.2, STORY-451, PLAN T511) —
 /// every seam defaults to the same fake <see cref="ProductionChainHarness"/> already uses, and every
-/// seam has a <c>With*</c> override, so a spec never reaches for the 27-parameter constructor
+/// seam has a <c>With*</c> override, so a spec never reaches for the 19-parameter constructor
 /// directly. <see cref="Build"/> resolves seams whose default depends on another seam's FINAL value
 /// (the clock feeds tts/deferral-queue/schedule-resolver; the catalog feeds the music selection
 /// policy; the schedule resolver and persona store feed the persona accessor) in dependency order, so
@@ -287,13 +287,18 @@ public sealed class OrchestratorBuilder
             personaStore: resolvedPersonaStore,
             speakerSnapshots: speakerSnapshotSource);
 
+        // PLAN T534 (SPEC F191): the render-phase seam, extracted off Orchestrator — built from the
+        // SAME resolvedTts/resolvedTime the Orchestrator itself used to take directly, plus whichever
+        // announcementRenderer/announcementCopyWriter a spec passed through WithAnnouncementRenderer/
+        // WithAnnouncementCopyWriter.
+        var resolvedBreakRenderer = new BreakRenderer(resolvedTts, resolvedTime, announcementRenderer, announcementCopyWriter);
+
         var orchestrator = new Orchestrator(
             resolvedIdentityProvider,
             resolvedScopeProvider,
             resolvedCadenceProvider,
             resolvedRotationProvider,
             resolvedMusicSelectionPolicy,
-            resolvedTts,
             resolvedPersonaAccessor,
             resolvedLogger,
             resolvedDeferralQueue,
@@ -301,13 +306,12 @@ public sealed class OrchestratorBuilder
             resolvedBoundaryBiasProvider,
             resolvedPlanner,
             resolvedHandoffCeremonyProducer,
+            resolvedBreakRenderer,
             scheduleResolver: resolvedScheduleResolver,
             events: resolvedEvents,
             patterEstimator: patterEstimator,
             imagingSettings: imagingSettings,
             crosstalkPlanner: crosstalkPlanner,
-            announcementRenderer: announcementRenderer,
-            announcementCopyWriter: announcementCopyWriter,
             observer: planObserver);
 
         return new OrchestratorChain(

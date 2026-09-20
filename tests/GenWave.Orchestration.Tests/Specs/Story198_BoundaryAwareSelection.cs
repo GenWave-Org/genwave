@@ -63,6 +63,7 @@ public static class FeatureBoundaryAwareSelection
         var boundaryBias = new FakeBoundaryBiasProvider(lookahead);
         var handoffCeremonyProducer = new HandoffCeremonyProducer(
             deferralQueue, boundaryBias, NullLogger<HandoffCeremonyProducer>.Instance);
+        var breakRenderer = new BreakRenderer(new FakeTtsSegmentSource(), clock);
 
         return new(
             new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")),
@@ -70,14 +71,14 @@ public static class FeatureBoundaryAwareSelection
             new FakeCadenceProvider(CadenceOff),
             new FakeRotationSettingsProvider(new RotationSettings()),
             new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance),
-            new FakeTtsSegmentSource(),
             personaAccessor,
             NullLogger<Orchestrator>.Instance,
             deferralQueue,
             clock,
             boundaryBias,
             planner,
-            handoffCeremonyProducer);
+            handoffCeremonyProducer,
+            breakRenderer);
     }
 
     static bool IsMusic(MediaItem item) =>

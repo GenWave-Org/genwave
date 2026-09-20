@@ -51,6 +51,7 @@ public static class FeatureSpeechBoundaryDeferral
         var boundaryBias = new FakeBoundaryBiasProvider(TimeSpan.Zero);
         var handoffCeremonyProducer = new HandoffCeremonyProducer(
             deferralQueue, boundaryBias, NullLogger<HandoffCeremonyProducer>.Instance);
+        var breakRenderer = new BreakRenderer(new FakeTtsSegmentSource(), clock);
 
         return new(
             new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")),
@@ -58,14 +59,14 @@ public static class FeatureSpeechBoundaryDeferral
             new FakeCadenceProvider(cadence),
             new FakeRotationSettingsProvider(new RotationSettings()),
             new MusicSelectionPolicy(new FakeMediaCatalog(MakeRef("track")), NullLogger<MusicSelectionPolicy>.Instance),
-            new FakeTtsSegmentSource(),
             personaAccessor,
             NullLogger<Orchestrator>.Instance,
             deferralQueue,
             clock,
             boundaryBias,
             planner,
-            handoffCeremonyProducer);
+            handoffCeremonyProducer,
+            breakRenderer);
     }
 
     static bool IsStationId(MediaItem item) =>
