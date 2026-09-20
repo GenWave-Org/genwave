@@ -3,10 +3,8 @@ namespace GenWave.Orchestration;
 using System.Collections.Frozen;
 using System.Globalization;
 using Microsoft.Extensions.Logging;
-using GenWave.Abstractions.Playout;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
-using GenWave.Core.Events;
 
 /// <summary>
 /// Plans and interleaves music tracks and TTS patter segments per <see cref="CadenceConfig"/>.
@@ -291,7 +289,6 @@ public sealed partial class Orchestrator(
     BreakRenderer breakRenderer,
     BreakDelivery breakDelivery,
     CachingScheduleResolver? scheduleResolver = null,
-    IStationEventSink? events = null,
     IPatterDurationEstimator? patterEstimator = null,
     IStationImagingSettingsProvider? imagingSettings = null,
     CrosstalkPlanner? crosstalkPlanner = null,
@@ -356,19 +353,14 @@ public sealed partial class Orchestrator(
     static readonly IReadOnlySet<SpeechDeferralKind> HoldSignOnAtStraddle =
         new HashSet<SpeechDeferralKind> { SpeechDeferralKind.SignOn };
 
-    // SPEC F92.4 (PLAN T124): the same null-coalesced-default idiom MusicSelectionPolicy's own
-    // envelope/persona/request-fulfillment seams use (F112, STORY-295) — a dropped handoff piece
-    // still needs somewhere to publish to even when no host binds a real sink (every pre-T124
-    // construction site keeps compiling and behaving exactly as before).
-    readonly IStationEventSink events = events ?? NoOpStationEventSink.Instance;
-
-    // gh-#253: the patter-duration estimation seam — same default idiom as the fields above, but a
-    // fresh per-Orchestrator instance rather than a shared NoOp: the default estimator carries
-    // rolling state, and sharing one static instance across constructions would bleed one test's
-    // (or one hypothetical second station's) observed history into another's estimates.
+    // gh-#253: the patter-duration estimation seam — same null-coalesced-default idiom the fields
+    // below reuse, but a fresh per-Orchestrator instance rather than a shared NoOp: the default
+    // estimator carries rolling state, and sharing one static instance across constructions would
+    // bleed one test's (or one hypothetical second station's) observed history into another's
+    // estimates.
     readonly IPatterDurationEstimator patterEstimator = patterEstimator ?? new RollingPatterDurationEstimator();
 
-    // SPEC F124.4 (PLAN T269): same null-coalesced-default idiom as events/patterEstimator above.
+    // SPEC F124.4 (PLAN T269): same null-coalesced-default idiom as patterEstimator above.
     // A host that has not yet wired the real IOptionsMonitor-backed implementation (every
     // pre-T269 construction site, including every unit test) reads back NoOpStationImagingSettingsProvider's
     // both-false/5-minute answer — the shipped SPEC F124.4 default — never a null-check, never a stall.

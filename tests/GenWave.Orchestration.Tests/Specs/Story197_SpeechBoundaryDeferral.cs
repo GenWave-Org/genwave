@@ -76,7 +76,6 @@ public static class FeatureSpeechBoundaryDeferral
             handoffCeremonyProducer,
             breakRenderer,
             breakDelivery,
-            events: events,
             patterEstimator: patterEstimator);
     }
 

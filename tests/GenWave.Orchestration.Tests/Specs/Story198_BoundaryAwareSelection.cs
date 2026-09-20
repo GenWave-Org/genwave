@@ -88,7 +88,6 @@ public static class FeatureBoundaryAwareSelection
             handoffCeremonyProducer,
             breakRenderer,
             breakDelivery,
-            events: events,
             patterEstimator: patterEstimator);
     }
 

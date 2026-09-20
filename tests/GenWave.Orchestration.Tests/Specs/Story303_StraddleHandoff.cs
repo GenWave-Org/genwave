@@ -86,7 +86,6 @@ public static class FeatureStraddleHandoff
             handoffCeremonyProducer,
             breakRenderer,
             breakDelivery,
-            events: events,
             patterEstimator: patterEstimator);
     }
 

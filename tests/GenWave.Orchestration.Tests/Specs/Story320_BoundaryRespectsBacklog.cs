@@ -119,7 +119,6 @@ public static class FeatureBoundaryRespectsBacklog
             handoffCeremonyProducer,
             breakRenderer,
             breakDelivery,
-            events: events,
             patterEstimator: patterEstimator);
     }
 

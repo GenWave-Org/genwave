@@ -211,7 +211,6 @@ public static class OrchestrationServiceCollectionExtensions
             sp.GetRequiredService<BreakRenderer>(),
             sp.GetRequiredService<BreakDelivery>(),
             scheduleResolver: sp.GetService<CachingScheduleResolver>(),
-            events: sp.GetService<IStationEventSink>() ?? NoOpStationEventSink.Instance,
             patterEstimator: sp.GetService<IPatterDurationEstimator>(),
             imagingSettings: sp.GetService<IStationImagingSettingsProvider>() ?? NoOpStationImagingSettingsProvider.Instance,
             crosstalkPlanner: sp.GetService<CrosstalkPlanner>(),

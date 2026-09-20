@@ -102,7 +102,6 @@ public static class FeatureAdCadenceAndPipeline
             handoffCeremonyProducer,
             breakRenderer,
             breakDelivery,
-            events: events,
             patterEstimator: patterEstimator);
     }
 

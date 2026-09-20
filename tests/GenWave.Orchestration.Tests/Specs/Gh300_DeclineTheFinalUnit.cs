@@ -110,7 +110,6 @@ public static class FeatureDeclineTheFinalUnit
             handoffCeremonyProducer,
             breakRenderer,
             breakDelivery,
-            events: events,
             patterEstimator: patterEstimator);
     }
 
