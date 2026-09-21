@@ -169,8 +169,9 @@ using GenWave.Core.Domain;
 /// <para>
 /// <b>The honest late variant (SPEC F141.2, STORY-355, PLAN T326).</b> A <see cref="SpeechDeferralKind.TimeDate"/>
 /// deferral that survives the expiry check above (still inside the budget) is classified a second time —
-/// on time vs. late — against the fixed 90-second <see cref="TimeDateHonestyThreshold"/>, using the SAME
-/// air-time-lateness formula the expiry check itself uses (real now plus already-queued runtime, minus the
+/// on time vs. late — against <see cref="BreakPlanner"/>'s own fixed 90-second <c>TimeDateHonestyThreshold</c>
+/// (PLAN T527 moved the classification there; the Orchestrator's dead duplicate was deleted at PLAN T539),
+/// using the SAME air-time-lateness formula the expiry check itself uses (real now plus already-queued runtime, minus the
 /// armed hour), read fresh at this SAME drain rather than reused from <c>drainNow</c> (which a straddle/
 /// ceremony caller may have forced ahead of real time — the identical reason <see cref="SpeechDeferralQueue.TryDequeueDue"/>'s
 /// own remarks give for checking its expiry budget against real wall-clock time, never the caller's
@@ -330,18 +331,6 @@ public sealed partial class Orchestrator(
     // constant as the covenant's signOffLeadTime term. It must never become a config knob (F142.2 —
     // "no new knobs").
     public static readonly TimeSpan SignOffLeadTime = TimeSpan.FromSeconds(15);
-
-    /// <summary>
-    /// SPEC F141.2 (STORY-355, PLAN T326) — the honesty threshold: a <see cref="SpeechDeferralKind.TimeDate"/>
-    /// deferral draining within this long of its own armed hour still speaks the classic F110.3 line;
-    /// past it (but still inside the live <c>Station:Imaging:TimeAnnouncementBudgetSeconds</c> budget)
-    /// the honest "just past" variant airs instead. Judged, not spec'd to the second beyond gh-#526's
-    /// own field data (the shallow overruns the fix targets landed 313-362s past Due) — 90 seconds
-    /// comfortably separates "the break just arrived a beat late" from "the break was genuinely late."
-    /// Not a live-tunable SPEC knob, the SAME posture <see cref="SignOffLeadTime"/> immediately above
-    /// carries — just an implementation seam.
-    /// </summary>
-    static readonly TimeSpan TimeDateHonestyThreshold = TimeSpan.FromSeconds(90);
 
     // SPEC F111.2 (PLAN T235) — the straddle seam's drain hold-set: a single-purpose, never-mutated
     // singleton rather than allocating a fresh HashSet per straddle unit, since its one member never

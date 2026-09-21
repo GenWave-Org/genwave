@@ -82,7 +82,7 @@ public static partial class FeatureBreakContract
             var chain = new OrchestratorBuilder().WithTts(tts).Build();
             chain.Queue.Enqueue(SpeechDeferralKind.TimeDate, "test: time due", chain.Time.GetUtcNow() - TimeSpan.FromSeconds(10));
 
-            // The fixed 90s honesty threshold (Orchestrator.TimeDateHonestyThreshold) reads lateness as
+            // The fixed 90s honesty threshold (BreakPlanner.TimeDateHonestyThreshold) reads lateness as
             // (now + queuedAhead) - due — 10s of raw staleness alone never crosses it, so this fact's own
             // queued tail (85s) is what pushes total lateness (95s) past the threshold into Late.
             await PullAsync(chain.Orchestrator, new PlayoutContext([], QueuedAheadMs: 85_000));
