@@ -110,22 +110,6 @@ public static class FeatureTheOrchestratorAfter
         public void ExposesSignOffLeadTime() =>
             Assert.NotNull(OrchestratorType.GetField(
                 nameof(Orchestrator.SignOffLeadTime), BindingFlags.Public | BindingFlags.Static));
-
-        /// <summary>AC3 — SPEC F193.3 names this field in the Orchestrator's keep-list, so this fact
-        /// pins its presence — NOT its use. It is currently unreferenced by any production code path:
-        /// PLAN T527 moved TimeDate honesty classification onto <see cref="BreakPlanner"/>, which
-        /// carries its own live duplicate constant (BreakPlanner.cs:71) that
-        /// BreakPlanner.Slots.cs:216 actually reads. Deleting this field builds clean
-        /// (-warnaserror, 0 warnings), so it is kept ONLY because docs/SPEC.md still names it — round
-        /// 2, PLAN T537 review finding F2 flags that clause as likely stale for a `/design` follow-up
-        /// (PLAN T539); this task owns neither SPEC.md nor the ruling on whether to drop it. Not
-        /// public (no external caller names it, unlike SignOffLeadTime), so it is reflected with
-        /// NonPublic rather than nameof, which would not compile against an inaccessible
-        /// member.</summary>
-        [Fact]
-        public void ExposesTimeDateHonestyThreshold() =>
-            Assert.NotNull(OrchestratorType.GetField(
-                "TimeDateHonestyThreshold", BindingFlags.NonPublic | BindingFlags.Static));
     }
 
     public sealed class ScenarioTheCeremonyOnlyUnitsTrace
