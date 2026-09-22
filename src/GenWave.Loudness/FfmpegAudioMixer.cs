@@ -1,6 +1,8 @@
 using System.Globalization;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace GenWave.Loudness;
 
@@ -24,11 +26,18 @@ namespace GenWave.Loudness;
 /// On failure (missing/unreadable input, ffmpeg non-zero exit) this throws
 /// <see cref="InvalidOperationException"/> and deletes any partially-written output file.
 /// </summary>
-public sealed class FfmpegAudioMixer(ILoudnessAnalyzer loudnessAnalyzer) : IAudioMixer
+public sealed class FfmpegAudioMixer(ILoudnessAnalyzer loudnessAnalyzer, ILogger<FfmpegAudioMixer>? logger = null) : IAudioMixer
 {
+    readonly ILogger<FfmpegAudioMixer> logger = logger ?? NullLogger<FfmpegAudioMixer>.Instance;
+
     // The bed branch is resampled to this rate before looping so the aloop buffer size (computed in
     // samples) is deterministic regardless of the bed file's native sample rate.
     const int BedProcessingSampleRate = 44100;
+
+    // SPEC F196.3 — the bed's gain (relative to the voice/target, before mixing) is clamped to this
+    // range; a clamp always logs WARN with the computed (pre-clamp) value.
+    internal const double MinBedGainDb = -40.0;
+    internal const double MaxBedGainDb = 12.0;
 
     public async Task MixAsync(AudioMixRequest request, CancellationToken ct)
     {
@@ -77,7 +86,7 @@ public sealed class FfmpegAudioMixer(ILoudnessAnalyzer loudnessAnalyzer) : IAudi
         // catalog's own when the caller carried it on the BedSpec, measured here otherwise.
         var voiceLoudness = await loudnessAnalyzer.AnalyzeAsync(request.VoicePath, ct);
         var bedLufs = bed.IntegratedLufs ?? await MeasureBedLufsAsync(bed.Path, ct);
-        var bedGainDb = ResolveBedGainDb(request.BedDuckDb, voiceLoudness, bedLufs);
+        var bedGainDb = ResolveAndLogBedGainDb(bed, request.BedDuckDb, request.TargetLufs, voiceLoudness, bedLufs);
 
         var voiceDurationSec = await FfmpegProcess.ProbeDurationSecondsAsync(request.VoicePath, ct);
         var totalDurationSec = voiceDurationSec + (2 * request.BedPadSeconds);
@@ -131,16 +140,55 @@ public sealed class FfmpegAudioMixer(ILoudnessAnalyzer loudnessAnalyzer) : IAudi
     }
 
     /// <summary>
-    /// The gain applied to the bed branch (gh-#746): <c>voice + duck − bed</c> — the bed lands exactly
-    /// <paramref name="duckDb"/> dB under the voice's integrated loudness. When either side is
-    /// unmeasurable (a silent voice track, a bed the analyzer cannot gate — <c>null</c>
-    /// <paramref name="bedLufs"/>) there is nothing to be relative to, and the duck falls back to the
-    /// pre-gh-#746 absolute reading: a flat <paramref name="duckDb"/> on the raw bed.
+    /// The UNCLAMPED gain applied to the bed branch: <c>reference + duck − bed</c>, where
+    /// <c>reference</c> is the voice's own integrated loudness (gh-#746 — the bed lands exactly
+    /// <paramref name="duckDb"/> dB under the voice actually rendered, never a flat <c>volume=</c> on
+    /// the raw bed file) when the voice is measurable, or <paramref name="targetLufs"/> — the
+    /// station's own loudness target — otherwise (SPEC F196.1; a Kokoro render that came out
+    /// unmeasurable still gets a sane reference to duck under, rather than losing the "relative to
+    /// something" property gh-#746 fixed). When <paramref name="bedLufs"/> is unmeasurable (<c>null</c>
+    /// or non-finite — a bed the analyzer cannot gate) there is nothing to be relative to on the bed
+    /// side either, and the duck falls back to the pre-gh-#746 absolute reading: a flat
+    /// <paramref name="duckDb"/> on the raw bed (SPEC F196.2). Clamping (SPEC F196.3) happens one level
+    /// up, in <see cref="ClampBedGainDb"/> / <see cref="ResolveAndLogBedGainDb"/> — this method stays
+    /// pure and side-effect-free so a fact can pin the exact pre-clamp number.
     /// </summary>
-    internal static double ResolveBedGainDb(double duckDb, Core.Domain.Loudness voice, double? bedLufs) =>
-        voice.Measurable && bedLufs is double measuredBed && double.IsFinite(measuredBed)
-            ? voice.IntegratedLufs + duckDb - measuredBed
+    internal static double ResolveBedGainDb(double duckDb, double targetLufs, Core.Domain.Loudness voice, double? bedLufs)
+    {
+        var reference = voice.Measurable ? voice.IntegratedLufs : targetLufs;
+        return bedLufs is double measuredBed && double.IsFinite(measuredBed)
+            ? reference + duckDb - measuredBed
             : duckDb;
+    }
+
+    /// <summary>SPEC F196.3 — clamps a computed bed gain into [<see cref="MinBedGainDb"/>, <see cref="MaxBedGainDb"/>].</summary>
+    internal static double ClampBedGainDb(double computedDb) => Math.Clamp(computedDb, MinBedGainDb, MaxBedGainDb);
+
+    /// <summary>
+    /// The seam <see cref="RunWithBedAsync"/> calls on the deploy path (no PR-tier fact pins that
+    /// call site — it is ffmpeg-tier; the container smoke covers it): resolves the bed gain via <see cref="ResolveBedGainDb"/>, clamps it via
+    /// <see cref="ClampBedGainDb"/>, and logs the two WARNs SPEC F196.2/F196.3 require — once each,
+    /// per render, never inside a loop. No ffmpeg/file I/O here, so specs can call this directly with a
+    /// fake <see cref="ILoudnessAnalyzer"/>'s output and a <see cref="Loudness"/> literal.
+    /// </summary>
+    internal double ResolveAndLogBedGainDb(BedSpec bed, double duckDb, double targetLufs, Core.Domain.Loudness voice, double? bedLufs)
+    {
+        // The WARN fires on a null measurement only; ResolveBedGainDb's fallback also covers a
+        // non-finite one (NaN/±∞), which the analyzer never emits today, so that path stays silent.
+        if (bedLufs is null)
+            logger.LogWarning(
+                "Bed {BedPath} has no measured loudness; ducking by {DuckDb} dB alone (F196.2)",
+                bed.Path, duckDb);
+
+        var computedDb = ResolveBedGainDb(duckDb, targetLufs, voice, bedLufs);
+        var appliedDb = ClampBedGainDb(computedDb);
+        if (appliedDb != computedDb)
+            logger.LogWarning(
+                "Bed gain {ComputedDb} dB for {BedPath} clamped to {AppliedDb} dB (F196.3)",
+                computedDb, bed.Path, appliedDb);
+
+        return appliedDb;
+    }
 
     internal static string BuildBedFilterGraph(
         AudioMixRequest request, double bedGainDb, double cueInSec, double cueOutSec, double totalDurationSec,
