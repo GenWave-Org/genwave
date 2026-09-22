@@ -55,6 +55,15 @@ public static class AdLiveSettingsReader
     internal const double MinBedDuckDb = -60.0;
     internal const double MaxBedDuckDb = 0.0;
 
+    /// <summary>SPEC F196.1; STORY-463; PLAN T542 — <c>Loudness:TargetLufs</c>'s own default and clamp:
+    /// mirrors <c>GenWave.Host.Options.LoudnessOptions.TargetLufs</c>'s <c>[Range(-40.0, 0.0)]</c> and
+    /// <c>appsettings.json</c>'s own seed exactly (hardcoded here rather than referenced — L10:
+    /// GenWave.Ads must never reference GenWave.Host — the SAME defensive-second-gate posture
+    /// <see cref="MinBedFadeMs"/>/<see cref="MaxBedFadeMs"/> already document above).</summary>
+    internal const double DefaultTargetLufs = -16.0;
+    internal const double MinTargetLufs = -40.0;
+    internal const double MaxTargetLufs = 0.0;
+
     public static AdLiveSettings Read(IConfiguration configuration) => new(
         AnnouncerVoice: ReadString(configuration, "Station:Ads:AnnouncerVoice", DefaultAnnouncerVoice).Trim(),
         CastVoices: ParseCastVoices(ReadString(configuration, "Station:Ads:CastVoices", "")),
@@ -63,7 +72,10 @@ public static class AdLiveSettingsReader
             MaxBedFadeMs),
         BedDuckDb: Math.Clamp(
             AdSettingsRead.OrDefault(configuration, "Station:Ads:BedDuckDb", DefaultBedDuckDb), MinBedDuckDb,
-            MaxBedDuckDb));
+            MaxBedDuckDb),
+        TargetLufs: Math.Clamp(
+            AdSettingsRead.OrDefault(configuration, "Loudness:TargetLufs", DefaultTargetLufs), MinTargetLufs,
+            MaxTargetLufs));
 
     static string ReadString(IConfiguration configuration, string key, string fallback)
     {

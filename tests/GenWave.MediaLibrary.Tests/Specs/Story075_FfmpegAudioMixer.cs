@@ -320,15 +320,25 @@ public static class FeatureFfmpegAudioMixer
 
         [Fact]
         public void TheGainIsVoicePlusDuckMinusBed()
-            => Assert.Equal(-16.0 + -12.0 - -9.0, FfmpegAudioMixer.ResolveBedGainDb(-12.0, new GenWave.Core.Domain.Loudness(-16.0, -1.0, true), -9.0), precision: 9);
+            => Assert.Equal(
+                -16.0 + -12.0 - -9.0,
+                FfmpegAudioMixer.ResolveBedGainDb(-12.0, targetLufs: -16.0, new GenWave.Core.Domain.Loudness(-16.0, -1.0, true), -9.0),
+                precision: 9);
 
+        // SPEC F196.1; PLAN T542 — with the voice unmeasurable, the reference is the station's own
+        // TargetLufs (gh-#746's own voice reference stays the FIRST choice — see ResolveBedGainDb's own
+        // remarks — this is only the fallback), not a flat duck-alone reading: target −16 + duck −12 −
+        // bed −9 = −19, not the pre-T542 absolute-duck −12 this fact used to pin.
         [Fact]
-        public void AnUnmeasurableVoiceFallsBackToTheAbsoluteDuck()
-            => Assert.Equal(-12.0, FfmpegAudioMixer.ResolveBedGainDb(-12.0, new GenWave.Core.Domain.Loudness(double.NegativeInfinity, double.NegativeInfinity, false), -9.0));
+        public void AnUnmeasurableVoiceFallsBackToTheTargetLufs()
+            => Assert.Equal(
+                -16.0 + -12.0 - -9.0,
+                FfmpegAudioMixer.ResolveBedGainDb(-12.0, targetLufs: -16.0, new GenWave.Core.Domain.Loudness(double.NegativeInfinity, double.NegativeInfinity, false), -9.0),
+                precision: 9);
 
         [Fact]
         public void AnUnmeasurableBedFallsBackToTheAbsoluteDuck()
-            => Assert.Equal(-12.0, FfmpegAudioMixer.ResolveBedGainDb(-12.0, new GenWave.Core.Domain.Loudness(-16.0, -1.0, true), null));
+            => Assert.Equal(-12.0, FfmpegAudioMixer.ResolveBedGainDb(-12.0, targetLufs: -16.0, new GenWave.Core.Domain.Loudness(-16.0, -1.0, true), null));
     }
 
     public sealed class ScenarioFfmpegFailureLeavesNoPartialOutput

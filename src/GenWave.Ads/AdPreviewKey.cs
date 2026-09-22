@@ -23,9 +23,11 @@ public static class AdPreviewKey
     /// voice plan (raw json, or empty), bed media id (or empty), spot length in seconds; the
     /// sponsor's Name, Tagline, About, Phone, Address, Website, Tone (each, or empty); then the LIVE
     /// render knobs — <paramref name="live"/>'s own AnnouncerVoice, CastVoices (comma-joined),
-    /// BedFadeMs, and <paramref name="bedDuckDb"/>. A change to any one of these — an edit to the
-    /// spot's own script/cast/bed, a sponsor detail update, or an operator changing a Live Ads
-    /// setting — changes this digest.
+    /// BedFadeMs, BedDuckDb, and TargetLufs (SPEC F196.1; PLAN T542 — the station target is the
+    /// bed's reference level only when the voice is unmeasurable, gh-#746 — a change still has to
+    /// re-render, exactly like a changed <c>BedDuckDb</c> does).
+    /// A change to any one of these — an edit to the spot's own script/cast/bed, a sponsor detail
+    /// update, or an operator changing a Live Ads/Loudness setting — changes this digest.
     /// </summary>
     public static string Compute(AdSpot spot, Sponsor sponsor, AdLiveSettings live)
     {
@@ -44,7 +46,8 @@ public static class AdPreviewKey
             live.AnnouncerVoice,
             string.Join(',', live.CastVoices),
             live.BedFadeMs.ToString(CultureInfo.InvariantCulture),
-            live.BedDuckDb.ToString(CultureInfo.InvariantCulture));
+            live.BedDuckDb.ToString(CultureInfo.InvariantCulture),
+            live.TargetLufs.ToString(CultureInfo.InvariantCulture));
 
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
         return Convert.ToHexStringLower(hash);

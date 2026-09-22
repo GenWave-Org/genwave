@@ -45,6 +45,12 @@ using GenWave.Core.Domain;
 /// not a <c>cref</c>: GenWave.Tts must never reference GenWave.Ads). Zero (the default) means no
 /// fade — every existing caller of this record, including this project's own tests, keeps compiling
 /// and behaving unchanged. Ignored when <see cref="Bed"/> is <see langword="null"/>.</param>
+/// <param name="TargetLufs">SPEC F196.1; STORY-463; PLAN T542 — the station's own loudness target
+/// (<c>Loudness:TargetLufs</c>), forwarded into <see cref="AudioMixRequest.TargetLufs"/> unchanged
+/// (<see cref="CrosstalkAssembler.AssembleCastAsync"/> is the one call site). Defaulted to −16.0 —
+/// <see cref="AudioMixRequest.TargetLufs"/>'s own default — so every existing caller of this record
+/// keeps compiling and behaving unchanged. Ignored when <see cref="Bed"/> is
+/// <see langword="null"/>.</param>
 public sealed record CastAssemblyRequest(
     IReadOnlyList<CastLine> Lines,
     IReadOnlyList<CastMember> Cast,
@@ -54,4 +60,5 @@ public sealed record CastAssemblyRequest(
     BedSpec? Bed = null,
     double BedDuckDb = 0.0,
     double BedPadSeconds = 0.0,
-    double BedFadeSeconds = 0.0);
+    double BedFadeSeconds = 0.0,
+    double TargetLufs = -16.0);

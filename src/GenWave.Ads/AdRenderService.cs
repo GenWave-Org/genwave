@@ -371,7 +371,7 @@ public sealed class AdRenderService(
         // BedFadeSeconds — a positional trailing arg here would silently land in the wrong slot.
         var request = new CastAssemblyRequest(
             lines, cast, ceilingSeconds, tags, outputDirectory, bed, liveSettings.BedDuckDb,
-            BedFadeSeconds: bedFadeSeconds);
+            BedFadeSeconds: bedFadeSeconds, TargetLufs: liveSettings.TargetLufs);
         return (request, null);
     }
 

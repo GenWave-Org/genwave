@@ -36,7 +36,9 @@ public static class FeatureAdCastPickerBuildsAVoicePlan
     // that reader, so it names the reader's own DefaultBedFadeMs constant explicitly rather than
     // re-inventing 300 as a second magic number nobody but this file would ever see.
     static AdLiveSettings Settings(string announcerVoice, params string[] castVoices) =>
-        new(announcerVoice, castVoices, AdLiveSettingsReader.DefaultBedFadeMs, AdLiveSettingsReader.DefaultBedDuckDb);
+        new(
+            announcerVoice, castVoices, BedFadeMs: AdLiveSettingsReader.DefaultBedFadeMs,
+            BedDuckDb: AdLiveSettingsReader.DefaultBedDuckDb, TargetLufs: AdLiveSettingsReader.DefaultTargetLufs);
 
     static string EntryFor(AdCastPick pick, string tag) => pick.Entries.Single(e => e.Tag == tag).VoiceId;
 

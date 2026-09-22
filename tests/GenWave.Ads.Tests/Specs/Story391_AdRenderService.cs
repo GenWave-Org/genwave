@@ -36,7 +36,9 @@ public static class FeatureAdRenderService
     /// fail-safe) never vary <c>BedFadeMs</c>, so <see cref="AdLiveSettingsReader.DefaultBedFadeMs"/>
     /// is enough here; Story403_AdBedPicker.cs is where a real override gets its own fact.</summary>
     static AdLiveSettings LiveSettings(int bedFadeMs = AdLiveSettingsReader.DefaultBedFadeMs) =>
-        new(AnnouncerVoice: "", CastVoices: [], BedFadeMs: bedFadeMs, BedDuckDb: AdLiveSettingsReader.DefaultBedDuckDb);
+        new(
+            AnnouncerVoice: "", CastVoices: [], BedFadeMs: bedFadeMs, BedDuckDb: AdLiveSettingsReader.DefaultBedDuckDb,
+            TargetLufs: AdLiveSettingsReader.DefaultTargetLufs);
 
     /// <summary>Wires a REAL <see cref="AdRenderService"/> against fakes at every I/O seam — the
     /// SAME "real subject, faked edges" posture every other spec in this suite uses. Seeds the ads

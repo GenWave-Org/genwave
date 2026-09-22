@@ -22,6 +22,15 @@ namespace GenWave.Core.Domain;
 /// ad render path is the one caller that varies it (plain text, not a <c>cref</c>: this project is
 /// never referenced by GenWave.Ads, so the reverse reference cannot exist either).
 /// </param>
+/// <param name="TargetLufs">
+/// SPEC F196.1; STORY-463; PLAN T542 — the station's own loudness target (<c>Loudness:TargetLufs</c>),
+/// used as the bed's reference level ONLY when the voice itself is unmeasurable (gh-#746's own voice
+/// reference is preferred whenever it exists — see <c>GenWave.Loudness.FfmpegAudioMixer.ResolveBedGainDb</c>,
+/// plain text not a <c>cref</c>: this project is never referenced by GenWave.Loudness). Ignored when
+/// <see cref="Bed"/> is null. Defaulted to −16.0 — <c>LoudnessOptions.TargetLufs</c>'s own default
+/// (plain text, not a <c>cref</c>: this project is never referenced by GenWave.Host) — so every
+/// existing caller of this record keeps compiling and behaving unchanged.
+/// </param>
 public sealed record AudioMixRequest(
     string VoicePath,
     BedSpec? Bed,
@@ -29,4 +38,5 @@ public sealed record AudioMixRequest(
     double BedDuckDb,
     double BedPadSeconds,
     string OutputPath,
-    double BedFadeSeconds = 0.0);
+    double BedFadeSeconds = 0.0,
+    double TargetLufs = -16.0);

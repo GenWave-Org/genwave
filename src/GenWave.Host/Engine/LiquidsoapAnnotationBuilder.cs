@@ -32,7 +32,11 @@ public static class LiquidsoapAnnotationBuilder
     public static string Build(
         MediaItem item, double gainDb, string stationId, string stationName, string? artworkUrl = null)
     {
-        var isTts = item.MediaId.StartsWith("tts:", StringComparison.Ordinal);
+        // F195.1 (STORY-462, PLAN T541, gh-#699): a voice item is a `tts:`-prefixed render OR any
+        // item carrying a SegmentKind — a vended ad spot (SegmentKind.Ad) and a pooled authored
+        // station ident (SegmentKind.StationId, F110.2) are library rows with numeric MediaIds, so
+        // the tts: prefix alone misses them; the kind fact travels on the item instead.
+        var isVoice = item.MediaId.StartsWith("tts:", StringComparison.Ordinal) || item.SegmentKind is not null;
         // F38.1: artist is always stamped — explicitly empty when the row has none. The telnet
         // metadata ring never merges keys across tracks, so an OMITTED artist lets a prior track's
         // value fill from the file's own embedded tag at request resolution (the gitea-#199 bleed); a
@@ -48,16 +52,17 @@ public static class LiquidsoapAnnotationBuilder
             ? $"gw_intro_energy=\"{Escape(intro.ToString("G", CultureInfo.InvariantCulture))}\"," +
               $"gw_outro_energy=\"{Escape(outro.ToString("G", CultureInfo.InvariantCulture))}\","
             : string.Empty;
-        // gh-#80: a TTS blurb shorter than the cross() window makes Liquidsoap hit end-of-track
+        // gh-#80: a voice item shorter than the cross() window makes Liquidsoap hit end-of-track
         // while buffering and warn "crossfade duration is longer than the track's duration"
         // (observed as an on-air stutter, 2026-07-22). liq_cross_duration is cross()'s built-in
         // per-track override (its default override_duration key, v2.4.4 cross.ml): stamping
-        // half the blurb's measured duration — clamped to [0.2s, 3.0s] — bounds the window on
-        // BOTH sides of the blurb (the override is processed even while the blurb's head is
+        // half the item's measured duration — clamped to [0.2s, 3.0s] — bounds the window on
+        // BOTH sides of the item (the override is processed even while the item's head is
         // being buffered as the incoming track) and auto-resets on the next track. Music tracks
-        // never carry it; when TTS cue analysis failed (null DurationMs) nothing is stamped —
-        // same honest-absence rule as every other enrichment field here.
-        var ttsCrossField = isTts && item.DurationMs is { } durationMs
+        // never carry it; when duration is unmeasured (null DurationMs) nothing is stamped —
+        // same honest-absence rule as every other enrichment field here. This only bounds the
+        // window; the transition arm itself is picked off gw_tts below (genwave.liq gw_transition).
+        var voiceCrossField = isVoice && item.DurationMs is { } durationMs
             ? $"liq_cross_duration=\"{Math.Clamp(durationMs / 1000.0 * 0.5, 0.2, 3.0).ToString("F2", CultureInfo.InvariantCulture)}\","
             : string.Empty;
         // SPEC F88.4–F88.5 (STORY-223, PLAN T85): omit-when-empty, same discipline as cueFields/
@@ -71,13 +76,15 @@ public static class LiquidsoapAnnotationBuilder
             $"annotate:track_id=\"{Escape(item.MediaId)}\"," +
             $"station_id=\"{Escape(stationId)}\"," +
             $"station_name=\"{Escape(stationName)}\"," +
-            $"gw_tts=\"{(isTts ? "true" : "false")}\"," +
+            // F195.2 (STORY-462): gw_tts="true" is what puts a vended ad spot's tail into the
+            // music->voice duck arm instead of a crossfade under the next track.
+            $"gw_tts=\"{(isVoice ? "true" : "false")}\"," +
             $"replay_gain=\"{gainDb.ToString("0.00", CultureInfo.InvariantCulture)} dB\"," +
             artistField +
             cueFields +
             urlField +
             energyFields +
-            ttsCrossField +
+            voiceCrossField +
             $"title=\"{Escape(item.Title)}\":{item.Locator}";
     }
 

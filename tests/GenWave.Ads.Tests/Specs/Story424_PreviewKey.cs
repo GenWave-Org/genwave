@@ -33,8 +33,9 @@ public static class FeaturePreviewKeyChangesWhenAnyInputChanges
 
     static AdLiveSettings MakeLive(
         string announcerVoice = "af_heart", IReadOnlyList<string>? castVoices = null, int bedFadeMs = 300,
-        double bedDuckDb = -12.0) =>
-        new(announcerVoice, castVoices ?? ["voice_a", "voice_b"], bedFadeMs, bedDuckDb);
+        double bedDuckDb = -12.0, double targetLufs = -16.0) =>
+        new(announcerVoice, castVoices ?? ["voice_a", "voice_b"], BedFadeMs: bedFadeMs, BedDuckDb: bedDuckDb,
+            TargetLufs: targetLufs);
 
     static string BaseKey() => AdPreviewKey.Compute(MakeSpot(), MakeSponsor(), MakeLive());
 
@@ -178,6 +179,16 @@ public static class FeaturePreviewKeyChangesWhenAnyInputChanges
             var before = BaseKey();
             // gh-#746 — the duck rides on the live settings now (Station:Ads:BedDuckDb), still a key input.
             var after = AdPreviewKey.Compute(MakeSpot(), MakeSponsor(), MakeLive(bedDuckDb: -6.0));
+            Assert.NotEqual(before, after);
+        }
+
+        [Fact]
+        public void TargetLufsChangeChangesTheKey()
+        {
+            var before = BaseKey();
+            // SPEC F196.1; PLAN T542 — the station's Loudness:TargetLufs is the bed's reference level
+            // whenever the voice itself is unmeasurable, so a changed target changes the render too.
+            var after = AdPreviewKey.Compute(MakeSpot(), MakeSponsor(), MakeLive(targetLufs: -20.0));
             Assert.NotEqual(before, after);
         }
     }

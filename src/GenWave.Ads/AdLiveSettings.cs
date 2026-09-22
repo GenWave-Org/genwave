@@ -19,6 +19,12 @@ namespace GenWave.Ads;
 /// where the 300ms default actually lives, and the only place clamping to
 /// <c>MinBedFadeMs</c>/<c>MaxBedFadeMs</c> happens); a second default here would protect zero real
 /// callers and hide a value already owned elsewhere.</param>
+/// <param name="TargetLufs">SPEC F196.1; STORY-463; PLAN T542 — <c>Loudness:TargetLufs</c>, the
+/// station's own loudness target, read once per render claim exactly like <paramref name="BedDuckDb"/>
+/// beside it and forwarded into <see cref="GenWave.Tts.CastAssemblyRequest.TargetLufs"/>. It is the
+/// bed's reference level only when the voice is unmeasurable (the voice's own LUFS wins otherwise,
+/// gh-#746; <c>FfmpegAudioMixer.ResolveBedGainDb</c>), so it is one more render input
+/// <see cref="AdPreviewKey.Compute"/> hashes.</param>
 /// <remarks>
 /// Public, not internal (PLAN T442 ruling): <see cref="AdPreviewKey.Compute"/> is a genuine
 /// cross-assembly seam — <c>GenWave.Host</c>'s <c>AdsController</c> calls it on every read to detect a
@@ -26,4 +32,5 @@ namespace GenWave.Ads;
 /// <see cref="AdDeterministicSeed"/> precedent this class otherwise follows stays <c>internal</c>
 /// because it has no caller outside this assembly; this record does now.
 /// </remarks>
-public sealed record AdLiveSettings(string AnnouncerVoice, IReadOnlyList<string> CastVoices, int BedFadeMs, double BedDuckDb);
+public sealed record AdLiveSettings(
+    string AnnouncerVoice, IReadOnlyList<string> CastVoices, int BedFadeMs, double BedDuckDb, double TargetLufs);
