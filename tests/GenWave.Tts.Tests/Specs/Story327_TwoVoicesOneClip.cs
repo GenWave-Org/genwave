@@ -168,12 +168,14 @@ public static class FeatureTwoVoicesOneClip
         [Fact]
         public void Inter_line_gaps_are_jittered_within_the_bounded_range()
         {
-            // Given a validated script's own gap plan...
+            // Given a validated script's own gap plan — every transition here alternates speaker
+            // (EightLineScript), so none is clamped to the narrower same-speaker range...
             var script = EightLineScript();
             var seed = CrosstalkTimeline.ComputeSeed(script);
+            var sameSpeaker = new bool[script.Lines.Count - 1];
 
             // When the exchange's inter-line gaps are computed...
-            var gaps = CrosstalkTimeline.ComputeGapsSeconds(script.Lines.Count - 1, seed);
+            var gaps = CrosstalkTimeline.ComputeGapsSeconds(script.Lines.Count - 1, seed, sameSpeaker);
 
             // Then every gap lands in the ~0.2-0.8s bounded range, and they are not all identical —
             // uniform gaps are the second-biggest TTS-dialogue tell this jitter exists to kill.
@@ -207,11 +209,14 @@ public static class FeatureTwoVoicesOneClip
             var scriptB = ThreeLineScript();
             var differentScript = EightLineScript();
 
-            // When each script's own gap sequence is planned from its own content-derived seed...
-            var gapsA = CrosstalkTimeline.ComputeGapsSeconds(scriptA.Lines.Count - 1, CrosstalkTimeline.ComputeSeed(scriptA));
-            var gapsB = CrosstalkTimeline.ComputeGapsSeconds(scriptB.Lines.Count - 1, CrosstalkTimeline.ComputeSeed(scriptB));
+            // When each script's own gap sequence is planned from its own content-derived seed — every
+            // transition here alternates speaker (ThreeLineScript/EightLineScript), so none is
+            // clamped to the narrower same-speaker range...
+            var sameSpeaker = new bool[scriptA.Lines.Count - 1];
+            var gapsA = CrosstalkTimeline.ComputeGapsSeconds(scriptA.Lines.Count - 1, CrosstalkTimeline.ComputeSeed(scriptA), sameSpeaker);
+            var gapsB = CrosstalkTimeline.ComputeGapsSeconds(scriptB.Lines.Count - 1, CrosstalkTimeline.ComputeSeed(scriptB), sameSpeaker);
             var gapsDifferent = CrosstalkTimeline.ComputeGapsSeconds(
-                scriptA.Lines.Count - 1, CrosstalkTimeline.ComputeSeed(differentScript));
+                scriptA.Lines.Count - 1, CrosstalkTimeline.ComputeSeed(differentScript), sameSpeaker);
 
             // Then IDENTICAL content always plans the IDENTICAL sequence — re-assembling the same
             // script (a retry, a re-run) reproduces byte-identical timing (SPEC F127.6) — and
@@ -257,8 +262,9 @@ public static class FeatureTwoVoicesOneClip
             // the assembler's OWN planner math for this exact transition, never a magic number.
             Assert.True(durationWithSec < durationWithoutSec);
 
+            // Host->Neighbor is a cross-speaker transition, so it draws from the full range, unclamped.
             var replacedGapSeconds = CrosstalkTimeline.ComputeGapsSeconds(
-                transitionCount: 1, CrosstalkTimeline.ComputeSeed(withoutInterjection))[0];
+                transitionCount: 1, CrosstalkTimeline.ComputeSeed(withoutInterjection), sameSpeaker: [false])[0];
             var expectedDeltaSeconds = replacedGapSeconds + CrosstalkTimeline.InterjectionOverlapSeconds;
             var actualDeltaSeconds = durationWithoutSec - durationWithSec;
             Assert.InRange(actualDeltaSeconds, expectedDeltaSeconds - 0.15, expectedDeltaSeconds + 0.15);

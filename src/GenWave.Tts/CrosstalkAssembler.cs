@@ -140,7 +140,8 @@ public sealed class CrosstalkAssembler(
                 return renderFailure;
 
             var isInterjections = script.Lines.Select(line => line.IsInterjection).ToArray();
-            await MixAsync(lineFiles, isInterjections, CrosstalkTimeline.ComputeSeed(script), outputPath, ct);
+            var sameSpeaker = ComputeSameSpeakerTransitions(script.Lines, (previous, current) => previous.Speaker == current.Speaker);
+            await MixAsync(lineFiles, isInterjections, sameSpeaker, CrosstalkTimeline.ComputeSeed(script), outputPath, ct);
 
             var estimatedSeconds = script.Lines.Sum(line => line.Text.Length) / CrosstalkScriptParser.CharsPerSecond;
             var actualSeconds = await FfmpegProcess.ProbeDurationSecondsAsync(outputPath, ct);
@@ -221,7 +222,9 @@ public sealed class CrosstalkAssembler(
             // an "ordinary line" gap, the same shape MixAsync already computes for crosstalk's own
             // non-interjecting lines.
             var isInterjections = new bool[lineFiles.Count];
-            await MixAsync(lineFiles, isInterjections, CrosstalkTimeline.ComputeSeed(request.Lines), rawMixPath, ct);
+            var sameSpeaker = ComputeSameSpeakerTransitions(
+                request.Lines, (previous, current) => string.Equals(previous.Tag, current.Tag, StringComparison.Ordinal));
+            await MixAsync(lineFiles, isInterjections, sameSpeaker, CrosstalkTimeline.ComputeSeed(request.Lines), rawMixPath, ct);
 
             await mixer.MixAsync(
                 new AudioMixRequest(
@@ -517,11 +520,30 @@ public sealed class CrosstalkAssembler(
     }
 
     /// <summary>
+    /// One same-speaker flag per line TRANSITION (SPEC F198.3, STORY-465 AC8/AC9) — the
+    /// <see cref="CrosstalkTimeline.ComputeGapsSeconds"/> input both <see cref="AssembleAsync"/>
+    /// (comparing each line's <see cref="CrosstalkAiredLine.Speaker"/> enum) and
+    /// <see cref="AssembleCastAsync"/> (comparing each <see cref="CastLine.Tag"/> ordinally) derive
+    /// from their own line shape via <paramref name="sameSpeaker"/> rather than each hand-rolling the
+    /// same adjacent-pair walk.
+    /// </summary>
+    static bool[] ComputeSameSpeakerTransitions<TLine>(IReadOnlyList<TLine> lines, Func<TLine, TLine, bool> sameSpeaker)
+    {
+        var transitions = new bool[lines.Count - 1];
+        for (var i = 1; i < lines.Count; i++)
+            transitions[i - 1] = sameSpeaker(lines[i - 1], lines[i]);
+
+        return transitions;
+    }
+
+    /// <summary>
     /// Positions every line's render on a shared timeline (<c>adelay</c>) and sums them
     /// (<c>amix</c>) in ONE ffmpeg invocation (SPEC F127.6) — see the class remarks for why
     /// <c>amix</c>, not concat. Start times come from <see cref="CrosstalkTimeline"/>, fed by
     /// each line's OWN rendered duration (probed here, not estimated) so gaps/overlaps land against
-    /// the real audio, not a guess.
+    /// the real audio, not a guess. <paramref name="sameSpeaker"/> (SPEC F198.3, STORY-465 AC8/AC9)
+    /// marks which transitions sit between two lines sharing a speaker — <see cref="CrosstalkTimeline.ComputeGapsSeconds"/>
+    /// clamps those to its own narrower range; a cross-speaker transition is untouched.
     ///
     /// <para>
     /// A trailing <c>alimiter</c> stage sits between the mix and the output map (T284 review F6):
@@ -536,9 +558,10 @@ public sealed class CrosstalkAssembler(
     /// </para>
     /// </summary>
     static async Task MixAsync(
-        IReadOnlyList<string> lineFiles, IReadOnlyList<bool> isInterjections, int seed, string outputPath, CancellationToken ct)
+        IReadOnlyList<string> lineFiles, IReadOnlyList<bool> isInterjections, IReadOnlyList<bool> sameSpeaker,
+        int seed, string outputPath, CancellationToken ct)
     {
-        var gaps = CrosstalkTimeline.ComputeGapsSeconds(lineFiles.Count - 1, seed);
+        var gaps = CrosstalkTimeline.ComputeGapsSeconds(lineFiles.Count - 1, seed, sameSpeaker);
         var starts = new double[lineFiles.Count];
         for (var i = 1; i < lineFiles.Count; i++)
         {

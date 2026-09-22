@@ -2,16 +2,14 @@
 //
 // BDD specification — xUnit. RED at plan time: every fact was [Fact(Skip = Pending)] with a loud body —
 // the Skip is removed only in the task that makes it green. Each Given comment names the arrange the
-// scenario needs. AC1-AC7 went green in T546 (SPEC F198.1/F198.2); AC8-AC9 stay skipped for T547
-// (CrosstalkTimeline is out of T546's scope). ScenarioCommaRunAtAFragmentBoundary pins the fragment-boundary
-// case (SPEC F197.2 + F198.1), beyond the original AC1-AC9 set.
+// scenario needs. AC1-AC7 went green in T546 (SPEC F198.1/F198.2); AC8-AC9 went green in T547 (SPEC
+// F198.3, CrosstalkTimeline's own same-speaker gap clamp). ScenarioCommaRunAtAFragmentBoundary pins the
+// fragment-boundary case (SPEC F197.2 + F198.1), beyond the original AC1-AC9 set.
 
 namespace GenWave.Tts.Tests.Specs;
 
 public static class FeatureTheflattenkeepsthepause
 {
-    const string Pending = "pending: T547 — The flatten keeps the pause (STORY-465)";
-
     public sealed class ScenarioCopyWithCommas
     {
         // Given: "Tonight, on GenWave, the hits"
@@ -143,15 +141,43 @@ public static class FeatureTheflattenkeepsthepause
 
     public sealed class ScenarioThreeConsecutiveAnnouncerLines
     {
-        // Given: a two-voice script through CrosstalkTimeline with a seeded sampler (T547)
+        // Given: a two-voice script through CrosstalkTimeline with a seeded sampler (T547) — three
+        // consecutive ANNOUNCER lines (transitions 0 and 1, both same-speaker) then one VOICE line
+        // (transition 2, cross-speaker).
+        static readonly CastLine[] Lines =
+        [
+            new CastLine("ANNOUNCER", "First line of the spot."),
+            new CastLine("ANNOUNCER", "Second line of the spot."),
+            new CastLine("ANNOUNCER", "Third line of the spot."),
+            new CastLine("VOICE", "Fourth line of the spot."),
+        ];
+
+        static readonly bool[] SameSpeaker = [true, true, false];
+
+        static IReadOnlyList<double> PlaceGaps() =>
+            CrosstalkTimeline.ComputeGapsSeconds(Lines.Length - 1, CrosstalkTimeline.ComputeSeed(Lines), SameSpeaker);
 
         /// <summary>AC8 — same-speaker gaps within [0.20, 0.35] s</summary>
-        [Fact(Skip = Pending)]
-        public void ClampsSameSpeakerGaps() => Assert.Fail(Pending);
+        [Fact]
+        public void ClampsSameSpeakerGaps()
+        {
+            // When CrosstalkTimeline places them, then every gap between consecutive same-speaker
+            // (ANNOUNCER→ANNOUNCER) lines — the first two transitions — lands in [0.20, 0.35]s.
+            var gaps = PlaceGaps();
+            Assert.All(
+                gaps.Take(2),
+                gap => Assert.InRange(gap, CrosstalkTimeline.MinGapSeconds, CrosstalkTimeline.SameSpeakerMaxGapSeconds));
+        }
 
         /// <summary>AC9 — the ANNOUNCER→VOICE gap within [0.20, 0.80] s</summary>
-        [Fact(Skip = Pending)]
-        public void LeavesCrossSpeakerGapsAlone() => Assert.Fail(Pending);
+        [Fact]
+        public void LeavesCrossSpeakerGapsAlone()
+        {
+            // When placed, then the ANNOUNCER→VOICE transition (the third gap) is untouched — still
+            // the full [0.20, 0.80]s range.
+            var gaps = PlaceGaps();
+            Assert.InRange(gaps[2], CrosstalkTimeline.MinGapSeconds, CrosstalkTimeline.MaxGapSeconds);
+        }
     }
 
 }
