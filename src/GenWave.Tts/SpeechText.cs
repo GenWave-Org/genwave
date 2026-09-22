@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
+using GenWave.Core;
 
 namespace GenWave.Tts;
 
@@ -169,6 +170,43 @@ public static partial class SpeechText
 
     private static string FlattenSegment(string text)
     {
+        var result = new StringBuilder(text.Length);
+        var cursor = 0;
+
+        // SPEC F197.2 (STORY-464, PLAN T545): a phone-shaped run is matched on THIS untouched
+        // segment text — on the raw segment, before every prose pass (accent-fold, lowering,
+        // ClauseMarkRx, LooseMarkRx). It has to be: the shape's
+        // own separators (-, ., space, and an optional leading/trailing paren) must still be on
+        // the page for GenWave.Core.PhoneShape.Regex to see them at all, since a loose paren is
+        // exactly the kind of mark LooseMarkRx erases. Each match is replaced OUTRIGHT with its
+        // fully-spoken form (comma already in place) rather than being routed through the ordinary
+        // prose pipeline below, so no later pass in THIS segment ever gets a chance to re-strip the
+        // comma the spoken form introduces (ClauseMarkRx would, today, treat a bare "," exactly
+        // like any other clause mark).
+        foreach (Match phone in PhoneShape.Regex.Matches(text))
+        {
+            result.Append(FlattenProse(text[cursor..phone.Index]));
+            result.Append(SpokenPhoneNumber(phone.Value));
+            cursor = phone.Index + phone.Length;
+        }
+
+        result.Append(FlattenProse(text[cursor..]));
+
+        // Re-attach an ender orphaned by a removal to its word ("iceberg ." → "iceberg.") so the
+        // engines never receive a floating mark to stumble on. Runs once over the FULL assembled
+        // segment (prose and any spoken phone numbers together) so it also catches an orphan
+        // sitting right at a phone-number/prose boundary.
+        return OrphanedEnderRx().Replace(result.ToString(), "$1");
+    }
+
+    /// <summary>
+    /// The ordinary speakability flatten for a stretch of text already known to carry no
+    /// phone-shaped run — everything <see cref="FlattenSegment"/> did end to end before SPEC
+    /// F197.2, minus the final orphaned-ender reattachment (now done once, over the whole
+    /// assembled segment, by the caller).
+    /// </summary>
+    private static string FlattenProse(string text)
+    {
         // Accent fold before anything case-sensitive: decompose, drop the combining marks, and
         // recompose what remains — "Beyoncé" reaches the residual filter as "beyonce", a name,
         // not "beyonc", a truncation.
@@ -185,12 +223,95 @@ public static partial class SpeechText
         var noEllipses = EllipsisRx().Replace(lowered, " ");
         var singleEnders = EnderRunRx().Replace(noEllipses, "$1");
         var noClauseMarks = ClauseMarkRx().Replace(singleEnders, " ");
-        var filtered = LooseMarkRx().Replace(noClauseMarks, " ");
-
-        // Re-attach an ender orphaned by a removal to its word ("iceberg ." → "iceberg.") so the
-        // engines never receive a floating mark to stumble on.
-        return OrphanedEnderRx().Replace(filtered, "$1");
+        return LooseMarkRx().Replace(noClauseMarks, " ");
     }
+
+    /// <summary>
+    /// SPEC F197.2 — a phone-shaped match becomes its digits spoken one by one, groups
+    /// comma-separated: <c>555-0142</c> -&gt; <c>five five five, zero one four two</c>. Groups come
+    /// from splitting <paramref name="matched"/> on its OWN separators, so a match keeps exactly
+    /// the grouping its author wrote (<c>(812) 555-0199</c> groups 812 / 555 / 0199, matching
+    /// SPEC F197.1's own three-alternative shape); a bare digit run has no separators of its own
+    /// to split on (<see cref="PhoneShape.Regex"/>'s third alternative, <c>\b\d{7,}\b</c>), so
+    /// <see cref="GroupBareDigitRun"/> invents a grouping for it instead.
+    /// </summary>
+    private static string SpokenPhoneNumber(string matched)
+    {
+        var groups = SplitDigitGroups(matched);
+        if (groups.Count == 1)
+            groups = GroupBareDigitRun(groups[0]);
+
+        return string.Join(", ", groups.Select(SpokenDigits));
+    }
+
+    /// <summary>
+    /// Splits <paramref name="value"/> on every run of non-digit characters — exactly the
+    /// separators <see cref="PhoneShape.Regex"/>'s own pattern allows (<c>-</c> <c>.</c> space and
+    /// an optional paren) — without redeclaring what counts as a phone shape: this only ever runs
+    /// on text the shape regex has already matched, so it just reads back the digit groups that
+    /// match already contains. Only ASCII digits are kept: the shape regex's <c>\d</c> admits any
+    /// Unicode digit, but a non-ASCII digit is dropped here by design (the old LooseMarkRx erased
+    /// it too), so a fullwidth or Arabic-Indic run never reaches <c>DigitWords</c>.
+    /// </summary>
+    private static List<string> SplitDigitGroups(string value)
+    {
+        var groups = new List<string>();
+        var start = -1;
+
+        for (var i = 0; i < value.Length; i++)
+        {
+            if (char.IsAsciiDigit(value[i]))
+            {
+                if (start < 0)
+                    start = i;
+                continue;
+            }
+
+            if (start >= 0)
+            {
+                groups.Add(value[start..i]);
+                start = -1;
+            }
+        }
+
+        if (start >= 0)
+            groups.Add(value[start..]);
+
+        return groups;
+    }
+
+    /// <summary>
+    /// A bare 7+ digit run (<see cref="PhoneShape.Regex"/>'s third alternative — dialled with no
+    /// punctuation at all, e.g. from a script that typed the whole number as one token) carries no
+    /// author-chosen grouping to read back, so this invents one: groups of 3 digits from the left,
+    /// with whatever 4 or fewer digits are left becoming the final group — groups of 3, then a
+    /// 1–4 digit tail. That yields 3/4 for a 7-digit run and 3/3/4 for a 10-digit run — the exact
+    /// two shapes SPEC F197.1's other two alternatives already cover WITH punctuation, so a bare run
+    /// of either length reads identically to its punctuated sibling; other lengths follow the same
+    /// rule (8 → 3/3/2, 11 → 3/3/3/2). Documented rather than pinned by an acceptance test (PLAN T545):
+    /// no STORY-464 fact reaches this path, since every phone-shaped input there already carries
+    /// its own separators.
+    /// </summary>
+    private static List<string> GroupBareDigitRun(string digits)
+    {
+        var groups = new List<string>();
+        var i = 0;
+
+        while (digits.Length - i > 4)
+        {
+            groups.Add(digits.Substring(i, 3));
+            i += 3;
+        }
+
+        groups.Add(digits[i..]);
+        return groups;
+    }
+
+    static readonly string[] DigitWords =
+        ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"];
+
+    /// <summary>One digit group read one digit at a time, space-separated: "555" -&gt; "five five five".</summary>
+    private static string SpokenDigits(string digits) => string.Join(' ', digits.Select(d => DigitWords[d - '0']));
 
     /// <summary>
     /// Collapses every run of whitespace to one space and trims the ends — the exact rule every
