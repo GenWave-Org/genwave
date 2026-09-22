@@ -208,7 +208,10 @@ public static class FeatureCorrectionsLiveWiring
 
             // Then the correction reached the engine — no restart, just the PUT above (F68.5).
             Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
-            Assert.Equal("coming up a deep cut from muh-cloud.", engine.LastText);
+
+            // The literal comma in the fixture copy survives the flatten (SPEC F198.1, gh-#703)
+            // instead of being stripped — unrelated to this scenario's own live-wiring behavior.
+            Assert.Equal("coming up, a deep cut from muh-cloud.", engine.LastText);
         }
     }
 

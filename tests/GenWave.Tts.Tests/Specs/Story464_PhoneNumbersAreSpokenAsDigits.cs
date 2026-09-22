@@ -1,7 +1,7 @@
 // STORY-464 — Phone numbers are spoken as digits (gh-#700 · SPEC F197 · PLAN T545)
 //
 // BDD specification — xUnit. GREEN as of T545: SpeechText.FlattenSegment now matches a
-// phone-shaped run (GenWave.Core.PhoneShape.Regex) before ClauseMarkRx/LooseMarkRx can strip its
+// phone-shaped run (GenWave.Core.PhoneShape.Regex) before the ordinary prose flatten can strip its
 // separators, and replaces it outright with its digits spoken one by one.
 
 namespace GenWave.Tts.Tests.Specs;
@@ -97,10 +97,10 @@ public static class FeaturePhonenumbersarespokenasdigits
         /// <summary>
         /// AC7 — a time is not a phone: the digit pass never touches "7:30" itself, since it is
         /// too short for PhoneShape.Regex's 3-3-4/3-4/7+ shapes. The intra-digit colon survives
-        /// only once T546 lands the F198 loose-mark fold (gh-#703) narrowing ClauseMarkRx/LooseMarkRx;
-        /// skipped until then.
+        /// because SPEC F198.1's LooseMarkRx (gh-#703, PLAN T546) treats a mark with a digit on
+        /// BOTH sides as an intra-word survivor, same as any other identity mark.
         /// </summary>
-        [Fact(Skip = "pending: T546 — the F198 loose-mark fold (gh-#703) keeps an intra-digit colon; ClauseMarkRx strips it today")]
+        [Fact]
         public void LeavesTimesAlone()
         {
             var spoken = SpeechText.FlattenForSpeech("at 7:30 tonight");

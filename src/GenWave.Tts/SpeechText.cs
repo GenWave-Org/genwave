@@ -120,28 +120,32 @@ public static partial class SpeechText
 
     /// <summary>
     /// The speakability flatten (gh-#541, subsuming gh-#292's comma-vocative and gh-#432's
-    /// mid-sentence-capitals pauses): both pinned engines read punctuation and casing as prosody
-    /// cues and stumble on exactly the marks grammatically correct copy is full of, so booth copy
-    /// is flattened to what the voice can actually speak — lowercase words, digits, and sentence
-    /// enders. Dean's gh-#541 ruling ("ToLower and discard anything that isn't a-z") is applied
-    /// with three deliberate survivors, each because removal would be WORSE on air than a pause:
+    /// mid-sentence-capitals pauses; narrowed for commas and select loose marks by SPEC F198
+    /// (gh-#703, STORY-465, PLAN T546)): both pinned engines read punctuation and casing as
+    /// prosody cues and stumble on exactly the marks grammatically correct copy is full of, so
+    /// booth copy is flattened to what the voice can actually speak — lowercase words, digits,
+    /// sentence enders, and (as of F198) commas. Dean's gh-#541 ruling ("ToLower and discard
+    /// anything that isn't a-z") is applied with four deliberate survivors, each because removal
+    /// would be WORSE on air than a pause:
     /// <list type="bullet">
     /// <item>Sentence enders (<c>.</c> <c>!</c> <c>?</c>) — <see cref="KokoroPauseMarkup"/>'s
     /// sentence-pause splice (gh-#116) and the blurb cue analyzer both key off them; dropping them
-    /// collapses all prosody into one breathless run. Runs collapse to their first mark and
-    /// ellipses become plain spaces — an ellipsis is a pause instruction, the exact thing this
-    /// pass exists to remove.</item>
+    /// collapses all prosody into one breathless run. Runs collapse to their first mark.</item>
     /// <item>Digits — "76 degrees" with the 76 discarded is mangled copy, and the unit expansion
     /// one pass earlier is digit-anchored. HOW an engine reads a number aloud is gh-#211's lexicon
     /// problem, not a character-class one.</item>
     /// <item>Intra-word marks — a mark with a letter or digit on BOTH sides is identity, not
     /// prosody: "we'll" stripped to "well" airs a different word, and the F68 survival law pins
-    /// stylized names ("Ke$ha", "AC/DC", "P!nk", snake_case) through this chokepoint — a raw a-z
-    /// filter would rename them on air. Loose marks (quoting: <c>'iceberg'</c>; elision:
-    /// <c>comin'</c>; the spaced pause-dash — all gh-#541 exhibits) are exactly the prosody cues
-    /// the ruling removes. The one amendment this pass makes to the survival law is case: names
-    /// flatten to lowercase like every other word, because casing is precisely gh-#432's pause
-    /// trigger and neither engine spells a name back out loud.</item>
+    /// stylized names ("Ke$ha", "AC/DC", "P!nk", snake_case) and now an intra-digit time
+    /// ("7:30", F198.1) through this chokepoint — a raw a-z filter would rename or misread them on
+    /// air. The one amendment this pass makes to the survival law is case: names flatten to
+    /// lowercase like every other word, because casing is precisely gh-#432's pause trigger and
+    /// neither engine spells a name back out loud.</item>
+    /// <item>Commas (F198.1, gh-#703) — the pinned engines DO take a comma as a short, correct
+    /// pause, so gh-#541's blanket strip was over-broad for this one mark: a literal comma now
+    /// survives verbatim, and a handful of loose marks fold to speak as one too — see
+    /// <see cref="LooseMarkRx"/> for exactly which, and <see cref="CommaRunRx"/> for how a run of
+    /// them collapses to a single comma.</item>
     /// </list>
     /// Accents fold to their base letters first (é → e) so a name is never silently truncated the
     /// way a raw a-z filter would truncate it. <c>[...]</c>-shaped speech-markup tokens (with an
@@ -165,7 +169,15 @@ public static partial class SpeechText
         }
 
         result.Append(FlattenSegment(text[cursor..]));
-        return result.ToString();
+
+        // F198.1 (gh-#703, PLAN T546): CommaRunRx (applied inside FlattenSegment) always folds a
+        // comma run to the canonical ", " — INCLUDING one that lands at the tail of a
+        // markup-delimited fragment, where the trailing space has to survive to separate it from
+        // the [...] token appended right after it (trimming per-fragment there
+        // swallowed that space). Only the true end of the WHOLE string has nothing left to
+        // separate from, so the space-to-nothing trim happens exactly once, here, after every
+        // fragment and markup span is already assembled — never inside FlattenSegment itself.
+        return result.ToString().TrimEnd();
     }
 
     private static string FlattenSegment(string text)
@@ -174,15 +186,16 @@ public static partial class SpeechText
         var cursor = 0;
 
         // SPEC F197.2 (STORY-464, PLAN T545): a phone-shaped run is matched on THIS untouched
-        // segment text — on the raw segment, before every prose pass (accent-fold, lowering,
-        // ClauseMarkRx, LooseMarkRx). It has to be: the shape's
-        // own separators (-, ., space, and an optional leading/trailing paren) must still be on
-        // the page for GenWave.Core.PhoneShape.Regex to see them at all, since a loose paren is
-        // exactly the kind of mark LooseMarkRx erases. Each match is replaced OUTRIGHT with its
-        // fully-spoken form (comma already in place) rather than being routed through the ordinary
-        // prose pipeline below, so no later pass in THIS segment ever gets a chance to re-strip the
-        // comma the spoken form introduces (ClauseMarkRx would, today, treat a bare "," exactly
-        // like any other clause mark).
+        // segment text — on the raw segment, before every prose pass (accent-fold, lowering, the
+        // ellipsis/loose-mark folds). It has to be: the shape's own separators (-, ., space, and an
+        // optional leading/trailing paren) must still be on the page for GenWave.Core.PhoneShape.Regex
+        // to see them at all, since a loose paren is exactly the kind of mark LooseMarkRx erases.
+        // Each match is replaced OUTRIGHT with its fully-spoken form (comma already in place)
+        // rather than being routed through the ordinary prose pipeline below — routing it through
+        // FlattenProse instead would leave the shape's own hyphen untouched as a literal "-" (digit
+        // on both sides makes it an intra-word survivor under F198.1's LooseMarkRx, SPEC F198,
+        // gh-#703, PLAN T546) rather than spoken digit-by-digit, and would lose the shape's own
+        // grouping entirely.
         foreach (Match phone in PhoneShape.Regex.Matches(text))
         {
             result.Append(FlattenProse(text[cursor..phone.Index]));
@@ -191,19 +204,29 @@ public static partial class SpeechText
         }
 
         result.Append(FlattenProse(text[cursor..]));
+        var assembled = result.ToString();
+
+        // F198.1 (gh-#703, PLAN T546): collapses a comma run ONCE over this FULL assembled
+        // segment — prose and any spoken phone numbers together — never over a single FlattenProse
+        // fragment. A fragment boundary sits at every phone-number match above; collapsing inside
+        // FlattenProse instead saw "end of fragment" where there was really more text still to
+        // come and wrongly dropped the space that separates them. The phone
+        // number's own spoken form already uses canonical ", " spacing, so a second pass over it
+        // is a no-op.
+        var commaCollapsed = CommaRunRx().Replace(assembled, ", ");
 
         // Re-attach an ender orphaned by a removal to its word ("iceberg ." → "iceberg.") so the
         // engines never receive a floating mark to stumble on. Runs once over the FULL assembled
         // segment (prose and any spoken phone numbers together) so it also catches an orphan
         // sitting right at a phone-number/prose boundary.
-        return OrphanedEnderRx().Replace(result.ToString(), "$1");
+        return OrphanedEnderRx().Replace(commaCollapsed, "$1");
     }
 
     /// <summary>
     /// The ordinary speakability flatten for a stretch of text already known to carry no
     /// phone-shaped run — everything <see cref="FlattenSegment"/> did end to end before SPEC
-    /// F197.2, minus the final orphaned-ender reattachment (now done once, over the whole
-    /// assembled segment, by the caller).
+    /// F197.2, minus the comma-run collapse and the orphaned-ender reattachment (both now done
+    /// once, over the whole assembled segment, by the caller — see FlattenSegment).
     /// </summary>
     private static string FlattenProse(string text)
     {
@@ -220,11 +243,30 @@ public static partial class SpeechText
             .Replace('–', '-').Replace('—', '-');
 
         var lowered = mapped.ToLowerInvariant();
-        var noEllipses = EllipsisRx().Replace(lowered, " ");
-        var singleEnders = EnderRunRx().Replace(noEllipses, "$1");
-        var noClauseMarks = ClauseMarkRx().Replace(singleEnders, " ");
-        return LooseMarkRx().Replace(noClauseMarks, " ");
+
+        // F198.1 (gh-#703): an ellipsis in either spelling is now a spoken pause — a comma — not
+        // silence. This has to run before EnderRunRx below: a bare "..." is also a run of sentence
+        // enders, so EnderRunRx would collapse it to a lone "." (reading as a sentence end, not a
+        // pause) before EllipsisRx ever got a chance to recognize it as an ellipsis.
+        var ellipsesAsCommas = EllipsisRx().Replace(lowered, ",");
+        var singleEnders = EnderRunRx().Replace(ellipsesAsCommas, "$1");
+        return LooseMarkRx().Replace(singleEnders, FoldLooseMark);
     }
+
+    /// <summary>
+    /// The <see cref="LooseMarkRx"/> match evaluator (SPEC F198.1, gh-#703, PLAN T546): a run
+    /// built ENTIRELY from <c>:</c> <c>;</c> <c>-</c> (a loose colon/semicolon, or a spaced dash —
+    /// <c>–</c>/<c>—</c> already folded to <c>-</c> by the typographic map in
+    /// <see cref="FlattenProse"/>) is spoken as a comma. A run that mixes in any OTHER mark (a
+    /// stray quote, <c>$</c>, <c>/</c>, ...) keeps the untouched gh-#541 behavior and closes up to
+    /// a plain space — F198 amends only the specific marks SPEC F198.1 names, not the whole
+    /// loose-mark family. <see cref="CommaRunRx"/>, run once by <see cref="FlattenSegment"/> over
+    /// the FULL assembled segment (never here, per-fragment — a per-fragment pass eats the space at every phone or markup boundary),
+    /// later collapses a run of freshly-folded commas (and any comma already sitting next to one)
+    /// down to one and fixes the spacing.
+    /// </summary>
+    private static string FoldLooseMark(Match match) =>
+        match.Value.All(static c => c is ':' or ';' or '-') ? "," : " ";
 
     /// <summary>
     /// SPEC F197.2 — a phone-shaped match becomes its digits spoken one by one, groups
@@ -393,8 +435,9 @@ public static partial class SpeechText
     [GeneratedRegex(@"\p{Mn}")]
     private static partial Regex CombiningMarkRx();
 
-    // An ellipsis in either spelling ("..." or the single … glyph) is a pause instruction, not a
-    // sentence ender — it becomes a plain space (see FlattenForSpeech).
+    // F198.1 (gh-#703): an ellipsis in either spelling ("..." or the single … glyph) is a pause
+    // instruction the voice can speak as a comma (FlattenProse folds the match to "," and
+    // CommaRunRx below fixes the spacing) — no longer a plain space (see FlattenForSpeech).
     [GeneratedRegex(@"\.{2,}|…+")]
     private static partial Regex EllipsisRx();
 
@@ -402,20 +445,30 @@ public static partial class SpeechText
     [GeneratedRegex(@"([.!?])[.!?]+")]
     private static partial Regex EnderRunRx();
 
-    // Clause punctuation — the gh-#292/#303 stumble marks. Commas fall here by Dean's gh-#541
-    // ruling: the prompt-side ban (Issue303_CommaDiscipline) asks the model nicely; this enforces.
-    [GeneratedRegex(@"[,;:]")]
-    private static partial Regex ClauseMarkRx();
-
     // The intra-word-survivor rule in one expression: any mark outside the speakable alphabet
-    // (words, digits, whitespace, sentence enders) that is missing a letter or digit on either
-    // side is loose — prosody, not identity — and becomes a space. What this leaves behind is by
-    // construction intra-word ("we'll", "ke$ha", "ac/dc", "brass-and-glass", snake_case) and is
-    // kept verbatim: renaming a stylized artist on air is worse than any pause (the F68 survival
-    // law, amended only for case — see FlattenForSpeech). Lookarounds read the ORIGINAL text, so
-    // one loose mark in a run condemns its neighbours the way "-'" after a word falls together.
-    [GeneratedRegex(@"(?<![a-z0-9])[^a-z0-9\s.!?]+|[^a-z0-9\s.!?]+(?![a-z0-9])")]
+    // (words, digits, whitespace, sentence enders, and — as of SPEC F198.1, gh-#703, PLAN T546 —
+    // comma, excluded below so this pass never touches one) that is missing a letter or digit on
+    // either side is loose — prosody, not identity. What this leaves UNTOUCHED is by construction
+    // intra-word ("we'll", "ke$ha", "ac/dc", "brass-and-glass", snake_case, an intra-digit "7:30")
+    // and is kept verbatim: renaming a stylized artist (or misreading a time) on air is worse than
+    // any pause (the F68 survival law, amended only for case — see FlattenForSpeech). Lookarounds
+    // read the ORIGINAL text, so one loose mark in a run condemns its neighbours the way "-'"
+    // after a word falls together. FlattenProse routes every MATCH through FoldLooseMark, which
+    // speaks a run built entirely from ':' ';' '-' as a comma (F198.1) and closes every other loose
+    // run — the gh-#292/#303 clause marks this pass used to erase outright, plus quotes and the
+    // rest of the gh-#541 exhibits — up to a plain space, unchanged from before F198.
+    [GeneratedRegex(@"(?<![a-z0-9])[^a-z0-9\s.!?,]+|[^a-z0-9\s.!?,]+(?![a-z0-9])")]
     private static partial Regex LooseMarkRx();
+
+    // F198.1: a run of one or more commas — each either already literal in the source copy or
+    // freshly folded by LooseMarkRx/EllipsisRx above — together with any whitespace threaded
+    // between or around them, collapses to exactly ONE canonical ", " (FlattenSegment applies this
+    // once, over the FULL assembled segment, not per FlattenProse fragment — see FlattenSegment).
+    // What this does NOT normalise: adjacency between a comma and a sentence ender ("well,." or
+    // "stop,!") is untouched — no scenario in SPEC F198 produces one, so it's left for a future
+    // pass to define rather than guessed at here.
+    [GeneratedRegex(@"(?:\s*,)+\s*")]
+    private static partial Regex CommaRunRx();
 
     // "iceberg ." -> "iceberg." — an ender orphaned by a removal re-attaches to its word.
     [GeneratedRegex(@"\s+([.!?])")]
