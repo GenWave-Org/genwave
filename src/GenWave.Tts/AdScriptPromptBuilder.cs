@@ -83,8 +83,9 @@ static class AdScriptPromptBuilder
             "one instead. Any tagline, phone number, address, or website given under \"Sponsor:\" " +
             "below is a real fact you may speak verbatim - never invent facts beyond what is given " +
             "there. Any phone number spoken must use the fictional 555 exchange, for example " +
-            "555-0142, unless the sponsor's real phone number is given under \"Sponsor:\" below, in " +
-            "which case speak that one instead. No stage directions, no emoji, no markdown formatting.";
+            $"{ExamplePhone(request.SponsorName)}, unless the sponsor's real phone number is given " +
+            "under \"Sponsor:\" below, in which case speak that one instead. No stage directions, no " +
+            "emoji, no markdown formatting.";
 
         var postureLine = request.Posture == AudiencePosture.Everyone
             ? " Keep the language family-friendly."
@@ -178,6 +179,37 @@ static class AdScriptPromptBuilder
     public static string BuildReaskLine(string ruleId, string reason) =>
         $"Your last draft violated the '{ruleId}' rule: {reason}. Write a new draft that fixes this " +
         "and obeys every other instruction above.";
+
+    /// <summary>
+    /// The fictional example phone <see cref="BuildSystemPrompt"/> cites (SPEC F199.1, STORY-466 AC1/AC2):
+    /// "555-01" + <c>hash % 100</c> of the sponsor name trimmed and lower-cased (the sponsor's slug — there
+    /// is no separate slug column). The hash is <see cref="Fnv1a32"/>, not <see cref="string.GetHashCode()"/>,
+    /// which is randomized per process and would change a sponsor's example on every restart.
+    /// </summary>
+    internal static string ExamplePhone(string sponsorName)
+    {
+        var slug = sponsorName.Trim().ToLowerInvariant();
+        var lastTwoDigits = Fnv1a32(Encoding.UTF8.GetBytes(slug)) % 100;
+        return $"555-01{lastTwoDigits:D2}";
+    }
+
+    /// <summary>FNV-1a, 32-bit, over raw bytes — a small, process-stable, non-cryptographic hash (see
+    /// <see cref="ExamplePhone"/>'s own remarks for why this exists instead of
+    /// <see cref="string.GetHashCode()"/>).</summary>
+    static uint Fnv1a32(byte[] bytes)
+    {
+        const uint FnvOffsetBasis = 2166136261;
+        const uint FnvPrime = 16777619;
+
+        var hash = FnvOffsetBasis;
+        foreach (var b in bytes)
+        {
+            hash ^= b;
+            hash *= FnvPrime;
+        }
+
+        return hash;
+    }
 
     static string Truncate(string text, int maxChars) => text.Length <= maxChars ? text : text[..maxChars];
 }
