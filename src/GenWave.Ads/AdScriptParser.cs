@@ -5,8 +5,9 @@ namespace GenWave.Ads;
 /// <summary>
 /// The format stage of <see cref="AdScriptValidator"/> (SPEC F160.3, STORY-390 AC1/AC8) — the
 /// <c>CrosstalkScriptParser</c> shape narrowed to the ad wire format: <c>TAG: line</c>, 1-3 DISTINCT
-/// uppercase-alphanumeric voice tags, <see cref="AnnouncerTag"/> required, each line's text bounded by
-/// the caller's per-line char ceiling. Fail-closed, first-rule-wins: the first line/rule that breaks
+/// uppercase-alphanumeric voice tags AFTER FOLDING (SPEC F200.1/F200.2 — see this class's own "not
+/// every tag is a voice" remarks below), <see cref="AnnouncerTag"/> required, each line's text bounded
+/// by the caller's per-line char ceiling. Fail-closed, first-rule-wins: the first line/rule that breaks
 /// the shape is the reason returned, never a full list.
 ///
 /// <para>
@@ -23,6 +24,18 @@ namespace GenWave.Ads;
 /// FIRST untagged line among the NON-BLANK lines (blanks are dropped before this numbering runs, so a
 /// blank interior line never shifts it).
 /// </para>
+///
+/// <para>
+/// <b>Not every <see cref="TagPattern"/>-shaped tag is a voice</b> (SPEC F200.1, STORY-467): only
+/// <see cref="KnownTags"/> — <see cref="AnnouncerTag"/>, <c>VOICE1</c>, <c>VOICE2</c> — cast a distinct
+/// voice. A tag that matched <see cref="TagPattern"/> but is not in <see cref="KnownTags"/> (e.g.
+/// <c>NARRATOR</c>, <c>VOICE 2</c> once its space fails the pattern) folds onto
+/// <see cref="AnnouncerTag"/> instead of refusing — its copy is kept, attributed to the announcer — and
+/// <see cref="Parse"/> records one <see cref="AdScript.Notes"/> entry per DISTINCT unknown tag
+/// (<c>FoldUnknownTags</c>). <see cref="MinVoiceTags"/>/<see cref="MaxVoiceTags"/> and the "no
+/// <see cref="AnnouncerTag"/> line" rule both run over the FOLDED lines (SPEC F200.2), so a script that
+/// is entirely unknown tags is a valid one-voice, all-<see cref="AnnouncerTag"/> script.
+/// </para>
 /// </summary>
 internal static partial class AdScriptParser
 {
@@ -30,7 +43,18 @@ internal static partial class AdScriptParser
     public const string AnnouncerTag = "ANNOUNCER";
 
     const int MinVoiceTags = 1;
+    /// <summary>F160.3's "1–3" upper bound, kept as a documented invariant: with <see cref="KnownTags"/>
+    /// at exactly three and every other tag folding (F200.2), the <c>&gt; MaxVoiceTags</c> arm is only
+    /// reachable if the known cast ever grows past three.</summary>
     const int MaxVoiceTags = 3;
+
+    /// <summary>The full known cast (SPEC F200.1) — <see cref="AdCastPicker.Voice1Tag"/>/
+    /// <see cref="AdCastPicker.Voice2Tag"/> are the SAME two tags <c>AdScriptPromptBuilder</c> tells the
+    /// writing model about, duplicated here as the one place the parser itself needs to know which tags
+    /// are cast, never merely shape-matched. Any other <see cref="TagPattern"/>-shaped tag folds onto
+    /// <see cref="AnnouncerTag"/> (<c>FoldUnknownTags</c>) rather than refusing.</summary>
+    static readonly IReadOnlySet<string> KnownTags =
+        new HashSet<string>(StringComparer.Ordinal) { AnnouncerTag, AdCastPicker.Voice1Tag, AdCastPicker.Voice2Tag };
 
     /// <summary>Cap for a tag echoed into a violation reason (the CrosstalkScriptParser
     /// <c>MaxEchoedLineChars</c> precedent, F127.11, PLAN T399 review F6) — an untrusted script's tag
@@ -65,14 +89,45 @@ internal static partial class AdScriptParser
                 return new AdScriptValidationResult.Refused(violation);
         }
 
-        var distinctTags = lines.Select(line => line.Tag).Distinct(StringComparer.Ordinal).ToList();
+        var (foldedLines, notes) = FoldUnknownTags(lines);
+
+        var distinctTags = foldedLines.Select(line => line.Tag).Distinct(StringComparer.Ordinal).ToList();
         if (distinctTags.Count is < MinVoiceTags or > MaxVoiceTags)
             return Refused($"expected {MinVoiceTags}-{MaxVoiceTags} distinct voice tags, got {distinctTags.Count}");
 
         if (!distinctTags.Contains(AnnouncerTag, StringComparer.Ordinal))
             return Refused($"no {AnnouncerTag} line appeared — every spot needs the {AnnouncerTag} voice");
 
-        return new AdScriptValidationResult.Accepted(new AdScript(lines));
+        return new AdScriptValidationResult.Accepted(new AdScript(foldedLines, notes));
+    }
+
+    /// <summary>Folds every line whose tag is not in <see cref="KnownTags"/> onto
+    /// <see cref="AnnouncerTag"/> (SPEC F200.1) — the line's own <see cref="AdScriptLine.Text"/> is kept
+    /// verbatim, only its <see cref="AdScriptLine.Tag"/> changes. One note per DISTINCT original tag, in
+    /// first-seen order (SPEC F200.1: "a tag appearing on three lines yields one note"); the tag echoed
+    /// through <see cref="EchoForReason"/>, the same untrusted-echo bound every other logged/surfaced
+    /// tag in this class goes through.</summary>
+    static (IReadOnlyList<AdScriptLine> Lines, IReadOnlyList<string> Notes) FoldUnknownTags(
+        IReadOnlyList<AdScriptLine> lines)
+    {
+        var foldedLines = new List<AdScriptLine>(lines.Count);
+        var notes = new List<string>();
+        var seenUnknownTags = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var line in lines)
+        {
+            if (KnownTags.Contains(line.Tag))
+            {
+                foldedLines.Add(line);
+                continue;
+            }
+
+            foldedLines.Add(line with { Tag = AnnouncerTag });
+            if (seenUnknownTags.Add(line.Tag))
+                notes.Add($"unknown-tag:{EchoForReason(line.Tag)}");
+        }
+
+        return (foldedLines, notes);
     }
 
     /// <summary>The plain-sentence pre-pass itself (SPEC F174.6, PLAN T444 ruling): classifies every

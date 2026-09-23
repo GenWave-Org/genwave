@@ -349,6 +349,12 @@ public sealed class AdRenderService(
             return (null, $"render: stored script no longer parses ({reason})");
         }
 
+        // SPEC F200.3 — every unknown-tag fold note the re-parse carried reaches the application log at
+        // INFO, structured (never interpolated): the "booth log" F200.3 names has no dedicated sink
+        // reachable from GenWave.Ads, only ILogger, so this IS that surface.
+        foreach (var note in script.Notes)
+            logger.LogInformation("Ad spot {Id} parse note {Note}", spot.Id, note);
+
         var (bed, bedFailure) = await ResolveBedAsync(spot.BedMediaId, ct);
         if (bedFailure is not null)
             return (null, bedFailure);

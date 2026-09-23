@@ -284,12 +284,16 @@ public static class FeatureAdScriptValidator
     public sealed class ScenarioFormatRefuses
     {
         [Fact]
-        public void FourVoiceTagsRefuse()
+        public void AFourthTagFoldsRatherThanExceedingTheMax()
         {
+            // SPEC F200.1/F200.2 (STORY-467) supersedes this fact's original premise: the known cast
+            // is exactly ANNOUNCER/VOICE1/VOICE2 (3 tags, the same as MaxVoiceTags), so a fourth,
+            // TagPattern-shaped tag like VOICE3 is not in the cast and folds onto ANNOUNCER instead of
+            // adding a 4th distinct tag — the over-max branch of the format rule is therefore no longer
+            // reachable through unknown-tag growth; it stays Accepted (3 distinct tags after folding).
             var result = Validate("ANNOUNCER: one.\nVOICE1: two.\nVOICE2: three.\nVOICE3: four.");
 
-            var refused = Assert.IsType<AdScriptValidationResult.Refused>(result);
-            Assert.Equal(AdScriptRuleIds.Format, refused.Violation.RuleId);
+            Assert.IsType<AdScriptValidationResult.Accepted>(result);
         }
 
         [Fact]
@@ -489,8 +493,15 @@ public static class FeatureAdScriptValidator
         [Fact]
         public void AFormatAndDurationViolationNamesFormatFirst()
         {
+            // SPEC F200.2 (STORY-467) retired the original "4 distinct tags" fixture here — a 4th
+            // TagPattern-shaped tag now folds onto ANNOUNCER instead of adding a distinct format
+            // violation (see AFourthTagFoldsRatherThanExceedingTheMax above). "Missing ANNOUNCER" is
+            // still a genuine, reachable format violation, so it stands in: this script is both
+            // missing the required ANNOUNCER voice AND, by its filler length, would also overrun
+            // duration — Format still wins, because AdScriptParser.Parse (format) runs before
+            // AdScriptValidator ever evaluates duration.
             var filler = new string('x', 180);
-            var result = Validate($"ANNOUNCER: {filler}\nVOICE1: {filler}\nVOICE2: {filler}\nVOICE3: {filler}");
+            var result = Validate($"VOICE1: {filler}\nVOICE2: {filler}\nVOICE1: {filler}\nVOICE2: {filler}");
 
             var refused = Assert.IsType<AdScriptValidationResult.Refused>(result);
             Assert.Equal(AdScriptRuleIds.Format, refused.Violation.RuleId);
