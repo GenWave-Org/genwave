@@ -1,7 +1,9 @@
 import type { ReactNode } from "react";
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { apiGet } from "@/lib/api";
 import { isAboutResponseDto } from "@/lib/about-api";
+import { isUnauthorizedStatus, SESSION_EXPIRED_PATH } from "@/lib/api-fetch";
 import { AboutView } from "./AboutView";
 
 // The build/station/library/uptime/attribution facts (SPEC F207.1, F207.2; STORY-474; PLAN T561)
@@ -29,7 +31,14 @@ export default async function AboutPage(): Promise<ReactNode> {
 
   const response = await apiGet("/api/about", { cookies: cookieStr });
 
-  if (response.status === 401 || response.status === 403) {
+  // A stale cookie: one owner for the 401 -> sign-out contract (SPEC F208.1, STORY-475). A
+  // Server Component render can't clear the cookie itself, so this hands off to a route handler
+  // that can (app/session-expired/route.ts).
+  if (isUnauthorizedStatus(response.status)) {
+    redirect(SESSION_EXPIRED_PATH);
+  }
+
+  if (response.status === 403) {
     return <ErrorPage message="You do not have permission to view this page." />;
   }
 

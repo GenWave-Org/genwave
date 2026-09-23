@@ -5,27 +5,42 @@
 // task that makes it green (T561). Each Given comment names the arrange the scenario needs.
 //
 // next/jest's SWC transform (unlike babel-jest) does not hoist jest.mock() calls above import
-// statements (mirrors app-shell.spec.tsx's own header comment), so Sidebar — which calls the
-// mocked next/navigation hook — is loaded via a dynamic `await import()` inside the test.
+// statements (mirrors app-shell.spec.tsx's own header comment), so Sidebar and the page's own
+// server component (app/(authed)/about/page.tsx) — both of which call a mocked next/navigation or
+// next/headers export — are loaded via a dynamic `await import()` inside their tests or before* hooks.
 
 jest.mock("next/navigation", () => ({
   usePathname: jest.fn(),
+  redirect: jest.fn(),
+}));
+
+jest.mock("next/headers", () => ({
+  cookies: jest.fn(),
 }));
 
 jest.mock("@/app/login/actions", () => ({
   logout: jest.fn(),
 }));
 
-import { describe, it, jest, expect } from "@jest/globals";
+import { describe, it, jest, expect, beforeAll, afterAll } from "@jest/globals";
 import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/jest-globals";
-import type { usePathname } from "next/navigation";
+import type { ReactNode } from "react";
+import type { redirect, usePathname } from "next/navigation";
+import type { cookies } from "next/headers";
 import { AboutView } from "../app/(authed)/about/AboutView";
 import type { AboutResponseDto } from "../lib/about-api";
 
-const mockedUsePathname = jest
-  .requireMock<{ usePathname: typeof usePathname }>("next/navigation")
-  .usePathname as jest.MockedFunction<typeof usePathname>;
+const mockedNextNavigation = jest.requireMock<{
+  usePathname: typeof usePathname;
+  redirect: typeof redirect;
+}>("next/navigation");
+const mockedUsePathname = mockedNextNavigation.usePathname as jest.MockedFunction<typeof usePathname>;
+const mockedRedirect = mockedNextNavigation.redirect as jest.MockedFunction<typeof redirect>;
+
+const mockedCookies = jest
+  .requireMock<{ cookies: typeof cookies }>("next/headers")
+  .cookies as jest.MockedFunction<typeof cookies>;
 
 // Given: a single fixture GET /api/about response — two attribution kinds, two packs, so AC4's
 // "shows every attribution name" fact can't pass vacuously on a one-item list.
@@ -181,6 +196,72 @@ describe("Feature: About page", () => {
       const about = screen.getByRole("link", { name: "About" });
       const signOut = screen.getByRole("button", { name: /sign out/i });
       expect(about.closest("footer")).toContainElement(signOut);
+    });
+  });
+
+  // The page's own 401/403 handling (SPEC F208.1, STORY-475, PLAN T566) — AboutView's fixture
+  // scenarios above don't exercise the server component (app/(authed)/about/page.tsx) itself, so
+  // GET /api/about's failure statuses need their own arrange. next/headers' cookies() is loaded
+  // via the mock registered above; the page module is loaded via a dynamic `await import()`
+  // (same reason as the Sidebar scenario: next/jest's SWC transform does not hoist jest.mock()
+  // above import statements).
+  describe("Scenario: a stale session (401)", () => {
+    let originalFetch: typeof fetch;
+
+    beforeAll(async () => {
+      originalFetch = global.fetch;
+      mockedCookies.mockResolvedValue(
+        { toString: () => "genwave-auth=stale" } as unknown as Awaited<ReturnType<typeof cookies>>
+      );
+      global.fetch = jest
+        .fn<typeof fetch>()
+        .mockResolvedValue({
+          ok: false,
+          status: 401,
+          json: () => Promise.resolve({}),
+        } as unknown as Response) as unknown as typeof fetch;
+
+      const { default: AboutPage } = await import("../app/(authed)/about/page");
+      await AboutPage();
+    });
+
+    afterAll(() => {
+      global.fetch = originalFetch;
+    });
+
+    it("apiGet 401 redirects to /session-expired", () => {
+      expect(mockedRedirect).toHaveBeenCalledWith("/session-expired");
+    });
+  });
+
+  describe("Scenario: a permission error (403)", () => {
+    let originalFetch: typeof fetch;
+    let node: ReactNode;
+
+    beforeAll(async () => {
+      originalFetch = global.fetch;
+      mockedCookies.mockResolvedValue(
+        { toString: () => "genwave-auth=ok" } as unknown as Awaited<ReturnType<typeof cookies>>
+      );
+      global.fetch = jest
+        .fn<typeof fetch>()
+        .mockResolvedValue({
+          ok: false,
+          status: 403,
+          json: () => Promise.resolve({}),
+        } as unknown as Response) as unknown as typeof fetch;
+
+      const { default: AboutPage } = await import("../app/(authed)/about/page");
+      node = await AboutPage();
+    });
+
+    afterAll(() => {
+      global.fetch = originalFetch;
+    });
+
+    it("apiGet 403 still renders the permission copy", () => {
+      render(<>{node}</>);
+      expect(screen.getByText("You do not have permission to view this page.")).toBeInTheDocument();
     });
   });
 

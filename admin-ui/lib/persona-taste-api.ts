@@ -7,6 +7,8 @@
 // convention as lib/broadcast-api.ts and lib/booth-log-api.ts — never lib/api.ts's apiGet, which
 // is server-only.
 
+import { apiFetch, isApiFetchResponseError } from "@/lib/api-fetch";
+
 export type TasteThumbDirection = "up" | "down";
 
 /** Failure buckets a taste-thumb POST classifies a non-2xx/network outcome into (SPEC F31.3
@@ -15,7 +17,6 @@ export type TasteThumbDirection = "up" | "down";
  * `detail` rather than fixed copy, since the three cases read very differently to an operator. */
 export type TasteThumbFailureKind =
   | "not-thumbable"
-  | "unauthorized"
   | "forbidden"
   | "not-found"
   | "network"
@@ -48,8 +49,6 @@ function classifyTasteThumbStatus(status: number): TasteThumbFailureKind {
   switch (status) {
     case 400:
       return "not-thumbable";
-    case 401:
-      return "unauthorized";
     case 403:
       return "forbidden";
     case 404:
@@ -82,8 +81,6 @@ export function describeTasteThumbFailure(outcome: TasteThumbFailure): string {
   switch (outcome.kind) {
     case "not-thumbable":
       return outcome.detail ?? "This row can't be thumbed for taste.";
-    case "unauthorized":
-      return "Your session has expired — sign in again.";
     case "forbidden":
       return "You don't have permission to make this change.";
     case "not-found":
@@ -108,22 +105,24 @@ export async function postTasteThumb(
 ): Promise<TasteThumbOutcome> {
   let response: Response;
   try {
-    response = await fetch(`/api/booth-log/${boothLogRowId}/taste-thumb`, {
+    // apiFetch (STORY-475, SPEC F208.1) owns 401 — a stale cookie never reaches
+    // classifyTasteThumbStatus below.
+    response = await apiFetch(`/api/booth-log/${boothLogRowId}/taste-thumb`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ direction }),
     });
-  } catch {
+  } catch (err) {
+    if (isApiFetchResponseError(err)) {
+      return {
+        ok: false,
+        kind: classifyTasteThumbStatus(err.status),
+        status: err.status,
+        detail: await readDetail(err),
+      };
+    }
     return { ok: false, kind: "network", status: null, detail: null };
-  }
-  if (!response.ok) {
-    return {
-      ok: false,
-      kind: classifyTasteThumbStatus(response.status),
-      status: response.status,
-      detail: await readDetail(response),
-    };
   }
   const body = (await response.json()) as { alreadyRecorded: boolean; weight: number | null };
   return { ok: true, alreadyRecorded: body.alreadyRecorded, weight: body.weight };

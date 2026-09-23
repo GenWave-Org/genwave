@@ -354,9 +354,12 @@ describe("Feature: Station-thumb controls", () => {
       expect(stationDown).toHaveAttribute("aria-pressed", "false");
     });
 
-    it("401: toasts the house session-expired copy and marks nothing pressed", async () => {
+    // 403, not 401 (STORY-475/gh-#729): a 401 is now apiFetch's own concern (clear the cookie,
+    // hand off to /login) — it never reaches this component as a toastable failure outcome, so
+    // this scenario proves the "still-surfaces" shape with a status apiFetch still lets through.
+    it("403: toasts the forbidden copy and marks nothing pressed", async () => {
       installBoothLogFetchMock(
-        defaultBoothLogState({ stationThumb: ok(undefined, 401) })
+        defaultBoothLogState({ stationThumb: ok(undefined, 403) })
       );
 
       renderBoothLog();
@@ -365,7 +368,7 @@ describe("Feature: Station-thumb controls", () => {
       const stationUp = screen.getByRole("button", { name: "Station thumbs up" });
       await clickAndSettle(stationUp);
 
-      expect(screen.getByText("Your session has expired — sign in again.")).toBeInTheDocument();
+      expect(screen.getByText("You don't have permission to make this change.")).toBeInTheDocument();
       expect(stationUp).toBeEnabled();
       expect(stationUp).toHaveAttribute("aria-pressed", "false");
     });

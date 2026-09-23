@@ -339,14 +339,17 @@ describe("Feature: Rating state in the Catalog page", () => {
   });
 
   describe("Scenario: failures surface (sad path)", () => {
+    // 403, not 401 (STORY-475/gh-#729): a 401 is now apiFetch's own concern (clear the cookie,
+    // hand off to /login) — it never reaches this component as a toastable failure outcome, so
+    // this scenario proves the "still-surfaces" shape with a status apiFetch still lets through.
     it("a failed restore toasts the outcome and keeps the badge (F31.3)", async () => {
-      makeFetchMock({}, 401);
+      makeFetchMock({}, 403);
       await renderCatalogTable({ media: [makeRow({ mediaId: "7", neverPlay: true })] });
 
       fireEvent.click(screen.getByRole("button", { name: "Restore to rotation" }));
 
       await waitFor(() => {
-        expect(screen.getByText("Your session has expired — sign in again.")).toBeInTheDocument();
+        expect(screen.getByText("You don't have permission to make this change.")).toBeInTheDocument();
       });
       expect(screen.getByText("Never play")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Restore to rotation" })).toBeInTheDocument();

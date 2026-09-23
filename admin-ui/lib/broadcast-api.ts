@@ -6,6 +6,7 @@
 // exists in a Server Component/Route Handler request context).
 
 import type { GardenerStatusSummary } from "@/lib/gardener-api";
+import { apiFetch, isApiFetchResponseError } from "@/lib/api-fetch";
 
 interface NowPlayingTrackWire {
   stationId: string;
@@ -155,7 +156,7 @@ export type VoteDirection = "up" | "down";
  * clamped increment and a never-play set is idempotent (F33.3/F33.4) — neither has an `If-Match`
  * to violate.
  */
-export type RatingFailureKind = "unauthorized" | "forbidden" | "not-found" | "network" | "unknown";
+export type RatingFailureKind = "forbidden" | "not-found" | "network" | "unknown";
 
 /**
  * User-facing copy for a classified rating-mutation failure (SPEC F31.3) — the single source of
@@ -165,8 +166,6 @@ export type RatingFailureKind = "unauthorized" | "forbidden" | "not-found" | "ne
  */
 export function describeRatingFailure(kind: RatingFailureKind, status: number | null): string {
   switch (kind) {
-    case "unauthorized":
-      return "Your session has expired — sign in again.";
     case "forbidden":
       return "You don't have permission to make this change.";
     case "not-found":
@@ -212,8 +211,6 @@ export type ExplicitOverrideOutcome = ExplicitOverrideSuccess | RatingFailure;
 
 function classifyRatingStatus(status: number): RatingFailureKind {
   switch (status) {
-    case 401:
-      return "unauthorized";
     case 403:
       return "forbidden";
     case 404:
@@ -228,7 +225,9 @@ function classifyRatingStatus(status: number): RatingFailureKind {
  * `setNeverPlay`, `setExplicitOverride`) follows: POST/PUT a JSON `body`, a network failure or a
  * non-2xx response both resolve to a classified {@link RatingFailure} — never throws, the whole
  * point of the idiom — and a 2xx response's JSON is handed to `parseSuccess` to build the caller's
- * specific success shape. One definition so the three call sites can't drift apart on it.
+ * specific success shape. One definition so the three call sites can't drift apart on it. Goes
+ * through `apiFetch` (STORY-475, SPEC F208.1) rather than a bare `fetch`: a 401 is that module's
+ * sole concern (clear the cookie, hand off to /login), never reaches this function's classifier.
  */
 async function writeRatingMutation<T extends object>(
   path: string,
@@ -238,17 +237,17 @@ async function writeRatingMutation<T extends object>(
 ): Promise<({ ok: true } & T) | RatingFailure> {
   let response: Response;
   try {
-    response = await fetch(path, {
+    response = await apiFetch(path, {
       method,
       credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-  } catch {
+  } catch (err) {
+    if (isApiFetchResponseError(err)) {
+      return { ok: false, kind: classifyRatingStatus(err.status), status: err.status };
+    }
     return { ok: false, kind: "network", status: null };
-  }
-  if (!response.ok) {
-    return { ok: false, kind: classifyRatingStatus(response.status), status: response.status };
   }
   return { ok: true, ...parseSuccess(await response.json()) };
 }
