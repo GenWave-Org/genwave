@@ -288,6 +288,12 @@ sealed class AnnouncementRepository(Lazy<NpgsqlDataSource> dataSource)
     /// unknown) leaves the guarded <c>WHERE</c> matching nothing — this never throws, it reports
     /// <see langword="null"/>.
     ///
+    /// <b>Idempotent by construction (SPEC F202.3):</b> the <c>state = 'claimed'</c> guard alone
+    /// already ensures a duplicate call is a no-op (a row this call just aired is no longer
+    /// <c>claimed</c>), and the <c>aired_at is null</c> clause names that same guarantee explicitly at
+    /// the column this feature cares about — two signals for one id leave exactly one <c>aired_at</c>,
+    /// never a changed one, and nothing is logged for the second.
+    ///
     /// <b>Returns the row's own <c>collapse_count</c> (PLAN T343), not a bare success flag.</b> The
     /// booth log's own <c>announcement-aired</c> entry carries this count (SPEC F143.3) — reading it
     /// off the SAME <c>UPDATE ... RETURNING</c> that performs the transition avoids a second round
@@ -301,7 +307,7 @@ sealed class AnnouncementRepository(Lazy<NpgsqlDataSource> dataSource)
             """
             update station.announcement
             set state = 'aired', aired_at = now(), state_changed_at = now()
-            where id = @Id and state = 'claimed'
+            where id = @Id and state = 'claimed' and aired_at is null
             returning collapse_count
             """,
             new { Id = id },
