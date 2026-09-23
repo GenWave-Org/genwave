@@ -43,11 +43,11 @@ export interface FontDetailPanelProps {
  * `ThemeInstallModal`) rather than posting anything itself.
  *
  * <b>Licence line (PLAN T204, Dean's post-v3.1.0 review).</b> "&lt;licence&gt; · v&lt;version&gt; ·
- * &lt;subset&gt;" via the shared `licenceLine` helper (`font-format.ts`) — the SAME line the
- * Wardrobe page's own installed-pack cards render, so the one trust fact a PRE-install review most
- * needs (what licence am I about to agree to?) reads identically whether the pack is already
- * installed or not. Degrades to "Licence unknown" rather than an empty line — see that helper's own
- * remarks.
+ * &lt;subset&gt;" via the shared `licenceLine` helper (`font-format.ts`) — the SAME line the retired
+ * Wardrobe page's own installed-pack cards once rendered, so the one trust fact a PRE-install review
+ * most needs (what licence am I about to agree to?) reads the same whether or not a future installed-
+ * pack surface reuses this helper. Degrades to "Licence unknown" rather than an empty line — see that
+ * helper's own remarks.
  *
  * <b>Installed-state awareness (PLAN T204).</b> Reopening an already-installed pack's detail panel
  * used to show no sign of that — `SpecimenBlock`'s OLD "Admin-only specimen — not installed" caption
@@ -67,8 +67,8 @@ export function FontDetailPanel({ slug, detail, isInstalled, onInstallClick }: F
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="font-display text-[1.1rem] text-ink">{prettifySlug(slug)}</h2>
           {/* Bare status word, not a provenance stamp (no slug/date — this panel already names the
-              slug in its own heading) — mirrors WardrobeClient's own ProvenanceChip shape one level
-              up, just narrower content. */}
+              slug in its own heading) — mirrors the retired Wardrobe page's own ProvenanceChip shape
+              one level up, just narrower content. */}
           {isInstalled && <Chip>Installed</Chip>}
         </div>
         {/* Install/Re-install (scope addition, see this component's own remarks) opens

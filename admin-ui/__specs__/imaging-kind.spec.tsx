@@ -1,5 +1,5 @@
 // @jest-environment jsdom
-// gh-#149 — Authored segments carry a Station Imaging content kind (admin-ui half).
+// gh-#149 — Authored segments carry a Station sounds content kind (admin-ui half).
 //
 // BDD specification — Jest (jsdom) + @testing-library/react + mocked fetch, mirroring
 // safe-content-page.spec.tsx's harness. The Generate form grows a Kind picker (Liner default —
@@ -96,10 +96,10 @@ function generateBody(mockFetch: jest.MockedFunction<typeof fetch>): Record<stri
 }
 
 // ---------------------------------------------------------------------------
-// Feature: Station Imaging content kinds
+// Feature: Station sounds content kinds
 // ---------------------------------------------------------------------------
 
-describe("Feature: Station Imaging content kinds", () => {
+describe("Feature: Station sounds content kinds", () => {
   let originalFetch: typeof fetch;
 
   beforeEach(() => {

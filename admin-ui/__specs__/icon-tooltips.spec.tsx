@@ -4,14 +4,16 @@
 // Runner: Jest (jsdom) + @testing-library/react. Implemented Z8 (2026-07-15), after Z7 (the
 // Catalog-toolbar file-conflict edge; Z7's four new rank actions had to exist to be swept). The
 // full inventory of icon-only interactive controls in the console, confirmed by grepping every
-// `Icon` usage under app/ and components/ at plan time: `RatingControls` (vote up, vote down,
-// never-play/restore — Live page rows + now-playing card), `NeverPlayControl` (never-play/restore
-// — Catalog rows), `CatalogToolbar`'s four rank actions (Z7), `ThemeSwitcher`'s mode toggle
-// (light/dark, PLAN T167 — its theme picker `<select>` is not icon-only, out of this sweep), and
-// `MobileNav`'s hamburger + drawer close. Every nav icon (Dashboard/Live/Catalog/…) always renders
-// beside its own visible text label (Sidebar/MobileNav), so those are NOT icon-only and out of
-// scope for this sweep, same as every other Button/`<button>` in the app that carries visible text
-// (Reassign, Re-analyze, Set eligible, Columns, Search, Edit, Delete, …).
+// `Icon` usage under app/ and components/ at plan time: `NeverPlayControl` (never-play/restore —
+// Catalog rows), `CatalogToolbar`'s own vote up/down + never-play/restore rank actions (Z7; the
+// former Live-page/now-playing `RatingControls` coverage of the same vote up/down pair was retired
+// with the Live page itself, SPEC F203.4 — CatalogToolbar's rank actions are its only remaining
+// home), `ThemeSwitcher`'s mode toggle (light/dark, PLAN T167 — its theme picker `<select>` is not
+// icon-only, out of this sweep), and `MobileNav`'s hamburger + drawer close. Every nav icon
+// (Dashboard/Station sounds/Catalog/…) always renders beside its own visible text label (Sidebar/MobileNav),
+// so those are NOT icon-only and out of scope for this sweep, same as every other Button/`<button>`
+// in the app that carries visible text (Reassign, Re-analyze, Set eligible, Columns, Search, Edit,
+// Delete, …).
 //
 // The F62.3 parity guard is the F55.3 coverage discipline applied to icon-only controls:
 // `assertNoUnlabeledIconOnlyButtons` is a GENERIC walker run against the actual rendered surface,
@@ -222,20 +224,18 @@ function mockMatchMedia(prefersDark: boolean): void {
 
 /**
  * Renders every component known to hold an icon-only control, in one tree, and puts each into the
- * state that surfaces its icon-only button(s): both `RatingControls`/`NeverPlayControl` never-play
- * states (X and restore-arrow glyphs) and the Catalog bulk toolbar in selection mode (so its four
- * rank actions render — SPEC F61.4/Z7). The mobile nav drawer's own trigger renders here too
- * (always visible); its "Close navigation" trigger — only present once the drawer is OPEN — is
- * covered separately (see file header comment on Radix's modal aria-hiding).
+ * state that surfaces its icon-only button(s): both `NeverPlayControl` never-play states (X and
+ * restore-arrow glyphs) and the Catalog bulk toolbar in selection mode (so its four rank actions,
+ * including its own vote up/down pair, render — SPEC F61.4/Z7). The mobile nav drawer's own
+ * trigger renders here too (always visible); its "Close navigation" trigger — only present once
+ * the drawer is OPEN — is covered separately (see file header comment on Radix's modal aria-hiding).
  *
- * Total icon-only buttons this surface puts on screen: 15 — RatingControls×2 renders (3 each:
- * vote up, vote down, never-play/restore) + NeverPlayControl×2 renders (1 each) + ThemeSwitcher's
- * mode toggle (1, rendered with no theme choices so its `<select>` — not icon-only — never mounts)
- * + MobileNav's hamburger (1) + the Catalog row's own NeverPlayControl (1) + CatalogToolbar's four
- * rank actions (4).
+ * Total icon-only buttons this surface puts on screen: 9 — NeverPlayControl×2 renders (1 each) +
+ * ThemeSwitcher's mode toggle (1, rendered with no theme choices so its `<select>` — not icon-only
+ * — never mounts) + MobileNav's hamburger (1) + the Catalog row's own NeverPlayControl (1) +
+ * CatalogToolbar's four rank actions (4: vote up, vote down, never-play, restore).
  */
 async function renderSweepSurface(): Promise<HTMLElement> {
-  const { RatingControls } = await import("../app/(authed)/_components/RatingControls");
   const { NeverPlayControl } = await import("../app/(authed)/catalog/NeverPlayControl");
   const { ThemeSwitcher } = await import("../app/(authed)/_components/ThemeSwitcher");
   const { MobileNav } = await import("../app/(authed)/_components/MobileNav");
@@ -244,8 +244,6 @@ async function renderSweepSurface(): Promise<HTMLElement> {
   const media = [makeRow({ mediaId: "1" })];
   const utils = render(
     <ConfirmDialogProvider>
-      <RatingControls mediaId="10" value={{ score: 50, neverPlay: false }} onChange={() => {}} />
-      <RatingControls mediaId="11" value={{ score: 50, neverPlay: true }} onChange={() => {}} />
       <NeverPlayControl mediaId="12" neverPlay={false} onChange={() => {}} />
       <NeverPlayControl mediaId="13" neverPlay={true} onChange={() => {}} />
       <ThemeSwitcher choices={[]} stationThemeSlug="" />
@@ -286,21 +284,21 @@ describe("Feature: Every icon-only control explains itself", () => {
 
   describe("Scenario: hover and focus both reveal the tooltip", () => {
     it("hovering an icon-only control renders its Wireless-tokened tooltip (F62.1, F62.2)", async () => {
-      const { RatingControls } = await import("../app/(authed)/_components/RatingControls");
-      render(<RatingControls mediaId="1" value={{ score: 50, neverPlay: false }} onChange={() => {}} />);
+      const { NeverPlayControl } = await import("../app/(authed)/catalog/NeverPlayControl");
+      render(<NeverPlayControl mediaId="1" neverPlay={false} onChange={() => {}} />);
 
-      const voteUp = screen.getByRole("button", { name: "Vote up" });
+      const control = screen.getByRole("button", { name: "Never play" });
       expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
 
-      fireEvent.mouseEnter(voteUp);
-      const tooltip = screen.getByRole("tooltip", { name: "Vote up" });
+      fireEvent.mouseEnter(control);
+      const tooltip = screen.getByRole("tooltip", { name: "Never play" });
       // Wireless semantic tokens only — no raw hex, no Tailwind stock palette class (design-aesthetic).
       expect(tooltip.className).toMatch(/\bbg-surface\b/);
       expect(tooltip.className).toMatch(/\bborder-line\b/);
       expect(tooltip.className).toMatch(/\btext-ink\b/);
       expect(tooltip.className).not.toMatch(/#[0-9a-fA-F]{3,6}/);
 
-      fireEvent.mouseLeave(voteUp);
+      fireEvent.mouseLeave(control);
       expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
     });
 
@@ -345,7 +343,7 @@ describe("Feature: Every icon-only control explains itself", () => {
       // Sanity: the sweep surface actually put every known icon-only control (except the
       // drawer-only close trigger, covered separately above) on screen — see renderSweepSurface's
       // own doc comment for the itemized count.
-      expect(iconOnlyButtons).toHaveLength(15);
+      expect(iconOnlyButtons).toHaveLength(9);
 
       for (const button of iconOnlyButtons) {
         const label = button.getAttribute("aria-label");

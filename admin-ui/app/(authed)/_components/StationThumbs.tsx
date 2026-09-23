@@ -44,7 +44,7 @@ const RESULT_COPY: Record<StationThumbResult, string> = {
  * "Taste up for {persona}" without any extra context), a neutral "Station" label chip in place of
  * the taste pair's brass persona-attribution chip, and its own dedicated `station-thumb-up`/
  * `station-thumb-down` glyphs (`icons.tsx`) — a tuning-dial needle, distinct from BOTH the taste
- * pair's hand-shaped glyph it sits directly next to AND `RatingControls`' catalog-vote chevron
+ * pair's hand-shaped glyph it sits directly next to AND `CatalogToolbar`'s catalog-vote chevron
  * (T369 review HIGH-1: reusing `vote-up`/`vote-down` put two different ledgers 8px apart on the
  * now-playing card, told apart only by tooltip — not good enough).
  *

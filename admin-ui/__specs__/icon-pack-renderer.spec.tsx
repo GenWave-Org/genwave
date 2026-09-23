@@ -1,43 +1,21 @@
 // @jest-environment jsdom
-// STORY-337 — Icon packs swap the chrome: the renderer + Wardrobe UI halves (PLAN T304).
-// Runner: Jest. Todo-scaffolded at /plan (2026-08-15); T304 turns these live.
-// Backend halves live in tests/GenWave.Host.Tests/Specs/Story337_IconPacksSwapTheChrome.cs.
+// STORY-337 — Icon packs swap the chrome: the safe renderer half (PLAN T304).
+// Runner: Jest. Backend half lives in tests/GenWave.Host.Tests/Specs/Story337_IconPacksSwapTheChrome.cs.
 //
-// `IconWardrobeClient` (via `IconUninstallPackButton`) calls `useRouter()` unconditionally, so it
-// is dynamic-imported AFTER the `next/navigation` mock is in place — the wardrobe-tabs.spec.tsx/
-// wardrobe-avatar-packs.spec.tsx established idiom.
+// The former Wardrobe Icons tab coverage (IconWardrobeClient — install list, Active chip, empty
+// state) was retired with the Wardrobe page itself (SPEC F203.4); the safe-rendering contract
+// (IconPackGlyph/IconPackSpecimenRow/Icon fallback) it depended on is unaffected and stays covered
+// below.
 
-jest.mock("next/navigation", () => ({
-  ...jest.requireActual<typeof import("next/navigation")>("next/navigation"),
-  useRouter: jest.fn(),
-}));
-
-import { describe, it, expect, jest, beforeEach } from "@jest/globals";
+import { describe, it, expect, jest } from "@jest/globals";
 import { render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom/jest-globals";
-import type { useRouter } from "next/navigation";
-import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { parseIconPackDefinition, type IconPackDefinition, type IconPackElement } from "@/lib/icon-pack";
 import { Icon, ICON_NAMES } from "../app/(authed)/_components/Icon";
 import { IconPackProvider } from "../app/(authed)/_components/IconPackContext";
 import { IconPackGlyph, IconPackSpecimenRow } from "../app/(authed)/_components/IconPackRenderer";
 import * as HouseIcons from "../app/(authed)/_components/icons";
 import { ChoiceSettingControl } from "../app/(authed)/settings/ChoiceSettingControl";
-import type { IconWardrobeClient as IconWardrobeClientType } from "../app/(authed)/wardrobe/IconWardrobeClient";
-import type { IconPackSummaryDto } from "../app/(authed)/wardrobe/types";
-
-const mockedUseRouter = jest
-  .requireMock<{ useRouter: typeof useRouter }>("next/navigation")
-  .useRouter as jest.MockedFunction<typeof useRouter>;
-
-let IconWardrobeClient: typeof IconWardrobeClientType;
-
-beforeEach(async () => {
-  mockedUseRouter.mockReturnValue(
-    { push: jest.fn(), refresh: jest.fn() } as unknown as ReturnType<typeof useRouter>
-  );
-  ({ IconWardrobeClient } = await import("../app/(authed)/wardrobe/IconWardrobeClient"));
-});
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -68,14 +46,6 @@ function iconElementsOrThrow(definition: IconPackDefinition, name: string): read
   if (elements === undefined) throw new Error(`expected icon "${name}" on the parsed definition`);
   return elements;
 }
-
-const INSTALLED_PACK: IconPackSummaryDto = {
-  slug: "line-icons",
-  iconCount: 2,
-  definition: TWO_ICON_PACK_JSON,
-  importedFrom: "line-icons",
-  importedAt: "2026-08-16T12:00:00Z",
-};
 
 // ---------------------------------------------------------------------------
 
@@ -235,54 +205,8 @@ describe("Feature: the safe icon-pack renderer", () => {
     });
   });
 
-  describe("Scenario: the Wardrobe Icons tab", () => {
-    it("lists installed packs with a specimen row rendered by the safe renderer", () => {
-      render(
-        <ConfirmDialogProvider>
-          <IconWardrobeClient packs={[INSTALLED_PACK]} timeZone="UTC" />
-        </ConfirmDialogProvider>
-      );
-
-      const list = screen.getByRole("list", { name: "Installed icon packs" });
-      const card = within(list).getByText("line-icons").closest("li");
-      if (card === null) throw new Error("No <li> ancestor for the pack card");
-
-      expect(within(card).getByText("Installed · line-icons · Aug 16, 2026")).toBeInTheDocument();
-      expect(within(card).getByText("2 icons")).toBeInTheDocument();
-      expect(within(card).getByRole("button", { name: "Uninstall line-icons" })).toBeInTheDocument();
-
-      // The specimen row itself — drawn by the SAME safe renderer (IconPackGlyph) the active
-      // chrome uses — one glyph per declared icon.
-      const specimens = within(card).getByLabelText("Icon specimens");
-      expect(within(specimens).getAllByRole("listitem")).toHaveLength(2);
-      expect(specimens.querySelectorAll("svg")).toHaveLength(2);
-    });
-
-    it("shows an 'Active' chip and a fail-open note in the confirm copy when this pack is the station's own Station:IconPack", () => {
-      render(
-        <ConfirmDialogProvider>
-          <IconWardrobeClient packs={[INSTALLED_PACK]} timeZone="UTC" activeSlug="line-icons" />
-        </ConfirmDialogProvider>
-      );
-
-      expect(screen.getByText("Active")).toBeInTheDocument();
-    });
-
-    it("shows the empty state, never a hidden tab, when no pack is installed", () => {
-      render(
-        <ConfirmDialogProvider>
-          <IconWardrobeClient packs={[]} timeZone="UTC" catalogEnabled />
-        </ConfirmDialogProvider>
-      );
-
-      expect(screen.getByText("No icon packs installed")).toBeInTheDocument();
-      expect(screen.getByRole("link", { name: "Browse the Community Catalog" })).toHaveAttribute(
-        "href",
-        "/persona-catalog"
-      );
-    });
-
-    it("the settings page shows an inline notice for a dangling Station:IconPack value (STORY-337 AC6)", () => {
+  describe("Scenario: a dangling Station:IconPack value on the settings page", () => {
+    it("shows an inline notice, not an error state, for a value outside the offered choices (STORY-337 AC6)", () => {
       render(
         <ChoiceSettingControl
           controlId="setting-Station-IconPack"

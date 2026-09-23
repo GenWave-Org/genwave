@@ -232,7 +232,7 @@ describe("Feature: Dashboard", () => {
       render(<DashboardView timeZone="UTC" />);
       await flush();
 
-      expect(screen.getByText(/Station Imaging rotation — drain state/)).toBeInTheDocument();
+      expect(screen.getByText(/Station sounds rotation — drain state/)).toBeInTheDocument();
     });
 
     it("shows a warming-up state for 503", async () => {

@@ -26,7 +26,7 @@ export interface IconPackProviderProps {
  * the next one), not on every re-render this provider's own subtree causes.
  *
  * The context's OWN default value is `null` (no ancestor provider) — deliberate: every existing
- * isolated component render (a jest test mounting e.g. `<Sidebar />` or `<RatingControls />` with
+ * isolated component render (a jest test mounting e.g. `<Sidebar />` or `<NeverPlayControl />` with
  * no shell above it) keeps rendering house icons exactly as before this task, with ZERO test
  * changes needed for the swap itself — `null` here IS "house icons", the identical fail-open shape
  * an uninstalled active pack already resolves to server-side (SPEC F130.5).

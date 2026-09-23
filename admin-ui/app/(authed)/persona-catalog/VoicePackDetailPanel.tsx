@@ -98,7 +98,7 @@ type PreviewState =
  * `VoicePackInstallModal` as a parent-level sibling (the same shape Icon/Avatar/AdPack already use)
  * — but Uninstall needs no multi-step confirm DIALOG shell, only a yes/no question, so it is wired
  * directly here via the house `useConfirm()` + `router.refresh()` idiom
- * (`wardrobe/UninstallPackButton.tsx`'s own precedent) rather than threaded back through the parent
+ * (the retired Wardrobe page's uninstall button set the precedent) rather than threaded back through the parent
  * as a second callback prop.
  */
 export function VoicePackDetailPanel({ slug, detail, isInstalled, onInstallClick }: VoicePackDetailPanelProps): ReactNode {

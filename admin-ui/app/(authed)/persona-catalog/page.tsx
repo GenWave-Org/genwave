@@ -37,8 +37,9 @@ async function fetchSlugs<T extends { slug: string }>(
 }
 
 /** Wire shape of a `GET /api/fonts` row (SPEC F104.7) — only the one field this page reads; mirrors
- * `wardrobe/page.tsx`'s own local `SettingRow` idiom (cast to the one field a caller needs rather
- * than importing the Wardrobe page's full `FontLibraryPackDto` for a single string). */
+ * this file's own narrow-cast idiom below (`InstalledAvatarPackRow`/`InstalledIconPackRow`): cast
+ * to the one field a caller needs rather than importing the full `FontLibraryPackDto` the retired
+ * Wardrobe page once used for a single string. */
 interface InstalledFontPackRow {
   slug: string;
 }
@@ -50,8 +51,8 @@ interface InstalledFontPackRow {
  * this task's own dispatch note weighed): one more `Promise.all` leg here, versus a second
  * client-side fetch/loading state threaded through `PersonaCatalogClient.loadDetail` for font
  * entries only. Independent of `Community:CatalogIndexUrl` (SPEC F104.8's offline floor — an
- * installed pack outlives the catalog, the same reasoning `wardrobe/page.tsx`'s own ungated nav item
- * follows) — fetched unconditionally, never gated on the catalog being enabled. Every row counts
+ * installed pack outlives the catalog, the same reasoning the retired Wardrobe page's ungated nav
+ * item followed) — fetched unconditionally, never gated on the catalog being enabled. Every row counts
  * (no predicate): a font pack has only one provenance path (SPEC F104.5), so "installed" and
  * "genuinely installed by this route" are the same thing.
  */
@@ -71,7 +72,7 @@ interface InstalledAvatarPackRow {
  * remarks verbatim, applied to the avatar kind (this task's own "match the font install flow
  * exactly" instruction): fetched ALONGSIDE the index, in the SAME server component, so
  * `AvatarDetailPanel` never has to guess whether a slug it is about to offer "Install" for is
- * already in the Wardrobe. Independent of `Community:CatalogIndexUrl` — same posture as
+ * already installed. Independent of `Community:CatalogIndexUrl` — same posture as
  * `fetchInstalledFontSlugs`, an installed pack outlives the catalog. Every row counts (no
  * predicate): an avatar pack has only one provenance path (SPEC F128.3), so "installed" and
  * "genuinely installed by this route" are the same thing.
@@ -91,7 +92,7 @@ interface InstalledIconPackRow {
  * Every already-installed icon pack's slug (PLAN T304) — mirrors `fetchInstalledAvatarSlugs`'s own
  * remarks verbatim, applied to the icon kind: fetched ALONGSIDE the index, in the SAME server
  * component, so `IconDetailPanel` never has to guess whether a slug it is about to offer "Install"
- * for is already in the Wardrobe. Every row counts (no predicate): an icon pack has only one
+ * for is already installed. Every row counts (no predicate): an icon pack has only one
  * provenance path (SPEC F130.5), so "installed" and "genuinely installed by this route" are the
  * same thing.
  */
@@ -136,8 +137,8 @@ interface StationThemeChoiceRow {
   importedAt?: string | null;
 }
 
-/** Wire shape of one `GET /api/settings` row — only the one field this page reads (mirrors
- * `wardrobe/page.tsx`'s own local `SettingRow` idiom for the SAME endpoint, a different key). */
+/** Wire shape of one `GET /api/settings` row — only the one field this page reads (mirrors the
+ * retired Wardrobe page's own local `SettingRow` idiom for the SAME endpoint, a different key). */
 interface SettingRow {
   key: string;
   choices?: StationThemeChoiceRow[];
@@ -213,9 +214,9 @@ async function fetchHiredPersonaSlugs(cookieHeader: string): Promise<string[]> {
  * costs over a dedicated route: this page reads the WHOLE settings document (every allowlisted key,
  * not only `Station:Theme`) to reach one field. That document is small (one row per allowlisted
  * key, no large payloads — SPEC F55.3's full-coverage allowlist is still a few dozen rows) and
- * already fetched wholesale by other authed pages for a single key each (`wardrobe/page.tsx`'s own
- * `fetchCatalogEnabled`, `layout.tsx`'s own `Station:Theme` read for the header's ThemeSwitcher) —
- * this is that same established shape, not a new pattern.
+ * already fetched wholesale by other authed pages for a single key each (`layout.tsx`'s own
+ * `Station:Theme` read for the header's ThemeSwitcher, and the retired Wardrobe page's own
+ * `fetchCatalogEnabled` before it) — this is that same established shape, not a new pattern.
  *
  * Fetched ALONGSIDE the index and `installedFontSlugs`, in the SAME server component (one more
  * `Promise.all` leg, the smaller diff over a lazy per-open client fetch). Any failure (network

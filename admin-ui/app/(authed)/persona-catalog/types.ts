@@ -82,9 +82,9 @@ export interface CatalogIndexResponseDto {
  * why this value is never interpolated into CSS. `fontSpecimenFile` is the bare filename
  * `SpecimenBlock` passes to `GET /api/catalog/entries/{slug}/assets/{file}` to render the real face
  * (SPEC F104.4). `fontLicense`/`fontVersion`/`fontSubset` (PLAN T204, Dean's post-v3.1.0 review: the
- * pre-install review panel showed no licence anywhere) are the SAME manifest trio a Wardrobe pack's
- * own `license`/`version`/`subset` carry once installed (`FontLibraryPackDto`) — see
- * `font-format.ts`'s shared `licenceLine` for the one place both render identically.
+ * pre-install review panel showed no licence anywhere) are the SAME manifest trio an installed font
+ * pack's own `license`/`version`/`subset` carry once installed (`FontLibraryPackDto`) — see
+ * `font-format.ts`'s shared `licenceLine`, which `FontDetailPanel` renders.
  * `suggestedPersona` (SPEC F118.3, PLAN T254/T255) is a show entry's OPTIONAL "also hire" catalog
  * persona slug, parsed off the entry's `meta.json` server-side — `null` for every non-show entry,
  * when unreachable, when the entry's meta.json omits it, or when it fails its own slug-shape check
@@ -185,8 +185,8 @@ export interface CatalogAdPackBriefDto {
  * though the two are always equal today (`ThemeInstallModal` always installs a theme under its own
  * catalog slug, threading that SAME value as both the import route's target slug and its
  * `?catalogSlug=`) — a caller keyed on `slug` never has to assume that equality holds, the same
- * "read the real field, don't infer it" discipline `WardrobeClient`'s own `ProvenanceChip` remarks
- * state for its own always-equal `importedFrom`/`slug` pair.
+ * "read the real field, don't infer it" discipline the retired Wardrobe page's own `ProvenanceChip`
+ * once stated for its own always-equal `importedFrom`/`slug` pair.
  */
 export interface ThemeCatalogProvenanceDto {
   slug: string;

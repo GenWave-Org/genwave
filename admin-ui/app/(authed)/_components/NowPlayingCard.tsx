@@ -9,51 +9,6 @@ import type { NowPlayingState } from "@/lib/broadcast-api";
 interface NowPlayingCardProps {
   state: NowPlayingState | null;
   error: boolean;
-  /**
-   * Opt-in rating-controls slot (SPEC F33.11, STORY-114) — omitted entirely by the Dashboard
-   * (`RecentPlays`/this card stay read-only there, F33.12), supplied by the Live page only. A
-   * plain `ReactNode` slot rather than a `votable` flag + mediaId prop: this card has no idea
-   * what rating controls are or how to reach the vote/never-play endpoints, and shouldn't — the
-   * caller already knows the on-air track's id and decides whether it's a catalog id worth
-   * rendering controls for at all (a `tts:*` patter announcement on air gets none).
-   */
-  ratingControls?: ReactNode;
-  /**
-   * Opt-in persona-taste-thumb slot (SPEC F84.1, F84.6-F84.7) — omitted entirely by the Dashboard
-   * (same read-only posture as `ratingControls`, F33.12), supplied by the Live page only, and
-   * rendered on its own line below `ratingControls` so the two affordances never visually merge
-   * into one control cluster (F84.7's visual-distinctness requirement extends to layout, not just
-   * the controls themselves). Like `ratingControls`, this card has no idea what a taste thumb is
-   * or how to resolve which booth-log row/persona it belongs to — the Live page already does that
-   * resolution (see `useNowPlayingTasteAttribution`) before ever handing this a node to render.
-   */
-  tasteThumbControls?: ReactNode;
-  /**
-   * Opt-in station-rotation-thumb slot (SPEC F150.1, F150.8; STORY-370) — omitted entirely by the
-   * Dashboard, same read-only posture as `tasteThumbControls`, supplied by the Live page only and
-   * rendered BESIDE `tasteThumbControls` on the SAME line (not stacked below it) — this card's own
-   * layout choice for satisfying F150.1's "the two read as siblings, distinguishable by glyph and
-   * label" legibility requirement, not literal SPEC text mandating "one row". Like
-   * `tasteThumbControls`, this card has no idea what a station thumb is or how to resolve its row
-   * id — the Live page's `useNowPlayingTasteAttribution` resolution decides whether this slot gets
-   * a node at all; reusing the SAME resolution `tasteThumbControls` uses (rather than a second
-   * one) is the Live page's own choice (see `LiveView`'s own remarks), not a SPEC F150.8
-   * requirement — SPEC F150.8 itself only names "Live now-playing and booth-log track rows".
-   */
-  stationThumbControls?: ReactNode;
-  /**
-   * Opt-in why-this-pick slot (SPEC F86.4, STORY-218, PLAN T76) — the caller's `<PickChips />`
-   * element, rendered BARE (`{pickChips}`, no wrapper `<div>`), mirroring `BoothLogFeed`'s own
-   * bare `<PickChips pick={entry.pick} className="mt-1.5" />` call (PLAN T75). This is load-
-   * bearing, not cosmetic: `PickChips` renders `null` not just for an absent/`undefined` pick but
-   * also for a *present* pick that matched no rule and wasn't exploration
-   * (`{firedRules: [], isExploration: false}` — the majority production shape). A `pickChips &&
-   * <div>...</div>` wrapper here would be truthy for that element regardless of what it renders
-   * internally, leaving a stray empty `<div>` in the DOM. Rendering bare instead means this card
-   * never has to duplicate `PickChips`'s own render-nothing gate — the spacing/margin is the
-   * caller's job via `PickChips`'s own `className` prop, exactly like `BoothLogFeed`'s call site.
-   */
-  pickChips?: ReactNode;
 }
 
 // Decorative dial-marking strip under the elapsed readout — a receiver
@@ -74,19 +29,12 @@ const DIAL_MARKS = Array.from({ length: DIAL_MARK_COUNT }, (_, index) => index);
  * quiet inline hint when the most recent poll failed (SPEC F28.8 AC5) —
  * never a toast.
  *
- * Shared, unforked, between the Dashboard (Q5) and Live (Q6) — the design
- * aesthetic treats both as the same faceplate treatment, so this card is
- * imported directly rather than duplicated or given a variant prop.
+ * The Dashboard is the only caller (the Live page that once shared this card
+ * was retired by F203.4); the card stays read-only, with no rating/taste/
+ * station-thumb/pick-chip slots to render.
  */
-export function NowPlayingCard({
-  state,
-  error,
-  ratingControls,
-  tasteThumbControls,
-  stationThumbControls,
-  pickChips,
-}: NowPlayingCardProps): ReactNode {
-  // Track and patter share the whole on-air treatment (pill, elapsed/progress, slots) —
+export function NowPlayingCard({ state, error }: NowPlayingCardProps): ReactNode {
+  // Track and patter share the whole on-air treatment (pill, elapsed/progress) —
   // they differ only in the headline block (gh-#187): a patter's `title` is literally the
   // station name (TtsSegmentSource), so the break renders a DJ-break chip + persona name
   // (`artist`) instead of masquerading as a track.
@@ -118,7 +66,7 @@ export function NowPlayingCard({
       )}
 
       {state?.kind === "drain" && (
-        <p className="mt-3 text-[0.95rem] text-ink">Station Imaging rotation — drain state.</p>
+        <p className="mt-3 text-[0.95rem] text-ink">Station sounds rotation — drain state.</p>
       )}
 
       {onAir && (
@@ -151,8 +99,6 @@ export function NowPlayingCard({
             </>
           )}
           <p className="mt-1 text-[0.82rem] tabular-nums text-mute">{onAir.gainDb.toFixed(2)} dB</p>
-
-          {pickChips}
 
           {trackProgress === null ? (
             <>
@@ -193,14 +139,6 @@ export function NowPlayingCard({
               <p className="mt-1 text-[0.85rem] tabular-nums text-ink">
                 {`${formatDuration(trackProgress.elapsedSeconds * 1000)} / ${formatDuration(trackProgress.totalSeconds * 1000)}`}
               </p>
-            </div>
-          )}
-
-          {ratingControls && <div className="mt-3">{ratingControls}</div>}
-          {(tasteThumbControls || stationThumbControls) && (
-            <div className="mt-2 flex flex-wrap items-center gap-3">
-              {tasteThumbControls}
-              {stationThumbControls}
             </div>
           )}
         </div>

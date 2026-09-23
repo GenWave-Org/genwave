@@ -161,7 +161,7 @@ describe("Feature: Depleted SafeScope visible at rest", () => {
 
   // -------------------------------------------------------------------------
   describe("Scenario: SafeScope non-empty with zero playable tracks", () => {
-    it("shows the 'Station Imaging scope has no playable tracks — drains will be silent' badge on the settings SafeScope picker", async () => {
+    it("shows the 'Station sounds scope has no playable tracks — drains will be silent' badge on the settings SafeScope picker", async () => {
       makeStatusFetchMock(makeStatusBody({ libraryIds: [1], playable: 0 }));
 
       renderWithProviders(
@@ -180,7 +180,7 @@ describe("Feature: Depleted SafeScope visible at rest", () => {
         render(<DashboardView timeZone="UTC" />);
         await flush();
 
-        const tile = screen.getByRole("group", { name: "Station Imaging scope" });
+        const tile = screen.getByRole("group", { name: "Station sounds scope" });
         expect(tile.className).toMatch(/\bborder-danger\b/);
         expect(screen.getByText(DEPLETED_COPY)).toBeInTheDocument();
       } finally {
@@ -206,7 +206,7 @@ describe("Feature: Depleted SafeScope visible at rest", () => {
         render(<DashboardView timeZone="UTC" />);
         await flush();
 
-        const tile = screen.getByRole("group", { name: "Station Imaging scope" });
+        const tile = screen.getByRole("group", { name: "Station sounds scope" });
         expect(tile.className).toMatch(/\bborder-danger\b/);
         expect(tile.className).not.toMatch(RAW_HEX_CLASS);
         expect(tile.className).not.toMatch(RAW_PALETTE_CLASS);
@@ -238,7 +238,7 @@ describe("Feature: Depleted SafeScope visible at rest", () => {
         render(<DashboardView timeZone="UTC" />);
         await flush();
 
-        const tile = screen.getByRole("group", { name: "Station Imaging scope" });
+        const tile = screen.getByRole("group", { name: "Station sounds scope" });
         expect(tile.className).toMatch(/\bborder-line\b/);
         expect(tile.className).not.toMatch(/\bborder-danger\b/);
         expect(screen.queryByText(DEPLETED_COPY)).not.toBeInTheDocument();
@@ -262,7 +262,7 @@ describe("Feature: Depleted SafeScope visible at rest", () => {
         state.status = makeStatusBody({ libraryIds: [1, 7], playable: 0 });
         await advance(5000);
 
-        const tile = screen.getByRole("group", { name: "Station Imaging scope" });
+        const tile = screen.getByRole("group", { name: "Station sounds scope" });
         expect(tile.className).toMatch(/\bborder-danger\b/);
         expect(screen.getByText(DEPLETED_COPY)).toBeInTheDocument();
       } finally {

@@ -11,6 +11,7 @@
 
 jest.mock("next/navigation", () => ({
   usePathname: jest.fn(),
+  redirect: jest.fn(),
 }));
 
 jest.mock("@/app/login/actions", () => ({
@@ -22,7 +23,7 @@ import { render, screen, fireEvent, within } from "@testing-library/react";
 import "@testing-library/jest-dom/jest-globals";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
-import type { usePathname } from "next/navigation";
+import type { redirect, usePathname } from "next/navigation";
 import {
   NAV_BOTTOM,
   NAV_FOOTER,
@@ -43,9 +44,12 @@ beforeEach(() => {
   window.localStorage.clear();
 });
 
-const mockedUsePathname = jest
-  .requireMock<{ usePathname: typeof usePathname }>("next/navigation")
-  .usePathname as jest.MockedFunction<typeof usePathname>;
+const mockedNextNavigation = jest.requireMock<{
+  usePathname: typeof usePathname;
+  redirect: typeof redirect;
+}>("next/navigation");
+const mockedUsePathname = mockedNextNavigation.usePathname as jest.MockedFunction<typeof usePathname>;
+const mockedRedirect = mockedNextNavigation.redirect as jest.MockedFunction<typeof redirect>;
 
 /** Recursively lists files under `dir` with one of `exts`, skipping build/dep dirs (house pattern,
  * see app-shell.spec.tsx's own `collectFiles`). */
@@ -84,6 +88,28 @@ function groupOpenStates(root: ParentNode): Record<string, boolean> {
   return Object.fromEntries(
     headings.map((button) => [groupHeadingLabel(button), button.getAttribute("aria-expanded") === "true"])
   );
+}
+
+/** Every static/dynamic import specifier (`from "..."` / `import("...")`) literally present in
+ * `fileText` — used by AC13's source scan below. */
+function importSpecifiersFrom(fileText: string): string[] {
+  const specifiers: string[] = [];
+  for (const re of [/\bfrom\s+["']([^"']+)["']/g, /\bimport\(\s*["']([^"']+)["']\s*\)/g]) {
+    for (const match of fileText.matchAll(re)) {
+      const specifier = match[1];
+      if (specifier !== undefined) specifiers.push(specifier);
+    }
+  }
+  return specifiers;
+}
+
+/** Resolves a relative (`./`, `../`) or `@/`-aliased specifier found in `fromFile` to an absolute
+ * path with no extension — `null` for a bare package specifier (e.g. `"react"`), which can never
+ * resolve inside `app/`. Mirrors `moduleNameMapper`'s own `^@/(.*)$ -> <rootDir>/$1` (jest.config.js). */
+function resolveImportSpecifier(fromFile: string, specifier: string): string | null {
+  if (specifier.startsWith(".")) return path.resolve(path.dirname(fromFile), specifier);
+  if (specifier.startsWith("@/")) return path.join(ROOT, specifier.slice(2));
+  return null;
 }
 
 /** The ordered shape of a rendered `<nav>`: `[Label]` for a group heading, the link text for every
@@ -257,15 +283,89 @@ describe("Feature: Grouped navigation", () => {
 
   describe("Scenario: the retired routes", () => {
     // Given: app/(authed)/live/page.tsx and app/(authed)/wardrobe/page.tsx
-    it.todo("AC11 — /live redirects to /");
-    it.todo("AC12 — /wardrobe redirects to /persona-catalog");
-    it.todo("AC13 — no import of PickChips, RatingControls, StationThumbs, PersonaTasteThumbs, PlayHistoryTable or the Wardrobe tabs remains");
+    it("AC11 — /live redirects to /", async () => {
+      const { default: LivePage } = await import("../app/(authed)/live/page");
+
+      LivePage();
+
+      expect(mockedRedirect).toHaveBeenCalledWith("/");
+    });
+
+    it("AC12 — /wardrobe redirects to /persona-catalog", async () => {
+      const { default: WardrobePage } = await import("../app/(authed)/wardrobe/page");
+
+      WardrobePage();
+
+      expect(mockedRedirect).toHaveBeenCalledWith("/persona-catalog");
+    });
+
+    // Given: every source file under app/, and the live/ and wardrobe/ route folders themselves —
+    // SPEC F203.4 requires both the dead surface gone AND nothing left importing it (the
+    // orchestrator ruling for AC13: PickChips/StationThumbs/PersonaTasteThumbs are NOT retired —
+    // BoothLogFeed.tsx keeps importing them from _components/ — so this scan only fails on an
+    // import reaching INTO app/(authed)/live/ or app/(authed)/wardrobe/, never on those three
+    // surviving components existing elsewhere).
+    it("AC13 — no module under app/ imports the retired live/wardrobe surfaces, and both routes keep only their redirect page", () => {
+      const liveDir = path.join(ROOT, "app", "(authed)", "live");
+      const wardrobeDir = path.join(ROOT, "app", "(authed)", "wardrobe");
+      const appFiles = collectFiles(path.join(ROOT, "app"), [".ts", ".tsx"]);
+      const offenders: string[] = [];
+
+      for (const file of appFiles) {
+        if (file.startsWith(liveDir + path.sep) || file.startsWith(wardrobeDir + path.sep)) continue;
+        const text = readFileSync(file, "utf-8");
+        for (const specifier of importSpecifiersFrom(text)) {
+          const resolved = resolveImportSpecifier(file, specifier);
+          if (resolved === null) continue;
+          const intoLive = resolved === liveDir || resolved.startsWith(liveDir + path.sep);
+          const intoWardrobe = resolved === wardrobeDir || resolved.startsWith(wardrobeDir + path.sep);
+          if (intoLive || intoWardrobe) offenders.push(`${path.relative(ROOT, file)} -> ${specifier}`);
+        }
+      }
+
+      // Non-vacuous proof: BoothLogFeed.tsx is a known real importer of the surviving
+      // PickChips/StationThumbs/PersonaTasteThumbs trio — confirm the scan actually walked it.
+      const boothLogFeedPath = path.join(ROOT, "app", "(authed)", "booth-log", "BoothLogFeed.tsx");
+
+      expect({
+        scannedBoothLogFeed: appFiles.includes(boothLogFeedPath),
+        offenders,
+        liveDirEntries: readdirSync(liveDir).sort(),
+        wardrobeDirEntries: readdirSync(wardrobeDir).sort(),
+      }).toEqual({
+        scannedBoothLogFeed: true,
+        offenders: [],
+        liveDirEntries: ["page.tsx"],
+        wardrobeDirEntries: ["page.tsx"],
+      });
+    });
   });
 
   describe("Scenario: station sounds", () => {
-    // Given: the imaging page and its nav entry
-    it.todo("AC14 — label and h1 read \"Station sounds\"");
-    it.todo("AC14 — the one-line explainer is present");
+    // Given: the safe-content page source and its nav entry
+    it("AC14 — the nav label and both page h1s read \"Station sounds\"", () => {
+      const stationGroup = NAV_GROUPS.find((group) => group.label === "Station");
+      const navLabel = stationGroup?.items.find((item) => item.href === "/safe-content")?.label ?? null;
+      const pageSource = readFileSync(
+        path.join(ROOT, "app", "(authed)", "safe-content", "page.tsx"),
+        "utf-8"
+      );
+      const h1Texts = Array.from(pageSource.matchAll(/<h1[^>]*>([^<]+)<\/h1>/g)).map((match) => match[1]);
+
+      expect({ navLabel, h1Texts }).toEqual({
+        navLabel: "Station sounds",
+        h1Texts: ["Station sounds", "Station sounds"],
+      });
+    });
+
+    it("AC14 — the one-line explainer paragraph is present", () => {
+      const pageSource = readFileSync(
+        path.join(ROOT, "app", "(authed)", "safe-content", "page.tsx"),
+        "utf-8"
+      );
+
+      expect(pageSource).toMatch(/always airable: when the music rotation drains/);
+    });
   });
 
   // ---- sad path ----

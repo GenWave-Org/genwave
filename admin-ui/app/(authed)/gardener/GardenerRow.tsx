@@ -50,8 +50,8 @@ function fileNameFromPath(path: string): string {
  * eligibility cell is read-only `Yes`/`No` text), so this mirrors
  * `catalog/[mediaId]/EditTrackForm.tsx`'s own checkbox+label markup for its "Eligible for playout"
  * field — the wrapping `<label>`'s own visible "Eligible" text IS the accessible name (LOW-C), never
- * a separate `aria-label`. Never-play REUSES `catalog/NeverPlayControl.tsx` verbatim — the exact production control
- * `RatingControls.tsx` renders the identical icon/label pair for on the Live page — rather than a
+ * a separate `aria-label`. Never-play REUSES `catalog/NeverPlayControl.tsx` verbatim — the exact
+ * production control `CatalogToolbar` renders the identical icon/label pair for — rather than a
  * second hand-rolled copy; it stays icon-only, but it is now this row's ONLY icon-only control, so
  * it can never collide with a sibling verb again. Re-enrich and dismiss are visible-text secondary
  * `Button`s, matching `DuplicateGroupCard`'s own "Keep this one" button.

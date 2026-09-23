@@ -40,7 +40,6 @@ import type { usePathname, useRouter } from "next/navigation";
 import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "@/components/ui/toast";
 import { CatalogTabs } from "../app/(authed)/catalog/CatalogTabs";
-import { PlayHistoryTable } from "../app/(authed)/live/PlayHistoryTable";
 import { RecentPlays } from "../app/(authed)/dashboard/RecentPlays";
 import { SafeContentClient } from "../app/(authed)/safe-content/SafeContentClient";
 import type { SafeContentClientProps } from "../app/(authed)/safe-content/SafeContentClient";
@@ -283,18 +282,6 @@ describe("Feature: Responsive and accessible console", () => {
       const catalogTable = screen.getByRole("table");
       expect(catalogTable.parentElement?.className).toMatch(/\boverflow-x-auto\b/);
       catalogTable.closest("div")?.remove(); // isolate from the next render's DOM
-
-      render(
-        <PlayHistoryTable
-          entries={makeHistoryEntries()}
-          error={false}
-          timeZone="UTC"
-          ratings={new Map()}
-          onRatingChange={() => {}}
-        />
-      );
-      const playHistoryTable = screen.getByRole("table");
-      expect(playHistoryTable.parentElement?.className).toMatch(/\boverflow-x-auto\b/);
 
       render(<RecentPlays entries={makeHistoryEntries()} error={false} timeZone="UTC" />);
       const recentPlaysTables = screen.getAllByRole("table");

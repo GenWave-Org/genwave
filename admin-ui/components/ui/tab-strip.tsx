@@ -19,9 +19,10 @@ interface TabStripProps<TId extends string> {
 /**
  * URL-driven tab strip (gh-#393 extraction, the gh-#375 `Chip` precedent applied to tabs):
  * `CatalogTabs` and `BoothLogTabs` were byte-identical modulo their tab defs — this is the one
- * shared implementation, and the Wardrobe/shelf kind tabs (gh-#393/gh-#372) build on it rather
- * than minting a fourth copy. Plain `<Link>`s + `aria-current`, no client state: the active tab is
- * whatever the URL says, so a strip works in a server component and survives refresh/share.
+ * shared implementation, and the shelf kind tabs (gh-#393/gh-#372, `PersonaCatalogTabs`) build on
+ * it rather than minting a fourth copy — the retired Wardrobe page's own tabs once did too. Plain
+ * `<Link>`s + `aria-current`, no client state: the active tab is whatever the URL says, so a strip
+ * works in a server component and survives refresh/share.
  */
 export function TabStrip<TId extends string>({ tabs, activeTab, ariaLabel }: TabStripProps<TId>): ReactNode {
   return (

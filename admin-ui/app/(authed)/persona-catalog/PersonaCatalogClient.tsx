@@ -136,8 +136,8 @@ interface PersonaCatalogClientProps {
    */
   installedJinglePackSlugs?: string[];
   /** Test-only injection point for the theme provenance line's `formatDateStamp` call (gh-#375);
-   * production omits this and gets the browser's local zone — the same SettingsForm/WardrobeClient/
-   * PersonasClient idiom, not a bespoke one. */
+   * production omits this and gets the browser's local zone — the same SettingsForm/PersonasClient
+   * idiom the retired Wardrobe page's own client once shared, not a bespoke one. */
   timeZone?: string;
   /**
    * The kind tab this render shows (gh-#372) — resolved off `?kind=` by the page's own server
@@ -375,10 +375,10 @@ export function PersonaCatalogClient({
   }
 
   /** SPEC F104.5's success path — mirrors `handleThemeInstalled`'s own remarks: no dedicated
-   * wardrobe-list page exists on THIS task's own owned files for the panel to route to (PLAN T203
-   * builds that separately); closing the modal, toasting the family that just entered the station's
-   * Wardrobe, AND (PLAN T204) marking `slug` installed in local state — so `FontDetailPanel` flips
-   * to "Installed"/"Re-install" immediately, no reload — is the whole client-side job. */
+   * installed-font list page exists on THIS task's own owned files for the panel to route to;
+   * closing the modal, toasting the family that just installed, AND (PLAN T204) marking `slug`
+   * installed in local state — so `FontDetailPanel` flips to "Installed"/"Re-install" immediately,
+   * no reload — is the whole client-side job. */
   function handleFontInstalled(slug: string, result: FontInstallResult): void {
     setInstallingFont(false);
     setInstalledSlugs((prev) => new Set(prev).add(slug));
@@ -439,8 +439,8 @@ export function PersonaCatalogClient({
    * STORY-397's install success path — unlike every kind above, this closes the modal, toasts, AND
    * calls `router.refresh()` instead of flipping a local `Set` (see `installedVoicePackSlugs`'s own
    * remarks on `PersonaCatalogClientProps`): the next server render's `GET /api/voice-packs` read
-   * becomes this component's own "Installed" source of truth, the same mechanism
-   * `wardrobe/UninstallPackButton.tsx` already uses for its own 204 path.
+   * becomes this component's own "Installed" source of truth, the same mechanism the retired
+   * Wardrobe page's uninstall button used for its own 204 path.
    */
   function handleVoicePackInstalled(result: VoicePackInstallResult): void {
     setInstallingVoicePack(false);

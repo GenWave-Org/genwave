@@ -10,7 +10,8 @@
  *
  * Moved here from `persona-catalog/avatar-format.ts` (PLAN T296 review rider, closed at PLAN T304):
  * three cross-segment importers (`personas/PersonaAvatarPackPicker.tsx`,
- * `personas/BulkApplySuggestedModal.tsx`, `wardrobe/AvatarWardrobeClient.tsx`) already reached into
+ * `personas/BulkApplySuggestedModal.tsx`, and the Wardrobe page's `AvatarWardrobeClient.tsx`,
+ * since retired by F203.4) already reached into
  * `persona-catalog/`'s own folder for a helper with nothing persona-catalog-specific about it — `lib/`
  * is the shared home every one of those segments can import from without crossing into another
  * route segment's own directory.

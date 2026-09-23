@@ -24,8 +24,8 @@ export const SECTION_LABELS: Readonly<Record<SectionId, string>> = {
   station: "Station",
   scope: "Scope",
   // gh-#149 display rename: the section holding Station:SafeScope:*/GW_SAFE_GAP_SECONDS is
-  // labeled "Station Imaging"; the section id and the setting KEYS deliberately stay "safe".
-  safe: "Station Imaging",
+  // labeled "Station sounds"; the section id and the setting KEYS deliberately stay "safe".
+  safe: "Station sounds",
   library: "Library",
   other: "Other",
 };

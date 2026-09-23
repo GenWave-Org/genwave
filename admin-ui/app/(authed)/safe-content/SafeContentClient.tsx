@@ -106,8 +106,9 @@ const FIELD_INPUT_CLASSES =
 const HEADER_CELL = "py-2 pr-3 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2";
 
 /**
- * Client half of the "Station Imaging" page (formerly "Safe content", gh-#149 — display rename
- * only: the /safe-content route, /api/safe-segments endpoint, and type names are stable keys).
+ * Client half of the "Station sounds" page (formerly "Safe content", then "Station Imaging" —
+ * gh-#149, then F203.5 — display renames only: the /safe-content route, /api/safe-segments
+ * endpoint, and type names are stable keys).
  * (SPEC F27.9/F28.9–F28.10, STORY-081/STORY-092). Owns
  * the Generate form (text, title, voice, optional bed, target library) and the target library's
  * segment list with an inline eligibility toggle. Consumes only the shipped endpoints: POST

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 
 /** One item on an installed avatar pack (SPEC F128.1/.5, PLAN T294) — the two fields the
  * apply-from-pack picker and the bulk-suggestion toolbar actually need. Declared locally rather
- * than importing `wardrobe/types.ts`'s own `AvatarPackSummaryItemDto` — the same
+ * than importing a route segment's own DTO (the retired Wardrobe page owned one) — the same
  * `usePersonaDirectory` discipline (this shared hook shouldn't couple to a type another route
  * segment owns, since the two happen to be wire-identical only by coincidence today). */
 export interface AvatarPackEntry {

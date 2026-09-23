@@ -36,8 +36,8 @@ export interface PersonasClientProps {
    * `null` when no persona is on the air right now, or the status read failed. */
   onAirPersonaName?: string | null;
   /** Test-only injection point for the provenance badge's `formatDateStamp` call; production omits
-   * this and gets the browser's local zone — the same StatusTiles/BoothLogFeed/LlmCallsFeed/
-   * PlayHistoryTable idiom, not a bespoke one. */
+   * this and gets the browser's local zone — the same StatusTiles/BoothLogFeed/LlmCallsFeed
+   * idiom, not a bespoke one. */
   timeZone?: string;
 }
 
@@ -717,8 +717,9 @@ export function PersonasClient({
           <h2 className="font-display text-[1.1rem] text-ink">Personas</h2>
           {/* Bulk apply-suggested (SPEC F128.5, STORY-333, PLAN T296) — the roster toolbar, the
               smaller honest surface (this page already has the full roster + slugs in hand; a
-              Wardrobe pack card would need its OWN persona-roster fetch to compute the identical
-              mapping). Opens BulkApplySuggestedModal — no request fires until its own Confirm. */}
+              Community Catalog avatar pack card would need its OWN persona-roster fetch to compute
+              the identical mapping). Opens BulkApplySuggestedModal — no request fires until its own
+              Confirm. */}
           <Button type="button" variant="secondary" onClick={() => setShowBulkApplyModal(true)}>
             Apply suggested faces
           </Button>

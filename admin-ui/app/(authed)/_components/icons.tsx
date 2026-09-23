@@ -167,8 +167,8 @@ export function MenuIcon(props: IconProps): ReactNode {
   );
 }
 
-/** Closes the nav drawer (SPEC F28.13); also the "never play" glyph on {@link RatingControls}
- * (F33.11) — an X is an X in both contexts. */
+/** Closes the nav drawer (SPEC F28.13); also the "never play" glyph on `NeverPlayControl`/
+ * `CatalogToolbar` (F33.11) — an X is an X in both contexts. */
 export function CloseIcon(props: IconProps): ReactNode {
   return (
     <IconBase {...props}>
@@ -178,7 +178,7 @@ export function CloseIcon(props: IconProps): ReactNode {
   );
 }
 
-/** Vote-up glyph (SPEC F33.11, STORY-114) — {@link RatingControls}. */
+/** Vote-up glyph (SPEC F33.11, STORY-114) — `CatalogToolbar`'s vote-up rank action. */
 export function VoteUpIcon(props: IconProps): ReactNode {
   return (
     <IconBase {...props}>
@@ -188,7 +188,7 @@ export function VoteUpIcon(props: IconProps): ReactNode {
   );
 }
 
-/** Vote-down glyph (SPEC F33.11, STORY-114) — {@link RatingControls}. */
+/** Vote-down glyph (SPEC F33.11, STORY-114) — `CatalogToolbar`'s vote-down rank action. */
 export function VoteDownIcon(props: IconProps): ReactNode {
   return (
     <IconBase {...props}>
@@ -235,7 +235,7 @@ export function TasteThumbDownIcon(props: IconProps): ReactNode {
 /** Station rotation-thumb-up glyph (SPEC F150.1, F150.8; STORY-370; T369 review HIGH-1) — a
  * tuning-dial needle deflected up, NOT {@link VoteUpIcon}'s straight chevron and NOT
  * {@link TasteThumbUpIcon}'s hand silhouette: a station thumb reads as the receiver's own dial
- * moving, distinct from both the controls it can render beside (`RatingControls`' catalog vote,
+ * moving, distinct from both the controls it can render beside (`CatalogToolbar`'s catalog vote,
  * `PersonaTasteThumbs`' persona-taste pair) at a glance, per the Wireless dial-marking motif
  * (`.claude/skills/design-aesthetic`) already used elsewhere in the chrome (the now-playing
  * card's own tuning-scale ticks). */
