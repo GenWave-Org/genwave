@@ -26,7 +26,9 @@ namespace GenWave.Ads;
 /// an owner sponsor with a non-blank value here, <see cref="AdScriptValidator"/>'s 555 rule (SPEC
 /// F172.5) treats a phone-shaped run whose DIGITS equal this value's digits as allowed — the
 /// comparison is formatting-insensitive (punctuation stripped from both sides), the surrounding script
-/// text is still read raw. Every OTHER non-555 phone-shaped run still refuses.</param>
+/// text is still read raw. Every OTHER phone-shaped run refuses (SPEC F199.3) — including one that
+/// itself contains 555 — once a real sponsor phone is on file; only with no phone on file does the
+/// looser "contains 555" rule apply.</param>
 /// <param name="IsPackOwned">Whether this script belongs to a pack-owned sponsor — the parody posture
 /// SPEC F172.5 keeps unchanged for packs (neither skip above ever runs). Defaults <see
 /// langword="true"/> (PLAN T438 ruling: fail closed, not fail open) so every caller that predates

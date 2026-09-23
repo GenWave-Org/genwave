@@ -25,7 +25,10 @@ namespace GenWave.Host.Api;
 /// <see cref="RenderWithinMinutes"/> (STORY-433; PLAN T457; gh-#745) is the configured render pass
 /// cadence (<c>Ads:WorkerIntervalMinutes</c>) for a spot in the <see cref="AdState.Approved"/> state,
 /// and <see langword="null"/> for every other state — the UI uses it to tell the operator roughly when
-/// the spot will be picked up, not a guaranteed bound.
+/// the spot will be picked up, not a guaranteed bound. <see cref="ParseNotes"/> (SPEC F200.3; STORY-467;
+/// PLAN T551) is one entry per distinct unknown speaker tag <see cref="Script"/> carried
+/// (<c>"unknown-tag:{TAG}"</c>, <c>GenWave.Ads.AdScriptParseNotes.For</c>'s own re-parse) — empty, never
+/// a validator failure, when every tag was already known or <see cref="Script"/> is null/unparseable.
 /// </summary>
 public sealed record AdSpotDto(
     long Id,
@@ -50,4 +53,5 @@ public sealed record AdSpotDto(
     string Version,
     AdSpotJobDto? Job,
     AdSpotPreviewDto? Preview,
-    int? RenderWithinMinutes);
+    int? RenderWithinMinutes,
+    IReadOnlyList<string> ParseNotes);

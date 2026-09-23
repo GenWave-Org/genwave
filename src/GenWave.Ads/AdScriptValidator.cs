@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 
@@ -6,12 +7,14 @@ namespace GenWave.Ads;
 /// <summary>
 /// Pure, fail-closed, first-rule-wins validation of an ad script (SPEC F160.3, STORY-390) — runs on
 /// EVERY path a script reaches the air from: the LLM writer (T400), the owner editor's save (T403),
-/// and a catalog pack's install preview (T405). Five checks, in this fixed order, the first violation
+/// and a catalog pack's install preview (T405). Six checks, in this fixed order, the first violation
 /// wins:
 ///
 /// <list type="number">
 /// <item><b>Format</b> (<see cref="AdScriptParser"/>) — <c>TAG: line</c>, 1-3 distinct voice tags,
 /// ANNOUNCER required, per-line <c>Llm:MaxCopyChars</c>.</item>
+/// <item><b>Stage direction</b> — a parenthetical/bracketed/asterisked aside that survived hygiene
+/// (SPEC F201.2, STORY-468) — a shape rule, checked immediately after Format and before Duration.</item>
 /// <item><b>Duration</b> — estimated total read time against <c>spot_seconds</c> +
 /// tolerance.</item>
 /// <item><b>Brand collision</b> — the shipped, folded blocklist.</item>
@@ -59,7 +62,7 @@ namespace GenWave.Ads;
 /// renamed.)
 /// </para>
 /// </summary>
-public static class AdScriptValidator
+public static partial class AdScriptValidator
 {
     /// <summary>The house spoken-rate constant (chars/second) — see <see cref="CheckDuration"/>'s own
     /// remarks and this class's own "duration is text-driven" summary above.</summary>
@@ -75,6 +78,13 @@ public static class AdScriptValidator
         var parsed = AdScriptParser.Parse(rawScript, request.MaxLineChars);
         if (parsed is not AdScriptValidationResult.Accepted(var script))
             return parsed;
+
+        // A shape rule, run right after the parse (SPEC F201.2, STORY-468) — the backstop for the
+        // three stage-direction shapes AdScriptWriter.ApplyLineAwareHygiene already strips from an
+        // LLM-authored script (GenWave.Tts): an owner-typed save, a pack script, or a hygiene bug
+        // never silently airs one of these instead of being named here.
+        if (CheckStageDirection(script) is { } stageDirectionViolation)
+            return Refused(stageDirectionViolation);
 
         if (CheckDuration(script, request, durationEstimator) is { } durationViolation)
             return Refused(durationViolation);
@@ -196,17 +206,68 @@ public static class AdScriptValidator
         // on file, passes null through — the plain 555 rule with no exemption.
         var allowedPhone = request.IsPackOwned ? null : request.SponsorPhone;
 
+        // The reason's own wording tracks which rule actually ran (SPEC F199.3, PLAN T552 ruling): with
+        // a real sponsor phone on file the "contains 555" framing went false the moment F199.3 tightened
+        // the skip to ONLY that exact number (STORY-466 AC6) — a differing run that itself contains 555
+        // still refuses, so telling the operator it "does not contain 555" would be a lie.
+        var hasAllowedPhone = !string.IsNullOrWhiteSpace(allowedPhone);
+
         // Checked per line, never a whole-script joined string (PLAN T399 review N8) — a digit
         // fragment ending one voice's line must never combine with a fragment opening the next
         // line's into a phone-shaped run that existed in neither line alone.
         foreach (var line in script.Lines)
         {
-            if (PhoneShapeCheck.FindViolation(line.Text, allowedPhone) is { } phoneRun)
-                return new AdScriptViolation(AdScriptRuleIds.PhoneShape, $"a phone-shaped digit run (\"{phoneRun}\") does not contain 555");
+            if (PhoneShapeCheck.FindViolation(line.Text, allowedPhone) is not { } phoneRun)
+                continue;
+
+            var reason = hasAllowedPhone
+                ? $"a phone-shaped digit run (\"{phoneRun}\") is not the sponsor's own number"
+                : $"a phone-shaped digit run (\"{phoneRun}\") does not contain 555";
+            return new AdScriptViolation(AdScriptRuleIds.PhoneShape, reason);
         }
 
         return null;
     }
+
+    /// <summary>SPEC F201.2, STORY-468 AC6 — the backstop for the three shapes
+    /// <c>AdScriptWriter.ApplyLineAwareHygiene</c> (GenWave.Tts) already strips from an LLM-authored
+    /// script's text: a script that reaches this validator by ANY other path (owner-typed save, a pack
+    /// install, a hygiene bug) still refuses if a parenthetical, bracketed beat, or asterisked aside
+    /// survives in its spoken text. Checked per line, first match wins, naming both the 1-based line
+    /// number and a bounded echo of the offending run.</summary>
+    static AdScriptViolation? CheckStageDirection(AdScript script)
+    {
+        for (var i = 0; i < script.Lines.Count; i++)
+        {
+            var match = StageDirectionResiduePattern().Match(script.Lines[i].Text);
+            if (!match.Success)
+                continue;
+
+            return new AdScriptViolation(
+                AdScriptRuleIds.StageDirection,
+                $"line {i + 1} still carries a stage direction (\"{AdScriptEcho.ForReason(match.Value)}\")");
+        }
+
+        return null;
+    }
+
+    /// <summary>The SAME three shapes <c>AdScriptWriter.ApplyLineAwareHygiene</c> (GenWave.Tts) strips
+    /// before an LLM-authored script's text ever reaches this validator — duplicated here as a literal
+    /// pattern because of the L10 boundary (GenWave.Tts cannot reference GenWave.Ads, and Ads does not
+    /// reference Tts); a Core-level shared shape is the seam if the two ever drift.
+    ///
+    /// <para>
+    /// Each shape must carry at least one LETTER to count (gh-#706 first-contact finding): a stage
+    /// direction is always a word or words, never a bare digit run — <see cref="GenWave.Core.PhoneShape.Regex"/>'s
+    /// own <c>(ddd) ddd-dddd</c> alternative (SPEC F197.1) means a sponsor's own area code can arrive
+    /// wrapped in real parentheses (<c>"(406) 222-0100"</c>), and that grouping must never trip this
+    /// check. The letter class (<c>[A-Za-z]</c>) is ASCII-only by design (PLAN T552 review N4): a shape whose only
+    /// "letters" are non-ASCII (an accented word, a non-Latin script) carries no <c>[A-Za-z]</c>
+    /// character and so is left alone by this check.
+    /// </para>
+    /// </summary>
+    [GeneratedRegex(@"\([^()\n]*[A-Za-z][^()\n]*\)|\[[^\[\]\n]*[A-Za-z][^\[\]\n]*\]|\*[^*\n]*[A-Za-z][^*\n]*\*")]
+    private static partial Regex StageDirectionResiduePattern();
 
     static AdScriptViolation? CheckAudiencePosture(IReadOnlyList<string> foldedVariants)
     {

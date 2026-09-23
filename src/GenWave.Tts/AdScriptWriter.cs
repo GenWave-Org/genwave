@@ -189,6 +189,7 @@ public sealed partial class AdScriptWriter(
             }
 
             var cleaned = ApplyLineAwareHygiene(reply.Content);
+            cleaned = ApplyPhoneHygiene(cleaned, request.Phone);
             if (cleaned.Length == 0)
             {
                 return Resolved(Failed(
@@ -288,7 +289,7 @@ public sealed partial class AdScriptWriter(
     /// reject branches already use (a shape mistake is <see cref="LlmCallCause.MalformedResponse"/>, a
     /// length/duration miss is <see cref="LlmCallCause.OverLength"/>, a content-truth-shaped miss is
     /// <see cref="LlmCallCause.TruthGateReject"/>) rather than flattening every refusal to one bucket.
-    /// The five rule id tokens are <c>GenWave.Ads.AdScriptRuleIds</c>' own wire vocabulary, duplicated
+    /// The six rule id tokens are <c>GenWave.Ads.AdScriptRuleIds</c>' own wire vocabulary, duplicated
     /// here as literal strings — this project cannot reference that one (L10) — mirrors
     /// <c>AdScriptPromptBuilder</c>'s own <c>AnnouncerTag</c> duplication for the identical reason. An
     /// unrecognized rule id (a rule <c>GenWave.Ads</c> adds later without a matching update here) falls
@@ -300,6 +301,7 @@ public sealed partial class AdScriptWriter(
     static LlmCallCause MapRuleIdToCause(string ruleId) => ruleId switch
     {
         "format" => LlmCallCause.MalformedResponse,
+        "stage_direction" => LlmCallCause.MalformedResponse,
         "duration" => LlmCallCause.OverLength,
         "brand_collision" => LlmCallCause.TruthGateReject,
         "phone_shape" => LlmCallCause.TruthGateReject,
@@ -366,10 +368,27 @@ public sealed partial class AdScriptWriter(
     /// <para>
     /// Blank interior lines are dropped (the <c>AdScriptParser.Parse</c>/<c>CrosstalkScriptParser.Parse</c>
     /// precedent: accidental double-spacing between beats is a formatting quirk, never a shape
-    /// violation). A line whose text is empty after hygiene keeps its own bare <c>TAG:</c> (never
-    /// silently dropped whole) — so <c>AdScriptValidator</c> reports the honest, specific "the {tag}
-    /// line has no spoken text" reason rather than a misleading "no {tag} line appeared" for a line that
-    /// DID arrive, just empty — unless an untagged continuation line follows and fills it (below).
+    /// violation). Every line's TEXT also has its own stage directions stripped, ANYWHERE in the text
+    /// and not only inside the tag (SPEC F201.1, STORY-468): a <c>(parenthetical)</c>, a
+    /// <c>[bracketed]</c> beat, or an <c>*asterisked*</c> aside — each required to carry at least one
+    /// LETTER, so a sponsor's own <c>(406) 222-0100</c>-shaped phone number never loses its area code
+    /// to this pass — is removed whole, BEFORE <see cref="LlmCopyWriter.ApplyCopyHygiene"/> ever runs
+    /// on what remains, so a multi-word aside like <c>*long pause*</c> never survives as spoken words
+    /// the way a bare emphasis-mark strip alone would leave it. A line where a shape actually matched
+    /// has its surrounding whitespace collapsed and a space left dangling before trailing punctuation
+    /// tidied away; a line where nothing matched is returned byte-for-byte untouched, so this pass never
+    /// rewrites legitimate copy that merely contains an ellipsis, a deliberately spaced colon, or a
+    /// stray space near punctuation of its own (PLAN T552 review F1).
+    /// </para>
+    ///
+    /// <para>
+    /// A line whose text is STILL empty once continuation-joining (above) has had its own chance to
+    /// fill it is dropped WHOLE — before the "nobody is ANNOUNCER" election below ever runs, so an
+    /// emptied line can never cast a vote for its own tag (F201.1, PLAN T552 review F2) — and never
+    /// surfaced as a bare <c>TAG:</c> the way it was before STORY-468. <c>AdScriptValidator</c>'s own
+    /// stage-direction rule (SPEC F201.2) is the backstop that NAMES any of the same three shapes a
+    /// script still carries after this pass, never this writer silently forwarding an empty line for the
+    /// validator to explain.
     /// </para>
     ///
     /// <para>
@@ -419,7 +438,7 @@ public sealed partial class AdScriptWriter(
                 text = line;
             }
 
-            var cleanedText = LlmCopyWriter.ApplyCopyHygiene(text);
+            var cleanedText = LlmCopyWriter.ApplyCopyHygiene(StripStageDirections(text));
             if (tag.Length == 0)
             {
                 // No speaker: continuation prose joins the previous voice's line (filling a bare tag);
@@ -431,6 +450,13 @@ public sealed partial class AdScriptWriter(
 
             lines.Add((tag, cleanedText));
         }
+
+        // F201.1 — a line whose text is STILL empty once continuation-joining above has had its own
+        // chance to fill it is dropped WHOLE here, BEFORE the "nobody is ANNOUNCER" election below
+        // reads lines.Count/lines.GroupBy: an emptied line (e.g. a line that was pure stage direction)
+        // must never cast a vote for its own tag, and must never be surfaced as a bare "TAG:" (STORY-468
+        // AC5, PLAN T552 review F2).
+        lines.RemoveAll(l => l.Text.Length == 0);
 
         if (lines.Count > 0 && lines.TrueForAll(l => l.Tag != AdScriptPromptBuilder.AnnouncerTag))
         {
@@ -446,8 +472,214 @@ public sealed partial class AdScriptWriter(
             }
         }
 
-        return string.Join('\n', lines.Select(l => l.Text.Length == 0 ? $"{l.Tag}:" : $"{l.Tag}: {l.Text}"));
+        // Emptied lines are already gone (removed above, before the election). A script that empties
+        // entirely falls out of this Join as string.Empty — AdScriptValidator's existing "the script
+        // has no lines" refusal (AdScriptParser.Parse) handles that case.
+        return string.Join('\n', lines.Select(l => $"{l.Tag}: {l.Text}"));
     }
+
+    /// <summary>
+    /// SPEC F201.1, STORY-468 — strips a <c>(parenthetical)</c>, a <c>[bracketed]</c> beat, and an
+    /// <c>*asterisked*</c> aside ANYWHERE in a line's text (not only when the shape wraps the whole
+    /// line), collapses the whitespace the removal leaves behind, and tidies a space stranded before
+    /// trailing punctuation. Run BEFORE <see cref="LlmCopyWriter.ApplyCopyHygiene"/> so a multi-word
+    /// aside like <c>*long pause*</c> is removed whole — <see cref="LlmCopyWriter.ApplyCopyHygiene"/>'s
+    /// own asterisk strip only catches a SINGLE-word run, then falls back to stripping the bare
+    /// <c>*</c>/<c>_</c> marks and leaving the words themselves spoken.
+    ///
+    /// <para>
+    /// Each shape must carry at least one LETTER to count (gh-#706 first-contact finding): a stage
+    /// direction is always a word or words, never a bare digit run — <see cref="PhoneShape.Regex"/>'s
+    /// own <c>(ddd) ddd-dddd</c> alternative (SPEC F197.1) means a sponsor's own area code can arrive
+    /// wrapped in real parentheses (<c>"(406) 222-0100"</c>), and that grouping must survive THIS pass
+    /// untouched for <see cref="ApplyPhoneHygiene"/> (run after this method) to ever see it. The letter
+    /// class (<c>[A-Za-z]</c>) is ASCII-only by design (PLAN T552 review N4): a shape whose only "letters" are non-ASCII
+    /// (an accented word, a non-Latin script) carries no <c>[A-Za-z]</c> character and so is left alone by
+    /// this pass.
+    /// </para>
+    /// </summary>
+    static string StripStageDirections(string text)
+    {
+        var stripped = StageDirectionParentheticalPattern().Replace(text, string.Empty);
+        stripped = StageDirectionBracketPattern().Replace(stripped, string.Empty);
+        stripped = StageDirectionAsteriskPattern().Replace(stripped, string.Empty);
+
+        // PLAN T552 review F1: the shapes above only ever REMOVE characters, so an unchanged length means
+        // no shape matched — return the ORIGINAL text untouched rather than running the collapse/tidy
+        // passes below, which exist solely to repair the gap a real removal leaves behind. Running them
+        // unconditionally rewrote legitimate copy that never had a stage direction in it at all: an
+        // ellipsis ("wait ... then go") collapsed to "wait... then go", and a colon/period with
+        // deliberate spacing ("Remember : call now", "3 . 5 dollars") lost its spacing.
+        if (stripped.Length == text.Length)
+            return text;
+
+        stripped = CollapseStrippedGapPattern().Replace(stripped, " ").Trim();
+        return SpaceBeforePunctuationPattern().Replace(stripped, "$1");
+    }
+
+    [GeneratedRegex(@"\([^()\n]*[A-Za-z][^()\n]*\)")]
+    private static partial Regex StageDirectionParentheticalPattern();
+
+    [GeneratedRegex(@"\[[^\[\]\n]*[A-Za-z][^\[\]\n]*\]")]
+    private static partial Regex StageDirectionBracketPattern();
+
+    [GeneratedRegex(@"\*[^*\n]*[A-Za-z][^*\n]*\*")]
+    private static partial Regex StageDirectionAsteriskPattern();
+
+    [GeneratedRegex(@"\s{2,}")]
+    private static partial Regex CollapseStrippedGapPattern();
+
+    /// <summary>A stripped shape can leave a lone space stranded just before the punctuation that
+    /// followed it (<c>"today [beat]."</c> strips to <c>"today ."</c>) — folded back against that
+    /// punctuation so the sentence reads <c>"today."</c>, never <c>"today ."</c>.</summary>
+    [GeneratedRegex(@"\s+([.,;:!?])")]
+    private static partial Regex SpaceBeforePunctuationPattern();
+
+    /// <summary>
+    /// SPEC F199.2 hygiene, run AFTER <see cref="ApplyLineAwareHygiene"/> on its already-tagged "TAG:
+    /// text" output: a phone-shaped digit run that is not the sponsor's own number is rewritten to the
+    /// sponsor's own number verbatim (STORY-466 AC3, F199.4 pinned); a sponsor with no
+    /// <paramref name="sponsorPhone"/> on file has the number AND its clause dropped instead (AC5). A
+    /// run whose DIGITS already equal the sponsor's own — even when formatted differently (parens vs
+    /// dashes) or itself containing "555" — is left exactly as written, its own formatting untouched
+    /// (AC4). Never touches a line's TAG, only the text after its colon.
+    /// </summary>
+    internal static string ApplyPhoneHygiene(string script, string? sponsorPhone)
+    {
+        var trimmedPhone = string.IsNullOrWhiteSpace(sponsorPhone) ? null : sponsorPhone.Trim();
+        var phoneDigits = trimmedPhone is null ? null : DigitsOnly(trimmedPhone);
+
+        var lines = new List<string>();
+        foreach (var line in script.Split('\n'))
+        {
+            var hygienic = ApplyPhoneHygieneToLine(line, trimmedPhone, phoneDigits);
+            if (hygienic is not null)
+                lines.Add(hygienic);
+        }
+
+        return string.Join('\n', lines);
+    }
+
+    /// <summary>Splits "TAG: text" at its first colon (the exact shape <see cref="ApplyLineAwareHygiene"/>
+    /// always produces) and hygienes only the text half. A line whose text hygiene empties entirely
+    /// (AC5's "the clause goes" when nothing is left) is dropped — the whole line, tag included — by
+    /// returning <see langword="null"/>; a line with no text to begin with (a bare "TAG:") is returned
+    /// unchanged, never dropped, since emptiness there predates this pass.</summary>
+    static string? ApplyPhoneHygieneToLine(string line, string? sponsorPhone, string? sponsorDigits)
+    {
+        var colonIndex = line.IndexOf(':');
+        if (colonIndex < 0)
+            return line; // never produced by ApplyLineAwareHygiene, but never mangled if it happens
+
+        var tag = line[..colonIndex];
+        var body = line[(colonIndex + 1)..];
+        var text = body.Length > 0 && body[0] == ' ' ? body[1..] : body;
+        if (text.Length == 0)
+            return line;
+
+        var cleanedText = ApplyPhoneHygieneToText(text, sponsorPhone, sponsorDigits);
+        return cleanedText.Length == 0 ? null : $"{tag}: {cleanedText}";
+    }
+
+    static string ApplyPhoneHygieneToText(string text, string? sponsorPhone, string? sponsorDigits)
+    {
+        var current = text;
+        var scanFrom = 0;
+
+        while (true)
+        {
+            var match = PhoneShapedRunPattern().Match(current, scanFrom);
+            if (!match.Success)
+                return current;
+
+            var runDigits = DigitsOnly(match.Value);
+            if (sponsorDigits is not null && string.Equals(runDigits, sponsorDigits, StringComparison.Ordinal))
+            {
+                // AC4 — the sponsor's own number (even one that itself contains "555"), unchanged;
+                // advance past it so the next search never re-matches the same run.
+                scanFrom = match.Index + match.Length;
+                continue;
+            }
+
+            if (sponsorPhone is not null)
+            {
+                // AC3, F199.4 pinned — replace with the sponsor's own number verbatim. Resume scanning
+                // just PAST the inserted replacement rather than resetting to 0: the text before it is
+                // already resolved, and there is nothing left to verify about what we just wrote.
+                current = ReplacePhoneRun(current, match, sponsorPhone);
+                scanFrom = match.Index + sponsorPhone.Length;
+                continue;
+            }
+
+            // AC5 — no phone on file: the run and its clause are dropped, never replaced with anything
+            // phone-shaped, so a rescan from 0 can never re-trigger on our own output the way the
+            // replace branch above could.
+            current = DropPhoneClause(current, match.Index, match.Index + match.Length);
+            scanFrom = 0;
+        }
+    }
+
+    static string ReplacePhoneRun(string text, Match match, string replacement) =>
+        string.Concat(text.AsSpan(0, match.Index), replacement, text.AsSpan(match.Index + match.Length));
+
+    /// <summary>Deletes from the nearest preceding clause boundary through the matched run. The boundary
+    /// char itself (one of <see cref="ClauseBoundaryChars"/>) goes too — it only led into the dropped
+    /// clause (<c>"Cravin's Diner, 555-0142."</c> → <c>"Cravin's Diner."</c>). Any leading run of
+    /// boundary punctuation left on the remainder is stripped, so a line that was nothing but the phone
+    /// clause drops to <see cref="string.Empty"/> rather than a bare "." (AC5); whitespace is collapsed
+    /// and, when the deletion reached the line start, the new first letter is capitalized (the F199.4
+    /// pin). <see cref="ApplyPhoneHygieneToLine"/> reads an empty result as "drop the whole line".</summary>
+    static string DropPhoneClause(string text, int matchStart, int matchEnd)
+    {
+        var boundary = 0;
+        for (var i = matchStart - 1; i >= 0; i--)
+        {
+            if (Array.IndexOf(ClauseBoundaryChars, text[i]) < 0)
+                continue;
+            boundary = i;
+            break;
+        }
+
+        var joined = LeadingClauseBoundaryPattern().Replace(text[..boundary] + text[matchEnd..], string.Empty);
+        var remaining = CollapseWhitespacePattern().Replace(joined, " ").Trim();
+        if (remaining.Length == 0)
+            return string.Empty;
+
+        return boundary == 0 ? char.ToUpperInvariant(remaining[0]) + remaining[1..] : remaining;
+    }
+
+    /// <summary>Punctuation that ends a clause (never a phone-run separator itself — those are
+    /// narrowly <c>-</c>/<c>.</c>/space inside <see cref="PhoneShapedRunPattern"/>'s own digit groups).
+    /// </summary>
+    static readonly char[] ClauseBoundaryChars = ['.', ',', ';', ':', '!', '?'];
+
+    static string DigitsOnly(string text) => new(text.Where(char.IsAsciiDigit).ToArray());
+
+    // NANP-shaped digit runs only (optional area code, then a 3-4 local grouping) — deliberately NOT
+    // a bare "555-\d{4}" match: the sponsor's own phone (e.g. "812-555-0199") contains "555-0199" as a
+    // substring, and matching only that tail would rewrite it to "812-812-555-0199". The optional
+    // area-code alternative is tried FIRST (.NET's default greedy order), which is what makes a full
+    // "812-555-0199" match as ONE run instead of splitting off its own "555-0199" tail.
+    //
+    // \b sits AFTER the optional leading paren, not before it (the PhoneShapeCheck.FindViolation
+    // precedent, GenWave.Ads — its own remarks explain the same fix): a paren is itself a non-word
+    // character, so a \b placed before it never finds a word/non-word transition when the paren is
+    // actually present (space-then-paren is non-word-to-non-word) — a leading \b there would make the
+    // paren alternative unreachable, and every "(NNN) NNN-NNNN" run would match only its own trailing
+    // "NNN-NNNN" tail.
+    [GeneratedRegex(@"(?:\(\d{3}\)\s?|\b\d{3}[-. ])?\b\d{3}[-. ]\d{4}\b")]
+    private static partial Regex PhoneShapedRunPattern();
+
+    [GeneratedRegex(@"\s+")]
+    private static partial Regex CollapseWhitespacePattern();
+
+    /// <summary>A leading run of <see cref="ClauseBoundaryChars"/> and/or whitespace — literally those
+    /// six characters, kept in sync by hand since <c>GeneratedRegex</c> needs a compile-time constant
+    /// and cannot read the array. What <see cref="DropPhoneClause"/> strips from the very front of its
+    /// own joined remainder, so an orphaned separator (or a bare terminal "." with nothing left to
+    /// terminate) never survives as the whole "sentence".</summary>
+    [GeneratedRegex(@"^[.,;:!?\s]+")]
+    private static partial Regex LeadingClauseBoundaryPattern();
 
     /// <summary>A raw tag longer than this is a sentence with a colon in it, never a voice.</summary>
     const int MaxRawTagChars = 40;

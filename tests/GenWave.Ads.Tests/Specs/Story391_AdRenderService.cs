@@ -225,8 +225,10 @@ public static class FeatureAdRenderService
             var (service, author, store, _, _, _) = Build();
             // A bare sentence is a legal one-line script (SPEC F174.6) — an unparseable fixture here
             // needs a violation the plain-sentence pre-pass cannot absorb: a tagged script with no
-            // ANNOUNCER line (PLAN T444 ruling).
-            var spot = MakeSpot(id: 2, script: "GUEST: no announcer line at all");
+            // ANNOUNCER line (PLAN T444 ruling). The tag must be a KNOWN one (VOICE1) — SPEC F200.1
+            // (STORY-467) folds any unrecognized tag like the former "GUEST" onto ANNOUNCER, which
+            // would make this script parse successfully instead of refusing.
+            var spot = MakeSpot(id: 2, script: "VOICE1: no announcer line at all");
 
             await service.RenderAsync(spot, LiveSettings(), CancellationToken.None);
 

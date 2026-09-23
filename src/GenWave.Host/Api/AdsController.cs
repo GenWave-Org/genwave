@@ -1041,13 +1041,17 @@ public sealed class AdsController(
     /// <see cref="List"/>'s own page-wide dictionary), not merely its wire cross-reference —
     /// <see cref="ToPreviewDto"/> needs it to recompute the staleness key. <paramref name="liveSettings"/>
     /// is read ONCE by the caller (PLAN T442 ruling) — never re-read here per row; see
-    /// <see cref="List"/>'s own remarks for why that hoist matters.</summary>
+    /// <see cref="List"/>'s own remarks for why that hoist matters.
+    /// <para><c>ParseNotes</c> re-parses <see cref="AdSpot.Script"/> every row
+    /// (<see cref="AdScriptParseNotes.For"/>, SPEC F200.3) — <see cref="List"/> goes through this same
+    /// method per row too; acceptable at admin page sizes (&lt;= 50 rows).</para></summary>
     AdSpotDto ToDto(AdSpot spot, Sponsor? sponsor, AdLiveSettings liveSettings) => new(
         spot.Id, spot.SponsorId, spot.SponsorName, SponsorRefFor(spot.SponsorId, sponsor), spot.Title, spot.Brief,
         spot.Script, AdSourceTokens.ToToken(spot.Source), spot.PackSlug, spot.SpotSeconds,
         DeserializeVoicePlan(spot.VoicePlan), spot.BedMediaId, AdStateTokens.ToToken(spot.State), spot.FailReason,
         spot.MediaId, spot.CreatedAt, spot.StateChangedAt, spot.RenderedAt, spot.RetiredAt, spot.Version,
-        ToJobDto(spot), ToPreviewDto(spot, sponsor, liveSettings), RenderWindowFor(spot));
+        ToJobDto(spot), ToPreviewDto(spot, sponsor, liveSettings), RenderWindowFor(spot),
+        AdScriptParseNotes.For(spot.Script));
 
     /// <summary>The configured worker interval for an approved spot, else <see langword="null"/>
     /// (STORY-433; PLAN T457; gh-#745).</summary>
