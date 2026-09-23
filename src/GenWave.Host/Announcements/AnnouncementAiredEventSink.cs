@@ -16,7 +16,7 @@ namespace GenWave.Host.Announcements;
 /// SAME reason <c>GenWave.MediaLibrary.Station.BoothLogWriter</c> queues rather than writes. This sink
 /// only ever does the cheap, synchronous part — the <see cref="SegmentKind.Announcement"/> filter and
 /// <see cref="AnnouncementMediaId.TryUnwrap"/> — and hands the extracted id to
-/// <see cref="AnnouncementAiredDrainService"/> via a bounded queue, mirroring
+/// <see cref="AnnouncementAiredDrainService"/> via an unbounded queue (SPEC F202.1), mirroring
 /// BoothLogWriter/BoothLogDrainService's own split one seam over.
 ///
 /// <para>
@@ -35,10 +35,13 @@ sealed class AnnouncementAiredEventSink(
         if (evt is not TrackAired { SegmentKind: SegmentKind.Announcement } t) return;
         if (!AnnouncementMediaId.TryUnwrap(t.MediaId, out var announcementId)) return;
 
+        // The production queue is unbounded (SPEC F202.1) — TryWrite only ever returns false once
+        // its writer has been completed (host shutdown), never for capacity. This branch exists for
+        // that case (and for a bounded queue in a test double), not a "queue full" outcome.
         if (!queue.TryWrite(new AnnouncementAiredSignal(announcementId)))
         {
             logger.LogWarning(
-                "Announcement aired-confirmation queue full — dropping confirmation for announcement {AnnouncementId}",
+                "Announcement aired-confirmation queue closed — dropping confirmation for announcement {AnnouncementId}",
                 announcementId);
         }
     }

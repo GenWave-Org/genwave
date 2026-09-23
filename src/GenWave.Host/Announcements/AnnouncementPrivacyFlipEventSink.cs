@@ -45,7 +45,9 @@ namespace GenWave.Host.Announcements;
 /// Postgres I/O — <see cref="IStationEventSink"/>'s own contract ("MUST NOT throw and MUST return
 /// promptly") means <see cref="Publish"/> only ever does the cheap, synchronous part (the key check
 /// and the live options read) and hands off to <see cref="AnnouncementPrivacyFlipDrainService"/> via
-/// a bounded queue — the SAME split <see cref="AnnouncementAiredEventSink"/> uses one seam over.
+/// a bounded queue (this feature's own traffic is rare and human-driven, so a bound is safe here —
+/// unlike <see cref="AnnouncementAiredEventSink"/>'s own unbounded aired queue, SPEC F202.1) — the
+/// SAME sink/drain split <see cref="AnnouncementAiredEventSink"/> uses one seam over.
 /// </para>
 /// </summary>
 sealed class AnnouncementPrivacyFlipEventSink(
