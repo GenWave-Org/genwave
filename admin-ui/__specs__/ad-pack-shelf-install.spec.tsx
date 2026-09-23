@@ -20,6 +20,7 @@ import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals
 import { render, screen, within, fireEvent, waitFor, act } from "@testing-library/react";
 import "@testing-library/jest-dom/jest-globals";
 import type { useRouter } from "next/navigation";
+import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "@/components/ui/toast";
 import type { PersonaCatalogClient as PersonaCatalogClientType } from "../app/(authed)/persona-catalog/PersonaCatalogClient";
 import type { CatalogEntryDetailDto, CatalogShelfEntryDto } from "../app/(authed)/persona-catalog/types";
@@ -176,13 +177,13 @@ describe("Feature: ad packs ride the shelf as data", () => {
   async function openWidgetWorldDetail(fetchMock: jest.MockedFunction<typeof fetch>): Promise<void> {
     global.fetch = fetchMock;
     render(
-      <>
+      <ConfirmDialogProvider>
         <PersonaCatalogClient
           activeKind="ad-pack"
           initialIndex={{ entries: [AD_PACK_ENTRY], fetchedAt: "2026-09-02T00:00:00Z", unreachable: false }}
         />
         <Toaster />
-      </>
+      </ConfirmDialogProvider>
     );
     fireEvent.click(cardFor("Widget World"));
     await screen.findByText("The Widget World Collection");
@@ -242,10 +243,12 @@ describe("Feature: ad packs ride the shelf as data", () => {
       const fetchMock = detailOnlyFetchMock(AD_PACK_ENTRY.slug, AD_PACK_DETAIL_NO_PACK_NAME);
       global.fetch = fetchMock;
       render(
-        <PersonaCatalogClient
-          activeKind="ad-pack"
-          initialIndex={{ entries: [AD_PACK_ENTRY], fetchedAt: "2026-09-02T00:00:00Z", unreachable: false }}
-        />
+        <ConfirmDialogProvider>
+          <PersonaCatalogClient
+            activeKind="ad-pack"
+            initialIndex={{ entries: [AD_PACK_ENTRY], fetchedAt: "2026-09-02T00:00:00Z", unreachable: false }}
+          />
+        </ConfirmDialogProvider>
       );
       fireEvent.click(cardFor("Widget World"));
       await screen.findByText("Bramble & Fitch");
@@ -263,10 +266,12 @@ describe("Feature: ad packs ride the shelf as data", () => {
       const fetchMock = detailOnlyFetchMock(EMPTY_BRIEFS_ENTRY.slug, AD_PACK_DETAIL_EMPTY_BRIEFS);
       global.fetch = fetchMock;
       render(
-        <PersonaCatalogClient
-          activeKind="ad-pack"
-          initialIndex={{ entries: [EMPTY_BRIEFS_ENTRY], fetchedAt: "2026-09-02T00:00:00Z", unreachable: false }}
-        />
+        <ConfirmDialogProvider>
+          <PersonaCatalogClient
+            activeKind="ad-pack"
+            initialIndex={{ entries: [EMPTY_BRIEFS_ENTRY], fetchedAt: "2026-09-02T00:00:00Z", unreachable: false }}
+          />
+        </ConfirmDialogProvider>
       );
       fireEvent.click(cardFor("Empty Briefs Pack"));
 
@@ -279,10 +284,12 @@ describe("Feature: ad packs ride the shelf as data", () => {
       const fetchMock = detailOnlyFetchMock(UNPARSED_ENTRY.slug, AD_PACK_DETAIL_UNPARSED);
       global.fetch = fetchMock;
       render(
-        <PersonaCatalogClient
-          activeKind="ad-pack"
-          initialIndex={{ entries: [UNPARSED_ENTRY], fetchedAt: "2026-09-02T00:00:00Z", unreachable: false }}
-        />
+        <ConfirmDialogProvider>
+          <PersonaCatalogClient
+            activeKind="ad-pack"
+            initialIndex={{ entries: [UNPARSED_ENTRY], fetchedAt: "2026-09-02T00:00:00Z", unreachable: false }}
+          />
+        </ConfirmDialogProvider>
       );
       fireEvent.click(cardFor("Unparsed Pack"));
 

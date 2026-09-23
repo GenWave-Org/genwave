@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using GenWave.Core.Domain;
 using GenWave.Host.Catalog;
 
 namespace GenWave.Host.Api;
@@ -381,4 +382,22 @@ internal static partial class CatalogInstallShell
     /// font pack's own write path stores verbatim — an avatar pack's own write path reads only
     /// <see cref="Bytes"/> (see <see cref="FetchAllAssetsAsync"/>'s own remarks for why).</summary>
     public sealed record CatalogFetchedAsset(byte[] Bytes, string Sha256);
+
+    // ── Structured uninstall-conflict extension (SPEC F204.3, STORY-472, PLAN T563) ──────────────────
+
+    /// <summary>The one literal for the uninstall-409 extension key (SPEC F204.3); serialized at the
+    /// ProblemDetails top level like <c>dependentMediaCount</c>.</summary>
+    public const string ReferencedByExtensionKey = "referencedBy";
+
+    /// <summary>Sets <see cref="ReferencedByExtensionKey"/> to the referrers' human-readable labels
+    /// (SPEC F204.3). Always set, even when empty, so the UI branches on emptiness, never presence.</summary>
+    public static ProblemDetails WithReferencedBy(this ProblemDetails problem, IEnumerable<string> referrers)
+    {
+        problem.Extensions[ReferencedByExtensionKey] = referrers.ToArray();
+        return problem;
+    }
+
+    /// <summary>The one "ad spot #&lt;id&gt;" label Voice and Jingle share (SPEC F204.3): their guards
+    /// read spot ids only, never titles.</summary>
+    public static string AdSpotReferrerLabel(long adSpotId) => $"ad spot #{adSpotId}";
 }

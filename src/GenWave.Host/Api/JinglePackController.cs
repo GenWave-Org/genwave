@@ -365,7 +365,11 @@ public sealed class JinglePackController(
 
     /// <summary>
     /// DELETE /api/jingle-packs/{slug} — see this class's own remarks for the full contract
-    /// <see cref="IJinglePackStore.DeleteAsync"/> enforces.
+    /// <see cref="IJinglePackStore.DeleteAsync"/> enforces. A refusal's 409 carries <c>referencedBy</c>
+    /// (SPEC F204.3, STORY-472, PLAN T563) — an <see cref="CatalogInstallShell.AdSpotReferrerLabel"/>
+    /// per referencing ad spot id, structured alongside <see cref="UninstallRefusedProblem"/>'s own
+    /// unchanged prose <c>Detail</c>. Install-time collisions (<see cref="InstallRefusedProblem"/>) are
+    /// unaffected — F204.3 only widens the UNINSTALL 409.
     /// </summary>
     [HttpDelete("{slug}")]
     public async Task<IActionResult> Uninstall(string slug, CancellationToken ct)
@@ -784,7 +788,8 @@ public sealed class JinglePackController(
             : $"\"{slug}\" cannot be reinstalled: it would drop background music still referenced by an active ad spot — remove or re-render it first.",
     };
 
-    static ProblemDetails UninstallRefusedProblem(string slug, IReadOnlyList<long> adSpotIds) => new()
+    // SPEC F204.3: referencedBy lists the Detail's ad spots via CatalogInstallShell.AdSpotReferrerLabel.
+    static ProblemDetails UninstallRefusedProblem(string slug, IReadOnlyList<long> adSpotIds) => new ProblemDetails
     {
         Status = StatusCodes.Status409Conflict,
         Title = "Jingle pack is referenced.",
@@ -792,7 +797,7 @@ public sealed class JinglePackController(
         Detail = adSpotIds.Count > 0
             ? $"\"{slug}\" is still referenced by ad spot(s) {string.Join(", ", adSpotIds)} and cannot be uninstalled — remove or re-render those first."
             : $"\"{slug}\" is still referenced and cannot be uninstalled.",
-    };
+    }.WithReferencedBy(adSpotIds.Select(CatalogInstallShell.AdSpotReferrerLabel));
 
     /// <summary>One asset this install attempt staged and enriched, before it was ever moved into
     /// <see cref="PacksOptions.JingleRoot"/> — <see cref="GenWave.Core.Domain.Loudness"/>/<see cref="Cue"/> already carry

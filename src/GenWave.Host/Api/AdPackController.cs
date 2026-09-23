@@ -220,6 +220,8 @@ public sealed class AdPackController(
     /// and the reasoning behind it. Deliberately mirrors <see cref="VoicePackController.Uninstall"/>'s
     /// own switch-based dispatch shape, one pack kind over, substituting
     /// <see cref="AdPackUninstallResult"/>'s three cases for <see cref="VoicePackDeleteResult"/>'s own.
+    /// A refusal's 409 carries <c>referencedBy</c> (SPEC F204.3, STORY-472, PLAN T563) — spot titles
+    /// plus show names, alongside <see cref="InUseProblem"/>'s own unchanged prose <c>Detail</c>.
     /// </summary>
     [HttpDelete("{slug}")]
     public async Task<IActionResult> Uninstall(string slug, CancellationToken ct)
@@ -262,19 +264,17 @@ public sealed class AdPackController(
 
     /// <summary>The <see cref="Uninstall"/>-only 409 body — <see cref="VoicePackController"/>'s own
     /// <c>BuildReferencedDetail</c> "join whichever parts are non-empty" idiom, one pack kind over.
-    /// <see cref="ProblemDetails.Detail"/> is the whole body (drops this method's former
-    /// <see cref="ProblemDetails.Extensions"/> entries: SPEC F172.4 and STORY-416 AC2
-    /// ask only for the prose <c>Detail</c>, no sibling pack controller's own 409 emits raw
-    /// <c>Extensions</c> arrays, and <see cref="VoicePackController"/>'s own <c>BuildReferencedDetail</c>
-    /// this method's summary claims to mirror never carried them either).</summary>
+    /// <see cref="ProblemDetails.Detail"/> is the prose SPEC F172.4 / STORY-416 AC2 pinned; SPEC F204.3
+    /// adds <c>referencedBy</c> (spot titles, then show names). LogSafeText.Sanitize deliberately mirrors
+    /// <see cref="BuildInUseDetail"/> so the list and the prose never diverge.</summary>
     static ProblemDetails InUseProblem(string slug, IReadOnlyList<string> spotTitles, IReadOnlyList<string> showNames) =>
-        new()
+        new ProblemDetails
         {
             Status = StatusCodes.Status409Conflict,
             Title = "Ad pack is referenced.",
             Type = InUseType,
             Detail = BuildInUseDetail(slug, spotTitles, showNames),
-        };
+        }.WithReferencedBy(spotTitles.Concat(showNames).Select(LogSafeText.Sanitize));
 
     static string BuildInUseDetail(string slug, IReadOnlyList<string> spotTitles, IReadOnlyList<string> showNames)
     {

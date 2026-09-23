@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { cookies } from "next/headers";
+import { AD_BRIEFS_PATH, type AdBriefDto } from "@/lib/ads-api";
 import { apiGet } from "@/lib/api";
 import { PersonaCatalogClient } from "./PersonaCatalogClient";
 import { PersonaCatalogTabs, resolveCatalogKind } from "./PersonaCatalogTabs";
@@ -12,25 +13,41 @@ export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 
 /**
- * Generic "GET a listing, project each admitted row's slug" fetcher (PLAN T255 review finding F3):
- * `fetchInstalledFontSlugs`/`fetchImportedShowSlugs`/`fetchHiredPersonaSlugs` below were byte-
- * identical modulo their URL and row shape before this extraction — this is the one shared
- * implementation. `predicate` (default: every row counts) is the one place a caller narrows WHICH
- * rows count — `fetchImportedShowSlugs` uses it to admit only genuinely-imported rows (review
- * finding F2), never an authored show that merely collides on the same slug. Any failure (network
- * error, non-200, or an unexpected non-array body) degrades to `[]` — fail closed: no live signal
- * ever means a slug gets FALSELY claimed.
+ * GET a listing and return each admitted row's id string, deduped. `predicate` narrows which rows
+ * count; `selector` (default `row.slug`) picks the field. Any failure degrades to `[]` (fail closed).
  */
 async function fetchSlugs<T extends { slug: string }>(
   path: string,
   cookieHeader: string,
-  predicate: (row: T) => boolean = () => true
+  options?: { predicate?: (row: T) => boolean }
+): Promise<string[]>;
+async function fetchSlugs<T>(
+  path: string,
+  cookieHeader: string,
+  options: { predicate?: (row: T) => boolean; selector: (row: T) => string | null | undefined }
+): Promise<string[]>;
+async function fetchSlugs<T>(
+  path: string,
+  cookieHeader: string,
+  options: { predicate?: (row: T) => boolean; selector?: (row: T) => string | null | undefined } = {}
 ): Promise<string[]> {
+  const predicate = options.predicate ?? (() => true);
+  // The no-selector overload above only ever admits a `T extends { slug: string }` — this cast just
+  // recovers that fact for the implementation signature, which (unlike the overloads) must stay
+  // generic enough to also serve the selector-supplied call below.
+  const selector = options.selector ?? ((row: T) => (row as unknown as { slug: string }).slug);
   try {
     const response = await apiGet(path, { cookies: cookieHeader });
     if (!response.ok) return [];
     const rows = (await response.json()) as T[];
-    return Array.isArray(rows) ? rows.filter(predicate).map((row) => row.slug) : [];
+    if (!Array.isArray(rows)) return [];
+    const values = new Set<string>();
+    for (const row of rows) {
+      if (!predicate(row)) continue;
+      const value = selector(row);
+      if (typeof value === "string" && value !== "") values.add(value);
+    }
+    return [...values];
   } catch {
     return [];
   }
@@ -128,6 +145,13 @@ async function fetchInstalledJinglePackSlugs(cookieHeader: string): Promise<stri
   return fetchSlugs<InstalledSummaryPackRow>("/api/jingle-packs", cookieHeader);
 }
 
+/** No `GET /api/ad-packs` exists — installed = distinct `packSlug` over `/api/ad-briefs` (server
+ * also counts sponsor rows, a known gap, owed to /design). Fail-closed via `fetchSlugs`'s own
+ * posture. */
+async function fetchInstalledAdPackSlugs(cookieHeader: string): Promise<string[]> {
+  return fetchSlugs<AdBriefDto>(AD_BRIEFS_PATH, cookieHeader, { selector: (row) => row.packSlug });
+}
+
 /** Wire shape of one `Station:Theme` choice, off `GET /api/settings` (SPEC F103.11, PLAN T187) —
  * only the fields this page reads; mirrors `InstalledFontPackRow`'s own narrow-cast idiom above
  * rather than importing `settings/settings-types.ts`'s full `SettingChoice` for three fields. */
@@ -176,7 +200,7 @@ interface ShowRow {
  * `readErrorMessage` failure path, same as any other refused import.
  */
 async function fetchImportedShowSlugs(cookieHeader: string): Promise<string[]> {
-  return fetchSlugs<ShowRow>("/api/shows", cookieHeader, (row) => row.importedFrom !== null);
+  return fetchSlugs<ShowRow>("/api/shows", cookieHeader, { predicate: (row) => row.importedFrom !== null });
 }
 
 /** Wire shape of one `GET /api/personas` row — only the one field this page reads (mirrors
@@ -260,6 +284,7 @@ export default async function PersonaCatalogPage({ searchParams }: PersonaCatalo
     hiredPersonaSlugs,
     installedAvatarSlugs,
     installedIconSlugs,
+    installedAdPackSlugs,
     installedVoicePackSlugs,
     installedJinglePackSlugs,
   ] = await Promise.all([
@@ -270,6 +295,7 @@ export default async function PersonaCatalogPage({ searchParams }: PersonaCatalo
     fetchHiredPersonaSlugs(cookieHeader),
     fetchInstalledAvatarSlugs(cookieHeader),
     fetchInstalledIconSlugs(cookieHeader),
+    fetchInstalledAdPackSlugs(cookieHeader),
     fetchInstalledVoicePackSlugs(cookieHeader),
     fetchInstalledJinglePackSlugs(cookieHeader),
   ]);
@@ -314,6 +340,7 @@ export default async function PersonaCatalogPage({ searchParams }: PersonaCatalo
           hiredPersonaSlugs={hiredPersonaSlugs}
           installedAvatarSlugs={installedAvatarSlugs}
           installedIconSlugs={installedIconSlugs}
+          installedAdPackSlugs={installedAdPackSlugs}
           installedVoicePackSlugs={installedVoicePackSlugs}
           installedJinglePackSlugs={installedJinglePackSlugs}
           activeKind={activeKind}

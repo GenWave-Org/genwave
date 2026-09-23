@@ -1,52 +1,33 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Button } from "@/components/ui/button";
+import { Chip } from "@/components/ui/chip";
 import { clampPackDisplayText } from "@/lib/clamp-pack-display-text";
 import { BestForChips, MatureBadge } from "./catalog-badges";
 import { prettifySlug } from "./format-slug";
+import { InstallToggle } from "./InstallToggle";
 import type { CatalogAdPackBriefDto, CatalogEntryDetailDto } from "./types";
 
 export interface AdPackDetailPanelProps {
   slug: string;
   detail: CatalogEntryDetailDto;
+  /** Whether this slug already has an installed pack — sourced from `GET /api/ad-briefs`'s own
+   * distinct `packSlug` values (no dedicated listing route exists, see `page.tsx`'s own
+   * `fetchInstalledAdPackSlugs` remarks). */
+  isInstalled: boolean;
   onInstallClick: () => void;
+  /** Fires once the DELETE resolves as removed (2xx or 404) — the caller removes this slug from its
+   * own installed set so the row flips without a reload. */
+  onUninstalled: (slug: string) => void;
 }
 
 /**
- * An ad-pack entry's detail view (SPEC F162.2, STORY-393, PLAN T405) — mirrors `IconDetailPanel`'s
- * own shape one kind over (name, 18+ badge, an Install button that opens a confirm modal rather than
- * posting anything itself) with the specimen half replaced by a READ-ONLY BRIEF LIST: every
- * `detail.adPackBriefs` entry (SPEC F162.2's own `briefs[]`, parsed off the already-fetched
- * `.ad-pack.json` manifest at zero extra network cost) rendered as brand/premise/tone/structure —
- * plain text only, the SAME `DetailPanel`/`AvatarDetailPanel` rule (SPEC F90.6): nothing here is
- * interpreted, and nothing here is editable — a brief's own editable home is the Ads page's Briefs
- * tab (SPEC F162.1), reached only AFTER an explicit install.
- *
- * The heading reads `detail.packName ?? prettifySlug(slug)` (mirrors `AvatarDetailPanel`'s own
- * fallback) — SPEC F162.2's own "pack metadata" leaves `packName` genuinely optional on this kind
- * (unlike an avatar pack's own required one), so a pack with none still gets an honest, slug-derived
- * title rather than a blank heading.
- *
- * PARSED-EMPTY vs UNPARSEABLE (T405 review F6 — this panel used to conflate the two): `null` means
- * the manifest could NOT be read (a hostile/malformed pack, or the catalog was unreachable) —
- * `AdPackController.Install` would 400 on the SAME manifest, so this panel must not contradict that
- * by offering an Install button that can only fail; Install is DISABLED and the panel names the
- * degrade instead. `[]` (a genuinely empty, but successfully PARSED, brief list — never actually
- * reachable off the real wire today, since `CatalogAdPackManifestSerializer.Deserialize` itself
- * refuses a briefless manifest, but the wire TYPE still allows it and this panel stays honest to it
- * defensively, the "never trust the wire blindly" idiom this codebase already holds every other
- * safe renderer to) keeps Install enabled and simply names the pack as declaring none.
- *
- * NO "Installed"/"Re-install" state on this panel (T405's own deliberate, stated scope line — unlike
- * every sibling pack kind, this route's installed state lives INSIDE `station.ad_brief`, mixed with
- * owner-authored rows, with no dedicated per-pack listing endpoint this task adds — see
- * `AdPackController`'s own class remarks for the full reasoning): the button always reads "Install",
- * even on a slug already installed — a legitimate, idempotent action either way (SPEC F162.2's own
- * upsert contract), never a destructive one. The station's own Briefs tab (`GET /api/ad-briefs`,
- * already shipped) is where an operator actually confirms what landed.
+ * An ad-pack entry's detail view (SPEC F162.2, STORY-393, PLAN T405) — name, 18+ badge, a read-only
+ * brief list (`detail.adPackBriefs`, plain text only), and the shared `InstallToggle` (SPEC F204.1,
+ * PLAN T564). Install is disabled when the manifest failed to parse (F6) — the route would 400 on
+ * the same manifest.
  */
-export function AdPackDetailPanel({ slug, detail, onInstallClick }: AdPackDetailPanelProps): ReactNode {
+export function AdPackDetailPanel({ slug, detail, isInstalled, onInstallClick, onUninstalled }: AdPackDetailPanelProps): ReactNode {
   const briefs = detail.adPackBriefs;
   const parsed = briefs !== null;
   const displayName = clampPackDisplayText(detail.packName ?? prettifySlug(slug));
@@ -59,15 +40,22 @@ export function AdPackDetailPanel({ slug, detail, onInstallClick }: AdPackDetail
           {/* 18+ badge — ALWAYS shown on a mature entry, never behind a toggle (the house rule this
               task's own dispatch restates). */}
           {detail.audience === "mature" && <MatureBadge />}
+          {isInstalled && <Chip>Installed</Chip>}
         </div>
-        {/* Install opens AdPackInstallModal's confirm step — this click itself issues no request;
-            the modal POSTs on confirm only, no request body (mirrors IconInstallModal's own "no
-            request body, by design" rule — AdPackController.Install fetches every byte server-side
-            too). Disabled when the manifest failed to parse (F6): the route would 400 on the exact
-            same manifest, so this panel must never offer an Install that can only fail. */}
-        <Button type="button" variant="primary" onClick={onInstallClick} disabled={!parsed}>
-          Install
-        </Button>
+        {/* Install opens AdPackInstallModal's confirm step, no request body. Disabled when the
+            manifest failed to parse (F6). Uninstall DELETEs; a 409 (still referenced) keeps the row
+            on "Uninstall" (SPEC F204.3). */}
+        <InstallToggle
+          slug={slug}
+          displayName={displayName}
+          isInstalled={isInstalled}
+          deletePath="/api/ad-packs"
+          kindLabel="ad pack"
+          removedNoun="brief"
+          onInstallClick={onInstallClick}
+          onUninstalled={onUninstalled}
+          installDisabled={!parsed}
+        />
       </div>
 
       <BestForChips items={detail.bestFor ?? []} />

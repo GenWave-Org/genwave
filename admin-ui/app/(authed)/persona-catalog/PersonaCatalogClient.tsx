@@ -59,6 +59,14 @@ const KIND_TAB_NOUN: Record<CatalogEntryKind, string> = {
   "jingle-pack": "jingle packs",
 };
 
+/** Returns a new Set with `slug` removed — the one shape all six `handle*Uninstalled` callbacks
+ * below share. */
+function withoutSlug(prev: ReadonlySet<string>, slug: string): ReadonlySet<string> {
+  const next = new Set(prev);
+  next.delete(slug);
+  return next;
+}
+
 interface PersonaCatalogClientProps {
   /** The index this page's server component already fetched (SPEC F90.2, F90.4). */
   initialIndex: CatalogIndexResponseDto;
@@ -120,19 +128,16 @@ interface PersonaCatalogClientProps {
    * the same posture every other installed-slugs prop on this component carries.
    */
   installedIconSlugs?: string[];
-  /**
-   * Every already-installed voice pack's slug (STORY-397, PLAN T418), per `GET /api/voice-packs`
-   * (R1's own new listing route). Unlike `installedAvatarSlugs`/`installedIconSlugs` above, this
-   * is read directly on every render rather than seeded into a locally-flipped `Set` — a successful
-   * install OR uninstall (`VoicePackDetailPanel`'s own job) calls `router.refresh()` instead, so the
-   * next server render's `GET /api/voice-packs` read is always this prop's own source of truth.
-   * Defaults to `[]` — fail closed, the same posture every other installed-slugs prop carries.
-   */
+  /** No `GET /api/ad-packs` exists — installed = distinct `packSlug` over `/api/ad-briefs` (server
+   * also counts sponsor rows, a known gap, owed to /design). Defaults to `[]` — fail closed. */
+  installedAdPackSlugs?: string[];
+  /** Every already-installed voice pack's slug (STORY-397, PLAN T418), per `GET /api/voice-packs`.
+   * Seeded into a local `Set` that Install/Uninstall flip without a reload (SPEC F204.1/F204.2, PLAN
+   * T564). Defaults to `[]` — fail closed. */
   installedVoicePackSlugs?: string[];
   /**
    * Every already-installed jingle pack's slug (STORY-397, PLAN T418), per `GET /api/jingle-packs`
-   * — mirrors `installedVoicePackSlugs`'s own shape and "read fresh via `router.refresh()`, never a
-   * local flip" posture exactly, one endpoint over. Defaults to `[]`.
+   * — mirrors `installedVoicePackSlugs`'s own shape exactly, one endpoint over. Defaults to `[]`.
    */
   installedJinglePackSlugs?: string[];
   /** Test-only injection point for the theme provenance line's `formatDateStamp` call (gh-#375);
@@ -197,6 +202,7 @@ export function PersonaCatalogClient({
   hiredPersonaSlugs = [],
   installedAvatarSlugs = [],
   installedIconSlugs = [],
+  installedAdPackSlugs = [],
   installedVoicePackSlugs = [],
   installedJinglePackSlugs = [],
   timeZone,
@@ -249,6 +255,11 @@ export function PersonaCatalogClient({
   const [installedIconPackSlugs, setInstalledIconPackSlugs] = useState<ReadonlySet<string>>(
     () => new Set(installedIconSlugs)
   );
+  // Local Set flipped by ad-pack install/uninstall (SPEC F204.1/F204.2, PLAN T564) so the row
+  // reads "Install"/"Uninstall" with no reload.
+  const [installedAdPackSlugSet, setInstalledAdPackSlugSet] = useState<ReadonlySet<string>>(
+    () => new Set(installedAdPackSlugs)
+  );
   // Same lazy-initializer/local-flip shape as `installedSlugs` above, keyed by slug — a Map, not a
   // Set, because the theme detail panel's provenance line needs the WHOLE row
   // (importedFrom/importedAt), not just a boolean.
@@ -263,12 +274,15 @@ export function PersonaCatalogClient({
   // soft offer below navigates away (`handleImported`'s own `router.push("/personas")`) before a
   // second offer in the same session could ever matter — see `handleShowImported`'s own remarks.
   const hiredPersonaSlugSet = useMemo(() => new Set(hiredPersonaSlugs), [hiredPersonaSlugs]);
-  // Read fresh from the server-fetched prop every render, never locally flipped (see
-  // `installedVoicePackSlugs`'s/`installedJinglePackSlugs`'s own remarks on `PersonaCatalogClientProps`
-  // for why — a successful install/uninstall calls `router.refresh()` instead of a local `Set`
-  // mutation the way `installedIconPackSlugs` above does).
-  const installedVoicePackSlugSet = useMemo(() => new Set(installedVoicePackSlugs), [installedVoicePackSlugs]);
-  const installedJinglePackSlugSet = useMemo(() => new Set(installedJinglePackSlugs), [installedJinglePackSlugs]);
+  // Local Set flipped by voice-pack install/uninstall (SPEC F204.1/F204.2, PLAN T564);
+  // `router.refresh()` still fires on top as cheap insurance, it no longer does the flipping.
+  const [installedVoicePackSlugSet, setInstalledVoicePackSlugSet] = useState<ReadonlySet<string>>(
+    () => new Set(installedVoicePackSlugs)
+  );
+  // Mirrors `installedVoicePackSlugSet` immediately above, one endpoint over.
+  const [installedJinglePackSlugSet, setInstalledJinglePackSlugSet] = useState<ReadonlySet<string>>(
+    () => new Set(installedJinglePackSlugs)
+  );
 
   // Request token (T102 review, HIGH): loadDetail's fetch is not the only thing that can change
   // `detail` between when a request starts and when it resolves — the operator can also collapse
@@ -385,6 +399,14 @@ export function PersonaCatalogClient({
     toast.success(`"${result.family}" installed.`);
   }
 
+  /** SPEC F204.2's success path, the font sibling of `handleAdPackUninstalled`'s local removal —
+   * `InstallToggle` itself already toasted and called the DELETE; this only owns the local flip so
+   * `FontDetailPanel` reads "Uninstall"→"Install" the instant the DELETE resolves as removed, no
+   * reload. */
+  function handleFontUninstalled(slug: string): void {
+    setInstalledSlugs((prev) => withoutSlug(prev, slug));
+  }
+
   /**
    * SPEC F128.3's success path — mirrors `handleFontInstalled`'s own shape exactly (this task's own
    * "match the font install flow" instruction): closes the modal, marks `slug` installed in local
@@ -401,6 +423,14 @@ export function PersonaCatalogClient({
     toast.success(`"${clampPackDisplayText(result.packName)}" installed.`);
   }
 
+  /** SPEC F204.2's success path, the avatar-pack sibling of `handleFontUninstalled` immediately
+   * above — `InstallToggle` itself already toasted and called the DELETE; this only owns the local
+   * flip so `AvatarDetailPanel` reads "Uninstall"→"Install" the instant the DELETE resolves as
+   * removed, no reload. */
+  function handleAvatarUninstalled(slug: string): void {
+    setInstalledAvatarPackSlugs((prev) => withoutSlug(prev, slug));
+  }
+
   /**
    * SPEC F130.5's success path — mirrors `handleAvatarInstalled`'s own shape exactly, the icon-kind
    * sibling: closes the modal, marks `slug` installed in local state so `IconDetailPanel` flips to
@@ -415,17 +445,20 @@ export function PersonaCatalogClient({
     toast.success(`Icon pack "${slug}" installed (${result.iconCount} icon${result.iconCount === 1 ? "" : "s"}).`);
   }
 
-  /**
-   * SPEC F162.2's success path — mirrors `handleIconInstalled`'s own shape, minus the local
-   * installed-slug flip: this kind carries no dedicated per-pack listing endpoint this task adds
-   * (`AdPackController`'s own class remarks), so `AdPackDetailPanel` has no "Installed" chip to flip
-   * in the first place — closing the modal and toasting the brief count is the whole client-side
-   * job. Toasts the pack's own display name when present, falling back to the brief count alone
-   * (SPEC F162.2's own `packName` is genuinely optional on this kind, unlike an avatar pack's own
-   * required one).
-   */
-  function handleAdPackInstalled(result: AdPackInstallResult): void {
+  /** SPEC F204.2's success path, the icon-pack sibling of `handleAvatarUninstalled` immediately
+   * above — `InstallToggle` itself already toasted and called the DELETE; this only owns the local
+   * flip so `IconDetailPanel` reads "Uninstall"→"Install" the instant the DELETE resolves as
+   * removed, no reload. */
+  function handleIconUninstalled(slug: string): void {
+    setInstalledIconPackSlugs((prev) => withoutSlug(prev, slug));
+  }
+
+  /** SPEC F162.2's success path — marks `slug` installed locally so `AdPackDetailPanel` flips to
+   * "Uninstall" immediately, and toasts the pack's own display name when present, else the brief
+   * count alone (`packName` is optional on this kind, unlike an avatar pack's required one). */
+  function handleAdPackInstalled(slug: string, result: AdPackInstallResult): void {
     setInstallingAdPack(false);
+    setInstalledAdPackSlugSet((prev) => new Set(prev).add(slug));
     const briefCount = result.brands.length;
     const briefWord = `${briefCount} brief${briefCount === 1 ? "" : "s"}`;
     toast.success(
@@ -435,25 +468,42 @@ export function PersonaCatalogClient({
     );
   }
 
-  /**
-   * STORY-397's install success path — unlike every kind above, this closes the modal, toasts, AND
-   * calls `router.refresh()` instead of flipping a local `Set` (see `installedVoicePackSlugs`'s own
-   * remarks on `PersonaCatalogClientProps`): the next server render's `GET /api/voice-packs` read
-   * becomes this component's own "Installed" source of truth, the same mechanism the retired
-   * Wardrobe page's uninstall button used for its own 204 path.
-   */
-  function handleVoicePackInstalled(result: VoicePackInstallResult): void {
+  /** SPEC F204.2's success path, the ad-pack sibling of `handleFontUninstalled`'s local removal
+   * — `InstallToggle` itself already toasted and called the DELETE; this only owns the local flip
+   * so `AdPackDetailPanel` reads "Uninstall"→"Install" the instant the DELETE resolves as removed,
+   * no reload. */
+  function handleAdPackUninstalled(slug: string): void {
+    setInstalledAdPackSlugSet((prev) => withoutSlug(prev, slug));
+  }
+
+  /** Flips local state the same way uninstall does (STORY-397, PLAN T564) — `router.refresh()`
+   * stays on top as cheap insurance for other server-derived state, it no longer does the flipping. */
+  function handleVoicePackInstalled(slug: string, result: VoicePackInstallResult): void {
     setInstallingVoicePack(false);
+    setInstalledVoicePackSlugSet((prev) => new Set(prev).add(slug));
     toast.success(`"${clampPackDisplayText(result.packName)}" installed (${result.voiceIds.join(", ")}).`);
     router.refresh();
   }
 
+  /** SPEC F204.2's success path, the voice-pack sibling of `handleAdPackUninstalled`'s local
+   * removal — `InstallToggle` itself already toasted, DELETEd, and called `router.refresh()`; this
+   * only owns the local flip. */
+  function handleVoicePackUninstalled(slug: string): void {
+    setInstalledVoicePackSlugSet((prev) => withoutSlug(prev, slug));
+  }
+
   /** Mirrors `handleVoicePackInstalled`'s own shape exactly, the jingle-pack sibling. */
-  function handleJinglePackInstalled(result: JinglePackInstallResult): void {
+  function handleJinglePackInstalled(slug: string, result: JinglePackInstallResult): void {
     setInstallingJinglePack(false);
+    setInstalledJinglePackSlugSet((prev) => new Set(prev).add(slug));
     const assetWord = `${result.assetCount} asset${result.assetCount === 1 ? "" : "s"}`;
     toast.success(`"${clampPackDisplayText(result.packName)}" installed (${assetWord}).`);
     router.refresh();
+  }
+
+  /** Mirrors `handleVoicePackUninstalled` immediately above, the jingle-pack sibling. */
+  function handleJinglePackUninstalled(slug: string): void {
+    setInstalledJinglePackSlugSet((prev) => withoutSlug(prev, slug));
   }
 
   /**
@@ -689,6 +739,7 @@ export function PersonaCatalogClient({
             detail={loaded.detail}
             isInstalled={installedSlugs.has(loaded.slug)}
             onInstallClick={() => setInstallingFont(true)}
+            onUninstalled={handleFontUninstalled}
           />
         );
       case "avatar":
@@ -698,6 +749,7 @@ export function PersonaCatalogClient({
             detail={loaded.detail}
             isInstalled={installedAvatarPackSlugs.has(loaded.slug)}
             onInstallClick={() => setInstallingAvatar(true)}
+            onUninstalled={handleAvatarUninstalled}
           />
         );
       case "icon":
@@ -707,6 +759,7 @@ export function PersonaCatalogClient({
             detail={loaded.detail}
             isInstalled={installedIconPackSlugs.has(loaded.slug)}
             onInstallClick={() => setInstallingIcon(true)}
+            onUninstalled={handleIconUninstalled}
           />
         );
       case "ad-pack":
@@ -714,7 +767,9 @@ export function PersonaCatalogClient({
           <AdPackDetailPanel
             slug={loaded.slug}
             detail={loaded.detail}
+            isInstalled={installedAdPackSlugSet.has(loaded.slug)}
             onInstallClick={() => setInstallingAdPack(true)}
+            onUninstalled={handleAdPackUninstalled}
           />
         );
       case "voice-pack":
@@ -724,6 +779,7 @@ export function PersonaCatalogClient({
             detail={loaded.detail}
             isInstalled={installedVoicePackSlugSet.has(loaded.slug)}
             onInstallClick={() => setInstallingVoicePack(true)}
+            onUninstalled={handleVoicePackUninstalled}
           />
         );
       case "jingle-pack":
@@ -733,6 +789,7 @@ export function PersonaCatalogClient({
             detail={loaded.detail}
             isInstalled={installedJinglePackSlugSet.has(loaded.slug)}
             onInstallClick={() => setInstallingJinglePack(true)}
+            onUninstalled={handleJinglePackUninstalled}
           />
         );
       default:
@@ -849,7 +906,7 @@ export function PersonaCatalogClient({
         <AdPackInstallModal
           slug={detail.slug}
           onCancel={() => setInstallingAdPack(false)}
-          onInstalled={handleAdPackInstalled}
+          onInstalled={(result) => handleAdPackInstalled(detail.slug, result)}
         />
       )}
 
@@ -861,7 +918,7 @@ export function PersonaCatalogClient({
         <VoicePackInstallModal
           slug={detail.slug}
           onCancel={() => setInstallingVoicePack(false)}
-          onInstalled={handleVoicePackInstalled}
+          onInstalled={(result) => handleVoicePackInstalled(detail.slug, result)}
         />
       )}
 
@@ -871,7 +928,7 @@ export function PersonaCatalogClient({
         <JinglePackInstallModal
           slug={detail.slug}
           onCancel={() => setInstallingJinglePack(false)}
-          onInstalled={handleJinglePackInstalled}
+          onInstalled={(result) => handleJinglePackInstalled(detail.slug, result)}
         />
       )}
 
@@ -988,16 +1045,19 @@ function detailSectionAriaLabel(kind: CatalogEntryKind | undefined): string {
 
 /**
  * A theme entry's detail panel (SPEC F103.5, F103.6, PLAN T186; installed-state awareness gh-#375
- * — the theme half of Dean's demo feedback, mirroring `FontDetailPanel`'s own
- * `isInstalled`/Re-install treatment). `provenance` is `null` for a theme with no `station.theme`
- * row under this catalog slug (never installed, or the shipped default it happens to share a slug
- * with — see `ThemeCatalogProvenanceDto`'s own remarks); non-null drives the SAME "Installed" chip
+ * — the theme half of Dean's demo feedback, mirroring `FontDetailPanel`'s own `isInstalled`
+ * treatment). `provenance` is `null` for a theme with no `station.theme` row under this catalog
+ * slug (never installed, or the shipped default it happens to share a slug with — see
+ * `ThemeCatalogProvenanceDto`'s own remarks); non-null drives the SAME "Installed" chip
  * `FontDetailPanel` uses (the shared `Chip` component) plus an "Imported · ⟨source⟩ · ⟨date⟩"
  * provenance line — the T187 copy verbatim, minus the leading label `SettingsForm`'s own
  * `ThemeProvenanceBadge` folds in (this panel already names the theme in its own heading, exactly
- * the same reasoning `FontDetailPanel`'s own bare-word chip gives) — and the Install→Re-install
- * button label. `importedFrom` renders VERBATIM, same provenance rule every other chip in this
- * codebase follows.
+ * the same reasoning `FontDetailPanel`'s own bare-word chip gives). `importedFrom` renders VERBATIM,
+ * same provenance rule every other chip in this codebase follows.
+ *
+ * <b>Install-only, no Uninstall (SPEC F204.1, F204.4, PLAN T564).</b> Themes have no `DELETE` route
+ * at all, so this panel keeps its own bare Install button and names where uninstall lives instead
+ * (the Theme Editor).
  */
 function ThemeDetailPanel({
   slug,
@@ -1019,12 +1079,12 @@ function ThemeDetailPanel({
           <h2 className="font-display text-[1.1rem] text-ink">{prettifySlug(slug)}</h2>
           {provenance !== null && <Chip>Installed</Chip>}
         </div>
-        {/* Install/Re-install (SPEC F103.6; label gh-#375) opens ThemeInstallModal's
-            confirm/cancel step — this click itself issues no request; the modal POSTs the SAME
-            manifestText already reviewed here. Re-install is a genuinely supported, non-destructive
-            action — ThemesImportController.Import upserts by slug (SPEC F103.7). */}
+        {/* Install-only (SPEC F204.1/F204.4, PLAN T564 — themes never show Uninstall/Re-install):
+            opens ThemeInstallModal's confirm/cancel step, the same non-destructive upsert-by-slug
+            action as before (ThemesImportController.Import, SPEC F103.7) — this click itself issues
+            no request; the modal POSTs the SAME manifestText already reviewed here. */}
         <Button type="button" variant="primary" onClick={onInstallClick}>
-          {provenance !== null ? "Re-install" : "Install"}
+          Install
         </Button>
       </div>
 
@@ -1033,6 +1093,9 @@ function ThemeDetailPanel({
           {`Imported · ${provenance.importedFrom} · ${formatDateStamp(provenance.importedAt, { timeZone })}`}
         </p>
       )}
+
+      {/* SPEC F204.4's own note — a theme's own uninstall lives on the Theme Editor, not here. */}
+      <p className="text-[0.75rem] text-mute">Imported themes are managed on the Theme Editor.</p>
 
       <ThemeDetailPreview slug={slug} manifestText={manifestText} />
     </div>

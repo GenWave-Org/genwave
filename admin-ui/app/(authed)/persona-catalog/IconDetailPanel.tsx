@@ -1,12 +1,12 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/chip";
 import { parseIconPackDefinition } from "@/lib/icon-pack";
 import { IconPackSpecimenRow } from "../_components/IconPackRenderer";
 import { BestForChips, MatureBadge } from "./catalog-badges";
 import { prettifySlug } from "./format-slug";
+import { InstallToggle } from "./InstallToggle";
 import type { CatalogEntryDetailDto } from "./types";
 
 export interface IconDetailPanelProps {
@@ -18,6 +18,10 @@ export interface IconDetailPanelProps {
    * this without a reload). */
   isInstalled: boolean;
   onInstallClick: () => void;
+  /** Fires once `DELETE /api/icon-packs/{slug}` resolves as removed (2xx, or 404 for an
+   * already-gone pack) (SPEC F204.2, PLAN T564) — the caller removes this slug from its own
+   * installed set so the row flips without a reload. */
+  onUninstalled: (slug: string) => void;
 }
 
 /**
@@ -38,7 +42,7 @@ export interface IconDetailPanelProps {
  * re-validated it once to produce `iconCount` (PLAN T304 rider 1's own "defensive regardless"
  * ruling).
  */
-export function IconDetailPanel({ slug, detail, isInstalled, onInstallClick }: IconDetailPanelProps): ReactNode {
+export function IconDetailPanel({ slug, detail, isInstalled, onInstallClick, onUninstalled }: IconDetailPanelProps): ReactNode {
   const definition = detail.card === null ? null : parseIconPackDefinition(detail.card);
 
   return (
@@ -51,13 +55,21 @@ export function IconDetailPanel({ slug, detail, isInstalled, onInstallClick }: I
           {detail.audience === "mature" && <MatureBadge />}
           {isInstalled && <Chip>Installed</Chip>}
         </div>
-        {/* Install/Re-install opens IconInstallModal's confirm step — this click itself issues no
-            request; the modal POSTs on confirm only, no request body (mirrors AvatarInstallModal's
-            own "no request body, by design" rule — IconPackController.Install fetches every byte
-            server-side too). */}
-        <Button type="button" variant="primary" onClick={onInstallClick}>
-          {isInstalled ? "Re-install" : "Install"}
-        </Button>
+        {/* Install opens IconInstallModal's confirm step — this click itself issues no request; the
+            modal POSTs on confirm only, no request body (mirrors AvatarInstallModal's own "no
+            request body, by design" rule — IconPackController.Install fetches every byte server-side
+            too). Uninstall calls `DELETE /api/icon-packs/{slug}` directly (SPEC F204.1/F204.2, PLAN
+            T564 — icon uninstall never 409, guard-free by design). */}
+        <InstallToggle
+          slug={slug}
+          displayName={prettifySlug(slug)}
+          isInstalled={isInstalled}
+          deletePath="/api/icon-packs"
+          kindLabel="icon pack"
+          removedNoun="icon"
+          onInstallClick={onInstallClick}
+          onUninstalled={onUninstalled}
+        />
       </div>
 
       <BestForChips items={detail.bestFor ?? []} />

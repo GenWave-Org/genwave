@@ -1,26 +1,24 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
+import type { ReactNode } from "react";
 import { Chip } from "@/components/ui/chip";
-import { useConfirm } from "@/components/ui/confirm-dialog";
-import { toast } from "@/components/ui/toast";
-import { readErrorMessage } from "@/lib/problem-details";
 import { isHttpUrl } from "@/lib/safe-external-url";
 import { LicenseBadge } from "./catalog-badges";
 import { prettifySlug } from "./format-slug";
+import { InstallToggle } from "./InstallToggle";
 import type { CatalogEntryDetailDto } from "./types";
 
 export interface JinglePackDetailPanelProps {
   slug: string;
   detail: CatalogEntryDetailDto;
   /** Whether THIS slug already has an installed pack — sourced from `GET /api/jingle-packs`'s own
-   * listing (`PersonaCatalogClient`'s `installedJinglePackSlugs` prop) — see `VoicePackDetailPanel`'s
-   * own remarks for why this kind reads server truth via `router.refresh()` rather than a locally-
-   * flipped `Set`. */
+   * listing (`PersonaCatalogClient`'s `installedJinglePackSlugs` prop). */
   isInstalled: boolean;
   onInstallClick: () => void;
+  /** Fires once `DELETE /api/jingle-packs/{slug}` resolves as removed (2xx, or 404 for an
+   * already-gone pack) (SPEC F204.2, PLAN T564) — the caller removes this slug from its own
+   * installed set so the row flips without a reload. */
+  onUninstalled: (slug: string) => void;
 }
 
 interface ParsedJinglePackAsset {
@@ -121,12 +119,11 @@ function aggregateLicenses(assets: readonly ParsedJinglePackAsset[]): string {
 
 /**
  * A jingle pack entry's detail view (SPEC F165, STORY-397, PLAN T418) — mirrors
- * `VoicePackDetailPanel`'s own shape (name, an Install/Re-install button opening the shared confirm
- * modal, an "Installed" chip, a self-contained Uninstall via `useConfirm()` + `router.refresh()`)
- * with no preview gate at all — a jingle pack declares no preview clip (unlike a voice pack's own
- * F103.5 honest-preview contract), so Install renders as soon as the manifest parses, the same
- * `disabled={!parsed}`-shaped posture `AdPackDetailPanel` already uses for its own preview-less
- * kind.
+ * `VoicePackDetailPanel`'s own shape (name, an `InstallToggle` opening the shared confirm modal, an
+ * "Installed" chip) with no preview gate at all — a jingle pack declares no preview clip (unlike a
+ * voice pack's own F103.5 honest-preview contract), so the toggle renders as soon as the manifest
+ * parses. Uninstall (SPEC F204.1, PLAN T564) lives once, in the shared `InstallToggle` — this panel
+ * no longer carries its own confirm/DELETE/toast machinery.
  *
  * The asset table's own Title · Kind · License · Credit columns are READ-ONLY review, the same
  * "reviewing installs nothing" rule every pack kind's detail panel already states — Kind reads the
@@ -137,37 +134,8 @@ function aggregateLicenses(assets: readonly ParsedJinglePackAsset[]): string {
  * (SPEC F165.2's own contract: attribution rides ONLY a CC-BY asset). `rel="noopener noreferrer"`
  * on every external link (security-web: an author-declared URL is untrusted output).
  */
-export function JinglePackDetailPanel({ slug, detail, isInstalled, onInstallClick }: JinglePackDetailPanelProps): ReactNode {
+export function JinglePackDetailPanel({ slug, detail, isInstalled, onInstallClick, onUninstalled }: JinglePackDetailPanelProps): ReactNode {
   const manifest = detail.card === null ? null : parseJinglePackManifest(detail.card);
-  const [uninstalling, setUninstalling] = useState(false);
-  const router = useRouter();
-  const confirm = useConfirm();
-
-  async function handleUninstall(): Promise<void> {
-    const displayName = manifest?.packName ?? prettifySlug(slug);
-    const confirmed = await confirm({
-      title: "Uninstall jingle pack",
-      consequence: `Uninstall "${displayName}"? Every clip it added is removed from this station immediately.`,
-      confirmLabel: "Uninstall",
-      destructive: true,
-    });
-    if (!confirmed) return;
-
-    setUninstalling(true);
-    try {
-      const resp = await fetch(`/api/jingle-packs/${encodeURIComponent(slug)}`, { method: "DELETE" });
-      if (resp.status === 204) {
-        toast.success(`"${displayName}" uninstalled.`);
-        router.refresh();
-        return;
-      }
-      toast.error(await readErrorMessage(resp));
-    } catch {
-      toast.error("Network error — check your connection");
-    } finally {
-      setUninstalling(false);
-    }
-  }
 
   if (manifest === null) {
     return (
@@ -187,21 +155,16 @@ export function JinglePackDetailPanel({ slug, detail, isInstalled, onInstallClic
           {isInstalled && <Chip>Installed</Chip>}
         </div>
         <div className="flex items-center gap-2">
-          {isInstalled && (
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={uninstalling}
-              onClick={() => {
-                void handleUninstall();
-              }}
-            >
-              Uninstall
-            </Button>
-          )}
-          <Button type="button" variant="primary" onClick={onInstallClick}>
-            {isInstalled ? "Re-install" : "Install"}
-          </Button>
+          <InstallToggle
+            slug={slug}
+            displayName={manifest.packName}
+            isInstalled={isInstalled}
+            deletePath="/api/jingle-packs"
+            kindLabel="jingle pack"
+            removedNoun="clip"
+            onInstallClick={onInstallClick}
+            onUninstalled={onUninstalled}
+          />
         </div>
       </div>
 

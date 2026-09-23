@@ -36,6 +36,7 @@ import { describe, it, expect, jest, beforeAll, beforeEach, afterEach } from "@j
 import { render, screen, within, fireEvent, waitFor, act } from "@testing-library/react";
 import "@testing-library/jest-dom/jest-globals";
 import type { useRouter } from "next/navigation";
+import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "@/components/ui/toast";
 import type { PersonaCatalogClient as PersonaCatalogClientComponent } from "../app/(authed)/persona-catalog/PersonaCatalogClient";
 import type { CatalogEntryDetailDto, CatalogShelfEntryDto } from "../app/(authed)/persona-catalog/types";
@@ -295,13 +296,13 @@ describe("Feature: packs on the shelf with an honest specimen", () => {
   ): Promise<void> {
     global.fetch = fetchMock;
     render(
-      <>
+      <ConfirmDialogProvider>
         <PersonaCatalogClient activeKind="font"
           initialIndex={{ entries: [FONT_ENTRY], fetchedAt: "2026-08-05T00:00:00Z", unreachable: false }}
           installedFontSlugs={installedFontSlugs}
         />
         <Toaster />
-      </>
+      </ConfirmDialogProvider>
     );
     fireEvent.click(cardFor("Space Grotesk"));
   }
@@ -452,7 +453,7 @@ describe("Feature: packs on the shelf with an honest specimen", () => {
       expect(await screen.findByText('"Space Grotesk" installed.')).toBeInTheDocument();
     });
 
-    it("flips the detail panel to Installed/Re-install locally once the install succeeds, no reload (PLAN T204)", async () => {
+    it("flips the detail panel to Installed/Uninstall locally once the install succeeds, no reload (PLAN T204; two-state toggle SPEC F204.1, PLAN T564)", async () => {
       const fetchMock = fontFlowFetchMock();
       // Starts NOT installed — the default `installedFontSlugs=[]` — so the button starts "Install".
       await openInstallDialog(fetchMock);
@@ -466,9 +467,11 @@ describe("Feature: packs on the shelf with an honest specimen", () => {
 
       // The detail panel itself (still open — only the confirm dialog closed) now reads installed,
       // with no second fetch and no page reload: PersonaCatalogClient.handleFontInstalled flips its
-      // own local state on the toast, the cheap path this task's own spec calls for.
+      // own local state on the toast, the cheap path this task's own spec calls for. The shared
+      // `InstallToggle` (SPEC F204.1) renders "Uninstall" once installed — a strict two-state
+      // toggle, no third "Re-install" state.
       expect(screen.getByText("Installed")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Re-install" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Uninstall" })).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Install" })).not.toBeInTheDocument();
     });
   });
@@ -500,13 +503,13 @@ describe("Feature: packs on the shelf with an honest specimen", () => {
       expect(screen.getByText("Transient specimen — previewing installs nothing")).toBeInTheDocument();
     });
 
-    it("shows an Installed chip, Re-install, and the SAME neutral caption when the pack is already installed", async () => {
+    it("shows an Installed chip, Uninstall, and the SAME neutral caption when the pack is already installed", async () => {
       const fetchMock = fontFlowFetchMock();
       await openLibreGroteskDetail(fetchMock, ["libre-grotesk"]);
       await screen.findByTestId("font-specimen");
 
       expect(screen.getByText("Installed")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Re-install" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Uninstall" })).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Install" })).not.toBeInTheDocument();
       // The specimen caption never claims install state either way (F104.4's own "transient,
       // installs nothing" fact is true regardless) — see SpecimenBlock's own remarks.
@@ -584,7 +587,7 @@ describe("Feature: packs on the shelf with an honest specimen", () => {
 
       // `onInstalled` (PersonaCatalogClient.handleFontInstalled) only ever fires on
       // FontInstallModal's own resp.ok branch — a 409 never reaches it, so the detail panel's own
-      // Install button, still present behind the open dialog, never flips to Re-install.
+      // Install button, still present behind the open dialog, never flips to Installed.
       // `getByText`, not `getByRole` (Radix marks the background `aria-hidden` while the dialog is
       // open, which `*ByRole` correctly excludes but a plain text query does not).
       expect(screen.getByText("Install")).toBeInTheDocument();

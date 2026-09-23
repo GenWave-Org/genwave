@@ -343,7 +343,10 @@ public sealed class VoicePackController(
 
     /// <summary>
     /// DELETE /api/voice-packs/{slug} — see this class's own remarks for the full contract
-    /// <see cref="IVoicePackStore.DeleteAsync"/> enforces.
+    /// <see cref="IVoicePackStore.DeleteAsync"/> enforces. A refusal's 409 carries <c>referencedBy</c>
+    /// (SPEC F204.3, STORY-472, PLAN T563) — every referencing persona's own name plus an
+    /// <see cref="CatalogInstallShell.AdSpotReferrerLabel"/> per referencing ad spot id, structured
+    /// alongside <see cref="ReferencedProblem"/>'s own unchanged prose <c>Detail</c>.
     /// </summary>
     [HttpDelete("{slug}")]
     public async Task<IActionResult> Uninstall(string slug, CancellationToken ct)
@@ -718,12 +721,14 @@ public sealed class VoicePackController(
         Detail = $"\"{slug}\" could not be installed. The previous install, if any, is unchanged.",
     };
 
-    static ProblemDetails ReferencedProblem(string slug, IReadOnlyList<long> adSpotIds, IReadOnlyList<string> personaNames) => new()
+    // SPEC F204.3: referencedBy lists the same referrers as the Detail prose. LogSafeText.Sanitize
+    // deliberately mirrors BuildReferencedDetail so the list and the prose never diverge.
+    static ProblemDetails ReferencedProblem(string slug, IReadOnlyList<long> adSpotIds, IReadOnlyList<string> personaNames) => new ProblemDetails
     {
         Status = StatusCodes.Status409Conflict,
         Title = "Voice pack is referenced.",
         Detail = BuildReferencedDetail(slug, adSpotIds, personaNames),
-    };
+    }.WithReferencedBy(adSpotIds.Select(CatalogInstallShell.AdSpotReferrerLabel).Concat(personaNames.Select(LogSafeText.Sanitize)));
 
     static string BuildReferencedDetail(string slug, IReadOnlyList<long> adSpotIds, IReadOnlyList<string> personaNames)
     {

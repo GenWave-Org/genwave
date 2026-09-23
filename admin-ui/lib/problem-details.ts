@@ -2,31 +2,39 @@
  * fetch — `detail` plus the `type` URI (gh-#486) a caller uses to tell two different causes of the
  * same status code apart without parsing `detail`'s human text. `field`/`ruleId` (PLAN T404) are
  * the two extension members a save-time validator 400 rides (e.g. `AdsController.ScriptViolationProblem`)
- * — optional so every caller that never sees them (the vast majority) is unaffected. */
+ * — optional so every caller that never sees them (the vast majority) is unaffected. `referencedBy`
+ * (T563, SPEC F204.3) replaces the retired `referenced-themes.ts` prose parser with the referrers'
+ * names, structured. */
 interface ProblemDetailsBody {
   detail?: string;
   type?: string;
   field?: string;
   ruleId?: string;
+  referencedBy?: unknown;
 }
 
 function isProblemDetailsBody(raw: unknown): raw is ProblemDetailsBody {
   return typeof raw === "object" && raw !== null;
 }
 
+/** Narrows `referencedBy` to a non-empty string array, dropping any non-string entry rather than
+ * trusting the wire blindly — `undefined` when the field is absent, not an array, or every entry
+ * failed the check (the same "degrade, never throw" posture this file's other fields already hold
+ * to). */
+function narrowReferencedBy(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const names = raw.filter((entry): entry is string => typeof entry === "string" && entry !== "");
+  return names.length > 0 ? names : undefined;
+}
+
 /**
- * Reads a failed response's ProblemDetails `detail` message (falling back to a generic
- * `"Unexpected error (status)"`) and `type` URI (gh-#486; `undefined` when absent — every
- * ProblemDetails this station returned before gh-#486 carried none) in ONE body read — a
- * `Response` body can only be consumed once, so a caller that needs both must read them together
- * rather than calling `resp.json()` a second time. {@link readErrorMessage} is this reader's own
- * detail-only shorthand, unchanged for every existing caller. `field`/`ruleId` ride along the same
- * single read (PLAN T404 fold — the Ads editor's own field-level 400 reader used to be a second,
- * per-feature copy of this exact body-parsing shape; this is the one house implementation).
+ * Reads a failed response's ProblemDetails `detail`, `type` (gh-#486), `field`/`ruleId` (PLAN T404),
+ * and `referencedBy` (T563/T564) in ONE body read — a `Response` body can only be consumed once.
+ * {@link readErrorMessage} is this reader's own detail-only shorthand.
  */
 export async function readProblemDetails(
   resp: Response
-): Promise<{ detail: string; type?: string; field?: string; ruleId?: string }> {
+): Promise<{ detail: string; type?: string; field?: string; ruleId?: string; referencedBy?: string[] }> {
   try {
     const raw = (await resp.json()) as unknown;
     if (isProblemDetailsBody(raw)) {
@@ -35,6 +43,7 @@ export async function readProblemDetails(
         type: typeof raw.type === "string" ? raw.type : undefined,
         field: typeof raw.field === "string" ? raw.field : undefined,
         ruleId: typeof raw.ruleId === "string" ? raw.ruleId : undefined,
+        referencedBy: narrowReferencedBy(raw.referencedBy),
       };
     }
   } catch {
