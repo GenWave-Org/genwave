@@ -28,11 +28,15 @@ internal sealed class AdScriptCompletionsRouter
     /// <summary>A short two-voice script that passes the real <c>AdScriptValidator</c> for a 30s spot
     /// (the <c>AdSpotWorkerHarness.WellFormedReply</c>/Story412's own short ANNOUNCER/VOICE1 precedent)
     /// — proven end to end against the real <c>RollingPatterDurationEstimator</c>, never a fake
-    /// duration estimator.</summary>
+    /// duration estimator. Deliberately carries NO phone-shaped digit run (PLAN T550, SPEC F199.2):
+    /// Story423's own facts assert this reply survives onto the row byte for byte, and every sponsor
+    /// this router serves is phone-less, so a placeholder "555-…" number here would now be hygiened
+    /// (its clause dropped) by the real <c>AdScriptWriter.ApplyPhoneHygiene</c> the write pipeline
+    /// runs — breaking that exact-equality promise for a reason unrelated to what Story423 tests.</summary>
     public const string WellFormedReply =
         "ANNOUNCER: Cravin's Diner has a deal so good it's almost illegal.\n" +
         "VOICE1: Almost. Stop by and taste the difference tonight.\n" +
-        "ANNOUNCER: Call 555-0142 - that's 555-0142 - Cravin's Diner.";
+        "ANNOUNCER: That's Cravin's Diner, right on Main Street.";
 
     // A route is appended by RouteSponsor on whichever thread the Arc's own arrangement runs on, and
     // read by the handler below on the station's own consumer thread — a plain List<> read racing that

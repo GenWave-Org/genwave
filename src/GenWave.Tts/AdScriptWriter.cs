@@ -189,6 +189,7 @@ public sealed partial class AdScriptWriter(
             }
 
             var cleaned = ApplyLineAwareHygiene(reply.Content);
+            cleaned = ApplyPhoneHygiene(cleaned, request.Phone);
             if (cleaned.Length == 0)
             {
                 return Resolved(Failed(
@@ -448,6 +449,152 @@ public sealed partial class AdScriptWriter(
 
         return string.Join('\n', lines.Select(l => l.Text.Length == 0 ? $"{l.Tag}:" : $"{l.Tag}: {l.Text}"));
     }
+
+    /// <summary>
+    /// SPEC F199.2 hygiene, run AFTER <see cref="ApplyLineAwareHygiene"/> on its already-tagged "TAG:
+    /// text" output: a phone-shaped digit run that is not the sponsor's own number is rewritten to the
+    /// sponsor's own number verbatim (STORY-466 AC3, F199.4 pinned); a sponsor with no
+    /// <paramref name="sponsorPhone"/> on file has the number AND its clause dropped instead (AC5). A
+    /// run whose DIGITS already equal the sponsor's own — even when formatted differently (parens vs
+    /// dashes) or itself containing "555" — is left exactly as written, its own formatting untouched
+    /// (AC4). Never touches a line's TAG, only the text after its colon.
+    /// </summary>
+    internal static string ApplyPhoneHygiene(string script, string? sponsorPhone)
+    {
+        var trimmedPhone = string.IsNullOrWhiteSpace(sponsorPhone) ? null : sponsorPhone.Trim();
+        var phoneDigits = trimmedPhone is null ? null : DigitsOnly(trimmedPhone);
+
+        var lines = new List<string>();
+        foreach (var line in script.Split('\n'))
+        {
+            var hygienic = ApplyPhoneHygieneToLine(line, trimmedPhone, phoneDigits);
+            if (hygienic is not null)
+                lines.Add(hygienic);
+        }
+
+        return string.Join('\n', lines);
+    }
+
+    /// <summary>Splits "TAG: text" at its first colon (the exact shape <see cref="ApplyLineAwareHygiene"/>
+    /// always produces) and hygienes only the text half. A line whose text hygiene empties entirely
+    /// (AC5's "the clause goes" when nothing is left) is dropped — the whole line, tag included — by
+    /// returning <see langword="null"/>; a line with no text to begin with (a bare "TAG:") is returned
+    /// unchanged, never dropped, since emptiness there predates this pass.</summary>
+    static string? ApplyPhoneHygieneToLine(string line, string? sponsorPhone, string? sponsorDigits)
+    {
+        var colonIndex = line.IndexOf(':');
+        if (colonIndex < 0)
+            return line; // never produced by ApplyLineAwareHygiene, but never mangled if it happens
+
+        var tag = line[..colonIndex];
+        var body = line[(colonIndex + 1)..];
+        var text = body.Length > 0 && body[0] == ' ' ? body[1..] : body;
+        if (text.Length == 0)
+            return line;
+
+        var cleanedText = ApplyPhoneHygieneToText(text, sponsorPhone, sponsorDigits);
+        return cleanedText.Length == 0 ? null : $"{tag}: {cleanedText}";
+    }
+
+    static string ApplyPhoneHygieneToText(string text, string? sponsorPhone, string? sponsorDigits)
+    {
+        var current = text;
+        var scanFrom = 0;
+
+        while (true)
+        {
+            var match = PhoneShapedRunPattern().Match(current, scanFrom);
+            if (!match.Success)
+                return current;
+
+            var runDigits = DigitsOnly(match.Value);
+            if (sponsorDigits is not null && string.Equals(runDigits, sponsorDigits, StringComparison.Ordinal))
+            {
+                // AC4 — the sponsor's own number (even one that itself contains "555"), unchanged;
+                // advance past it so the next search never re-matches the same run.
+                scanFrom = match.Index + match.Length;
+                continue;
+            }
+
+            if (sponsorPhone is not null)
+            {
+                // AC3, F199.4 pinned — replace with the sponsor's own number verbatim. Resume scanning
+                // just PAST the inserted replacement rather than resetting to 0: the text before it is
+                // already resolved, and there is nothing left to verify about what we just wrote.
+                current = ReplacePhoneRun(current, match, sponsorPhone);
+                scanFrom = match.Index + sponsorPhone.Length;
+                continue;
+            }
+
+            // AC5 — no phone on file: the run and its clause are dropped, never replaced with anything
+            // phone-shaped, so a rescan from 0 can never re-trigger on our own output the way the
+            // replace branch above could.
+            current = DropPhoneClause(current, match.Index, match.Index + match.Length);
+            scanFrom = 0;
+        }
+    }
+
+    static string ReplacePhoneRun(string text, Match match, string replacement) =>
+        string.Concat(text.AsSpan(0, match.Index), replacement, text.AsSpan(match.Index + match.Length));
+
+    /// <summary>Deletes from the nearest preceding clause boundary through the matched run. The boundary
+    /// char itself (one of <see cref="ClauseBoundaryChars"/>) goes too — it only led into the dropped
+    /// clause (<c>"Cravin's Diner, 555-0142."</c> → <c>"Cravin's Diner."</c>). Any leading run of
+    /// boundary punctuation left on the remainder is stripped, so a line that was nothing but the phone
+    /// clause drops to <see cref="string.Empty"/> rather than a bare "." (AC5); whitespace is collapsed
+    /// and, when the deletion reached the line start, the new first letter is capitalized (the F199.4
+    /// pin). <see cref="ApplyPhoneHygieneToLine"/> reads an empty result as "drop the whole line".</summary>
+    static string DropPhoneClause(string text, int matchStart, int matchEnd)
+    {
+        var boundary = 0;
+        for (var i = matchStart - 1; i >= 0; i--)
+        {
+            if (Array.IndexOf(ClauseBoundaryChars, text[i]) < 0)
+                continue;
+            boundary = i;
+            break;
+        }
+
+        var joined = LeadingClauseBoundaryPattern().Replace(text[..boundary] + text[matchEnd..], string.Empty);
+        var remaining = CollapseWhitespacePattern().Replace(joined, " ").Trim();
+        if (remaining.Length == 0)
+            return string.Empty;
+
+        return boundary == 0 ? char.ToUpperInvariant(remaining[0]) + remaining[1..] : remaining;
+    }
+
+    /// <summary>Punctuation that ends a clause (never a phone-run separator itself — those are
+    /// narrowly <c>-</c>/<c>.</c>/space inside <see cref="PhoneShapedRunPattern"/>'s own digit groups).
+    /// </summary>
+    static readonly char[] ClauseBoundaryChars = ['.', ',', ';', ':', '!', '?'];
+
+    static string DigitsOnly(string text) => new(text.Where(char.IsAsciiDigit).ToArray());
+
+    // NANP-shaped digit runs only (optional area code, then a 3-4 local grouping) — deliberately NOT
+    // a bare "555-\d{4}" match: the sponsor's own phone (e.g. "812-555-0199") contains "555-0199" as a
+    // substring, and matching only that tail would rewrite it to "812-812-555-0199". The optional
+    // area-code alternative is tried FIRST (.NET's default greedy order), which is what makes a full
+    // "812-555-0199" match as ONE run instead of splitting off its own "555-0199" tail.
+    //
+    // \b sits AFTER the optional leading paren, not before it (the PhoneShapeCheck.FindViolation
+    // precedent, GenWave.Ads — its own remarks explain the same fix): a paren is itself a non-word
+    // character, so a \b placed before it never finds a word/non-word transition when the paren is
+    // actually present (space-then-paren is non-word-to-non-word) — a leading \b there would make the
+    // paren alternative unreachable, and every "(NNN) NNN-NNNN" run would match only its own trailing
+    // "NNN-NNNN" tail.
+    [GeneratedRegex(@"(?:\(\d{3}\)\s?|\b\d{3}[-. ])?\b\d{3}[-. ]\d{4}\b")]
+    private static partial Regex PhoneShapedRunPattern();
+
+    [GeneratedRegex(@"\s+")]
+    private static partial Regex CollapseWhitespacePattern();
+
+    /// <summary>A leading run of <see cref="ClauseBoundaryChars"/> and/or whitespace — literally those
+    /// six characters, kept in sync by hand since <c>GeneratedRegex</c> needs a compile-time constant
+    /// and cannot read the array. What <see cref="DropPhoneClause"/> strips from the very front of its
+    /// own joined remainder, so an orphaned separator (or a bare terminal "." with nothing left to
+    /// terminate) never survives as the whole "sentence".</summary>
+    [GeneratedRegex(@"^[.,;:!?\s]+")]
+    private static partial Regex LeadingClauseBoundaryPattern();
 
     /// <summary>A raw tag longer than this is a sentence with a colon in it, never a voice.</summary>
     const int MaxRawTagChars = 40;

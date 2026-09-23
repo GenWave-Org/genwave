@@ -76,6 +76,10 @@ public static class FeatureOwnerSponsorsAreRealPackSponsorsStayParody
         }
     }
 
+    // SPEC F199.3 (STORY-466): every filler phone line below moved from a plain "555-0100" placeholder
+    // to the sponsor's OWN {SponsorPhone} — OwnerRequest puts a real sponsor phone on file, and F199.3
+    // tightened the phone-shape skip to "only that exact number", so a differing 555 filler would now
+    // itself refuse on phone_shape before ever reaching the brand check these facts exist to exercise.
     public sealed class ScenarioOwnerSponsorsOwnNamePassesTheBlocklist
     {
         [Fact]
@@ -83,7 +87,7 @@ public static class FeatureOwnerSponsorsAreRealPackSponsorsStayParody
         {
             const string script =
                 $"ANNOUNCER: {SponsorName} has a deal so good it's almost illegal.\n" +
-                "ANNOUNCER: Call 555-0100 today.";
+                $"ANNOUNCER: Call {SponsorPhone} today.";
 
             var result = Validate(script, OwnerRequest);
 
@@ -98,7 +102,7 @@ public static class FeatureOwnerSponsorsAreRealPackSponsorsStayParody
         {
             const string script =
                 $"ANNOUNCER: Fresh every day at {SponsorName}. {SponsorName}, on Main Street.\n" +
-                "ANNOUNCER: Call 555-0100 today.";
+                $"ANNOUNCER: Call {SponsorPhone} today.";
 
             var result = Validate(script, OwnerRequest);
 
@@ -114,7 +118,7 @@ public static class FeatureOwnerSponsorsAreRealPackSponsorsStayParody
         {
             const string script =
                 $"ANNOUNCER: {SponsorName}\n" +
-                $"ANNOUNCER: {SponsorName} — call 555-0100 today.";
+                $"ANNOUNCER: {SponsorName} — call {SponsorPhone} today.";
 
             var result = Validate(script, OwnerRequest);
 
@@ -130,7 +134,7 @@ public static class FeatureOwnerSponsorsAreRealPackSponsorsStayParody
         {
             const string script =
                 $"ANNOUNCER: Mountain {SponsorName} Dew has a deal so good it's almost illegal.\n" +
-                "ANNOUNCER: Call 555-0100 today.";
+                $"ANNOUNCER: Call {SponsorPhone} today.";
 
             var result = Validate(script, OwnerRequest);
 
