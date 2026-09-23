@@ -1,10 +1,10 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/chip";
 import { formatFontByteTotal, licenceLine } from "./font-format";
 import { prettifySlug } from "./format-slug";
+import { InstallToggle } from "./InstallToggle";
 import { SpecimenBlock } from "./SpecimenBlock";
 import type { CatalogEntryDetailDto } from "./types";
 
@@ -17,6 +17,10 @@ export interface FontDetailPanelProps {
    * read happens and how a fresh install flips this without a reload. */
   isInstalled: boolean;
   onInstallClick: () => void;
+  /** Fires once `DELETE /api/fonts/{slug}` resolves as removed (2xx, or 404 for an already-gone
+   * pack) (SPEC F204.2, PLAN T564) — the caller removes this slug from its own installed set so the
+   * row flips without a reload. */
+  onUninstalled: (slug: string) => void;
 }
 
 /**
@@ -55,12 +59,12 @@ export interface FontDetailPanelProps {
  * preview, never the pack itself), so that caption is now state-neutral in BOTH states (see
  * `SpecimenBlock`'s own remarks) and the installed signal moved here instead. `isInstalled` (sourced
  * by `PersonaCatalogClient` from `GET /api/fonts`, see its own remarks) drives an "Installed" chip —
- * the shared `Chip` component (`components/ui/chip.tsx`, gh-#375 extraction) — and the
- * button's own label: "Re-install" when a pack under this slug is already installed
- * (`FontPackController.Install` upserts, PLAN T199, so a re-install is a genuinely supported,
- * non-destructive action), "Install" otherwise.
+ * the shared `Chip` component (`components/ui/chip.tsx`, gh-#375 extraction) — and `InstallToggle`'s
+ * own Install/Uninstall split (SPEC F204.1, PLAN T564 — retires the earlier "Re-install" label this
+ * panel used to show once installed; `DELETE /api/fonts/{slug}` finally has a button here, the
+ * retired Wardrobe page's own affordance restored one page over).
  */
-export function FontDetailPanel({ slug, detail, isInstalled, onInstallClick }: FontDetailPanelProps): ReactNode {
+export function FontDetailPanel({ slug, detail, isInstalled, onInstallClick, onUninstalled }: FontDetailPanelProps): ReactNode {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -71,12 +75,16 @@ export function FontDetailPanel({ slug, detail, isInstalled, onInstallClick }: F
               one level up, just narrower content. */}
           {isInstalled && <Chip>Installed</Chip>}
         </div>
-        {/* Install/Re-install (scope addition, see this component's own remarks) opens
-            FontInstallModal's confirm step — this click itself issues no request; the modal POSTs
-            on confirm only. */}
-        <Button type="button" variant="primary" onClick={onInstallClick}>
-          {isInstalled ? "Re-install" : "Install"}
-        </Button>
+        <InstallToggle
+          slug={slug}
+          displayName={prettifySlug(slug)}
+          isInstalled={isInstalled}
+          deletePath="/api/fonts"
+          kindLabel="font pack"
+          removedNoun="face"
+          onInstallClick={onInstallClick}
+          onUninstalled={onUninstalled}
+        />
       </div>
 
       {detail.fontFamily !== null && detail.fontFamily !== "" && (

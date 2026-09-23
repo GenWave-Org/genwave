@@ -1,25 +1,23 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/chip";
-import { useConfirm } from "@/components/ui/confirm-dialog";
-import { toast } from "@/components/ui/toast";
-import { readErrorMessage } from "@/lib/problem-details";
 import { LicenseBadge } from "./catalog-badges";
 import { prettifySlug } from "./format-slug";
+import { InstallToggle } from "./InstallToggle";
 import type { CatalogEntryDetailDto } from "./types";
 
 export interface VoicePackDetailPanelProps {
   slug: string;
   detail: CatalogEntryDetailDto;
   /** Whether THIS slug already has an installed pack — sourced from `GET /api/voice-packs`'s own
-   * listing (`PersonaCatalogClient`'s `installedVoicePackSlugs` prop), never a locally-flipped
-   * `Set` the way Font/Avatar/Icon track it: this panel's own successful install/uninstall calls
-   * `router.refresh()` instead (see this component's own remarks). */
+   * listing (`PersonaCatalogClient`'s `installedVoicePackSlugs` prop). */
   isInstalled: boolean;
   onInstallClick: () => void;
+  /** Fires once `DELETE /api/voice-packs/{slug}` resolves as removed (2xx, or 404 for an
+   * already-gone pack) (SPEC F204.2, PLAN T564) — the caller removes this slug from its own
+   * installed set so the row flips without a reload. */
+  onUninstalled: (slug: string) => void;
 }
 
 interface ParsedVoicePackManifest {
@@ -75,8 +73,8 @@ type PreviewState =
 
 /**
  * A voice pack entry's detail view (SPEC F164, STORY-397 AC4, PLAN T418) — mirrors `IconDetailPanel`'s
- * own shape (name, an Install/Re-install button opening the shared confirm modal, an "Installed"
- * chip) with two departures this kind's own contract forces.
+ * own shape (name, an `InstallToggle` opening the shared confirm modal, an "Installed" chip) with
+ * two departures this kind's own contract forces.
  *
  * <b>The honest-preview gate (F103.5 / AC4).</b> Every other pack kind's Install button renders the
  * instant its manifest parses; this one additionally fetches the manifest's own declared `preview`
@@ -90,18 +88,10 @@ type PreviewState =
  * fetch at all, and shows its own "manifest could not be read" copy instead (mirrors
  * `AdPackDetailPanel`'s own `!parsed` branch).
  *
- * <b>Uninstall lives here, self-contained.</b> Unlike Icon/Avatar/AdPack (whose install flip is a
- * local `Set` the parent owns), this kind's "Installed" signal is the parent's own
- * `installedVoicePackSlugs` prop, sourced from `GET /api/voice-packs` — so a successful mutation
- * (install OR uninstall) is reflected by a `router.refresh()` re-running that server fetch, never a
- * client-side flip. Install still bubbles `onInstallClick` up to open the shared
- * `VoicePackInstallModal` as a parent-level sibling (the same shape Icon/Avatar/AdPack already use)
- * — but Uninstall needs no multi-step confirm DIALOG shell, only a yes/no question, so it is wired
- * directly here via the house `useConfirm()` + `router.refresh()` idiom
- * (the retired Wardrobe page's uninstall button set the precedent) rather than threaded back through the parent
- * as a second callback prop.
+ * <b>`InstallToggle` (SPEC F204.1).</b> Uninstall renders whenever installed; Install waits for the
+ * preview gate above (F103.5).
  */
-export function VoicePackDetailPanel({ slug, detail, isInstalled, onInstallClick }: VoicePackDetailPanelProps): ReactNode {
+export function VoicePackDetailPanel({ slug, detail, isInstalled, onInstallClick, onUninstalled }: VoicePackDetailPanelProps): ReactNode {
   const manifest = detail.card === null ? null : parseVoicePackManifest(detail.card);
   // Hoisted out of `manifest` (T418 review round 1 finding O2): `manifest` is re-derived from
   // `detail` every render, so depending on it directly would re-run this effect every render too —
@@ -109,9 +99,6 @@ export function VoicePackDetailPanel({ slug, detail, isInstalled, onInstallClick
   // change it, which is what lets the dependency array below be exhaustive without looping.
   const previewFile = manifest?.preview ?? null;
   const [preview, setPreview] = useState<PreviewState>({ kind: "loading" });
-  const [uninstalling, setUninstalling] = useState(false);
-  const router = useRouter();
-  const confirm = useConfirm();
 
   useEffect(() => {
     if (previewFile === null) return;
@@ -148,32 +135,6 @@ export function VoicePackDetailPanel({ slug, detail, isInstalled, onInstallClick
     };
   }, [slug, previewFile]);
 
-  async function handleUninstall(): Promise<void> {
-    const displayName = manifest?.packName ?? prettifySlug(slug);
-    const confirmed = await confirm({
-      title: "Uninstall voice pack",
-      consequence: `Uninstall "${displayName}"? Every voice it added is removed from this station immediately.`,
-      confirmLabel: "Uninstall",
-      destructive: true,
-    });
-    if (!confirmed) return;
-
-    setUninstalling(true);
-    try {
-      const resp = await fetch(`/api/voice-packs/${encodeURIComponent(slug)}`, { method: "DELETE" });
-      if (resp.status === 204) {
-        toast.success(`"${displayName}" uninstalled.`);
-        router.refresh();
-        return;
-      }
-      toast.error(await readErrorMessage(resp));
-    } catch {
-      toast.error("Network error — check your connection");
-    } finally {
-      setUninstalling(false);
-    }
-  }
-
   if (manifest === null) {
     return (
       <div className="flex flex-col gap-4">
@@ -199,23 +160,20 @@ export function VoicePackDetailPanel({ slug, detail, isInstalled, onInstallClick
           {isInstalled && <Chip>Installed</Chip>}
         </div>
         <div className="flex items-center gap-2">
-          {isInstalled && (
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={uninstalling}
-              onClick={() => {
-                void handleUninstall();
-              }}
-            >
-              Uninstall
-            </Button>
-          )}
-          {/* Not rendered — not merely disabled — until the preview proves playable (F103.5/AC4). */}
-          {canInstall && (
-            <Button type="button" variant="primary" onClick={onInstallClick}>
-              {isInstalled ? "Re-install" : "Install"}
-            </Button>
+          {/* Uninstall always renders once installed, regardless of preview state; Install is NOT
+              rendered — not merely disabled — until the preview proves playable (F103.5/AC4), so the
+              toggle itself is withheld until one or the other condition is true. */}
+          {(isInstalled || canInstall) && (
+            <InstallToggle
+              slug={slug}
+              displayName={manifest.packName}
+              isInstalled={isInstalled}
+              deletePath="/api/voice-packs"
+              kindLabel="voice pack"
+              removedNoun="voice"
+              onInstallClick={onInstallClick}
+              onUninstalled={onUninstalled}
+            />
           )}
         </div>
       </div>

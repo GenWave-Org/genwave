@@ -2,17 +2,16 @@
 // SPEC F164, F165, STORY-397, PLAN T418 — voice-pack and jingle-pack install/uninstall verbs.
 //
 // Runner: Jest. Mirrors ad-pack-shelf-install.spec.tsx's own install-confirm idiom (200 POSTs with
-// no body, toasts the installed pack) and wardrobe-uninstall-pack.spec.tsx's own uninstall idiom
-// (useConfirm() → DELETE → 204 toasts + router.refresh(), 409 toasts the server's own explanation) —
-// applied to BOTH new kinds, which (unlike Font/Avatar/Icon/AdPack) read their "Installed" state
-// fresh off the server via `router.refresh()` rather than a locally-flipped `Set` (see
-// `PersonaCatalogClient`'s own `installedVoicePackSlugs`/`installedJinglePackSlugs` remarks) — every
-// success path here is pinned on `router.refresh()` having fired, not on a local chip flip. R4/R5's
-// own ProblemDetails-field ruling: a voice-pack install failure toasts the problem's TITLE (its own
-// short, actionable string); every other failure here (voice-pack uninstall, jingle-pack install AND
-// uninstall) toasts the DETAIL instead. The preview-gate itself is NOT this file's concern (see
-// voice-pack-shelf-preview-install.spec.tsx) — every voice-pack fixture below serves a preview asset
-// that resolves immediately and fires `canplay` before Install is ever clicked.
+// no body, toasts the installed pack, and flips the row to Uninstall). Uninstall (SPEC F204.1/
+// F204.2, PLAN T564) routes through the shared `InstallToggle` — the SAME confirm -> DELETE ->
+// success (2xx, or 404 for an already-gone pack) toasts + local flip + `router.refresh()`, 409
+// toasts the server's own explanation idiom every pack-shaped kind now uses. R4/R5's own
+// ProblemDetails-field ruling: a voice-pack install failure toasts the problem's
+// TITLE (its own short, actionable string); every other failure here (voice-pack uninstall,
+// jingle-pack install AND uninstall) toasts the DETAIL instead. The preview-gate itself is NOT this
+// file's concern (see voice-pack-shelf-preview-install.spec.tsx) — every voice-pack fixture below
+// serves a preview asset that resolves immediately and fires `canplay` before Install is ever
+// clicked.
 
 jest.mock("next/navigation", () => ({
   ...jest.requireActual<typeof import("next/navigation")>("next/navigation"),
@@ -109,8 +108,9 @@ function makeAssetResponse(): Response {
 /** Opens the voice-pack detail panel and waits for the preview to prove playable — the SAME
  * `fireEvent.canPlay` step voice-pack-shelf-preview-install.spec.tsx pins on its own, done here only
  * to REACH the install/uninstall buttons, never re-asserted as this file's own fact. Already-installed
- * packs render "Re-install" beside "Uninstall" rather than a bare "Install" — the button this helper
- * waits for tracks that same installed/not-installed split. */
+ * packs render "Uninstall" rather than "Install" (SPEC F204.1, PLAN T564 — a strict two-state
+ * toggle, no third "Re-install" state) — the button this helper waits for tracks that same
+ * installed/not-installed split. */
 async function openMoonlitNarratorsWithPlayablePreview(installedVoicePackSlugs: string[] = []): Promise<void> {
   ({ PersonaCatalogClient } = await import("../app/(authed)/persona-catalog/PersonaCatalogClient"));
   render(
@@ -128,7 +128,7 @@ async function openMoonlitNarratorsWithPlayablePreview(installedVoicePackSlugs: 
   await act(async () => {
     fireEvent.canPlay(audio);
   });
-  const installLabel = installedVoicePackSlugs.includes("moonlit-narrators") ? "Re-install" : "Install";
+  const installLabel = installedVoicePackSlugs.includes("moonlit-narrators") ? "Uninstall" : "Install";
   await screen.findByRole("button", { name: installLabel });
 }
 
@@ -181,6 +181,35 @@ describe("Feature: voice-pack install/uninstall verbs (SPEC F164, STORY-397, PLA
 
       expect(await screen.findByText('"Moonlit Narrators" installed (af_heart).')).toBeInTheDocument();
       await waitFor(() => expect(refreshMock).toHaveBeenCalled());
+    });
+  });
+
+  describe("Scenario: after a successful install, the row flips to Uninstall", () => {
+    // Given: the SAME 200 install response as above, confirmed
+    beforeEach(async () => {
+      const fetchMock = jest.fn<typeof fetch>().mockImplementation(async (input, init) => {
+        const url = String(input);
+        if (url === VOICE_ENTRY_URL) return makeJsonResponse(200, VOICE_DETAIL);
+        if (url === VOICE_ASSET_URL) return makeAssetResponse();
+        if (url === VOICE_INSTALL_URL && (init?.method ?? "GET") === "POST") {
+          return makeJsonResponse(200, { slug: "moonlit-narrators", packName: "Moonlit Narrators", voiceIds: ["af_heart"] });
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      }) as unknown as jest.MockedFunction<typeof fetch>;
+      global.fetch = fetchMock;
+
+      await openMoonlitNarratorsWithPlayablePreview();
+      fireEvent.click(screen.getByRole("button", { name: "Install" }));
+      const dialog = within(await screen.findByRole("dialog"));
+      await act(async () => {
+        fireEvent.click(dialog.getByRole("button", { name: "Confirm install" }));
+        await Promise.resolve();
+      });
+      await screen.findByRole("button", { name: "Uninstall" });
+    });
+
+    it("the row shows the Uninstall button", () => {
+      expect(screen.getByRole("button", { name: "Uninstall" })).toBeInTheDocument();
     });
   });
 
@@ -370,7 +399,7 @@ async function openSundayDriveDetail(installedJinglePackSlugs: string[] = []): P
     </ConfirmDialogProvider>
   );
   fireEvent.click(cardFor("Sunday Drive Jingles"));
-  const installLabel = installedJinglePackSlugs.includes("sunday-drive-jingles") ? "Re-install" : "Install";
+  const installLabel = installedJinglePackSlugs.includes("sunday-drive-jingles") ? "Uninstall" : "Install";
   await screen.findByRole("button", { name: installLabel });
 }
 
@@ -422,6 +451,38 @@ describe("Feature: jingle-pack install/uninstall verbs (SPEC F165, STORY-397, PL
 
       expect(await screen.findByText('"Sunday Drive Jingles" installed (1 asset).')).toBeInTheDocument();
       await waitFor(() => expect(refreshMock).toHaveBeenCalled());
+    });
+  });
+
+  describe("Scenario: after a successful install, the row flips to Uninstall", () => {
+    // Given: the SAME 200 install response as above, confirmed
+    beforeEach(async () => {
+      const fetchMock = jest.fn<typeof fetch>().mockImplementation(async (input, init) => {
+        const url = String(input);
+        if (url === JINGLE_ENTRY_URL) return makeJsonResponse(200, JINGLE_DETAIL);
+        if (url === JINGLE_INSTALL_URL && (init?.method ?? "GET") === "POST") {
+          return makeJsonResponse(200, {
+            slug: "sunday-drive-jingles",
+            packName: "Sunday Drive Jingles",
+            assets: [{ file: "station-id-chime.mp3", role: "station_id", mediaId: 42 }],
+          });
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      }) as unknown as jest.MockedFunction<typeof fetch>;
+      global.fetch = fetchMock;
+
+      await openSundayDriveDetail();
+      fireEvent.click(screen.getByRole("button", { name: "Install" }));
+      const dialog = within(await screen.findByRole("dialog"));
+      await act(async () => {
+        fireEvent.click(dialog.getByRole("button", { name: "Confirm install" }));
+        await Promise.resolve();
+      });
+      await screen.findByRole("button", { name: "Uninstall" });
+    });
+
+    it("the row shows the Uninstall button", () => {
+      expect(screen.getByRole("button", { name: "Uninstall" })).toBeInTheDocument();
     });
   });
 

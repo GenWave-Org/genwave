@@ -1,12 +1,12 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/chip";
 import { clampPackDisplayText } from "@/lib/clamp-pack-display-text";
 import { AvatarItemFace } from "./AvatarItemFace";
 import { BestForChips, MatureBadge } from "./catalog-badges";
 import { prettifySlug } from "./format-slug";
+import { InstallToggle } from "./InstallToggle";
 import type { CatalogEntryDetailDto } from "./types";
 
 export interface AvatarDetailPanelProps {
@@ -19,6 +19,10 @@ export interface AvatarDetailPanelProps {
    * this without a reload). */
   isInstalled: boolean;
   onInstallClick: () => void;
+  /** Fires once `DELETE /api/avatar-packs/{slug}` resolves as removed (2xx, or 404 for an
+   * already-gone pack) (SPEC F204.2, PLAN T564) — the caller removes this slug from its own
+   * installed set so the row flips without a reload. */
+  onUninstalled: (slug: string) => void;
 }
 
 /**
@@ -38,7 +42,7 @@ export interface AvatarDetailPanelProps {
  * display name resolves. No item-COUNT line: it stays implicit in the face grid itself
  * (`detail.avatarItems.length` tiles, rendered), never restated as a separate line.
  */
-export function AvatarDetailPanel({ slug, detail, isInstalled, onInstallClick }: AvatarDetailPanelProps): ReactNode {
+export function AvatarDetailPanel({ slug, detail, isInstalled, onInstallClick, onUninstalled }: AvatarDetailPanelProps): ReactNode {
   const items = detail.avatarItems ?? [];
   const displayName = clampPackDisplayText(detail.packName ?? prettifySlug(slug));
 
@@ -52,13 +56,21 @@ export function AvatarDetailPanel({ slug, detail, isInstalled, onInstallClick }:
           {detail.audience === "mature" && <MatureBadge />}
           {isInstalled && <Chip>Installed</Chip>}
         </div>
-        {/* Install/Re-install opens AvatarInstallModal's confirm step — this click itself issues no
-            request; the modal POSTs on confirm only, no request body (mirrors FontInstallModal's own
-            "no request body, by design" rule — AvatarPackController.Install fetches every byte
-            server-side too). */}
-        <Button type="button" variant="primary" onClick={onInstallClick}>
-          {isInstalled ? "Re-install" : "Install"}
-        </Button>
+        {/* Install opens AvatarInstallModal's confirm step — this click itself issues no request;
+            the modal POSTs on confirm only, no request body (mirrors FontInstallModal's own "no
+            request body, by design" rule — AvatarPackController.Install fetches every byte
+            server-side too). Uninstall calls `DELETE /api/avatar-packs/{slug}` directly (SPEC
+            F204.1/F204.2, PLAN T564 — avatar uninstall never 409, guard-free by design). */}
+        <InstallToggle
+          slug={slug}
+          displayName={displayName}
+          isInstalled={isInstalled}
+          deletePath="/api/avatar-packs"
+          kindLabel="avatar pack"
+          removedNoun="face"
+          onInstallClick={onInstallClick}
+          onUninstalled={onUninstalled}
+        />
       </div>
 
       <BestForChips items={detail.bestFor ?? []} />

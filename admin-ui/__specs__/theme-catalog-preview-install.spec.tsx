@@ -329,7 +329,7 @@ describe("Feature: previewing and installing a catalog theme", () => {
       expect(await screen.findByText('"Golden Frequency" installed.')).toBeInTheDocument();
     });
 
-    it("flips the detail panel to Installed/Re-install with the real provenance locally, no reload (gh-#375)", async () => {
+    it("flips the detail panel to Installed with the real provenance locally, no reload — button stays Install (SPEC F204.4, gh-#375)", async () => {
       const fetchMock = themeFlowFetchMock();
       // Starts NOT installed — the default `installedThemeProvenance=[]` — so the button starts
       // "Install" and no provenance line renders yet.
@@ -345,11 +345,13 @@ describe("Feature: previewing and installing a catalog theme", () => {
       // The detail panel itself (still open — only the confirm dialog closed) now reads installed,
       // with the REAL provenance the import response carried (never a fabricated "just now") and
       // no second fetch: PersonaCatalogClient.handleThemeInstalled flips its own local state on the
-      // toast, the same cheap path the font half's own T204 spec calls for.
+      // toast, the same cheap path the font half's own T204 spec calls for. The button itself never
+      // moves off "Install" — a theme carries no Uninstall/Re-install at all (SPEC F204.1/F204.4,
+      // PLAN T564: uninstalling a theme is a Theme Editor action, not a catalog one).
       expect(screen.getByText("Installed")).toBeInTheDocument();
       expect(screen.getByText("Imported · golden-frequency · Aug 6, 2026")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Re-install" })).toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "Install" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Install" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Re-install" })).not.toBeInTheDocument();
     });
   });
 
@@ -363,7 +365,7 @@ describe("Feature: previewing and installing a catalog theme", () => {
       expect(screen.queryByText(/^Imported ·/)).not.toBeInTheDocument();
     });
 
-    it('shows an Installed chip, "Imported · <source> · <date>", and Re-install when the theme is already installed', async () => {
+    it('shows an Installed chip, "Imported · <source> · <date>", and Install only — never Re-install/Uninstall — when the theme is already installed (SPEC F204.4)', async () => {
       const fetchMock = themeFlowFetchMock();
       await openGoldenFrequencyPreview(fetchMock, [
         { slug: "golden-frequency", importedFrom: "golden-frequency", importedAt: "2026-07-21T09:05:00Z" },
@@ -371,8 +373,8 @@ describe("Feature: previewing and installing a catalog theme", () => {
 
       expect(screen.getByText("Installed")).toBeInTheDocument();
       expect(screen.getByText("Imported · golden-frequency · Jul 21, 2026")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Re-install" })).toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "Install" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Install" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Re-install" })).not.toBeInTheDocument();
     });
   });
 
@@ -453,7 +455,7 @@ describe("Feature: previewing and installing a catalog theme", () => {
 
       // `onInstalled` (PersonaCatalogClient.handleThemeInstalled) only ever fires on
       // ThemeInstallModal's own 2xx branch — a 409 never reaches it, so the detail panel's own
-      // Install button, still present behind the open dialog, never flips to Re-install.
+      // Install button, still present behind the open dialog, never flips to Installed.
       // `getByText`, not `getByRole` (Radix marks the background `aria-hidden` while the dialog is
       // open, which `*ByRole` correctly excludes but a plain text query does not).
       expect(screen.getByText("Install")).toBeInTheDocument();
