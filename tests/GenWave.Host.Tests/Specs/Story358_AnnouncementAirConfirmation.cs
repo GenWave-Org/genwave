@@ -23,7 +23,8 @@ public static class FeatureAnnouncementAirConfirmation
             var boothLog = new FakeBoothLogAppender();
             var sink = new AnnouncementAiredEventSink(channel.Writer, NullLogger<AnnouncementAiredEventSink>.Instance);
             var drain = new AnnouncementAiredDrainService(
-                channel.Reader, lifecycle, boothLog, NullLogger<AnnouncementAiredDrainService>.Instance);
+                channel.Reader, lifecycle, boothLog, TimeProvider.System,
+                NullLogger<AnnouncementAiredDrainService>.Instance);
             var mediaId = AnnouncementMediaId.Wrap(555, "tts:abc");
 
             // When the REAL production event — a genuine TrackAired for that exact segment — publishes...
@@ -46,7 +47,8 @@ public static class FeatureAnnouncementAirConfirmation
             var boothLog = new FakeBoothLogAppender();
             var sink = new AnnouncementAiredEventSink(channel.Writer, NullLogger<AnnouncementAiredEventSink>.Instance);
             var drain = new AnnouncementAiredDrainService(
-                channel.Reader, lifecycle, boothLog, NullLogger<AnnouncementAiredDrainService>.Instance);
+                channel.Reader, lifecycle, boothLog, TimeProvider.System,
+                NullLogger<AnnouncementAiredDrainService>.Instance);
             var mediaId = AnnouncementMediaId.Wrap(555, "tts:abc");
 
             // When it airs...
@@ -70,7 +72,8 @@ public static class FeatureAnnouncementAirConfirmation
             var boothLog = new FakeBoothLogAppender();
             var sink = new AnnouncementAiredEventSink(channel.Writer, NullLogger<AnnouncementAiredEventSink>.Instance);
             var drain = new AnnouncementAiredDrainService(
-                channel.Reader, lifecycle, boothLog, NullLogger<AnnouncementAiredDrainService>.Instance);
+                channel.Reader, lifecycle, boothLog, TimeProvider.System,
+                NullLogger<AnnouncementAiredDrainService>.Instance);
             var mediaId = AnnouncementMediaId.Wrap(555, "tts:abc");
             var trackAired = new TrackAired(
                 mediaId, "Dinner's ready", null, 0.0, DateTimeOffset.UtcNow, 4200, SegmentKind: SegmentKind.Announcement);
