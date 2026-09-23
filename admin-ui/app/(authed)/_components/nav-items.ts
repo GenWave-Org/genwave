@@ -12,9 +12,15 @@ export interface NavItem {
   requiresCatalog?: boolean;
 }
 
+/** The stable group identities (SPEC F203.1, ARCHITECTURE's `NavGroup` shape) — the key a manual
+ * collapse/expand toggle is remembered under (PLAN T559). Kept separate from `label` so a future
+ * copy change can't silently invalidate every browser's stored toggle. */
+export type NavGroupId = "station" | "media" | "tools" | "status";
+
 /** A titled cluster of nav items (SPEC F203.1). */
 export interface NavGroup {
-  title: string;
+  id: NavGroupId;
+  label: string;
   items: NavItem[];
 }
 
@@ -30,11 +36,14 @@ export type NavFooterEntry =
 
 /**
  * Grouped sidebar/drawer model (SPEC F203.1, STORY-471) shared by the persistent desktop `Sidebar`
- * (≥1024px) and the `MobileNav` drawer (<1024px, SPEC F28.13) so the two never drift.
+ * (≥1024px) and the `MobileNav` drawer (<1024px, SPEC F28.13) so the two never drift. `readonly`
+ * (ARCHITECTURE) — this is a house constant, not a per-render working copy; `visibleNavGroups`
+ * below always returns a fresh array rather than mutating one of these in place.
  */
-export const NAV_GROUPS: NavGroup[] = [
+export const NAV_GROUPS: readonly NavGroup[] = [
   {
-    title: "Station",
+    id: "station",
+    label: "Station",
     items: [
       { href: "/safe-content", label: "Station sounds", iconName: "safe-content" },
       { href: "/ads", label: "Ads", iconName: "exploration" },
@@ -44,7 +53,8 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    title: "Media",
+    id: "media",
+    label: "Media",
     items: [
       { href: "/catalog", label: "Catalog", iconName: "catalog" },
       { href: "/announcements", label: "Announcements", iconName: "announcements" },
@@ -57,14 +67,16 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    title: "Tools",
+    id: "tools",
+    label: "Tools",
     items: [
       { href: "/gardener", label: "Gardener", iconName: "restore" },
       { href: "/editor", label: "Theme Editor", iconName: "editor" },
     ],
   },
   {
-    title: "Status",
+    id: "status",
+    label: "Status",
     items: [
       { href: "/booth-log", label: "Booth log", iconName: "booth-log" },
       { href: "/health", label: "Health", iconName: "health" },
@@ -73,13 +85,14 @@ export const NAV_GROUPS: NavGroup[] = [
 ];
 
 /** Rendered above every group. */
-export const NAV_TOP: NavItem[] = [{ href: "/dashboard", label: "Dashboard", iconName: "dashboard" }];
+export const NAV_TOP: readonly NavItem[] = [{ href: "/dashboard", label: "Dashboard", iconName: "dashboard" }];
 
 /** Rendered below every group. */
-export const NAV_BOTTOM: NavItem[] = [{ href: "/settings", label: "Settings", iconName: "settings" }];
+export const NAV_BOTTOM: readonly NavItem[] = [{ href: "/settings", label: "Settings", iconName: "settings" }];
 
-/** The footer entries (About, Sign out). Sidebar/MobileNav render them once PLAN T559 wires the footer; About's page arrives at PLAN T561. */
-export const NAV_FOOTER: NavFooterEntry[] = [
+/** The footer entries (About, Sign out) — rendered by `Sidebar`/`MobileNav` from this same data
+ * (PLAN T559). About's page arrives at PLAN T561; until then its link 404s. */
+export const NAV_FOOTER: readonly NavFooterEntry[] = [
   { kind: "link", href: "/about", label: "About" },
   { kind: "sign-out", label: "Sign out", iconName: "sign-out" },
 ];
@@ -92,7 +105,7 @@ export const NAV_FOOTER: NavFooterEntry[] = [
  * to `NAV_GROUPS` but takes an override so a spec can exercise an all-gated group without one
  * existing in the house model.
  */
-export function visibleNavGroups(catalogEnabled: boolean, groups: NavGroup[] = NAV_GROUPS): NavGroup[] {
+export function visibleNavGroups(catalogEnabled: boolean, groups: readonly NavGroup[] = NAV_GROUPS): readonly NavGroup[] {
   return groups
     .map((group) => ({
       ...group,
@@ -106,8 +119,22 @@ export function isActiveSection(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
+/** The id of the group that owns `pathname` (SPEC F203.2's route rule), or `undefined` when
+ * `pathname` belongs to `NAV_TOP`/`NAV_BOTTOM` (e.g. `/dashboard`, `/settings`) rather than any
+ * group. */
+export function groupIdForPathname(pathname: string, groups: readonly NavGroup[] = NAV_GROUPS): NavGroupId | undefined {
+  return groups.find((group) => group.items.some((item) => isActiveSection(pathname, item.href)))?.id;
+}
+
 /** 40px min touch target (SPEC F28.13) — nav links are `<a>` elements, so the
  * global `input/select/textarea/button` min-height rule in globals.css doesn't
  * reach them; this class list carries it explicitly instead. */
 export const NAV_LINK_CLASSES =
   "flex min-h-10 items-center gap-2.5 rounded-[6px] px-3 py-2 text-[0.85rem] font-semibold transition-colors duration-[120ms] ease-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
+
+/** A group's collapsible heading button (SPEC F203.2) — same 40px touch target as `NAV_LINK_CLASSES`
+ * but styled as a micro-label (uppercase, tracked) rather than a destination, so a group heading
+ * never reads as just another link. Used by `NavSections`, the shared render both `Sidebar` and
+ * `MobileNav` mount. */
+export const NAV_GROUP_HEADING_CLASSES =
+  "flex min-h-10 w-full items-center justify-between rounded-[6px] px-3 py-2 text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-mute transition-colors duration-[120ms] ease-out hover:bg-surface hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";

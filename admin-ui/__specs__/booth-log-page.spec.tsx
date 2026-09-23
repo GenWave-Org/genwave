@@ -366,7 +366,9 @@ describe("Feature: Booth log", () => {
 
 describe("Feature: Booth log sidebar entry", () => {
   it("lists Booth log in the persistent sidebar nav", async () => {
-    mockedUsePathname.mockReturnValue("/dashboard");
+    // Booth log lives in the Status group (SPEC F203.1) — /booth-log is Status's own route, so the
+    // group opens by rule (SPEC F203.2) without a manual toggle.
+    mockedUsePathname.mockReturnValue("/booth-log");
 
     const { Sidebar } = await import("../app/(authed)/_components/Sidebar");
     render(<Sidebar />);

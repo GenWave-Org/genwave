@@ -1,0 +1,37 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`Feature: Grouped navigation — F203.6 snapshot shows exactly one open group ("Media") at /catalog 1`] = `
+{
+  "Media": true,
+  "Station": false,
+  "Status": false,
+  "Tools": false,
+}
+`;
+
+exports[`Feature: Grouped navigation — F203.6 snapshot shows exactly one open group ("Station") at /ads 1`] = `
+{
+  "Media": false,
+  "Station": true,
+  "Status": false,
+  "Tools": false,
+}
+`;
+
+exports[`Feature: Grouped navigation — F203.6 snapshot shows exactly one open group ("Status") at /health 1`] = `
+{
+  "Media": false,
+  "Station": false,
+  "Status": true,
+  "Tools": false,
+}
+`;
+
+exports[`Feature: Grouped navigation — F203.6 snapshot shows exactly one open group ("Tools") at /gardener 1`] = `
+{
+  "Media": false,
+  "Station": false,
+  "Status": false,
+  "Tools": true,
+}
+`;

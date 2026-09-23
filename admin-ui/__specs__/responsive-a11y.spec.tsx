@@ -218,6 +218,9 @@ describe("Feature: Responsive and accessible console", () => {
   beforeEach(() => {
     mockedUsePathname.mockReturnValue("/dashboard");
     mockedUseRouter.mockReturnValue({ refresh: jest.fn() } as unknown as ReturnType<typeof useRouter>);
+    // jsdom's `window.localStorage` is shared by every `it` in this FILE — a nav-group toggle
+    // written by "traps focus..." (below) must not leak into a later test's Sidebar/MobileNav mount.
+    window.localStorage.clear();
   });
 
   afterEach(() => {
@@ -252,6 +255,10 @@ describe("Feature: Responsive and accessible console", () => {
 
       const dialog = await screen.findByRole("dialog", { name: "Navigation" });
       expect(dialog).toContainElement(document.activeElement as HTMLElement);
+      // Catalog (Media) and Station sounds (Station) live inside collapsible groups (SPEC F203.2)
+      // that don't open by route rule at /dashboard — open them by hand.
+      fireEvent.click(screen.getByRole("button", { name: "Station" }));
+      fireEvent.click(screen.getByRole("button", { name: "Media" }));
       // The same section list as the persistent Sidebar (SPEC F28.13: the
       // drawer is the same nav, not a second one that can drift).
       for (const label of ["Dashboard", "Catalog", "Station sounds", "Settings"]) {

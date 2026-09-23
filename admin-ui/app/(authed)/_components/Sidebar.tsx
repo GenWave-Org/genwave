@@ -1,12 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
-import { logout } from "@/app/login/actions";
-import { cn } from "@/lib/utils";
-import { Icon } from "./Icon";
-import { NAV_BOTTOM, NAV_LINK_CLASSES, NAV_TOP, isActiveSection, visibleNavGroups } from "./nav-items";
+import { NavSections } from "./NavSections";
 
 interface SidebarProps {
   /**
@@ -33,13 +29,12 @@ interface SidebarProps {
  * this component still mounts (so `usePathname` stays live for the active-
  * section highlight) but is hidden via `lg:flex` rather than unmounted.
  *
- * Renders `NAV_TOP`, then the visible groups' items flattened in order, then `NAV_BOTTOM` — a flat
- * list, same as before the grouped model (SPEC F203.1) landed. Group headings, collapsing and the
- * `NAV_FOOTER` entries are PLAN T559's job.
+ * The wordmark header is the only markup this component owns — the rest (`NAV_TOP`, the
+ * collapsible groups, `NAV_BOTTOM`, the footer) is `NavSections`, shared verbatim with
+ * `MobileNav` (SPEC F203.1–F203.2).
  */
 export function Sidebar({ stationName = "GenWave", catalogEnabled = false }: SidebarProps): ReactNode {
   const pathname = usePathname();
-  const items = [...NAV_TOP, ...visibleNavGroups(catalogEnabled).flatMap((group) => group.items), ...NAV_BOTTOM];
 
   return (
     <aside className="hidden w-[215px] shrink-0 flex-col border-r-2 border-line bg-surface-2 lg:flex">
@@ -47,37 +42,7 @@ export function Sidebar({ stationName = "GenWave", catalogEnabled = false }: Sid
         <span className="font-display text-xl italic text-ink">{stationName}</span>
       </div>
 
-      <nav aria-label="Sections" className="flex-1 px-3">
-        <ul className="flex flex-col gap-1">
-          {items.map(({ href, label, iconName }) => {
-            const active = isActiveSection(pathname, href);
-            return (
-              <li key={href}>
-                <Link
-                  href={href}
-                  aria-current={active ? "page" : undefined}
-                  className={cn(
-                    NAV_LINK_CLASSES,
-                    active
-                      ? "bg-accent/10 text-accent"
-                      : "text-mute hover:bg-surface hover:text-ink"
-                  )}
-                >
-                  <Icon name={iconName} className="shrink-0" />
-                  {label}
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      </nav>
-
-      <form action={logout} className="border-t border-line px-3 py-4">
-        <button type="submit" className={cn(NAV_LINK_CLASSES, "w-full text-mute hover:bg-surface hover:text-ink")}>
-          <Icon name="sign-out" className="shrink-0" />
-          Sign out
-        </button>
-      </form>
+      <NavSections pathname={pathname} catalogEnabled={catalogEnabled} />
     </aside>
   );
 }

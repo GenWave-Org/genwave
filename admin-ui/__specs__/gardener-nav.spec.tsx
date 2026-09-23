@@ -10,7 +10,7 @@ import { NAV_GROUPS } from "../app/(authed)/_components/nav-items";
 
 describe("Feature: the Gardener nav entry (SPEC F153.10)", () => {
   describe("Scenario: the Tools group", () => {
-    const tools = NAV_GROUPS.find((group) => group.title === "Tools");
+    const tools = NAV_GROUPS.find((group) => group.label === "Tools");
 
     it("places Gardener first in the Tools group", () => {
       expect(tools?.items[0]?.label).toBe("Gardener");

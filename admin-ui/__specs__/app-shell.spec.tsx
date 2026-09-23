@@ -136,6 +136,10 @@ function collectFiles(dir: string, exts: string[], out: string[] = []): string[]
 beforeEach(() => {
   jest.clearAllMocks();
   document.documentElement.removeAttribute("data-theme");
+  // jsdom's `window` (and its `localStorage`) is shared by every `it` in this FILE — a nav-group
+  // toggle written by one test (SPEC F203.2's remembered-toggle storage) must not leak into the
+  // next one's Sidebar/MobileNav mount.
+  window.localStorage.clear();
 });
 
 afterEach(() => {
@@ -153,6 +157,11 @@ describe("Feature: App shell", () => {
       const { Sidebar } = await import("../app/(authed)/_components/Sidebar");
 
       render(<Sidebar />);
+      // Catalog (Media) and Station sounds (Station) live inside collapsible groups (SPEC F203.2)
+      // that don't open by route rule at /dashboard — open them by hand so this stays a shell-
+      // composition check, not a group-collapse check.
+      fireEvent.click(screen.getByRole("button", { name: "Station" }));
+      fireEvent.click(screen.getByRole("button", { name: "Media" }));
 
       for (const label of ["Dashboard", "Catalog", "Station sounds", "Settings"]) {
         expect(screen.getByRole("link", { name: label })).toBeInTheDocument();
@@ -185,7 +194,10 @@ describe("Feature: App shell", () => {
   // ---------------------------------------------------------------------------
   describe("Scenario: Persona Catalog nav entry is feature-gated (PLAN T102, SPEC F90.1)", () => {
     it("hides the Persona Catalog link by default (no live signal, fail-closed)", async () => {
-      mockedUsePathname.mockReturnValue("/dashboard");
+      // /catalog is Media's own route, so the group opens by rule (SPEC F203.2) with no manual
+      // toggle — otherwise Media stays collapsed and this assertion would pass whether or not the
+      // gate exists (the link would be absent either way).
+      mockedUsePathname.mockReturnValue("/catalog");
       const { Sidebar } = await import("../app/(authed)/_components/Sidebar");
 
       render(<Sidebar />);
@@ -194,7 +206,9 @@ describe("Feature: App shell", () => {
     });
 
     it("lists the Persona Catalog link once the authed layout resolves catalogEnabled=true", async () => {
-      mockedUsePathname.mockReturnValue("/dashboard");
+      // Community Catalog lives in the Media group (SPEC F203.1) — /catalog is Media's own route,
+      // so the group opens by rule (SPEC F203.2) without a manual toggle.
+      mockedUsePathname.mockReturnValue("/catalog");
       const { Sidebar } = await import("../app/(authed)/_components/Sidebar");
 
       render(<Sidebar catalogEnabled />);
@@ -206,7 +220,7 @@ describe("Feature: App shell", () => {
     });
 
     it("mirrors the same gating in the sub-1024px drawer (MobileNav)", async () => {
-      mockedUsePathname.mockReturnValue("/dashboard");
+      mockedUsePathname.mockReturnValue("/catalog");
       const { MobileNav } = await import("../app/(authed)/_components/MobileNav");
 
       render(<MobileNav catalogEnabled />);
