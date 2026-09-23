@@ -2,6 +2,7 @@
 
 import { useCallback } from "react";
 import { toast } from "@/components/ui/toast";
+import { apiFetch, isApiFetchResponseError } from "@/lib/api-fetch";
 
 /** A row this hook can PATCH — the id plus the bare version (Postgres xmin, no `W/"…"` wrapper)
  * used to build the `If-Match` header. */
@@ -15,7 +16,6 @@ export interface RowPatchTarget {
  * `"unknown"` — callers with a site-specific case for a code outside this set handle it via
  * `describeFailure`. */
 export type RowPatchFailureKind =
-  | "unauthorized"
   | "forbidden"
   | "not-found"
   | "conflict"
@@ -46,8 +46,6 @@ export type RowPatchOutcome = RowPatchSuccess | RowPatchFailure;
 
 function classifyStatus(status: number): RowPatchFailureKind {
   switch (status) {
-    case 401:
-      return "unauthorized";
     case 403:
       return "forbidden";
     case 404:
@@ -64,8 +62,6 @@ function classifyStatus(status: number): RowPatchFailureKind {
 
 function defaultFailureMessage(failure: RowPatchFailure): string {
   switch (failure.kind) {
-    case "unauthorized":
-      return "Your session has expired — sign in again.";
     case "forbidden":
       return "You don't have permission to make this change.";
     case "not-found":
@@ -149,7 +145,9 @@ export function useRowPatch(options: UseRowPatchOptions = {}): UseRowPatchResult
     async (target: RowPatchTarget, body: Record<string, unknown>): Promise<RowPatchOutcome> => {
       let response: Response;
       try {
-        response = await fetch(`/api/media/${target.mediaId}`, {
+        // apiFetch (STORY-475, SPEC F208.1) owns 401 — a stale cookie never reaches the classify
+        // step below, since apiFetch clears it and hands off to /login itself.
+        response = await apiFetch(`/api/media/${target.mediaId}`, {
           method: "PATCH",
           headers: {
             "Content-Type": "application/json",
@@ -157,27 +155,19 @@ export function useRowPatch(options: UseRowPatchOptions = {}): UseRowPatchResult
           },
           body: JSON.stringify(body),
         });
-      } catch {
-        const failure: RowPatchFailure = { ok: false, kind: "network", status: null };
+      } catch (err) {
+        const failure: RowPatchFailure = isApiFetchResponseError(err)
+          ? { ok: false, kind: classifyStatus(err.status), status: err.status }
+          : { ok: false, kind: "network", status: null };
         if (notify) toast.error(describeFailure?.(failure) ?? defaultFailureMessage(failure));
+        if (failure.kind === "conflict") onConflict?.(target);
         return failure;
       }
 
-      if (response.ok) {
-        const etagHeader = response.headers.get("etag");
-        const version = etagHeader !== null ? stripWeakETag(etagHeader) : target.version;
-        const responseBody: unknown = await response.json().catch(() => null);
-        return { ok: true, version, body: responseBody };
-      }
-
-      const failure: RowPatchFailure = {
-        ok: false,
-        kind: classifyStatus(response.status),
-        status: response.status,
-      };
-      if (notify) toast.error(describeFailure?.(failure) ?? defaultFailureMessage(failure));
-      if (failure.kind === "conflict") onConflict?.(target);
-      return failure;
+      const etagHeader = response.headers.get("etag");
+      const version = etagHeader !== null ? stripWeakETag(etagHeader) : target.version;
+      const responseBody: unknown = await response.json().catch(() => null);
+      return { ok: true, version, body: responseBody };
     },
     [notify, onConflict, describeFailure]
   );

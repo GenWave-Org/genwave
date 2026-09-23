@@ -7,6 +7,7 @@
 // same convention as lib/persona-taste-api.ts.
 
 import { readErrorMessage } from "@/lib/problem-details";
+import { apiFetch, isApiFetchResponseError } from "@/lib/api-fetch";
 
 export type StationThumbDirection = "up" | "down";
 
@@ -49,18 +50,16 @@ export type StationThumbOutcome = StationThumbSuccess | StationThumbFailure;
 
 /** User-facing copy for a classified station-thumb failure (SPEC F31.3 posture, mirrors
  * lib/persona-taste-api.ts's describeTasteThumbFailure — same wording for the buckets the two
- * share). A 401 always reads as session-expiry regardless of whatever body the framework's own
- * auth challenge attached; a network failure gets the house network copy; 403/404 get the same
- * fixed copy every other mutation module in this directory uses; everything else (400 and
- * anything unclassified) prefers the server's own `detail` — for the 400 case it already names
- * the row's own kind (F150.8), app-authored vocabulary the operator can act on directly — falling
- * back to a generic message only when none arrived. */
+ * share). A 401 never reaches this function — apiFetch (SPEC F208.1) owns it and navigates away
+ * before a caller ever sees a failure outcome. A network failure gets the house network copy;
+ * 403/404 get the same fixed copy every other mutation module in this directory uses; everything
+ * else (400 and anything unclassified) prefers the server's own `detail` — for the 400 case it
+ * already names the row's own kind (F150.8), app-authored vocabulary the operator can act on
+ * directly — falling back to a generic message only when none arrived. */
 export function describeStationThumbFailure(outcome: StationThumbFailure): string {
   switch (outcome.status) {
     case 0:
       return "Network error — check your connection.";
-    case 401:
-      return "Your session has expired — sign in again.";
     case 403:
       return "You don't have permission to make this change.";
     case 404:
@@ -89,17 +88,19 @@ export async function postStationThumb(
 ): Promise<StationThumbOutcome> {
   let response: Response;
   try {
-    response = await fetch(`/api/booth-log/${boothLogId}/station-thumb`, {
+    // apiFetch (STORY-475, SPEC F208.1) owns 401 — a stale cookie never reaches the status
+    // checks below.
+    response = await apiFetch(`/api/booth-log/${boothLogId}/station-thumb`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ direction }),
     });
-  } catch {
+  } catch (err) {
+    if (isApiFetchResponseError(err)) {
+      return { ok: false, status: err.status, detail: await readErrorMessage(err) };
+    }
     return { ok: false, status: 0, detail: null };
-  }
-  if (!response.ok) {
-    return { ok: false, status: response.status, detail: await readErrorMessage(response) };
   }
   try {
     const raw = (await response.json()) as unknown;

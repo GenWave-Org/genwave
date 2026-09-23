@@ -40,6 +40,7 @@ import { render, screen, fireEvent, act, waitFor, within } from "@testing-librar
 import "@testing-library/jest-dom/jest-globals";
 import type { ComponentProps } from "react";
 import type { useRouter } from "next/navigation";
+import { toast as sonnerToast } from "sonner";
 import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "@/components/ui/toast";
 import type { LibraryDto } from "@/lib/library";
@@ -551,6 +552,12 @@ describe("Feature: One shared PATCH hook with real feedback", () => {
         expect(screen.getByText("You don't have permission to make this change.")).toBeInTheDocument();
       });
       safeContent.unmount();
+      // sonner's toast store is module-global and outlives a component's unmount (gh-#516,
+      // documented at jest.setup.ts) — jest.setup.ts's own afterEach only reaches between `it`s,
+      // not between the four sites this single `it` walks through in sequence, so each site
+      // dismisses its own toast before the next site's <Toaster/> mounts and would otherwise
+      // replay it alongside the next site's own.
+      sonnerToast.dismiss();
 
       // catalog detail form.
       makeFetchMock(403);
@@ -571,6 +578,7 @@ describe("Feature: One shared PATCH hook with real feedback", () => {
         expect(screen.getByText("You don't have permission to make this change.")).toBeInTheDocument();
       });
       editForm.unmount();
+      sonnerToast.dismiss();
 
       // move-to-library.
       makeFetchMock(403);
@@ -586,6 +594,7 @@ describe("Feature: One shared PATCH hook with real feedback", () => {
         expect(screen.getByText("You don't have permission to make this change.")).toBeInTheDocument();
       });
       moveAction.unmount();
+      sonnerToast.dismiss();
 
       // selection-toolbar: aggregates per-row outcomes into one summary toast instead of the
       // hook's own per-row toast (Q7 review) — still a visible, never-silent failure signal.
