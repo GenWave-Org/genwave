@@ -10,9 +10,8 @@ import { useBreadcrumbTitleOverride } from "./BreadcrumbTitle";
 // page's Libraries tab (Q7, SPEC F28.11) and is never itself a rendered route.
 const SECTION_LABELS: Record<string, string> = {
   dashboard: "Dashboard",
-  live: "Live",
   catalog: "Catalog",
-  "safe-content": "Station Imaging",
+  "safe-content": "Station sounds",
   "persona-catalog": "Community Catalog",
   settings: "Settings",
 };

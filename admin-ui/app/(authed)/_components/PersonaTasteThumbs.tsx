@@ -22,10 +22,10 @@ interface PersonaTasteThumbsProps {
 
 /**
  * The persona-taste thumb control (SPEC F84.1, F84.5-F84.7; STORY-215) — deliberately a different
- * shape from the catalog's `RatingControls` (F33.11) so an operator can never confuse "curate the
+ * shape from `CatalogToolbar`'s catalog vote (F33.11) so an operator can never confuse "curate the
  * library" with "teach the DJ" at a glance (F84.7's visual-distinctness requirement): real thumb
- * glyphs (not `RatingControls`' up/down chevrons), a brass (`--accent-2`) persona-attribution chip
- * in place of `RatingControls`' neutral numeric score pill, and exactly two directions — no third
+ * glyphs (not the catalog vote's up/down chevrons), a brass (`--accent-2`) persona-attribution chip
+ * in place of the catalog vote's neutral numeric score pill, and exactly two directions — no third
  * never-play/restore button, since taste has no flag to clear.
  *
  * Idempotency affordance (F84.5): each direction disables itself independently the moment its own

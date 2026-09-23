@@ -14,8 +14,8 @@ export function formatFontByteTotal(bytes: number): string {
 }
 
 /** The trio a font pack's licence line reads off (PLAN T204) — shared shape between the CATALOG
- * detail wire (`CatalogEntryDetailDto.fontLicense`/`fontVersion`/`fontSubset`) and the installed
- * Wardrobe wire (`FontLibraryPackDto.license`/`version`/`subset`): different DTOs, same three field
+ * detail wire (`CatalogEntryDetailDto.fontLicense`/`fontVersion`/`fontSubset`) and the installed-
+ * font wire (`FontLibraryPackDto.license`/`version`/`subset`): different DTOs, same three field
  * names and the same "degrades gracefully, never blank" contract, so this shape only names what
  * `licenceLine` below actually needs. */
 export interface FontLicenceFields {
@@ -25,13 +25,13 @@ export interface FontLicenceFields {
 }
 
 /** One pack's licence line — "&lt;licence&gt; · v&lt;version&gt; · &lt;subset&gt;" (PLAN T204,
- * mirrors the Library/Wardrobe page's own pre-existing line) — omitting whichever of the three is
- * absent (`version` is genuinely optional even on a cleanly-parsed manifest; `license`/`subset` are
- * `null` only when the manifest failed to parse, degrade, or — on the catalog wire — the entry is
- * unreachable). Degrades to "Licence unknown" rather than an empty line on the all-null edge — a
- * reviewer never sees a blank fact where the panel's whole point is showing this one. Shared by
- * `FontDetailPanel` (pre-install review) and the Wardrobe page's own pack cards so the two can never
- * drift on the same wording. */
+ * mirrors the retired Library/Wardrobe page's own pre-existing line) — omitting whichever of the
+ * three is absent (`version` is genuinely optional even on a cleanly-parsed manifest; `license`/
+ * `subset` are `null` only when the manifest failed to parse, degrade, or — on the catalog wire —
+ * the entry is unreachable). Degrades to "Licence unknown" rather than an empty line on the
+ * all-null edge — a reviewer never sees a blank fact where the panel's whole point is showing this
+ * one. Used by `FontDetailPanel` (pre-install review); the retired Wardrobe page's own pack cards
+ * shared this exact wording too. */
 export function licenceLine(fields: FontLicenceFields): string {
   const parts = [
     fields.license,

@@ -898,6 +898,24 @@ sealed class MediaRepository(
     }
 
     /// <summary>
+    /// <see cref="IAdminMediaQuery.GetReadyMusicCountAsync"/>'s own real query (SPEC F207.1,
+    /// STORY-474, PLAN T561) — the About page's "Tracks in the library" figure: rows with
+    /// <c>state = 'ready' and imaging_kind is null</c>, the SAME <c>imaging_kind is null</c> fence
+    /// <see cref="PlayablePredicate"/> applies to keep authored imaging content (liner/station_id/
+    /// jingle/promo/ad) out of music rotation. Unscoped, like <see cref="GetStatusCountsAsync"/>'s
+    /// own <c>Ready</c> state count — see that interface member's own remarks for why. Explicit
+    /// <c>::int</c> cast for the same Dapper-materialization reason <see cref="GetStatusCountsAsync"/>
+    /// needs it: Postgres' <c>count(*)</c> is <c>bigint</c>.
+    /// </summary>
+    public async Task<int> GetReadyMusicCountAsync(CancellationToken ct)
+    {
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        return await conn.ExecuteScalarAsync<int>(new CommandDefinition(
+            "select count(*)::int from library.media where state = 'ready' and imaging_kind is null",
+            cancellationToken: ct));
+    }
+
+    /// <summary>
     /// SPEC F52.1/F52.2 (closes gitea-#189) — distinct, non-NULL, non-blank values of <paramref name="field"/>'s
     /// backing column, grouped case-insensitively via <c>group by lower(column)</c> so "Rock"/"rock"
     /// collapse into one entry with the group's total row count (never two divided-count rows).

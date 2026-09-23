@@ -336,7 +336,7 @@ describe("Feature: Author personas from the console", () => {
       expect(within(rowFor("Radio Rex")).queryByText(/^Hired/)).not.toBeInTheDocument();
     });
 
-    it('badges a file import as the literal three-field "Hired · file · Jul 20, 2026" (timeZone="UTC" pinned for determinism, the StatusTiles/BoothLogFeed/LlmCallsFeed/PlayHistoryTable house idiom; "Hired" wording per SPEC F94.4 — no split by origin)', () => {
+    it('badges a file import as the literal three-field "Hired · file · Jul 20, 2026" (timeZone="UTC" pinned for determinism, the StatusTiles/BoothLogFeed/LlmCallsFeed house idiom; "Hired" wording per SPEC F94.4 — no split by origin)', () => {
       const fileImported: PersonaDto = { ...REX, importedFrom: "file", importedAt: FILE_IMPORTED_AT };
       makeDispatchFetchMock({});
       renderClient({ initialPersonas: [fileImported, NOVA], timeZone: "UTC" });

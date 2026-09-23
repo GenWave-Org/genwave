@@ -1,5 +1,5 @@
 // @jest-environment jsdom
-// gh-#431 — Station Imaging "Bed (optional)" gets a ? help flyover, matching the settings page's
+// gh-#431 — Station sounds "Bed (optional)" gets a ? help flyover, matching the settings page's
 // SettingHelpFlyover pattern: the shared `HelpFlyover` (gh-#209 extraction), the exact idiom the
 // booth log's Mode column header already uses (LlmCallsFeed.tsx).
 //

@@ -17,8 +17,7 @@ export interface ShowsClientProps {
   /** Every show row, from `GET /api/shows` (SPEC F115.1). */
   initialShows: ShowDto[];
   /** Test-only injection point for the provenance line's `formatDateStamp` call; production omits
-   * this and gets the browser's local zone — the same PersonasClient/WardrobeClient idiom, not a
-   * bespoke one. */
+   * this and gets the browser's local zone — the same `PersonasClient` idiom, not a bespoke one. */
   timeZone?: string;
 }
 
@@ -84,9 +83,9 @@ const FLAVOR_MAX_CHARS = 400;
 /** The one label a show's own delete refusal needs to surface (SPEC F115.4) — the server's `detail`
  * already IS the block-naming prose (`"<slug>" is still scheduled and cannot be deleted: Mon
  * 09:00–12:00, …`), so this reads it verbatim via `readErrorMessage` rather than re-parsing it into a
- * bespoke shape the way `WardrobeClient`'s `formatReferencedThemesMessage` does for its own
- * differently-shaped 409 — that reshape earns its keep there because the theme names sit inside a
- * longer sentence; here the whole sentence already reads as the plain-words refusal. */
+ * bespoke shape the way the retired Wardrobe page's `formatReferencedThemesMessage` once did for its
+ * own differently-shaped 409 — that reshape earned its keep there because the theme names sat inside
+ * a longer sentence; here the whole sentence already reads as the plain-words refusal. */
 function deleteConsequence(show: ShowDto): string {
   return `Delete "${show.name}"? This cannot be undone.`;
 }
@@ -101,8 +100,8 @@ function unscopedImagingNames(rows: readonly ScopedImagingRowDto[]): string[] {
 
 /** Provenance line (SPEC F115.1, F90.7's own three-field pattern) — "Imported · &lt;source&gt; ·
  * &lt;date&gt;" for an imported show, nothing for one authored in place. `importedFrom` renders
- * VERBATIM, the same provenance-not-decoration rule `PersonasClient`'s `ProvenanceBadge` and
- * `WardrobeClient`'s `ProvenanceChip` already follow. */
+ * VERBATIM, the same provenance-not-decoration rule `PersonasClient`'s `ProvenanceBadge` already
+ * follows (the retired Wardrobe page's own `ProvenanceChip` once did too). */
 function ProvenanceLine({
   importedFrom,
   importedAt,
@@ -127,23 +126,23 @@ const CHAR_COUNTER_CLASSES = "text-[0.72rem] tabular-nums text-mute";
  * `/api/shows`. Mirrors `PersonasClient`'s pre-export-first CRUD shape (a single form that toggles
  * create/edit, a list below it, local `shows` state spliced on every mutation response — every
  * mutation here returns a full row, so unlike `PersonasClient`'s import panel there is never a
- * reason to re-fetch the whole list) rather than `WardrobeClient`/`UninstallPackButton`'s
- * server-refresh-on-mutate split: that pair exists because Wardrobe is read-only except for one
- * per-pack action; this page authors every field a show has.
+ * reason to re-fetch the whole list) rather than the retired Wardrobe page's own server-refresh-
+ * on-mutate split (`WardrobeClient`/`UninstallPackButton`): that pair existed because Wardrobe was
+ * read-only except for one per-pack action; this page authors every field a show has.
  *
  * <b>No export-first gate (PLAN T244, "your call" — SPEC gives none).</b> `PersonasClient`'s Fire
  * flow (SPEC F94.2) forces an export or an explicit skip before Delete unlocks, because a persona
  * card carries taste history and narrative an operator could lose for good. A show carries three
  * short authored fields (name/tagline/flavor) with no comparable export format anywhere in this
  * codebase (`PersonaExportLink`'s card JSON has no show analogue) and no learned state at all — the
- * plain `useConfirm()` guard `UninstallPackButton` uses for font packs is the proportionate one here
- * too: state the consequence, confirm, delete.
+ * plain `useConfirm()` guard the retired Wardrobe page's `UninstallPackButton` once used for font
+ * packs is the proportionate one here too: state the consequence, confirm, delete.
  *
  * <b>Guarded delete (SPEC F115.4).</b> A 409 means `station.segment_schedule` still names this show
  * in ≥1 block; the server's own `detail` already names them (`ShowsController.ReferencedProblem`),
  * so this reads it straight through `readErrorMessage` with no reshape (see `deleteConsequence`'s own
- * remarks for why that differs from `WardrobeClient`'s theme-name reshape). A success that unscoped
- * ≥1 show-scoped imaging row (F117.1, no FK — never what BLOCKS the delete) folds those names into
+ * remarks for why that differs from the retired Wardrobe page's own theme-name reshape). A success
+ * that unscoped ≥1 show-scoped imaging row (F117.1, no FK — never what BLOCKS the delete) folds those names into
  * the success toast rather than a second dialog; nothing here re-fetches the imaging/catalog surface,
  * since this page never lists imaging rows in the first place.
  *

@@ -546,9 +546,8 @@ export function CatalogToolbar({
       </div>
 
       {/* Vote up/down + never-play/restore (SPEC F61.4) — icon-only, matching the row-level
-          RatingControls/NeverPlayControl convention (Live page, Catalog rows): rendered through
-          the shared `IconButton` so the hover/focus tooltip always carries the same copy as the
-          aria-label (SPEC F62.1–F62.2). */}
+          NeverPlayControl convention (Catalog rows): rendered through the shared `IconButton` so
+          the hover/focus tooltip always carries the same copy as the aria-label (SPEC F62.1–F62.2). */}
       <div className="flex items-center gap-1.5">
         <IconButton
           label="Vote up"

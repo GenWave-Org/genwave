@@ -146,24 +146,6 @@ export interface PlayHistoryEntry {
   durationMs?: number | null;
 }
 
-/** One catalog media id's rating state (SPEC F33.2, F33.9) — the `GET /api/ratings` element shape. */
-export interface RatingEntry {
-  mediaId: string;
-  score: number;
-  neverPlay: boolean;
-  /** gh-#99 — `false` for safe-scope content (safe-loop tracks, station IDs): render NO vote or
-   * never-play control at all, not a disabled one. Optional so a cached/older API shape (absent
-   * field) keeps the pre-#99 behavior: everything rateable. */
-  rateable?: boolean;
-}
-
-/** gh-#99 — the one gate every rating surface shares: an entry is rateable unless the server
- * said otherwise. `undefined` (no entry fetched yet, or an older API) stays rateable — the write
- * endpoints refuse safe content independently, so this is presentation, not enforcement. */
-export function isRateable(entry: RatingEntry | undefined): boolean {
-  return entry?.rateable !== false;
-}
-
 export type VoteDirection = "up" | "down";
 
 /**
@@ -228,15 +210,6 @@ export interface ExplicitOverrideSuccess {
 }
 export type ExplicitOverrideOutcome = ExplicitOverrideSuccess | RatingFailure;
 
-/** A media id this UI can vote/flag by id — the `RatingController` route requires a numeric
- * `long`; `tts:*` (and any other non-numeric) id would 404 the route entirely, so this same
- * check both selects which ids are worth batch-reading (F33.9's "non-numeric ids skipped
- * silently" is enforced server-side too, but an empty id list must never be requested at all)
- * and which rows/cards get rating controls rendered at all (F33.11). */
-export function isCatalogMediaId(mediaId: string): boolean {
-  return /^\d+$/.test(mediaId);
-}
-
 function classifyRatingStatus(status: number): RatingFailureKind {
   switch (status) {
     case 401:
@@ -248,26 +221,6 @@ function classifyRatingStatus(status: number): RatingFailureKind {
     default:
       return "unknown";
   }
-}
-
-/**
- * GET /api/ratings?ids=… (F33.9) — batch rating read composed on the poll cadence from whatever
- * catalog ids are currently visible. Filters to numeric catalog ids client-side first: an empty
- * result (every visible id is `tts:*` or there's nothing on screen yet) MUST NOT issue a request.
- */
-export async function fetchRatings(mediaIds: readonly string[]): Promise<RatingEntry[]> {
-  const catalogIds = mediaIds.filter(isCatalogMediaId);
-  if (catalogIds.length === 0) {
-    return [];
-  }
-  const response = await fetch(`/api/ratings?ids=${catalogIds.join(",")}`, {
-    credentials: "include",
-    cache: "no-store",
-  });
-  if (!response.ok) {
-    throw new Error(`GET /api/ratings failed: ${response.status}`);
-  }
-  return (await response.json()) as RatingEntry[];
 }
 
 /**

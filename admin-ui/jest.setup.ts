@@ -7,7 +7,12 @@
 // against (gh-#516).
 import { afterEach } from "@jest/globals";
 import { toast } from "sonner";
+import { resetNavGroupOpenStateForTests } from "./app/(authed)/_components/useNavGroupOpenState";
 
 afterEach(() => {
   toast.dismiss();
+  // Same module-global-leak shape as the toast store above (PLAN T559 fix round): the shared nav
+  // open-state store outlives a test's render, so a toggle in one test's Sidebar/MobileNav would
+  // otherwise leak into the next test's mount.
+  resetNavGroupOpenStateForTests();
 });

@@ -24,7 +24,7 @@ import { GARDENER_KIND_ORDER, type GardenerKind } from "@/lib/gardener-api";
 /** Raw `?tab=&page=&limit=` values exactly as Next.js hands them back — each MAY arrive as a
  * string array if the query string repeats the key. None of these three is ever meant to repeat,
  * but every resolver below treats a repeated value the same as an unrecognised one (falls back to
- * default) rather than picking one arbitrarily — mirrors `resolveWardrobeTab`'s own defensive
+ * default) rather than picking one arbitrarily — mirrors `resolveCatalogKind`'s own defensive
  * "absent, an array, or a stranger" posture (gh-#393). */
 export interface GardenerSearchParams {
   tab?: string | string[];

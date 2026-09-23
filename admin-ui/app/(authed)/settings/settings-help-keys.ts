@@ -19,6 +19,7 @@ export const SETTINGS_HELP_KEYS = [
   "Loudness:TargetLufs",
   "Loudness:CeilingDbtp",
   "Station:Name",
+  "Station:Tagline",
   "Station:Voice",
   "Station:Cadence:LeadInBeforeEachTrack",
   "Station:Cadence:BackAnnounceAfterEachTrack",

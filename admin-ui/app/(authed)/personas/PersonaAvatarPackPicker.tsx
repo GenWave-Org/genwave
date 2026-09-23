@@ -26,7 +26,7 @@ export interface PersonaAvatarPackPickerProps {
  * The apply-from-pack picker (SPEC F128.5, STORY-333, PLAN T296) — every installed avatar pack's
  * own items, listed for the persona currently being edited. An item whose `suggestedPersona`
  * matches this persona's OWN `slug` renders a "Suggested" offer chip (the same wording
- * `AvatarWardrobeClient`/`AvatarItemFace` already use for the identical field elsewhere); nothing
+ * `AvatarItemFace` already uses for the identical field elsewhere); nothing
  * here writes on its own — every row's own explicit "Use this face" click is the only write this
  * component ever issues, one `POST .../from-pack` per click, straight through
  * `PersonaAvatarController.ApplyFromPack` (T295). No bulk affordance lives here — that is the
@@ -75,7 +75,7 @@ export function PersonaAvatarPackPicker({
   if (packsState.packs.length === 0) {
     return (
       <p className="text-[0.82rem] text-mute">
-        No avatar packs installed — install one from the Wardrobe&apos;s Avatars tab.
+        No avatar packs installed — install one from the Community Catalog.
       </p>
     );
   }

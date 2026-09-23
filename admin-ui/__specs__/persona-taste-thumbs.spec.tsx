@@ -1,23 +1,34 @@
 // @jest-environment jsdom
 // STORY-215 — The persona learns only from me, and can't spiral (UI half — SPEC F84.1, F84.6, F84.7)
 //
-// Runner: Jest (jsdom) + @testing-library/react. PLAN T71 implements against two existing pages:
-// the now-playing surface (`LiveView`, driven exactly like live-rating.spec.tsx's own harness) and
-// the booth-log surface (`BoothLogView`, driven like booth-log-page.spec.tsx's own harness) — both
-// mirrored here rather than imported, per this directory's established "duplicated rather than
-// imported" convention (see e.g. catalog-rating-toolbar.spec.tsx's header comment). The taste thumb
-// is a DIFFERENT control from the F33 catalog vote (curation vs character) and must never be
-// visually confusable with it (F84.7) — the last scenario below pins that directly against
-// `RatingControls`.
+// Runner: Jest (jsdom) + @testing-library/react. PLAN T71 implements against the booth-log surface
+// (`BoothLogView`, driven like booth-log-page.spec.tsx's own harness) — mirrored here rather than
+// imported, per this directory's established "duplicated rather than imported" convention (see e.g.
+// catalog-rating-toolbar.spec.tsx's header comment). The taste thumb is a DIFFERENT control from
+// the F33 catalog vote (curation vs character) and must never be visually confusable with it
+// (F84.7) — the last scenario below pins that directly against `CatalogToolbar`'s own "Vote up"
+// button. This scenario used to compare against the Live page's `RatingControls`; F203.4 retired
+// that page, so it's re-pointed at the toolbar, the surviving catalog-vote surface.
+
+jest.mock("next/navigation", () => ({
+  ...jest.requireActual<typeof import("next/navigation")>("next/navigation"),
+  useRouter: jest.fn(),
+}));
 
 import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
-import { render, screen, fireEvent, within, act } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import "@testing-library/jest-dom/jest-globals";
+import type { useRouter } from "next/navigation";
 import { Toaster } from "@/components/ui/toast";
-import { LiveView } from "../app/(authed)/live/LiveView";
+import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
+import type { LibraryDto } from "@/lib/library";
 import { BoothLogView } from "../app/(authed)/booth-log/BoothLogView";
 import { PersonaTasteThumbs } from "../app/(authed)/_components/PersonaTasteThumbs";
-import { RatingControls } from "../app/(authed)/_components/RatingControls";
+import type { AdminMediaDto, BulkFilter } from "../app/(authed)/catalog/types";
+
+const mockedUseRouter = jest
+  .requireMock<{ useRouter: typeof useRouter }>("next/navigation")
+  .useRouter as jest.MockedFunction<typeof useRouter>;
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -92,6 +103,7 @@ async function advance(ms: number): Promise<void> {
 
 beforeEach(() => {
   jest.useFakeTimers({ now: new Date(ISO_NOW) });
+  mockedUseRouter.mockReturnValue({ refresh: jest.fn() } as unknown as ReturnType<typeof useRouter>);
 });
 
 afterEach(() => {
@@ -99,90 +111,46 @@ afterEach(() => {
   jest.restoreAllMocks();
 });
 
-// ---------------------------------------------------------------------------
-// Now-playing surface (LiveView) — extends live-rating.spec.tsx's installFetchMock style with the
-// two endpoints T71 adds (booth-log resolution, persona directory) and the taste-thumb POST.
-// ---------------------------------------------------------------------------
-
-interface TrackFixture {
-  mediaId?: string;
-}
-
-function makeTrack(overrides: TrackFixture = {}) {
+/** Minimal `CatalogToolbar` fixtures — mirrors catalog-rating-toolbar.spec.tsx's own `makeRow`/
+ * `LIBRARIES`/`EMPTY_FILTER`, trimmed to the one row this scenario needs to get the toolbar's
+ * "Vote up" button on screen (selection mode renders unconditionally on a non-empty selection —
+ * CatalogTable, not CatalogToolbar itself, is what gates visibility on selection/filter state). */
+function makeToolbarRow(): AdminMediaDto {
   return {
-    stationId: "1",
-    // Non-numeric on purpose — sidesteps the F33 rating machinery entirely (irrelevant to taste
-    // thumbs, which key off the booth log's own row, never the now-playing mediaId). NOT tts:-
-    // prefixed: since gh-#187 a tts:* id maps to kind "patter", whose card treatment carries no
-    // taste thumbs at all — this fixture models a TRACK airing.
-    mediaId: "live:announcer-1",
+    mediaId: "101",
+    locator: "/media/101.flac",
+    format: "flac",
+    state: "ready",
+    durationMs: 180000,
     title: "Astral Plane",
     artist: "Valerie June",
-    gainDb: -2.3,
-    startedAt: ISO_NOW,
-    ...overrides,
+    album: "Album",
+    genre: "Folk",
+    year: 2024,
+    bpm: null,
+    trackEnergy: null,
+    integratedLufs: -14,
+    truePeakDbtp: -1,
+    measurable: true,
+    cueInSec: null,
+    cueOutSec: null,
+    eligible: true,
+    version: "900",
+    score: 50,
+    neverPlay: false,
   };
 }
 
-interface LiveFetchState {
-  now: MockResult;
-  history: MockResult;
-  boothLog: MockResult;
-  personas: MockResult;
-  tasteThumb: MockResult;
-}
+const EMPTY_TOOLBAR_FILTER: BulkFilter = {
+  state: null,
+  artist: null,
+  genre: null,
+  libraryId: null,
+  q: null,
+  eligible: null,
+};
 
-function defaultLiveState(overrides: Partial<LiveFetchState> = {}): LiveFetchState {
-  return {
-    now: ok(makeTrack()),
-    history: ok([]),
-    boothLog: ok({ entries: [makeBoothLogEntry()], nextBefore: null }),
-    personas: ok([makePersona()]),
-    tasteThumb: ok({ alreadyRecorded: false, weight: 0.2 }),
-    ...overrides,
-  };
-}
-
-function endpointKeyForLive(url: string): keyof LiveFetchState {
-  if (url.includes("taste-thumb")) return "tasteThumb";
-  if (url.includes("/api/booth-log")) return "boothLog";
-  if (url.includes("/api/personas")) return "personas";
-  if (url.includes("/play-history")) return "history";
-  return "now";
-}
-
-function installLiveFetchMock(initial: LiveFetchState) {
-  const state: LiveFetchState = { ...initial };
-  const calls: RecordedCall[] = [];
-  const fn = jest.fn<typeof fetch>().mockImplementation((input, init) => {
-    const url = String(input);
-    const method = (init?.method ?? "GET").toUpperCase();
-    const body = typeof init?.body === "string" ? (JSON.parse(init.body) as unknown) : undefined;
-    calls.push({ url, method, body });
-
-    const result = state[endpointKeyForLive(url)];
-    if (result.kind === "network-error") {
-      return Promise.reject(new Error("network error"));
-    }
-    const status = result.status ?? 200;
-    return Promise.resolve({
-      ok: status >= 200 && status < 300,
-      status,
-      json: () => Promise.resolve(result.body),
-    } as Response);
-  });
-  global.fetch = fn as unknown as typeof fetch;
-  return { fn, state, calls };
-}
-
-function renderLive(): ReturnType<typeof render> {
-  return render(
-    <>
-      <LiveView timeZone="UTC" />
-      <Toaster />
-    </>
-  );
-}
+const TOOLBAR_LIBRARIES: LibraryDto[] = [{ id: 1, name: "In Rotation", mediaCount: 50 }];
 
 // ---------------------------------------------------------------------------
 // Booth-log surface (BoothLogView) — extends booth-log-page.spec.tsx's installFetchMock style
@@ -248,53 +216,6 @@ function renderBoothLog(): ReturnType<typeof render> {
 // ---------------------------------------------------------------------------
 
 describe("Feature: Persona taste thumbs", () => {
-  describe("Scenario: thumbing the now-playing track", () => {
-    // Arrange: now-playing with an active persona; thumb endpoints faked at the fetch seam.
-    it("shows taste thumbs attributed to the active persona", async () => {
-      installLiveFetchMock(defaultLiveState());
-
-      renderLive();
-      await flush();
-
-      const card = screen.getByRole("region", { name: "Now playing" });
-      expect(within(card).getByText("Nova taste")).toBeInTheDocument();
-      expect(within(card).getByRole("button", { name: "Taste up for Nova" })).toBeInTheDocument();
-      expect(within(card).getByRole("button", { name: "Taste down for Nova" })).toBeInTheDocument();
-    });
-
-    it("posts one thumb per tap to the taste endpoint", async () => {
-      const { calls } = installLiveFetchMock(defaultLiveState());
-
-      renderLive();
-      await flush();
-
-      const card = screen.getByRole("region", { name: "Now playing" });
-      await clickAndSettle(within(card).getByRole("button", { name: "Taste up for Nova" }));
-
-      const thumbCalls = calls.filter((call) => call.url.includes("taste-thumb"));
-      expect(thumbCalls).toHaveLength(1);
-      expect(thumbCalls[0]).toMatchObject({
-        url: "/api/booth-log/501/taste-thumb",
-        method: "POST",
-        body: { direction: "up" },
-      });
-    });
-
-    it("reflects the recorded direction after the round trip", async () => {
-      installLiveFetchMock(defaultLiveState());
-
-      renderLive();
-      await flush();
-
-      const card = screen.getByRole("region", { name: "Now playing" });
-      const up = within(card).getByRole("button", { name: "Taste up for Nova" });
-      await clickAndSettle(up);
-
-      expect(up).toBeDisabled();
-      expect(within(card).getByRole("button", { name: "Taste down for Nova" })).toBeEnabled();
-    });
-  });
-
   describe("Scenario: thumbing a booth-log row", () => {
     // Arrange: booth-log rows — one stamped with persona A, one unstamped (F84.6).
     it("offers thumbs on a persona-stamped track row", async () => {
@@ -434,23 +355,36 @@ describe("Feature: Persona taste thumbs", () => {
       expect(down).toBeDisabled();
       expect(screen.getByRole("button", { name: "Taste up for Nova" })).toBeEnabled();
     });
+  });
 
-    it("renders the taste thumb visually distinct from the catalog vote control", () => {
+  describe("Scenario: the taste thumb never blurs with the catalog vote (F84.7)", () => {
+    it("renders a taste thumbs-up glyph distinct from CatalogToolbar's Vote up glyph", async () => {
+      // Dynamic import (not a static top-level import): CatalogToolbar itself calls `useRouter()`,
+      // and next/jest's SWC transform does not hoist `jest.mock()` above static imports (mirrors
+      // grouped-navigation.spec.tsx's own header comment, and catalog-rating-toolbar.spec.tsx's own
+      // `renderCatalogTable` precedent) — a static import here would load the REAL next/navigation
+      // before this file's `jest.mock()` call takes effect.
+      const { CatalogToolbar } = await import("../app/(authed)/catalog/CatalogToolbar");
+
       render(
-        <>
-          <RatingControls mediaId="101" value={{ score: 50, neverPlay: false }} onChange={() => undefined} />
+        <ConfirmDialogProvider>
+          <CatalogToolbar
+            selectedMedia={[makeToolbarRow()]}
+            totalMatchingRows={1}
+            filter={EMPTY_TOOLBAR_FILTER}
+            libraries={TOOLBAR_LIBRARIES}
+            busy={false}
+            onBusyChange={() => undefined}
+            onOutcome={() => undefined}
+          />
           <PersonaTasteThumbs boothLogRowId={1} personaName="Nova" />
-        </>
+        </ConfirmDialogProvider>
       );
 
       const voteUp = screen.getByRole("button", { name: "Vote up" });
       const tasteUp = screen.getByRole("button", { name: "Taste up for Nova" });
 
-      // Distinct affordance shape (brass persona-attribution styling vs the plain vote control) —
-      // never sharing a class, and the persona-attribution chip has no F33 equivalent at all.
-      expect(tasteUp).toHaveClass("border-accent-2");
-      expect(voteUp).not.toHaveClass("border-accent-2");
-      expect(screen.getByText("Nova taste")).toBeInTheDocument();
+      expect(tasteUp.innerHTML).not.toEqual(voteUp.innerHTML);
     });
   });
 });

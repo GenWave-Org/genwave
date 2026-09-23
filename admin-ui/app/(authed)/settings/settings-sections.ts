@@ -24,8 +24,8 @@ export const SECTION_LABELS: Readonly<Record<SectionId, string>> = {
   station: "Station",
   scope: "Scope",
   // gh-#149 display rename: the section holding Station:SafeScope:*/GW_SAFE_GAP_SECONDS is
-  // labeled "Station Imaging"; the section id and the setting KEYS deliberately stay "safe".
-  safe: "Station Imaging",
+  // labeled "Station sounds"; the section id and the setting KEYS deliberately stay "safe".
+  safe: "Station sounds",
   library: "Library",
   other: "Other",
 };
@@ -35,15 +35,16 @@ export const SECTION_LABELS: Readonly<Record<SectionId, string>> = {
  * key list in `GenWave.Host.Configuration.StationSettingsAllowlist`:
  *   - `Loudness:*`                                             → Loudness
  *   - `Station:Cadence:*`, `Station:Rotation:*`, `GW_XFADE_*`   → Playout
- *   - `Station:Name`, `Station:Voice`                          → Station
+ *   - `Station:Name`, `Station:Tagline`, `Station:Voice`        → Station
  *   - `Station:SafeScope:*`, `GW_SAFE_GAP_SECONDS`              → Safe
  *   - `Station:Scope:*`                                         → Scope
  *   - `Library:*`                                               → Library
  * Anything else falls back to "other" so a future allowlist addition is
  * surfaced rather than silently dropped from the page.
  *
- * `station` is a minimal V7 addition (SPEC F44.1/F44.5) carrying only two exact keys below —
- * NOT a `Station:` prefix rule, which would also swallow Cadence/Rotation/Scope/SafeScope.
+ * `station` is a minimal V7 addition (SPEC F44.1/F44.5) carrying only the exact keys below
+ * (`Station:Tagline` joined them at PLAN T561, SPEC F207.1) — NOT a `Station:` prefix rule, which
+ * would also swallow Cadence/Rotation/Scope/SafeScope.
  * V8 (SPEC F44.8) adds the `library` section for every `Library:*` key. `Station:Persona:ActiveId`
  * (a V8 addition to this section) is retired outright (SPEC F91.5, PLAN T120/T127) — the format
  * clock is the only thing that names an on-air persona now, and this section carries no
@@ -53,7 +54,7 @@ export const SECTION_LABELS: Readonly<Record<SectionId, string>> = {
  */
 export function sectionForKey(key: string): SectionId {
   if (key.startsWith("Loudness:")) return "loudness";
-  if (key === "Station:Name" || key === "Station:Voice") return "station";
+  if (key === "Station:Name" || key === "Station:Tagline" || key === "Station:Voice") return "station";
   // Station:Rotation:* (SPEC F41.6) joins Station:Cadence:*/GW_XFADE_* in Playout — its prefix
   // doesn't overlap Station:Scope:*/Station:SafeScope:*, so it carries none of that pair's
   // check-order pitfall (see the SafeScope-before-Scope note below).

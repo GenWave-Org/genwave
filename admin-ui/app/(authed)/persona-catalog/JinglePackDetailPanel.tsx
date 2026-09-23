@@ -7,6 +7,7 @@ import { Chip } from "@/components/ui/chip";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { toast } from "@/components/ui/toast";
 import { readErrorMessage } from "@/lib/problem-details";
+import { isHttpUrl } from "@/lib/safe-external-url";
 import { LicenseBadge } from "./catalog-badges";
 import { prettifySlug } from "./format-slug";
 import type { CatalogEntryDetailDto } from "./types";
@@ -117,8 +118,6 @@ function aggregateLicenses(assets: readonly ParsedJinglePackAsset[]): string {
   const unknown = [...present].filter((license) => !KNOWN_LICENSE_ORDER.includes(license)).sort();
   return [...known, ...unknown].join(" · ");
 }
-
-const HTTP_URL_PATTERN = /^https?:/i;
 
 /**
  * A jingle pack entry's detail view (SPEC F165, STORY-397, PLAN T418) — mirrors
@@ -232,7 +231,7 @@ export function JinglePackDetailPanel({ slug, detail, isInstalled, onInstallClic
               <td className="py-1.5">
                 {asset.attributionCreator === null ? (
                   "—"
-                ) : asset.attributionSourceUrl !== null && HTTP_URL_PATTERN.test(asset.attributionSourceUrl) ? (
+                ) : asset.attributionSourceUrl !== null && isHttpUrl(asset.attributionSourceUrl) ? (
                   <a
                     href={asset.attributionSourceUrl}
                     target="_blank"

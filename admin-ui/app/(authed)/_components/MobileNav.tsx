@@ -1,14 +1,12 @@
 "use client";
 
 import * as Dialog from "@radix-ui/react-dialog";
-import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
-import { logout } from "@/app/login/actions";
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { Icon } from "./Icon";
-import { NAV_LINK_CLASSES, isActiveSection, visibleNavItems } from "./nav-items";
+import { NavSections } from "./NavSections";
 
 const ICON_BUTTON_CLASSES =
   "flex h-10 w-10 shrink-0 items-center justify-center rounded-[6px] text-mute transition-colors duration-[120ms] ease-out hover:bg-surface hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
@@ -29,18 +27,22 @@ interface MobileNavProps {
 
 /**
  * Sub-1024px nav drawer (SPEC F28.13): a hamburger in the shell header opens
- * the same `NAV_ITEMS` the persistent `Sidebar` renders at ≥1024px, inside a
+ * the same nav model the persistent `Sidebar` renders at ≥1024px, inside a
  * Radix Dialog reused for the trap (as confirm-dialog.tsx does — FocusScope
  * + DismissableLayer are Radix's job, not hand-rolled here). Unlike
  * `useConfirm()`, this trigger is a real rendered `<Dialog.Trigger>`, so
  * Radix's built-in onCloseAutoFocus already refocuses it on close with no
- * extra wiring. Every nav Link and the sign-out submit close the drawer
- * explicitly so a route change never leaves it open over the new page. Both
- * icon-only triggers (hamburger, drawer close) carry a hover/focus tooltip
- * with the same copy as their aria-label (SPEC F62.1–F62.2) — the `Tooltip`
- * wraps each `Dialog.Trigger`/`Dialog.Close` from the outside, not as their
- * `asChild` target, so Radix's own prop-cloning onto the real `<button>` is
- * unaffected.
+ * extra wiring. Both icon-only triggers (hamburger, drawer close) carry a
+ * hover/focus tooltip with the same copy as their aria-label (SPEC
+ * F62.1–F62.2) — the `Tooltip` wraps each `Dialog.Trigger`/`Dialog.Close`
+ * from the outside, not as their `asChild` target, so Radix's own
+ * prop-cloning onto the real `<button>` is unaffected.
+ *
+ * The header chrome (wordmark, hamburger, close button) is the only markup this component owns —
+ * the rest (`NAV_TOP`, the collapsible groups, `NAV_BOTTOM`, the footer) is `NavSections`, shared
+ * verbatim with `Sidebar` (SPEC F203.1–F203.2) so the two surfaces can never drift. `NavSections`
+ * is given `onNavigate` here so every nav `Link` and the sign-out submit close the drawer
+ * explicitly — a route change should never leave it open over the new page.
  */
 export function MobileNav({ stationName = "GenWave", catalogEnabled = false }: MobileNavProps): ReactNode {
   const pathname = usePathname();
@@ -75,41 +77,7 @@ export function MobileNav({ stationName = "GenWave", catalogEnabled = false }: M
             </Tooltip>
           </div>
 
-          <nav aria-label="Sections" className="flex-1 px-3">
-            <ul className="flex flex-col gap-1">
-              {visibleNavItems(catalogEnabled).map(({ href, label, iconName }) => {
-                const active = isActiveSection(pathname, href);
-                return (
-                  <li key={href}>
-                    <Link
-                      href={href}
-                      aria-current={active ? "page" : undefined}
-                      onClick={() => setOpen(false)}
-                      className={cn(
-                        NAV_LINK_CLASSES,
-                        active
-                          ? "bg-accent/10 text-accent"
-                          : "text-mute hover:bg-surface hover:text-ink"
-                      )}
-                    >
-                      <Icon name={iconName} className="shrink-0" />
-                      {label}
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          </nav>
-
-          <form action={logout} className="border-t border-line px-3 py-4" onSubmit={() => setOpen(false)}>
-            <button
-              type="submit"
-              className={cn(NAV_LINK_CLASSES, "w-full text-mute hover:bg-surface hover:text-ink")}
-            >
-              <Icon name="sign-out" className="shrink-0" />
-              Sign out
-            </button>
-          </form>
+          <NavSections pathname={pathname} catalogEnabled={catalogEnabled} onNavigate={() => setOpen(false)} />
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

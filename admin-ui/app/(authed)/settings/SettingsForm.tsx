@@ -45,8 +45,7 @@ interface SettingsFormProps {
   libraries?: LibraryDto[];
   /** Test-only injection point for the theme provenance list's `formatDateStamp` call (SPEC
    * F103.11, PLAN T187 review F2); production omits this and gets the browser's local zone — the
-   * same StatusTiles/BoothLogFeed/LlmCallsFeed/PlayHistoryTable/`PersonasClient` idiom, not a
-   * bespoke one. */
+   * same StatusTiles/BoothLogFeed/LlmCallsFeed/`PersonasClient` idiom, not a bespoke one. */
   timeZone?: string;
   /**
    * Extra content mounted at the end of the TTS tabpanel, after its own section cards (PLAN T145
@@ -82,9 +81,9 @@ const TTS_TAB_PREFIX = "Tts";
 const VERSION_GUARDED_KEYS = new Set<string>(["Tts:Corrections", "Tts:Pronunciations"]);
 const EMPTY_MAIN_SCOPE_ERROR =
   "Main rotation scope cannot be empty — the station would go silent.";
-const SAFE_SCOPE_EMPTY_CONFIRM_TITLE = "Save empty Station Imaging scope";
+const SAFE_SCOPE_EMPTY_CONFIRM_TITLE = "Save empty Station sounds scope";
 const SAFE_SCOPE_EMPTY_CONFIRM_CONSEQUENCE =
-  "Saving an empty Station Imaging scope (Station:SafeScope:LibraryIds) silences the stream on " +
+  "Saving an empty Station sounds scope (Station:SafeScope:LibraryIds) silences the stream on " +
   "drain — mksafe emits silence until re-pointed.";
 
 /**
@@ -138,6 +137,9 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
   "Station:Name":
     "The public Icecast stream/directory name updates on the next engine restart; patter, " +
     "metadata, and this console update immediately.",
+  "Station:Tagline":
+    "A short line shown under the station name on the About page. Optional — leave blank to show " +
+    "no tagline. Up to 120 characters.",
   "Station:Voice":
     "The Kokoro voice used for station-branded patter (station IDs, time/date, lead-ins, " +
     "back-announces) whenever no persona is active.",
@@ -155,7 +157,7 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
     "The libraries the main rotation picks tracks from — must name at least one library, or the " +
     "station has nothing to play.",
   "Station:SafeScope:LibraryIds":
-    "The libraries holding Station Imaging — the always-airable station segments (IDs, jingles, " +
+    "The libraries holding Station sounds — the always-airable station segments (IDs, jingles, " +
     "sweepers, liners) played when the main rotation drains. An empty list is legal and falls " +
     "back to silence (mksafe).",
   // ── Rotation resilience + artist separation (SPEC F41.6, F53.1, F56.1, closes gitea-#210/gitea-#213/gitea-#227) ─
@@ -293,7 +295,7 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
     "The longest crossfade duration the engine uses between tracks, in seconds. Must be " +
     "greater than 0, at most 30.",
   "GW_SAFE_GAP_SECONDS":
-    "The silence gap the engine inserts between consecutive Station Imaging (safe-rotation) " +
+    "The silence gap the engine inserts between consecutive Station sounds (safe-rotation) " +
     "tracks, in seconds. 0 disables the gap. Accepted range: 0–600.",
 
   // ── Enrichment-mode knobs (F44.3) ──────────────────────────────────────────────────────────
@@ -358,8 +360,8 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
 
   // ── Icon pack selection (SPEC F130.4, STORY-337, PLAN T303) ───────────────────────────────
   "Station:IconPack":
-    "The station's active icon pack, by slug — fed by the packs installed on the Wardrobe " +
-    "Icons tab. Empty (the default) uses the house icons. Uninstalling the active pack leaves " +
+    "The station's active icon pack, by slug — fed by the packs installed on the Community " +
+    "Catalog. Empty (the default) uses the house icons. Uninstalling the active pack leaves " +
     "this value dangling; the admin chrome falls back to house icons rather than erroring. " +
     "Changes apply live.",
 

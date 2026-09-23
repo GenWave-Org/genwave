@@ -28,8 +28,8 @@ function tabLabel(kind: GardenerKind, open: GardenerOpenCounts | null): string {
  * URL-driven via `?tab=`, the shared `TabStrip` markup (gh-#393's extraction), each label badged
  * with that kind's own OPEN count from `/api/status` (STORY-381 AC1). `TabStrip` itself stays
  * untouched (T387 scope: the count is embedded IN the label string here rather than widening the
- * shared strip's own props) — every kind renders as its own tab regardless of count, the
- * `WardrobeTabs`/`PersonaCatalogTabs` "always render every kind" ruling applied here too.
+ * shared strip's own props) — every kind renders as its own tab regardless of count,
+ * `PersonaCatalogTabs`' own "always render every kind" ruling applied here too.
  */
 export function GardenerTabs({ activeTab, limit, open }: GardenerTabsProps): ReactNode {
   const tabs: TabStripTab<GardenerKind>[] = GARDENER_KIND_ORDER.map((kind) => ({

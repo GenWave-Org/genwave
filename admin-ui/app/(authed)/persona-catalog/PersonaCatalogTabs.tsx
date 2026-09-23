@@ -21,9 +21,9 @@ const TABS: TabStripTab<CatalogEntryKind>[] = [
 ];
 
 /**
- * Resolves `?kind=` to a shelf kind (gh-#372, widened at PLAN T304/T405) — the `resolveWardrobeTab`
- * posture: anything unrecognised (absent, an array, a stranger) falls back to personas, the
- * shelf's founding kind.
+ * Resolves `?kind=` to a shelf kind (gh-#372, widened at PLAN T304/T405) — the retired Wardrobe
+ * page's `resolveWardrobeTab` posture: anything unrecognised (absent, an array, a stranger) falls
+ * back to personas, the shelf's founding kind.
  */
 export function resolveCatalogKind(raw: string | string[] | undefined): CatalogEntryKind {
   switch (raw) {

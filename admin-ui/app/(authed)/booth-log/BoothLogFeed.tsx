@@ -70,9 +70,9 @@ function BoothLogKindBadge({ kind }: { kind: string }): ReactNode {
 /**
  * The booth log's narrative feed (PLAN T40, STORY-195, SPEC F72.1-F72.2): newest-first rows of
  * occurred-at / kind badge / summary — "what did it say at 9:14" answerable from this table
- * alone. Loading/empty/error idioms match the Live page's `PlayHistoryTable` (skeleton rows,
- * `EmptyState`, a quiet unavailable hint on a poll failure that keeps whatever was already
- * loaded) — composed here through `useBoothLogFeed` instead of `usePoll` directly, since this
+ * alone. Loading/empty/error idioms match the house feed idiom (skeleton rows, `EmptyState`, a
+ * quiet unavailable hint on a poll failure that keeps whatever was already loaded) — composed
+ * here through `useBoothLogFeed` instead of `usePoll` directly, since this
  * page additionally accumulates "Load more" pages (see that hook's doc comment for the
  * refresh/paging interaction this renders).
  *

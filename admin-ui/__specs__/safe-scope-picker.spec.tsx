@@ -23,7 +23,7 @@ import type { LibraryDto } from "../lib/library";
 
 const SAFE_SCOPE_KEY = "Station:SafeScope:LibraryIds";
 const SAFE_SCOPE_EMPTY_CONSEQUENCE =
-  "Saving an empty Station Imaging scope (Station:SafeScope:LibraryIds) silences the stream on " +
+  "Saving an empty Station sounds scope (Station:SafeScope:LibraryIds) silences the stream on " +
   "drain — mksafe emits silence until re-pointed.";
 
 function makeSafeScopeSetting(override: Partial<SettingDto> = {}): SettingDto {

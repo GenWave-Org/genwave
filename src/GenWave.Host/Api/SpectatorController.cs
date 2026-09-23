@@ -1,4 +1,3 @@
-using System.Reflection;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OutputCaching;
@@ -65,15 +64,6 @@ public sealed class SpectatorController(
     /// <summary>Canonical public repository URL (SPEC F62.8), matching the one
     /// <see cref="GenWave.MediaLibrary.YearLookup.MusicBrainzYearLookup"/> sends as its User-Agent contact.</summary>
     const string ProjectUrl = "https://github.com/GenWave-Org/genwave";
-
-    /// <summary>
-    /// The build-stamped <see cref="AssemblyInformationalVersionAttribute"/> on the Host assembly
-    /// (SPEC F65.1, STORY-175). Read once at class load — it is fixed for the process's lifetime,
-    /// so re-reading it per request would only waste reflection.
-    /// </summary>
-    static readonly string HostVersion =
-        typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
-            ?? "unknown";
 
     /// <summary>
     /// GET /spectator/api/now-playing — the public-shaped now-playing projection (SPEC F62.4/
@@ -326,7 +316,7 @@ public sealed class SpectatorController(
     {
         var options = stationMonitor.CurrentValue;
         return Ok(new SpectatorAbout(
-            options.Name, HostVersion, License, ProjectUrl, options.PublicStreamUrl, options.Requests.Enabled));
+            options.Name, HostVersion.Value, License, ProjectUrl, options.PublicStreamUrl, options.Requests.Enabled));
     }
 
     /// <summary>

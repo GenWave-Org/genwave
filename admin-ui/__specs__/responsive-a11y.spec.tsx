@@ -40,7 +40,6 @@ import type { usePathname, useRouter } from "next/navigation";
 import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "@/components/ui/toast";
 import { CatalogTabs } from "../app/(authed)/catalog/CatalogTabs";
-import { PlayHistoryTable } from "../app/(authed)/live/PlayHistoryTable";
 import { RecentPlays } from "../app/(authed)/dashboard/RecentPlays";
 import { SafeContentClient } from "../app/(authed)/safe-content/SafeContentClient";
 import type { SafeContentClientProps } from "../app/(authed)/safe-content/SafeContentClient";
@@ -218,6 +217,9 @@ describe("Feature: Responsive and accessible console", () => {
   beforeEach(() => {
     mockedUsePathname.mockReturnValue("/dashboard");
     mockedUseRouter.mockReturnValue({ refresh: jest.fn() } as unknown as ReturnType<typeof useRouter>);
+    // jsdom's `window.localStorage` is shared by every `it` in this FILE — a nav-group toggle
+    // written by "traps focus..." (below) must not leak into a later test's Sidebar/MobileNav mount.
+    window.localStorage.clear();
   });
 
   afterEach(() => {
@@ -252,9 +254,13 @@ describe("Feature: Responsive and accessible console", () => {
 
       const dialog = await screen.findByRole("dialog", { name: "Navigation" });
       expect(dialog).toContainElement(document.activeElement as HTMLElement);
+      // Catalog (Media) and Station sounds (Station) live inside collapsible groups (SPEC F203.2)
+      // that don't open by route rule at /dashboard — open them by hand.
+      fireEvent.click(screen.getByRole("button", { name: "Station" }));
+      fireEvent.click(screen.getByRole("button", { name: "Media" }));
       // The same section list as the persistent Sidebar (SPEC F28.13: the
       // drawer is the same nav, not a second one that can drift).
-      for (const label of ["Dashboard", "Live", "Catalog", "Station Imaging", "Settings"]) {
+      for (const label of ["Dashboard", "Catalog", "Station sounds", "Settings"]) {
         expect(screen.getByRole("link", { name: label })).toBeInTheDocument();
       }
 
@@ -276,18 +282,6 @@ describe("Feature: Responsive and accessible console", () => {
       const catalogTable = screen.getByRole("table");
       expect(catalogTable.parentElement?.className).toMatch(/\boverflow-x-auto\b/);
       catalogTable.closest("div")?.remove(); // isolate from the next render's DOM
-
-      render(
-        <PlayHistoryTable
-          entries={makeHistoryEntries()}
-          error={false}
-          timeZone="UTC"
-          ratings={new Map()}
-          onRatingChange={() => {}}
-        />
-      );
-      const playHistoryTable = screen.getByRole("table");
-      expect(playHistoryTable.parentElement?.className).toMatch(/\boverflow-x-auto\b/);
 
       render(<RecentPlays entries={makeHistoryEntries()} error={false} timeZone="UTC" />);
       const recentPlaysTables = screen.getAllByRole("table");

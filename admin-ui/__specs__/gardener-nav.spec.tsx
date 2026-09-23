@@ -1,25 +1,23 @@
 // @jest-environment jsdom
-// SPEC F153.10, PLAN T378 — the Gardener nav entry.
+// SPEC F153.10, PLAN T378 — the Gardener nav entry, now inside the grouped Tools group
+// (SPEC F203.1, PLAN T558).
 //
-// Runner: Jest. NAV_ITEMS/visibleNavItems are plain data (no rendering needed) — same posture the
-// Sidebar itself reads them with.
+// Runner: Jest. NAV_GROUPS is plain data (no rendering needed) — same posture the Sidebar itself
+// reads it with.
 
 import { describe, it, expect } from "@jest/globals";
-import { visibleNavItems } from "../app/(authed)/_components/nav-items";
+import { NAV_GROUPS } from "../app/(authed)/_components/nav-items";
 
 describe("Feature: the Gardener nav entry (SPEC F153.10)", () => {
-  describe("Scenario: the sidebar/mobile nav item list", () => {
-    it("places Gardener right after Catalog", () => {
-      const items = visibleNavItems(false);
-      const catalogIndex = items.findIndex((item) => item.label === "Catalog");
-      const gardenerIndex = items.findIndex((item) => item.label === "Gardener");
+  describe("Scenario: the Tools group", () => {
+    const tools = NAV_GROUPS.find((group) => group.label === "Tools");
 
-      expect(gardenerIndex).toBe(catalogIndex + 1);
+    it("places Gardener first in the Tools group", () => {
+      expect(tools?.items[0]?.label).toBe("Gardener");
     });
 
     it("links Gardener to /gardener", () => {
-      const items = visibleNavItems(false);
-      const gardener = items.find((item) => item.label === "Gardener");
+      const gardener = tools?.items.find((item) => item.label === "Gardener");
 
       expect(gardener?.href).toBe("/gardener");
     });

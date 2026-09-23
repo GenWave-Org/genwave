@@ -3,16 +3,16 @@
 // The feeder half lives in Core.Tests/Specs/Story146_FeederStampsDuration.cs; the DTO wire half
 // in Host.Tests/Specs/Story146_DurationOnAirDtos.cs.
 //
-// Runner: Jest (jsdom) + @testing-library/react. Mounts NowPlayingCard/PlayHistoryTable/RecentPlays
-// directly with fixed props (no fetch mocking needed — all three are pure prop-driven components);
-// fake timers pin `Date.now()` so the card's elapsed-seconds calculation is deterministic without
-// advancing the clock.
+// Runner: Jest (jsdom) + @testing-library/react. Mounts NowPlayingCard/RecentPlays directly with
+// fixed props (no fetch mocking needed — both are pure prop-driven components); fake timers pin
+// `Date.now()` so the card's elapsed-seconds calculation is deterministic without advancing the
+// clock. The former PlayHistoryTable (Live page) coverage of F50.5/F50.6 was retired with the Live
+// page itself (SPEC F203.4) — RecentPlays carries the equivalent dashboard-side duration coverage.
 
 import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
 import { render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom/jest-globals";
 import { NowPlayingCard } from "../app/(authed)/_components/NowPlayingCard";
-import { PlayHistoryTable } from "../app/(authed)/live/PlayHistoryTable";
 import { RecentPlays } from "../app/(authed)/dashboard/RecentPlays";
 import type { NowPlayingState, PlayHistoryEntry } from "../lib/broadcast-api";
 
@@ -98,21 +98,6 @@ describe("Feature: Duration on the air surfaces", () => {
   });
 
   describe("Scenario: the lists carry durations", () => {
-    it("shows plain duration on Live history rows where present (F50.5)", () => {
-      const entries = [makeHistoryEntry({ durationMs: 180_000 })];
-      render(
-        <PlayHistoryTable
-          entries={entries}
-          error={false}
-          timeZone="UTC"
-          ratings={new Map()}
-          onRatingChange={() => {}}
-        />
-      );
-
-      expect(screen.getByText("03:00")).toBeInTheDocument();
-    });
-
     it("shows plain duration on dashboard recent plays where present (F50.5)", () => {
       const entries = [makeHistoryEntry({ durationMs: 210_000 })];
       render(<RecentPlays entries={entries} error={false} timeZone="UTC" />);
@@ -129,27 +114,24 @@ describe("Feature: Duration on the air surfaces", () => {
       expect(screen.getByText(/00:00 elapsed/)).toBeInTheDocument();
     });
 
-    it("renders history rows without a duration cell value for tts:* and drain plays (F50.6)", () => {
+    it("renders no duration cell value for a tts:* patter row on dashboard recent plays (F50.6)", () => {
       const entries = [
         makeHistoryEntry({ mediaId: "tts:seg", title: "Station ID", artist: "GenWave", durationMs: null }),
-        makeHistoryEntry({ mediaId: "engine-1", title: "Please Stand By", artist: "Test Station" }),
       ];
-      render(
-        <PlayHistoryTable
-          entries={entries}
-          error={false}
-          timeZone="UTC"
-          ratings={new Map()}
-          onRatingChange={() => {}}
-        />
-      );
+      render(<RecentPlays entries={entries} error={false} timeZone="UTC" />);
 
-      for (const title of ["Station ID", "Please Stand By"]) {
-        const row = screen.getByText(title).closest("tr");
-        expect(row).not.toBeNull();
-        const cells = within(row as HTMLElement).getAllByRole("cell");
-        expect(cells[4]?.textContent).toBe("");
-      }
+      const row = screen.getByText("Station ID").closest("tr") as HTMLElement;
+      const cells = within(row).getAllByRole("cell");
+      expect(cells[4]?.textContent).toBe("");
+    });
+
+    it("renders no duration cell value for an engine-initiated drain row on dashboard recent plays (F50.6)", () => {
+      const entries = [makeHistoryEntry({ mediaId: "engine-1", title: "Please Stand By", artist: "Test Station" })];
+      render(<RecentPlays entries={entries} error={false} timeZone="UTC" />);
+
+      const row = screen.getByText("Please Stand By").closest("tr") as HTMLElement;
+      const cells = within(row).getAllByRole("cell");
+      expect(cells[4]?.textContent).toBe("");
     });
   });
 });

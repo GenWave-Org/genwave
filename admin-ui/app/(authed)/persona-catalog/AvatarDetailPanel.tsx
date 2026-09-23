@@ -24,8 +24,8 @@ export interface AvatarDetailPanelProps {
 /**
  * An avatar pack entry's detail view (SPEC F128.1, F128.4, PLAN T294) — mirrors `FontDetailPanel`'s
  * own shape one level up (name, 18+ badge, an Install/Re-install button that opens a confirm modal
- * rather than posting anything itself, an "Installed" chip once a pack under this slug is already in
- * the Wardrobe) with the specimen half replaced by a FACE GRID: every `detail.avatarItems` entry
+ * rather than posting anything itself, an "Installed" chip once a pack under this slug is already
+ * installed) with the specimen half replaced by a FACE GRID: every `detail.avatarItems` entry
  * (SPEC F128.1's `items[]`, parsed off the already-fetched `.avatar.json` manifest at zero extra
  * network cost, T292) rendered as its own `AvatarItemFace` tile — see that component's own remarks
  * for why it loads through a plain `<img>` rather than `SpecimenBlock`'s own fetch/Blob/FontFace

@@ -10,8 +10,8 @@ export interface ChipProps extends HTMLAttributes<HTMLSpanElement> {
  * text — used across the admin UI for a status word or a provenance stamp: source tags
  * (`SettingsForm`'s `SourceChip`), imported-theme provenance (`SettingsForm`'s
  * `ThemeProvenanceBadge`, `PersonaCatalogClient`'s theme detail panel), imported-persona provenance
- * (`PersonasClient`'s `ProvenanceBadge`), an installed font pack's provenance
- * (`WardrobeClient`'s `ProvenanceChip`), and a catalog font pack's bare "Installed" status
+ * (`PersonasClient`'s `ProvenanceBadge`), an installed font pack's provenance (the retired Wardrobe
+ * page's own `ProvenanceChip`), and a catalog font pack's bare "Installed" status
  * (`FontDetailPanel`). Every one of those five pre-existing sites carried its OWN copy of the same
  * className string (gh-#375 review carry-forward, N4) — this is the one extraction, children and
  * an optional `className` override are the only thing that ever varied. `className` merges via

@@ -38,7 +38,7 @@ function makeStatus(safeScope: SafeScopeOverrides = {}): StatusResponse {
 }
 
 function safeScopeTile(): HTMLElement {
-  return screen.getByRole("group", { name: "Station Imaging scope" });
+  return screen.getByRole("group", { name: "Station sounds scope" });
 }
 
 afterEach(() => {
@@ -103,7 +103,7 @@ describe("Feature: The dashboard SafeScope tile tells the truth", () => {
 
       const tile = safeScopeTile();
       expect(tile.className).toMatch(/\bborder-danger\b/);
-      expect(screen.getByText("Station Imaging scope has no playable tracks — drains will be silent")).toBeInTheDocument();
+      expect(screen.getByText("Station sounds scope has no playable tracks — drains will be silent")).toBeInTheDocument();
     });
 
     it("keeps the F25.4 empty-scope badge semantics when libraryIds is empty (F40.3)", () => {
@@ -113,7 +113,7 @@ describe("Feature: The dashboard SafeScope tile tells the truth", () => {
       expect(screen.getByText("No libraries in scope")).toBeInTheDocument();
       expect(tile.className).not.toMatch(/\bborder-danger\b/);
       expect(
-        screen.queryByText("Station Imaging scope has no playable tracks — drains will be silent")
+        screen.queryByText("Station sounds scope has no playable tracks — drains will be silent")
       ).not.toBeInTheDocument();
     });
 

@@ -104,8 +104,8 @@ export interface IconPackSpecimenRowProps {
 const MAX_SPECIMEN_GLYPHS = 48;
 
 /**
- * A pack's own icon set, drawn small (SPEC F130.3, STORY-337, PLAN T304) — the Wardrobe Icons
- * tab's per-pack row and the shelf's icon-kind detail panel both render through this ONE component,
+ * A pack's own icon set, drawn small (SPEC F130.3, STORY-337, PLAN T304) — the Community
+ * Catalog's icon-kind detail panel (`IconDetailPanel`) renders through this ONE component,
  * ordinal-sorted by name for a stable, deterministic layout. Every glyph renders through the SAME
  * `IconPackGlyph` the active-chrome resolver (`Icon.tsx`) uses — no separate, less-defensive path
  * for a "just previewing" render.

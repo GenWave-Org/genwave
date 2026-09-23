@@ -16,10 +16,10 @@ export interface NeverPlayControlProps {
 }
 
 /**
- * Restore/never-play toggle for one catalog row (SPEC F33.12, STORY-115). Symmetric with the
- * Live page's control (STORY-114, `RatingControls`): X flags a playable row, the restore icon
- * un-flags it — the X is never a one-way door (F23.2 reachability posture), and this symmetry
- * costs nothing extra to build since the icons and the S4 PUT are already shared.
+ * Restore/never-play toggle for one catalog row (SPEC F33.12, STORY-115). Symmetric with
+ * `CatalogToolbar`'s own never-play/restore action (F33.4/F61.1): X flags a playable row, the
+ * restore icon un-flags it — the X is never a one-way door (F23.2 reachability posture), and this
+ * symmetry costs nothing extra to build since the icons and the S4 PUT are already shared.
  *
  * Calls the shared `setNeverPlay` (S4's `PUT /api/media/{id}/never-play`) directly — deliberately
  * NOT through `useRowPatch` (rating writes are ETag-free by design, PLAN.md Epic S sequencing

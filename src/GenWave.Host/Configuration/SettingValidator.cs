@@ -266,6 +266,9 @@ public sealed partial class SettingValidator
             // StationRotationOptions floors StationOptionsValidator exists for), but the live-edit
             // path needs its own guard here — this is the F23.1-style 400 for the identity keys.
             ["Station:Name"]  = IsNonBlank,
+            // Station:Tagline (SPEC F207.1, STORY-474, PLAN T561) — unlike Name, blank is valid (no
+            // tagline shown); anything over ShowBudgets.TaglineMaxChars is rejected.
+            ["Station:Tagline"] = IsValidStationTagline,
             ["Station:Voice"] = IsNonBlank,
 
             // StationCadenceOptions — bools
@@ -624,6 +627,12 @@ public sealed partial class SettingValidator
     // Station:Name / Station:Voice (F44.1/F44.2) — a blank value is always invalid; mirrors the
     // boot-time [Required]/[MinLength(1)] guard on the same StationOptions properties.
     static bool IsNonBlank(string v) => !string.IsNullOrWhiteSpace(v);
+
+    // Station:Tagline (SPEC F207.1, STORY-474, PLAN T561) — blank is valid (the About page simply
+    // shows no tagline); anything else must fit ShowBudgets.TaglineMaxChars, the same 120-char budget
+    // a show's own tagline is held to (ShowBudgets.FirstViolation) — deliberately reused rather than
+    // a second 120 minted here.
+    static bool IsValidStationTagline(string v) => v.Length <= ShowBudgets.TaglineMaxChars;
 
     // Inclusive both bounds (used for every F53.1-ceilinged int, plus the pre-existing
     // Library:YearLookup:MinScore). min may be 0 (rotation/cadence knobs, where 0 disables the
@@ -1083,6 +1092,8 @@ public sealed partial class SettingValidator
     {
         var k when k.Equals("Station:Name", StringComparison.OrdinalIgnoreCase)
             => $"Value for '{key}' must not be blank.",
+        var k when k.Equals("Station:Tagline", StringComparison.OrdinalIgnoreCase)
+            => $"Value for '{key}' must be at most {ShowBudgets.TaglineMaxChars} characters.",
         var k when k.Equals("Station:Voice", StringComparison.OrdinalIgnoreCase)
             => $"Value for '{key}' must not be blank.",
         var k when k.Equals("Loudness:TargetLufs",  StringComparison.OrdinalIgnoreCase)

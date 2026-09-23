@@ -24,7 +24,7 @@ export interface IconDetailPanelProps {
  * An icon pack entry's detail view (SPEC F130.1, F130.6, STORY-337, PLAN T304) — mirrors
  * `AvatarDetailPanel`'s own shape one level up (name, 18+ badge, an Install/Re-install button that
  * opens a confirm modal rather than posting anything itself, an "Installed" chip once a pack under
- * this slug is already in the Wardrobe) with the specimen half replaced by a SPECIMEN ROW: every
+ * this slug is already installed) with the specimen half replaced by a SPECIMEN ROW: every
  * icon `detail.card`'s own definition declares, drawn small through the SAME safe renderer
  * (`IconPackSpecimenRow`/`IconPackGlyph`) the active admin chrome itself uses once a pack installs.
  *

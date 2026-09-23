@@ -1,95 +1,117 @@
 import type { IconName } from "./Icon";
 
+/** One clickable nav destination (SPEC F130.2 icon-name contract, PLAN T304 — `iconName` resolves
+ * through `Icon` at render time, never a direct `icons.tsx` import, so an installed icon pack swaps
+ * every nav glyph without this file changing). */
 export interface NavItem {
   href: string;
   label: string;
-  /** The icon-name-contract slot this nav item renders (SPEC F130.2, PLAN T304) — resolved through
-   * `Icon` at render time (`Sidebar`/`MobileNav`'s own map), never a direct `icons.tsx` component
-   * reference, so an installed icon pack swaps every nav glyph without either of those files
-   * changing. */
   iconName: IconName;
-  /**
-   * True for a nav item that only exists when its own feature is enabled (PLAN T102, SPEC
-   * F90.1's own "the eventual admin UI hides the Persona Catalog entry point on the same
-   * [Community:CatalogIndexUrl] signal" ruling — see `CommunityCatalogAccessor`'s remarks). No
-   * other nav item needs this today; every other section is always-on.
-   */
+  /** True for a nav item that only exists when its own feature is enabled (PLAN T102, SPEC
+   * F90.1) — hidden until `catalogEnabled`. No other item needs a gate today. */
   requiresCatalog?: boolean;
 }
 
+/** The stable group identities (SPEC F203.1, ARCHITECTURE's `NavGroup` shape) — the key a manual
+ * collapse/expand toggle is remembered under (PLAN T559). Kept separate from `label` so a future
+ * copy change can't silently invalidate every browser's stored toggle. */
+export type NavGroupId = "station" | "media" | "tools" | "status";
+
+/** A titled cluster of nav items (SPEC F203.1). */
+export interface NavGroup {
+  id: NavGroupId;
+  label: string;
+  items: NavItem[];
+}
+
 /**
- * Sidebar sections per SPEC F28.5, shared by the persistent desktop
- * `Sidebar` (≥1024px) and the `MobileNav` drawer (<1024px, SPEC F28.13) so
- * the two never drift.
- *
- * "Libraries" (plural — the MEDIA library, Q7, SPEC F28.11) is deliberately absent from this list:
- * it lives under the Catalog page's Libraries tab, and /libraries is only a redirect into that tab,
- * never its own rendered route. Do not confuse it with "Wardrobe" below — a DIFFERENT feature
- * entirely (SPEC F104.7, installed font packs; named "Library" through v3.1.0, renamed "Wardrobe" at
- * PLAN T204, Dean's ruling) that this same stale note used to read as ruling out too (PLAN T203
- * review finding, closed here): the two features share no code, and the naming collision was never
- * intentional.
+ * A footer entry is either a real link or the sign-out action — never both, modeled as a
+ * discriminated union so the "sign-out isn't a link" fact can't be lost to a fake href. `Sidebar`/
+ * `MobileNav` render the sign-out action as the `logout` server-action form they already own; this
+ * entry only carries what the footer displays.
  */
-export const NAV_ITEMS: NavItem[] = [
-  { href: "/dashboard", label: "Dashboard", iconName: "dashboard" },
-  { href: "/live", label: "Live", iconName: "live" },
-  // Announcements (SPEC F146, STORY-361, PLAN T344) — the House Voice's own admin page: send a
-  // message, watch its fate, manage the announce token. Placed right after Live (both are "what's
-  // happening on air right now" surfaces) and before Catalog (a library-management surface, a
-  // different concern entirely).
-  { href: "/announcements", label: "Announcements", iconName: "announcements" },
-  { href: "/catalog", label: "Catalog", iconName: "catalog" },
-  // Gardener (SPEC F153.10, STORY-374, PLAN T378, gh-#529) — the self-healing rot queue's own admin
-  // page, placed right after Catalog: it curates the SAME library-management surface Catalog owns,
-  // just as a queue of findings rather than a browse table. `restore` (the circular-arrow glyph
-  // already carrying "return this row to a healthy state" everywhere else it appears — NeverPlayControl,
-  // RatingControls, CatalogToolbar) is the closest existing icon-contract fit; this page mints no
-  // new icon name (ORCHESTRATOR ruling 3).
-  { href: "/gardener", label: "Gardener", iconName: "restore" },
-  { href: "/safe-content", label: "Station Imaging", iconName: "safe-content" },
-  // Ads (SPEC F162.1, STORY-392, PLAN T404) — the ad-spot library's own admin page, placed right
-  // after Station Imaging: both are authored-audio library surfaces (voice + optional bed,
-  // generate/render pipeline) rather than a browse of pre-existing tracks. `exploration` (the
-  // three-pip die glyph, otherwise only PickChips' exploration badge) is the closest UNCLAIMED icon
-  // in the house contract (SPEC F130.2's fixed 26-name set — this task cannot mint a new one, that
-  // needs a matching `GenWave.Host.Icons.IconNameContract` change on the backend side) that isn't
-  // already another nav item's own glyph; the more obviously "on-brand" megaphone
-  // (`AnnouncementsIcon`) is deliberately NOT reused here — it already IS the Announcements nav
-  // item's glyph, and two sidebar entries sharing one icon reads as a rendering bug, not a theme
-  // (the Gardener/`restore` precedent reused a CONTROL icon, never another nav item's own).
-  { href: "/ads", label: "Ads", iconName: "exploration" },
-  { href: "/personas", label: "Personas", iconName: "persona" },
-  { href: "/schedule", label: "Schedule", iconName: "schedule" },
-  // Shows (SPEC F119.1, STORY-312, PLAN T244) sits immediately after Schedule — the format-clock
-  // grid that assigns them (T243's assign-show endpoint) is the reason this entity exists at all.
-  // Final placement across the whole sidebar is the Admin-UI-Polish lane's own call (ARCHITECTURE
-  // TODO); this is the sensible spot until that pass reorders the shell.
-  { href: "/shows", label: "Shows", iconName: "shows" },
-  { href: "/persona-catalog", label: "Community Catalog", iconName: "persona-catalog", requiresCatalog: true },
-  // Wardrobe (PLAN T203, SPEC F104.7; renamed from "Library" at PLAN T204, Dean's ruling — nav label
-  // and route only, see this file's own class remarks) is deliberately NOT gated by
-  // `requiresCatalog` — unlike the Community Catalog browse surface, an installed pack keeps serving
-  // with the catalog disabled or unreachable (SPEC F104.8's offline floor), so the page that
-  // inspects what's ALREADY installed must stay reachable on that same axis too.
-  { href: "/wardrobe", label: "Wardrobe", iconName: "wardrobe" },
-  // Editor (PLAN T206, SPEC F104.11) — the v2 editor mixes a base theme's palette with wardrobe
-  // faces, transient client state only. Deliberately NOT gated by `requiresCatalog`, the SAME
-  // reasoning as Wardrobe's own ungated entry immediately above: the base-theme and vendored role
-  // picker options never touch the Community Catalog at all (GET /api/themes, GET /api/fonts/assignable
-  // both read station-local/embedded data), so there is no catalog-reachability axis to gate on.
-  { href: "/editor", label: "Editor", iconName: "editor" },
-  { href: "/booth-log", label: "Booth log", iconName: "booth-log" },
-  { href: "/health", label: "Health", iconName: "health" },
-  { href: "/settings", label: "Settings", iconName: "settings" },
+export type NavFooterEntry =
+  | { kind: "link"; href: string; label: string; iconName?: IconName }
+  | { kind: "sign-out"; label: string; iconName?: IconName };
+
+/**
+ * Grouped sidebar/drawer model (SPEC F203.1, STORY-471) shared by the persistent desktop `Sidebar`
+ * (≥1024px) and the `MobileNav` drawer (<1024px, SPEC F28.13) so the two never drift. `readonly`
+ * (ARCHITECTURE) — this is a house constant, not a per-render working copy; `visibleNavGroups`
+ * below always returns a fresh array rather than mutating one of these in place.
+ */
+export const NAV_GROUPS: readonly NavGroup[] = [
+  {
+    id: "station",
+    label: "Station",
+    items: [
+      { href: "/safe-content", label: "Station sounds", iconName: "safe-content" },
+      { href: "/ads", label: "Ads", iconName: "exploration" },
+      { href: "/personas", label: "Personas", iconName: "persona" },
+      { href: "/schedule", label: "Schedule", iconName: "schedule" },
+      { href: "/shows", label: "Shows", iconName: "shows" },
+    ],
+  },
+  {
+    id: "media",
+    label: "Media",
+    items: [
+      { href: "/catalog", label: "Catalog", iconName: "catalog" },
+      { href: "/announcements", label: "Announcements", iconName: "announcements" },
+      {
+        href: "/persona-catalog",
+        label: "Community Catalog",
+        iconName: "persona-catalog",
+        requiresCatalog: true,
+      },
+    ],
+  },
+  {
+    id: "tools",
+    label: "Tools",
+    items: [
+      { href: "/gardener", label: "Gardener", iconName: "restore" },
+      { href: "/editor", label: "Theme Editor", iconName: "editor" },
+    ],
+  },
+  {
+    id: "status",
+    label: "Status",
+    items: [
+      { href: "/booth-log", label: "Booth log", iconName: "booth-log" },
+      { href: "/health", label: "Health", iconName: "health" },
+    ],
+  },
+];
+
+/** Rendered above every group. */
+export const NAV_TOP: readonly NavItem[] = [{ href: "/dashboard", label: "Dashboard", iconName: "dashboard" }];
+
+/** Rendered below every group. */
+export const NAV_BOTTOM: readonly NavItem[] = [{ href: "/settings", label: "Settings", iconName: "settings" }];
+
+/** The footer entries (About, Sign out) — rendered by `Sidebar`/`MobileNav` from this same data
+ * (PLAN T559). About's own page (PLAN T561) lives at `app/(authed)/about/page.tsx`. */
+export const NAV_FOOTER: readonly NavFooterEntry[] = [
+  { kind: "link", href: "/about", label: "About" },
+  { kind: "sign-out", label: "Sign out", iconName: "sign-out" },
 ];
 
 /**
- * The nav items to actually render (SPEC F90.1's fail-closed hide) — `catalogEnabled` defaults to
- * `false` so an isolated component render (no shell/layout above it, e.g. a jest test rendering
- * `<Sidebar />` bare) never shows an entry point to a feature it has no live signal for.
+ * The groups to actually render (SPEC F90.1's fail-closed hide) — `Sidebar`/`MobileNav` default
+ * their `catalogEnabled` prop to `false` so an isolated component render (no shell/layout above it, e.g. a jest test rendering
+ * `<Sidebar />` bare) never shows an entry point to a feature it has no live signal for. A group
+ * left with zero visible items after the gate is dropped entirely (SPEC F203.3). `groups` defaults
+ * to `NAV_GROUPS` but takes an override so a spec can exercise an all-gated group without one
+ * existing in the house model.
  */
-export function visibleNavItems(catalogEnabled: boolean): NavItem[] {
-  return NAV_ITEMS.filter((item) => item.requiresCatalog !== true || catalogEnabled);
+export function visibleNavGroups(catalogEnabled: boolean, groups: readonly NavGroup[] = NAV_GROUPS): readonly NavGroup[] {
+  return groups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => item.requiresCatalog !== true || catalogEnabled),
+    }))
+    .filter((group) => group.items.length > 0);
 }
 
 /** True when `pathname` is the nav item's own route or a route nested under it. */
@@ -97,8 +119,22 @@ export function isActiveSection(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
+/** The id of the group that owns `pathname` (SPEC F203.2's route rule), or `undefined` when
+ * `pathname` belongs to `NAV_TOP`/`NAV_BOTTOM` (e.g. `/dashboard`, `/settings`) rather than any
+ * group. */
+export function groupIdForPathname(pathname: string, groups: readonly NavGroup[] = NAV_GROUPS): NavGroupId | undefined {
+  return groups.find((group) => group.items.some((item) => isActiveSection(pathname, item.href)))?.id;
+}
+
 /** 40px min touch target (SPEC F28.13) — nav links are `<a>` elements, so the
  * global `input/select/textarea/button` min-height rule in globals.css doesn't
  * reach them; this class list carries it explicitly instead. */
 export const NAV_LINK_CLASSES =
   "flex min-h-10 items-center gap-2.5 rounded-[6px] px-3 py-2 text-[0.85rem] font-semibold transition-colors duration-[120ms] ease-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
+
+/** A group's collapsible heading button (SPEC F203.2) — same 40px touch target as `NAV_LINK_CLASSES`
+ * but styled as a micro-label (uppercase, tracked) rather than a destination, so a group heading
+ * never reads as just another link. Used by `NavSections`, the shared render both `Sidebar` and
+ * `MobileNav` mount. */
+export const NAV_GROUP_HEADING_CLASSES =
+  "flex min-h-10 w-full items-center justify-between rounded-[6px] px-3 py-2 text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-mute transition-colors duration-[120ms] ease-out hover:bg-surface hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";

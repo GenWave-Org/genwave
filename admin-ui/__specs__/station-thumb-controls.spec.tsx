@@ -9,13 +9,11 @@
 // endpoint bucket alongside `tasteThumb`, since a track-started row now offers both.
 
 import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
-import { render, screen, fireEvent, within, act } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import "@testing-library/jest-dom/jest-globals";
 import { Toaster } from "@/components/ui/toast";
-import { LiveView } from "../app/(authed)/live/LiveView";
 import { BoothLogView } from "../app/(authed)/booth-log/BoothLogView";
 import { PersonaTasteThumbs } from "../app/(authed)/_components/PersonaTasteThumbs";
-import { RatingControls } from "../app/(authed)/_components/RatingControls";
 import { StationThumbs } from "../app/(authed)/_components/StationThumbs";
 
 // ---------------------------------------------------------------------------
@@ -90,89 +88,6 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// Now-playing surface (LiveView)
-// ---------------------------------------------------------------------------
-
-interface TrackFixture {
-  mediaId?: string;
-}
-
-function makeTrack(overrides: TrackFixture = {}) {
-  return {
-    stationId: "1",
-    mediaId: "live:announcer-1",
-    title: "Astral Plane",
-    artist: "Valerie June",
-    gainDb: -2.3,
-    startedAt: ISO_NOW,
-    ...overrides,
-  };
-}
-
-interface LiveFetchState {
-  now: MockResult;
-  history: MockResult;
-  boothLog: MockResult;
-  personas: MockResult;
-  tasteThumb: MockResult;
-  stationThumb: MockResult;
-}
-
-function defaultLiveState(overrides: Partial<LiveFetchState> = {}): LiveFetchState {
-  return {
-    now: ok(makeTrack()),
-    history: ok([]),
-    boothLog: ok({ entries: [makeBoothLogEntry()], nextBefore: null }),
-    personas: ok([makePersona()]),
-    tasteThumb: ok({ alreadyRecorded: false, weight: 0.2 }),
-    stationThumb: ok({ result: "recorded" }),
-    ...overrides,
-  };
-}
-
-function endpointKeyForLive(url: string): keyof LiveFetchState {
-  if (url.includes("station-thumb")) return "stationThumb";
-  if (url.includes("taste-thumb")) return "tasteThumb";
-  if (url.includes("/api/booth-log")) return "boothLog";
-  if (url.includes("/api/personas")) return "personas";
-  if (url.includes("/play-history")) return "history";
-  return "now";
-}
-
-function installLiveFetchMock(initial: LiveFetchState) {
-  const state: LiveFetchState = { ...initial };
-  const calls: RecordedCall[] = [];
-  const fn = jest.fn<typeof fetch>().mockImplementation((input, init) => {
-    const url = String(input);
-    const method = (init?.method ?? "GET").toUpperCase();
-    const body = typeof init?.body === "string" ? (JSON.parse(init.body) as unknown) : undefined;
-    calls.push({ url, method, body });
-
-    const result = state[endpointKeyForLive(url)];
-    if (result.kind === "network-error") {
-      return Promise.reject(new Error("network error"));
-    }
-    const status = result.status ?? 200;
-    return Promise.resolve({
-      ok: status >= 200 && status < 300,
-      status,
-      json: () => Promise.resolve(result.body),
-    } as Response);
-  });
-  global.fetch = fn as unknown as typeof fetch;
-  return { fn, state, calls };
-}
-
-function renderLive(): ReturnType<typeof render> {
-  return render(
-    <>
-      <LiveView timeZone="UTC" />
-      <Toaster />
-    </>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Booth-log surface (BoothLogView)
 // ---------------------------------------------------------------------------
 
@@ -238,31 +153,6 @@ function renderBoothLog(): ReturnType<typeof render> {
 // ---------------------------------------------------------------------------
 
 describe("Feature: Station-thumb controls", () => {
-  describe("Scenario: the Live now-playing card shows both thumb pairs", () => {
-    it("renders a station-thumb pair with its own glyph and label", async () => {
-      installLiveFetchMock(defaultLiveState());
-
-      renderLive();
-      await flush();
-
-      const card = screen.getByRole("region", { name: "Now playing" });
-      expect(within(card).getByText("Station")).toBeInTheDocument();
-      expect(within(card).getByRole("button", { name: "Station thumbs up" })).toBeInTheDocument();
-      expect(within(card).getByRole("button", { name: "Station thumbs down" })).toBeInTheDocument();
-    });
-
-    it("renders a persona-taste pair alongside it, both pairs present at once", async () => {
-      installLiveFetchMock(defaultLiveState());
-
-      renderLive();
-      await flush();
-
-      const card = screen.getByRole("region", { name: "Now playing" });
-      expect(within(card).getByRole("button", { name: "Taste up for Nova" })).toBeInTheDocument();
-      expect(within(card).getByRole("button", { name: "Station thumbs up" })).toBeInTheDocument();
-    });
-  });
-
   describe("Scenario: a booth-log track row shows both thumb pairs", () => {
     it("renders a station-thumb pair beside its persona-taste pair", async () => {
       installBoothLogFetchMock(defaultBoothLogState());
@@ -309,34 +199,34 @@ describe("Feature: Station-thumb controls", () => {
       expect(stationUp).not.toHaveClass("border-accent-2");
     });
 
-    it("renders its own dedicated glyph — distinct from vote-up/down AND taste-thumb-up/down (T369 review HIGH-1)", () => {
-      // Mirrors persona-taste-thumbs.spec.tsx's own RatingControls-distinctness fact: all THREE
-      // controls that can share a row/card rendered together, isolated from any page harness.
+    it("renders a station thumbs-up glyph distinct from the taste thumbs-up glyph (T369 HIGH-1 regression guard)", () => {
+      // `RatingControls` (the third sibling the original HIGH-1 guard also compared against) was
+      // retired with the Live page (SPEC F203.4) — StationThumbs and PersonaTasteThumbs are the
+      // two surviving controls a booth-log row renders side by side, so the guard now covers them.
       render(
         <>
-          <RatingControls mediaId="101" value={{ score: 50, neverPlay: false }} onChange={() => undefined} />
           <PersonaTasteThumbs boothLogRowId={1} personaName="Nova" />
           <StationThumbs boothLogRowId={1} />
         </>
       );
 
-      const voteUp = screen.getByRole("button", { name: "Vote up" });
-      const voteDown = screen.getByRole("button", { name: "Vote down" });
       const tasteUp = screen.getByRole("button", { name: "Taste up for Nova" });
-      const tasteDown = screen.getByRole("button", { name: "Taste down for Nova" });
       const stationUp = screen.getByRole("button", { name: "Station thumbs up" });
+
+      expect(stationUp.innerHTML).not.toEqual(tasteUp.innerHTML);
+    });
+
+    it("renders a station thumbs-down glyph distinct from the taste thumbs-down glyph (T369 HIGH-1 regression guard)", () => {
+      render(
+        <>
+          <PersonaTasteThumbs boothLogRowId={1} personaName="Nova" />
+          <StationThumbs boothLogRowId={1} />
+        </>
+      );
+
+      const tasteDown = screen.getByRole("button", { name: "Taste down for Nova" });
       const stationDown = screen.getByRole("button", { name: "Station thumbs down" });
 
-      // Accessible names never collide with either sibling's own pair.
-      expect(screen.queryAllByRole("button", { name: "Station thumbs up" })).toHaveLength(1);
-
-      // The glyph itself (the icon's own SVG markup) must differ from BOTH siblings, not just the
-      // label — reusing `vote-up`/`vote-down` (the HIGH-1 defect) would make the vote pair and the
-      // station pair identical; reusing `taste-thumb-up`/`down` would do the same to the pair it
-      // sits directly beside.
-      expect(stationUp.innerHTML).not.toEqual(voteUp.innerHTML);
-      expect(stationDown.innerHTML).not.toEqual(voteDown.innerHTML);
-      expect(stationUp.innerHTML).not.toEqual(tasteUp.innerHTML);
       expect(stationDown.innerHTML).not.toEqual(tasteDown.innerHTML);
     });
   });
