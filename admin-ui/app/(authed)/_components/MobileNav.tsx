@@ -8,7 +8,7 @@ import { logout } from "@/app/login/actions";
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { Icon } from "./Icon";
-import { NAV_LINK_CLASSES, isActiveSection, visibleNavItems } from "./nav-items";
+import { NAV_BOTTOM, NAV_LINK_CLASSES, NAV_TOP, isActiveSection, visibleNavGroups } from "./nav-items";
 
 const ICON_BUTTON_CLASSES =
   "flex h-10 w-10 shrink-0 items-center justify-center rounded-[6px] text-mute transition-colors duration-[120ms] ease-out hover:bg-surface hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
@@ -29,7 +29,7 @@ interface MobileNavProps {
 
 /**
  * Sub-1024px nav drawer (SPEC F28.13): a hamburger in the shell header opens
- * the same `NAV_ITEMS` the persistent `Sidebar` renders at ≥1024px, inside a
+ * the same nav model the persistent `Sidebar` renders at ≥1024px, inside a
  * Radix Dialog reused for the trap (as confirm-dialog.tsx does — FocusScope
  * + DismissableLayer are Radix's job, not hand-rolled here). Unlike
  * `useConfirm()`, this trigger is a real rendered `<Dialog.Trigger>`, so
@@ -41,10 +41,15 @@ interface MobileNavProps {
  * wraps each `Dialog.Trigger`/`Dialog.Close` from the outside, not as their
  * `asChild` target, so Radix's own prop-cloning onto the real `<button>` is
  * unaffected.
+ *
+ * Renders `NAV_TOP`, then the visible groups' items flattened in order, then `NAV_BOTTOM` — mirrors
+ * `Sidebar`'s own flat list (SPEC F203.1); group headings, collapsing and `NAV_FOOTER` are PLAN
+ * T559's job.
  */
 export function MobileNav({ stationName = "GenWave", catalogEnabled = false }: MobileNavProps): ReactNode {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const items = [...NAV_TOP, ...visibleNavGroups(catalogEnabled).flatMap((group) => group.items), ...NAV_BOTTOM];
 
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>
@@ -77,7 +82,7 @@ export function MobileNav({ stationName = "GenWave", catalogEnabled = false }: M
 
           <nav aria-label="Sections" className="flex-1 px-3">
             <ul className="flex flex-col gap-1">
-              {visibleNavItems(catalogEnabled).map(({ href, label, iconName }) => {
+              {items.map(({ href, label, iconName }) => {
                 const active = isActiveSection(pathname, href);
                 return (
                   <li key={href}>

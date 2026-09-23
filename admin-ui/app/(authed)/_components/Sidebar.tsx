@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 import { logout } from "@/app/login/actions";
 import { cn } from "@/lib/utils";
 import { Icon } from "./Icon";
-import { NAV_LINK_CLASSES, isActiveSection, visibleNavItems } from "./nav-items";
+import { NAV_BOTTOM, NAV_LINK_CLASSES, NAV_TOP, isActiveSection, visibleNavGroups } from "./nav-items";
 
 interface SidebarProps {
   /**
@@ -29,12 +29,17 @@ interface SidebarProps {
 /**
  * Persistent shell sidebar (SPEC F28.5) — visible at ≥1024px only. Below
  * that breakpoint it is replaced by `MobileNav`'s drawer (SPEC F28.13),
- * which renders the same `NAV_ITEMS` behind a focus-trapped Radix dialog;
+ * which renders the same nav model behind a focus-trapped Radix dialog;
  * this component still mounts (so `usePathname` stays live for the active-
  * section highlight) but is hidden via `lg:flex` rather than unmounted.
+ *
+ * Renders `NAV_TOP`, then the visible groups' items flattened in order, then `NAV_BOTTOM` — a flat
+ * list, same as before the grouped model (SPEC F203.1) landed. Group headings, collapsing and the
+ * `NAV_FOOTER` entries are PLAN T559's job.
  */
 export function Sidebar({ stationName = "GenWave", catalogEnabled = false }: SidebarProps): ReactNode {
   const pathname = usePathname();
+  const items = [...NAV_TOP, ...visibleNavGroups(catalogEnabled).flatMap((group) => group.items), ...NAV_BOTTOM];
 
   return (
     <aside className="hidden w-[215px] shrink-0 flex-col border-r-2 border-line bg-surface-2 lg:flex">
@@ -44,7 +49,7 @@ export function Sidebar({ stationName = "GenWave", catalogEnabled = false }: Sid
 
       <nav aria-label="Sections" className="flex-1 px-3">
         <ul className="flex flex-col gap-1">
-          {visibleNavItems(catalogEnabled).map(({ href, label, iconName }) => {
+          {items.map(({ href, label, iconName }) => {
             const active = isActiveSection(pathname, href);
             return (
               <li key={href}>

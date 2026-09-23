@@ -254,7 +254,7 @@ describe("Feature: Responsive and accessible console", () => {
       expect(dialog).toContainElement(document.activeElement as HTMLElement);
       // The same section list as the persistent Sidebar (SPEC F28.13: the
       // drawer is the same nav, not a second one that can drift).
-      for (const label of ["Dashboard", "Live", "Catalog", "Station Imaging", "Settings"]) {
+      for (const label of ["Dashboard", "Catalog", "Station sounds", "Settings"]) {
         expect(screen.getByRole("link", { name: label })).toBeInTheDocument();
       }
 
