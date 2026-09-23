@@ -16,6 +16,18 @@ public sealed class StationOptions
     [Required]
     public string Name { get; set; } = string.Empty;
 
+    /// <summary>
+    /// The station's short public tagline (SPEC F207.1, STORY-474, PLAN T561) — shown on the About
+    /// page beside the station name. Not required — defaults to empty, which the About endpoint
+    /// serves verbatim and the page treats as "no tagline" (renders the name alone). Capped at
+    /// <see cref="GenWave.Core.Domain.ShowBudgets.TaglineMaxChars"/>, the same 120-char budget a show
+    /// tagline uses (<c>SettingValidator</c>'s own idiom for <c>Station:Tagline</c>) — deliberately
+    /// not a second magic number. Read live, per request, through
+    /// <c>IOptionsMonitor&lt;StationOptions&gt;</c> by <c>AboutController</c>, so a
+    /// <c>PUT /api/settings</c> here reaches the very next request with no api restart.
+    /// </summary>
+    public string Tagline { get; set; } = string.Empty;
+
     [Required, MinLength(1)]
     public string Voice { get; set; } = string.Empty;
 

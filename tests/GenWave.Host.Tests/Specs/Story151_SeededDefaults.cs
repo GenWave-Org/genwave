@@ -179,6 +179,11 @@ public static class FeatureSeededDefaults
         // own identical rationale: empty is the spec'd default meaning "use the station's own voice"
         // (Station:Voice) — an honest blank, not a gap, until an operator casts a distinct announcer.
         "Station:Ads:AnnouncerVoice",
+        // Station:Tagline (SPEC F207.1, STORY-474, PLAN T561; Dean's ruling 2026-09-23) joins on
+        // Station:IconPack's own identical rationale: empty is the spec'd default (the About page
+        // shows the station name alone), an honest blank until an operator sets one — unlike
+        // Station:Name, this key has no "shipped" seed a fresh deploy could even name.
+        "Station:Tagline",
     };
 
     /// <summary>

@@ -158,6 +158,10 @@ public static class StationSettingsAllowlist
         // restart — the admin UI badges this via FIELD_HELP_TEXT (SPEC F44.5), not a different
         // apply-mode; the api-side effects (patter, /api/stations, this console) are genuinely live.
         new("Station:Name",                                   SettingApplyMode.Live,          SettingKind.String,     ""),
+        // Station:Tagline (SPEC F207.1, STORY-474, PLAN T561) — the About page's subtitle. Blank is
+        // valid (unlike Name's IsNonBlank guard); no Icecast round-trip at all, so it carries none of
+        // Station:Name's restart caveat.
+        new("Station:Tagline",                                SettingApplyMode.Live,          SettingKind.String,     ""),
         new("Station:Voice",                                  SettingApplyMode.Live,          SettingKind.String,     ""),
 
         new("Station:Cadence:LeadInBeforeEachTrack",          SettingApplyMode.Live,          SettingKind.Boolean,    ""),

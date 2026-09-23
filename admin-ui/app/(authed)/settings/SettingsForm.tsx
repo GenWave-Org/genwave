@@ -137,6 +137,9 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
   "Station:Name":
     "The public Icecast stream/directory name updates on the next engine restart; patter, " +
     "metadata, and this console update immediately.",
+  "Station:Tagline":
+    "A short line shown under the station name on the About page. Optional — leave blank to show " +
+    "no tagline. Up to 120 characters.",
   "Station:Voice":
     "The Kokoro voice used for station-branded patter (station IDs, time/date, lead-ins, " +
     "back-announces) whenever no persona is active.",

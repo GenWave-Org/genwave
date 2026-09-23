@@ -91,7 +91,7 @@ export const NAV_TOP: readonly NavItem[] = [{ href: "/dashboard", label: "Dashbo
 export const NAV_BOTTOM: readonly NavItem[] = [{ href: "/settings", label: "Settings", iconName: "settings" }];
 
 /** The footer entries (About, Sign out) — rendered by `Sidebar`/`MobileNav` from this same data
- * (PLAN T559). About's page arrives at PLAN T561; until then its link 404s. */
+ * (PLAN T559). About's own page (PLAN T561) lives at `app/(authed)/about/page.tsx`. */
 export const NAV_FOOTER: readonly NavFooterEntry[] = [
   { kind: "link", href: "/about", label: "About" },
   { kind: "sign-out", label: "Sign out", iconName: "sign-out" },

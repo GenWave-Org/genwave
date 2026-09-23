@@ -377,6 +377,10 @@ builder.Services.Replace(
 builder.Services.AddSingleton<IValidateOptions<ScanOptions>, ScanOptionsValidator>();
 builder.Services.AddOptions<ScanOptions>().ValidateOnStart();
 
+// SPEC F169.2/F207.2, PLAN T419/T561 — the attribution projection AttributionsController and
+// AboutController both call, so their two responses can never independently drift.
+builder.Services.AddSingleton<AttributionProjector>();
+
 builder.Services.AddControllers();
 
 // Liveness endpoint for the compose healthcheck. No checks registered = 200 Healthy when up.

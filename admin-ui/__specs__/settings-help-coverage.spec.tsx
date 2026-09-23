@@ -49,6 +49,7 @@ const NUMBER_LIST_KEYS = new Set<SettingsHelpKey>([
 
 const STRING_KEYS = new Set<SettingsHelpKey>([
   "Station:Name",
+  "Station:Tagline",
   "Station:Voice",
   "Tts:Endpoint",
   "Llm:Endpoint",

@@ -75,4 +75,24 @@ public interface IAdminMediaQuery
     Task<int> CountUnavailableAsync(
         LibraryScope scope, MediaQuery query, ImagingBrowseFilter imaging, CancellationToken ct) =>
         throw new NotSupportedException("this query does not filter by imaging kind");
+
+    /// <summary>
+    /// The number of actual MUSIC tracks ready to air (SPEC F207.1, STORY-474, PLAN T561) — rows in
+    /// <c>library.media</c> with <c>state = 'ready' and imaging_kind is null</c>. This is the About
+    /// page's "Tracks in the library" figure, deliberately narrower than
+    /// <see cref="IMediaCatalog.GetStatusCountsAsync"/>'s own <c>Ready</c> count, which counts every
+    /// ready row INCLUDING authored imaging (liner/station_id/jingle/promo/ad — db/01-library.sh's
+    /// <c>imaging_kind</c> CHECK) — the same <c>imaging_kind is null</c> fence
+    /// <c>MediaRepository.PlayablePredicate</c> already applies to keep imaging content out of music
+    /// rotation (that constant's own remarks) is what distinguishes "music" here too. Unscoped across
+    /// the whole catalog, mirroring <see cref="CatalogStatusCounts.Ready"/>'s own unscoped state
+    /// counts (SPEC F20.1) rather than a <see cref="LibraryScope"/>-narrowed figure. Authored rows
+    /// stored before db/30 carry no <c>imaging_kind</c> and so count as music — the same limit music
+    /// rotation has (db/01-library.sh's own remarks).
+    ///
+    /// Default-implemented (returns 0) so existing read-only test doubles keep compiling — the same
+    /// posture as <see cref="CountUnavailableAsync(LibraryScope,MediaQuery,CancellationToken)"/>'s
+    /// own remarks; the concrete repository overrides it with the real count.
+    /// </summary>
+    Task<int> GetReadyMusicCountAsync(CancellationToken ct) => Task.FromResult(0);
 }

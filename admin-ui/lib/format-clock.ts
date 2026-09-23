@@ -143,3 +143,36 @@ export function formatElapsedMs(elapsedMs: number): string {
   const seconds = totalSeconds % 60;
   return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
 }
+
+/**
+ * Humanizes a process uptime in whole seconds (SPEC F207.1, STORY-474, PLAN T561 — the About
+ * page's own uptime readout, `GET /api/about`'s `uptimeSeconds`), mirroring
+ * {@link formatRelativeAgo}'s "never fabricate finer than the reader needs" discipline — an
+ * operator checking how long the station has been up wants a coarse read, not a live stopwatch.
+ * Under a minute reads "less than a minute"; under an hour reads minutes alone ("42 minutes");
+ * under a day reads hours alone ("5 hours") — only once the uptime reaches a full day does it
+ * combine the two largest units ("1 day, 0 hours"). Always pluralizes correctly at exactly 1
+ * (never "1 days").
+ */
+export function formatUptime(uptimeSeconds: number): string {
+  const totalSeconds = Math.max(0, Math.floor(uptimeSeconds));
+  const minuteSeconds = 60;
+  const hourSeconds = 60 * minuteSeconds;
+  const daySeconds = 24 * hourSeconds;
+
+  if (totalSeconds < minuteSeconds) return "less than a minute";
+
+  if (totalSeconds < hourSeconds) {
+    const minutes = Math.floor(totalSeconds / minuteSeconds);
+    return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
+  }
+
+  if (totalSeconds < daySeconds) {
+    const hours = Math.floor(totalSeconds / hourSeconds);
+    return `${hours} ${hours === 1 ? "hour" : "hours"}`;
+  }
+
+  const days = Math.floor(totalSeconds / daySeconds);
+  const hours = Math.floor((totalSeconds % daySeconds) / hourSeconds);
+  return `${days} ${days === 1 ? "day" : "days"}, ${hours} ${hours === 1 ? "hour" : "hours"}`;
+}
