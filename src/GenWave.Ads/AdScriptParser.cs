@@ -56,12 +56,6 @@ internal static partial class AdScriptParser
     static readonly IReadOnlySet<string> KnownTags =
         new HashSet<string>(StringComparer.Ordinal) { AnnouncerTag, AdCastPicker.Voice1Tag, AdCastPicker.Voice2Tag };
 
-    /// <summary>Cap for a tag echoed into a violation reason (the CrosstalkScriptParser
-    /// <c>MaxEchoedLineChars</c> precedent, F127.11, PLAN T399 review F6) — an untrusted script's tag
-    /// text reaches a Reason that is logged and surfaced verbatim (STORY-390 AC9's 400), never an
-    /// unbounded echo.</summary>
-    const int MaxEchoedChars = 120;
-
     public static AdScriptValidationResult Parse(string rawScript, int maxLineChars)
     {
         // Blank interior lines are skipped, never refused (the CrosstalkScriptParser precedent, PLAN
@@ -105,8 +99,8 @@ internal static partial class AdScriptParser
     /// <see cref="AnnouncerTag"/> (SPEC F200.1) — the line's own <see cref="AdScriptLine.Text"/> is kept
     /// verbatim, only its <see cref="AdScriptLine.Tag"/> changes. One note per DISTINCT original tag, in
     /// first-seen order (SPEC F200.1: "a tag appearing on three lines yields one note"); the tag echoed
-    /// through <see cref="EchoForReason"/>, the same untrusted-echo bound every other logged/surfaced
-    /// tag in this class goes through.</summary>
+    /// through <see cref="AdScriptEcho.ForReason"/>, the same untrusted-echo bound every other
+    /// logged/surfaced tag in this class goes through.</summary>
     static (IReadOnlyList<AdScriptLine> Lines, IReadOnlyList<string> Notes) FoldUnknownTags(
         IReadOnlyList<AdScriptLine> lines)
     {
@@ -124,7 +118,7 @@ internal static partial class AdScriptParser
 
             foldedLines.Add(line with { Tag = AnnouncerTag });
             if (seenUnknownTags.Add(line.Tag))
-                notes.Add($"unknown-tag:{EchoForReason(line.Tag)}");
+                notes.Add($"unknown-tag:{AdScriptEcho.ForReason(line.Tag)}");
         }
 
         return (foldedLines, notes);
@@ -191,10 +185,10 @@ internal static partial class AdScriptParser
     static (AdScriptLine? Line, AdScriptViolation? Violation) CheckLine(string tag, string text, int maxLineChars)
     {
         if (text.Length == 0)
-            return (null, FormatViolation($"the {EchoForReason(tag)} line has no spoken text"));
+            return (null, FormatViolation($"the {AdScriptEcho.ForReason(tag)} line has no spoken text"));
 
         if (text.Length > maxLineChars)
-            return (null, FormatViolation($"the {EchoForReason(tag)} line ({text.Length} chars) exceeds the {maxLineChars}-char per-line budget"));
+            return (null, FormatViolation($"the {AdScriptEcho.ForReason(tag)} line ({text.Length} chars) exceeds the {maxLineChars}-char per-line budget"));
 
         return (new AdScriptLine(tag, text), null);
     }
@@ -202,14 +196,6 @@ internal static partial class AdScriptParser
     static AdScriptValidationResult.Refused Refused(string reason) => new(FormatViolation(reason));
 
     static AdScriptViolation FormatViolation(string reason) => new(AdScriptRuleIds.Format, reason);
-
-    /// <summary>Bounds an untrusted tag echoed into a violation Reason to <see cref="MaxEchoedChars"/>
-    /// (CWE-117 log forging — PLAN T399 review F6). PLAN T444 ruling: every call site passes a
-    /// <paramref name="tag"/> that already matched <see cref="TagPattern"/>
-    /// (<c>^[A-Z][A-Z0-9]*$</c>, which admits no control character), so the control-character strip
-    /// this method carried is unreachable and has been removed — a future call site that echoes
-    /// raw, unvalidated text into a Reason must bring that strip back, pinned by a fact.</summary>
-    static string EchoForReason(string tag) => tag.Length <= MaxEchoedChars ? tag : tag[..MaxEchoedChars] + "…";
 
     // Must start with a letter (PLAN T399 review N4) — a digits-only tag ("12") is not a plausible
     // voice name, so a line whose would-be tag is pure digits reads as malformed FORMAT rather than

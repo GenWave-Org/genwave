@@ -19,9 +19,14 @@ public static class AdScriptRuleIds
     /// <summary>The script named a blocklisted real-world brand.</summary>
     public const string BrandCollision = "brand_collision";
 
-    /// <summary>A phone-shaped digit run does not contain 555.</summary>
+    /// <summary>A phone-shaped digit run does not contain 555 (no sponsor phone on file), or does not
+    /// match the sponsor's own number (one is on file).</summary>
     public const string PhoneShape = "phone_shape";
 
     /// <summary>A profane word under the <c>everyone</c> audience posture.</summary>
     public const string AudiencePosture = "audience_posture";
+
+    /// <summary>A parenthetical, bracketed beat, or asterisked aside survived hygiene and still
+    /// appears in a line's spoken text (SPEC F201.2, STORY-468).</summary>
+    public const string StageDirection = "stage_direction";
 }

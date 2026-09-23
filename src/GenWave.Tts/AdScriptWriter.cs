@@ -289,7 +289,7 @@ public sealed partial class AdScriptWriter(
     /// reject branches already use (a shape mistake is <see cref="LlmCallCause.MalformedResponse"/>, a
     /// length/duration miss is <see cref="LlmCallCause.OverLength"/>, a content-truth-shaped miss is
     /// <see cref="LlmCallCause.TruthGateReject"/>) rather than flattening every refusal to one bucket.
-    /// The five rule id tokens are <c>GenWave.Ads.AdScriptRuleIds</c>' own wire vocabulary, duplicated
+    /// The six rule id tokens are <c>GenWave.Ads.AdScriptRuleIds</c>' own wire vocabulary, duplicated
     /// here as literal strings — this project cannot reference that one (L10) — mirrors
     /// <c>AdScriptPromptBuilder</c>'s own <c>AnnouncerTag</c> duplication for the identical reason. An
     /// unrecognized rule id (a rule <c>GenWave.Ads</c> adds later without a matching update here) falls
@@ -301,6 +301,7 @@ public sealed partial class AdScriptWriter(
     static LlmCallCause MapRuleIdToCause(string ruleId) => ruleId switch
     {
         "format" => LlmCallCause.MalformedResponse,
+        "stage_direction" => LlmCallCause.MalformedResponse,
         "duration" => LlmCallCause.OverLength,
         "brand_collision" => LlmCallCause.TruthGateReject,
         "phone_shape" => LlmCallCause.TruthGateReject,
@@ -367,10 +368,27 @@ public sealed partial class AdScriptWriter(
     /// <para>
     /// Blank interior lines are dropped (the <c>AdScriptParser.Parse</c>/<c>CrosstalkScriptParser.Parse</c>
     /// precedent: accidental double-spacing between beats is a formatting quirk, never a shape
-    /// violation). A line whose text is empty after hygiene keeps its own bare <c>TAG:</c> (never
-    /// silently dropped whole) — so <c>AdScriptValidator</c> reports the honest, specific "the {tag}
-    /// line has no spoken text" reason rather than a misleading "no {tag} line appeared" for a line that
-    /// DID arrive, just empty — unless an untagged continuation line follows and fills it (below).
+    /// violation). Every line's TEXT also has its own stage directions stripped, ANYWHERE in the text
+    /// and not only inside the tag (SPEC F201.1, STORY-468): a <c>(parenthetical)</c>, a
+    /// <c>[bracketed]</c> beat, or an <c>*asterisked*</c> aside — each required to carry at least one
+    /// LETTER, so a sponsor's own <c>(406) 222-0100</c>-shaped phone number never loses its area code
+    /// to this pass — is removed whole, BEFORE <see cref="LlmCopyWriter.ApplyCopyHygiene"/> ever runs
+    /// on what remains, so a multi-word aside like <c>*long pause*</c> never survives as spoken words
+    /// the way a bare emphasis-mark strip alone would leave it. A line where a shape actually matched
+    /// has its surrounding whitespace collapsed and a space left dangling before trailing punctuation
+    /// tidied away; a line where nothing matched is returned byte-for-byte untouched, so this pass never
+    /// rewrites legitimate copy that merely contains an ellipsis, a deliberately spaced colon, or a
+    /// stray space near punctuation of its own (PLAN T552 review F1).
+    /// </para>
+    ///
+    /// <para>
+    /// A line whose text is STILL empty once continuation-joining (above) has had its own chance to
+    /// fill it is dropped WHOLE — before the "nobody is ANNOUNCER" election below ever runs, so an
+    /// emptied line can never cast a vote for its own tag (F201.1, PLAN T552 review F2) — and never
+    /// surfaced as a bare <c>TAG:</c> the way it was before STORY-468. <c>AdScriptValidator</c>'s own
+    /// stage-direction rule (SPEC F201.2) is the backstop that NAMES any of the same three shapes a
+    /// script still carries after this pass, never this writer silently forwarding an empty line for the
+    /// validator to explain.
     /// </para>
     ///
     /// <para>
@@ -420,7 +438,7 @@ public sealed partial class AdScriptWriter(
                 text = line;
             }
 
-            var cleanedText = LlmCopyWriter.ApplyCopyHygiene(text);
+            var cleanedText = LlmCopyWriter.ApplyCopyHygiene(StripStageDirections(text));
             if (tag.Length == 0)
             {
                 // No speaker: continuation prose joins the previous voice's line (filling a bare tag);
@@ -432,6 +450,13 @@ public sealed partial class AdScriptWriter(
 
             lines.Add((tag, cleanedText));
         }
+
+        // F201.1 — a line whose text is STILL empty once continuation-joining above has had its own
+        // chance to fill it is dropped WHOLE here, BEFORE the "nobody is ANNOUNCER" election below
+        // reads lines.Count/lines.GroupBy: an emptied line (e.g. a line that was pure stage direction)
+        // must never cast a vote for its own tag, and must never be surfaced as a bare "TAG:" (STORY-468
+        // AC5, PLAN T552 review F2).
+        lines.RemoveAll(l => l.Text.Length == 0);
 
         if (lines.Count > 0 && lines.TrueForAll(l => l.Tag != AdScriptPromptBuilder.AnnouncerTag))
         {
@@ -447,8 +472,68 @@ public sealed partial class AdScriptWriter(
             }
         }
 
-        return string.Join('\n', lines.Select(l => l.Text.Length == 0 ? $"{l.Tag}:" : $"{l.Tag}: {l.Text}"));
+        // Emptied lines are already gone (removed above, before the election). A script that empties
+        // entirely falls out of this Join as string.Empty — AdScriptValidator's existing "the script
+        // has no lines" refusal (AdScriptParser.Parse) handles that case.
+        return string.Join('\n', lines.Select(l => $"{l.Tag}: {l.Text}"));
     }
+
+    /// <summary>
+    /// SPEC F201.1, STORY-468 — strips a <c>(parenthetical)</c>, a <c>[bracketed]</c> beat, and an
+    /// <c>*asterisked*</c> aside ANYWHERE in a line's text (not only when the shape wraps the whole
+    /// line), collapses the whitespace the removal leaves behind, and tidies a space stranded before
+    /// trailing punctuation. Run BEFORE <see cref="LlmCopyWriter.ApplyCopyHygiene"/> so a multi-word
+    /// aside like <c>*long pause*</c> is removed whole — <see cref="LlmCopyWriter.ApplyCopyHygiene"/>'s
+    /// own asterisk strip only catches a SINGLE-word run, then falls back to stripping the bare
+    /// <c>*</c>/<c>_</c> marks and leaving the words themselves spoken.
+    ///
+    /// <para>
+    /// Each shape must carry at least one LETTER to count (gh-#706 first-contact finding): a stage
+    /// direction is always a word or words, never a bare digit run — <see cref="PhoneShape.Regex"/>'s
+    /// own <c>(ddd) ddd-dddd</c> alternative (SPEC F197.1) means a sponsor's own area code can arrive
+    /// wrapped in real parentheses (<c>"(406) 222-0100"</c>), and that grouping must survive THIS pass
+    /// untouched for <see cref="ApplyPhoneHygiene"/> (run after this method) to ever see it. The letter
+    /// class (<c>[A-Za-z]</c>) is ASCII-only by design (PLAN T552 review N4): a shape whose only "letters" are non-ASCII
+    /// (an accented word, a non-Latin script) carries no <c>[A-Za-z]</c> character and so is left alone by
+    /// this pass.
+    /// </para>
+    /// </summary>
+    static string StripStageDirections(string text)
+    {
+        var stripped = StageDirectionParentheticalPattern().Replace(text, string.Empty);
+        stripped = StageDirectionBracketPattern().Replace(stripped, string.Empty);
+        stripped = StageDirectionAsteriskPattern().Replace(stripped, string.Empty);
+
+        // PLAN T552 review F1: the shapes above only ever REMOVE characters, so an unchanged length means
+        // no shape matched — return the ORIGINAL text untouched rather than running the collapse/tidy
+        // passes below, which exist solely to repair the gap a real removal leaves behind. Running them
+        // unconditionally rewrote legitimate copy that never had a stage direction in it at all: an
+        // ellipsis ("wait ... then go") collapsed to "wait... then go", and a colon/period with
+        // deliberate spacing ("Remember : call now", "3 . 5 dollars") lost its spacing.
+        if (stripped.Length == text.Length)
+            return text;
+
+        stripped = CollapseStrippedGapPattern().Replace(stripped, " ").Trim();
+        return SpaceBeforePunctuationPattern().Replace(stripped, "$1");
+    }
+
+    [GeneratedRegex(@"\([^()\n]*[A-Za-z][^()\n]*\)")]
+    private static partial Regex StageDirectionParentheticalPattern();
+
+    [GeneratedRegex(@"\[[^\[\]\n]*[A-Za-z][^\[\]\n]*\]")]
+    private static partial Regex StageDirectionBracketPattern();
+
+    [GeneratedRegex(@"\*[^*\n]*[A-Za-z][^*\n]*\*")]
+    private static partial Regex StageDirectionAsteriskPattern();
+
+    [GeneratedRegex(@"\s{2,}")]
+    private static partial Regex CollapseStrippedGapPattern();
+
+    /// <summary>A stripped shape can leave a lone space stranded just before the punctuation that
+    /// followed it (<c>"today [beat]."</c> strips to <c>"today ."</c>) — folded back against that
+    /// punctuation so the sentence reads <c>"today."</c>, never <c>"today ."</c>.</summary>
+    [GeneratedRegex(@"\s+([.,;:!?])")]
+    private static partial Regex SpaceBeforePunctuationPattern();
 
     /// <summary>
     /// SPEC F199.2 hygiene, run AFTER <see cref="ApplyLineAwareHygiene"/> on its already-tagged "TAG:

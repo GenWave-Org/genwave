@@ -36,5 +36,16 @@ public static class FeatureTheValidatorStillRefusesAStray555
             var refused = Assert.IsType<AdScriptValidationResult.Refused>(result);
             Assert.Equal(AdScriptRuleIds.PhoneShape, refused.Violation.RuleId);
         }
+
+        // PLAN T552 review N3: with a real sponsor phone on file, "does not contain 555" went false the
+        // moment F199.3 tightened the skip to ONLY the sponsor's own exact number — this run refuses
+        // even though it itself contains "555", so the reason must say WHY honestly instead of repeating
+        // a claim that is no longer true.
+        [Fact]
+        public void TheReasonNamesTheSponsorsOwnNumberNotThe555Claim()
+        {
+            var refused = Assert.IsType<AdScriptValidationResult.Refused>(result);
+            Assert.Contains("sponsor's own number", refused.Violation.Reason);
+        }
     }
 }

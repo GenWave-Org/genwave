@@ -243,6 +243,7 @@ public static class FeatureAdScriptWriter
         // miss is OverLength, a content-truth-shaped miss is TruthGateReject).
         [Theory]
         [InlineData("format", LlmCallCause.MalformedResponse)]
+        [InlineData("stage_direction", LlmCallCause.MalformedResponse)]
         [InlineData("duration", LlmCallCause.OverLength)]
         [InlineData("brand_collision", LlmCallCause.TruthGateReject)]
         [InlineData("phone_shape", LlmCallCause.TruthGateReject)]
@@ -441,10 +442,14 @@ public static class FeatureAdScriptWriter
         }
 
         [Fact]
-        public void AStillEmptyTagStaysVisibleForTheValidator()
+        public void AStillEmptyTagIsDroppedAtTheFinalJoin()
         {
-            // The T400 posture holds where nothing fills the tag: the validator names it, never a silent drop.
-            Assert.Equal("ANNOUNCER: Hi.\nVOICE1:", AdScriptWriter.ApplyLineAwareHygiene("ANNOUNCER: Hi.\nVOICE1:"));
+            // STORY-468/F201.1 supersedes the T400 posture this fact used to pin (a bare tag staying
+            // visible for the validator to name): a line whose text is STILL empty once continuation-
+            // joining has had its own chance to fill it is now dropped WHOLE, never surfaced as a bare
+            // "TAG:" — the same drop AC5's hygiene-emptied "VOICE1: (laughs)" exercises, generalized to
+            // a line that arrived with no text to begin with.
+            Assert.Equal("ANNOUNCER: Hi.", AdScriptWriter.ApplyLineAwareHygiene("ANNOUNCER: Hi.\nVOICE1:"));
         }
     }
 
