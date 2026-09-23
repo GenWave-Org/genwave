@@ -258,6 +258,9 @@ public sealed class FontPackController(
     /// the reference lives inside opaque jsonb rather than a real foreign key) — see
     /// <see cref="IFontPackStore.DeleteAsync"/>'s own remarks for how the guard is enforced atomically,
     /// inside the delete statement itself, never as an advisory pre-check this action could race past.
+    /// The SAME 409 also carries <c>referencedBy</c> (SPEC F204.3, STORY-472, PLAN T563) — every
+    /// referencing theme's SLUG, structured, alongside <see cref="ReferencedProblem"/>'s own unchanged
+    /// prose <c>Detail</c> — see that method's own remarks for why a slug, not a display name.
     /// With no reference, 204: the pack row and every one of its faces are gone (db/32's own
     /// <c>ON DELETE CASCADE</c>), and the SAME post-write rebuild <see cref="Install"/> already performs
     /// (<see cref="InstalledFontCatalog.ReloadAsync"/>) runs again here — <c>GET /fonts/{file}</c> stops
@@ -551,7 +554,10 @@ public sealed class FontPackController(
     // every offending row" contract). Falls back to generic wording only on FontPackDeleteResult.
     // Referenced's own documented rare-empty race case (see that type's own remarks) — never a bare
     // "cannot be uninstalled" with no theme list when one is actually available.
-    static ProblemDetails ReferencedProblem(string slug, IReadOnlyList<string> themeSlugs) => new()
+    //
+    // SPEC F204.3: referencedBy carries the same theme slugs — station.theme has no name column
+    // (the display name lives in the jsonb definition), so slugs are the names the store has.
+    static ProblemDetails ReferencedProblem(string slug, IReadOnlyList<string> themeSlugs) => new ProblemDetails
     {
         Status = StatusCodes.Status409Conflict,
         Title  = "Font pack is referenced.",
@@ -559,7 +565,7 @@ public sealed class FontPackController(
             ? $"\"{slug}\" is still referenced by theme(s) {string.Join(", ", themeSlugs.Select(t => $"\"{t}\""))} " +
               "and cannot be uninstalled — remove or edit those themes first."
             : $"\"{slug}\" is still referenced by a theme and cannot be uninstalled.",
-    };
+    }.WithReferencedBy(themeSlugs);
 
     static ProblemDetails DuplicateManifestAssetProblem(string slug, string file) => new()
     {
