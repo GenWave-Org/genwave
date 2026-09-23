@@ -291,7 +291,10 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
 
             var first = await source.RenderAsync(request, CancellationToken.None);
             Assert.Equal(1, innerSynth.CallCount);
-            Assert.Equal("coming up a deep cut from macleod.", innerSynth.LastText);
+            // The literal comma in the FakeSegmentCopyWriter copy above survives the flatten
+            // (SPEC F198.1, gh-#703) instead of being stripped — unrelated to this scenario's own
+            // corrections-rebuild re-keying, which the rest of the fact still pins.
+            Assert.Equal("coming up, a deep cut from macleod.", innerSynth.LastText);
 
             // A second render with nothing changed is still a genuine cache hit.
             await source.RenderAsync(request, CancellationToken.None);
@@ -309,7 +312,7 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
             // pronunciation reaches it (F68.5, F68.7).
             var second = await source.RenderAsync(request, CancellationToken.None);
             Assert.Equal(2, innerSynth.CallCount);
-            Assert.Equal("coming up a deep cut from muh-cloud.", innerSynth.LastText);
+            Assert.Equal("coming up, a deep cut from muh-cloud.", innerSynth.LastText);
             Assert.NotEqual(first!.MediaId, second!.MediaId);
         }
 
@@ -396,7 +399,9 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
                 "[{\"from\":\"MacLeod\",\"to\":\"Muh-cloud\"}]");
             var request = StationIdRequest();
             var before = await preRestartSource.RenderAsync(request, CancellationToken.None);
-            Assert.Equal("coming up a deep cut from muh-cloud.", preRestartSynth.LastText);
+            // CorrectedText's literal comma survives the flatten (SPEC F198.1, gh-#703) instead of
+            // being stripped — unrelated to this scenario's own restart-lifecycle re-keying.
+            Assert.Equal("coming up, a deep cut from muh-cloud.", preRestartSynth.LastText);
 
             // When the process restarts with a CHANGED rule R' — a fresh provider over the new
             // rules, backing a fresh source over the SAME cache directory...
@@ -407,7 +412,7 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
             // very next render instead of silently reusing the stale pre-restart audio.
             var after = await postRestartSource.RenderAsync(request, CancellationToken.None);
             Assert.Equal(1, postRestartSynth.CallCount);
-            Assert.Equal("coming up a deep cut from mac cloud.", postRestartSynth.LastText);
+            Assert.Equal("coming up, a deep cut from mac cloud.", postRestartSynth.LastText);
             Assert.NotEqual(before!.MediaId, after!.MediaId);
         }
 
@@ -506,7 +511,9 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
 
             var first = await source.RenderAsync(request, CancellationToken.None);
             Assert.Equal(1, innerSynth.CallCount);
-            Assert.Equal("coming up a deep cut from muh-cloud.", innerSynth.LastText);
+            // The copy's literal comma survives the flatten (SPEC F198.1, gh-#703) instead of being
+            // stripped — unrelated to this scenario's own card-correction re-keying.
+            Assert.Equal("coming up, a deep cut from muh-cloud.", innerSynth.LastText);
 
             // When an operator edits the card's correction rule, and the cache's bounded staleness
             // window has elapsed (the same TTL RefreshIfStaleAsync always applies)...
@@ -517,7 +524,7 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
             // again, and the corrected pronunciation reaches it.
             var second = await source.RenderAsync(request, CancellationToken.None);
             Assert.Equal(2, innerSynth.CallCount);
-            Assert.Equal("coming up a deep cut from mac cloud.", innerSynth.LastText);
+            Assert.Equal("coming up, a deep cut from mac cloud.", innerSynth.LastText);
             Assert.NotEqual(first!.MediaId, second!.MediaId);
         }
 
@@ -558,7 +565,9 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
             var request = StationIdRequest();
 
             var first = await source.RenderAsync(request, CancellationToken.None);
-            Assert.Equal("coming up a deep cut from muh-cloud.", innerSynth.LastText);
+            // The copy's literal comma survives the flatten (SPEC F198.1, gh-#703) instead of being
+            // stripped — unrelated to this scenario's own persona-switch re-keying.
+            Assert.Equal("coming up, a deep cut from muh-cloud.", innerSynth.LastText);
 
             // When the operator activates a DIFFERENT persona whose OWN card corrects "MacLeod" to
             // something else entirely, and the cache's TTL has elapsed...
@@ -569,7 +578,7 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
             // active persona's rule, never the previous persona's stale audio.
             var second = await source.RenderAsync(request, CancellationToken.None);
             Assert.Equal(2, innerSynth.CallCount);
-            Assert.Equal("coming up a deep cut from big mac.", innerSynth.LastText);
+            Assert.Equal("coming up, a deep cut from big mac.", innerSynth.LastText);
             Assert.NotEqual(first!.MediaId, second!.MediaId);
         }
 

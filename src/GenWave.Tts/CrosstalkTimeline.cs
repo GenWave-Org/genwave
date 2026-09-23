@@ -6,15 +6,16 @@ using GenWave.Core.Domain;
 
 /// <summary>
 /// Pure timing math for <see cref="CrosstalkAssembler"/>'s ffmpeg delay/mix plan (SPEC F127.6,
-/// STORY-327 AC2) — no I/O, no ffmpeg, no audio: only where each line's render starts on the shared
-/// mix timeline. Split out so the jitter/overlap contract ("uniform gaps are the second-biggest
-/// TTS-dialogue tell", STORY-327's own scenario remarks) is unit-testable without ever invoking
-/// ffmpeg, and reused by <see cref="CrosstalkAssembler"/> unchanged for the real filter graph it
-/// builds. Internal — <see cref="GenWave.Tts"/>'s own <c>InternalsVisibleTo</c> to
-/// <c>GenWave.Tts.Tests</c> is what lets Story327's facts pin this directly. Named
-/// <c>CrosstalkTimeline</c>, not <c>CrosstalkTimingPlanner</c> (T284 review): a LATER task (T285)
-/// introduces its own <c>CrosstalkPlanner</c> for casting/scheduling an exchange — a different
-/// concern one stage upstream of this one — and the two names read as the same thing at a glance.
+/// STORY-327 AC2; SPEC F198.3, STORY-465 AC8/AC9) — no I/O, no ffmpeg, no audio: only where each
+/// line's render starts on the shared mix timeline. Split out so the jitter/overlap contract
+/// ("uniform gaps are the second-biggest TTS-dialogue tell", STORY-327's own scenario remarks) is
+/// unit-testable without ever invoking ffmpeg, and reused by <see cref="CrosstalkAssembler"/>
+/// unchanged for the real filter graph it builds. Internal — <see cref="GenWave.Tts"/>'s own
+/// <c>InternalsVisibleTo</c> to <c>GenWave.Tts.Tests</c> is what lets Story327's/Story465's facts
+/// pin this directly. Named <c>CrosstalkTimeline</c>, not <c>CrosstalkTimingPlanner</c> (T284
+/// review): a LATER task (T285) introduces its own <c>CrosstalkPlanner</c> for casting/scheduling an
+/// exchange — a different concern one stage upstream of this one — and the two names read as the
+/// same thing at a glance.
 /// </summary>
 static class CrosstalkTimeline
 {
@@ -29,6 +30,16 @@ static class CrosstalkTimeline
     /// walkie-talkie "over" beat the whole feature exists to kill.
     /// </summary>
     internal const double MaxGapSeconds = 0.8;
+
+    /// <summary>
+    /// Inter-line gap ceiling for a transition between two lines sharing the SAME speaker (SPEC
+    /// F198.3, STORY-465 AC8) — narrower than <see cref="MaxGapSeconds"/>: the same voice talking to
+    /// itself across a wide 0.2-0.8s gap reads as a stitched-together edit, not one speaker
+    /// continuing, so consecutive same-speaker lines clamp toward the tight end of the range instead.
+    /// <see cref="MinGapSeconds"/> is unchanged either way — a same-speaker transition still needs
+    /// SOME beat, just never one as long as a genuine turn-taking pause.
+    /// </summary>
+    internal const double SameSpeakerMaxGapSeconds = 0.35;
 
     /// <summary>
     /// How far an interjection line's start rides BACK into the previous line's still-playing tail
@@ -80,19 +91,37 @@ static class CrosstalkTimeline
 
     /// <summary>
     /// One jittered gap per line TRANSITION (<paramref name="transitionCount"/> = line count - 1,
-    /// SPEC F127.6), each in [<see cref="MinGapSeconds"/>, <see cref="MaxGapSeconds"/>], drawn in
-    /// order from one <paramref name="seed"/>-derived <see cref="Random"/> — so the SAME script
-    /// always plans the SAME sequence (see <see cref="ComputeSeed"/>). A transition landing on an
+    /// SPEC F127.6), each in [<see cref="MinGapSeconds"/>, <see cref="MaxGapSeconds"/>] — or, for a
+    /// transition <paramref name="sameSpeaker"/> marks <see langword="true"/>, the narrower
+    /// [<see cref="MinGapSeconds"/>, <see cref="SameSpeakerMaxGapSeconds"/>] (SPEC F198.3, STORY-465
+    /// AC8/AC9) — drawn in order from one <paramref name="seed"/>-derived <see cref="Random"/> — so
+    /// the SAME script always plans the SAME sequence (see <see cref="ComputeSeed"/>). Exactly one
+    /// <see cref="Random.NextDouble"/> draw happens per transition regardless of
+    /// <paramref name="sameSpeaker"/>'s value at that index — the draw is remapped into the narrower
+    /// range for a same-speaker transition, never clamped after the fact, so the result stays uniform
+    /// within whichever range applies, and marking a transition same-speaker never reshuffles any
+    /// LATER transition's own jitter (the same contract <see cref="ComputeLineStartSeconds"/>'s own
+    /// interjection handling already relies on — see its remarks). A transition landing on an
     /// interjection line still draws a value here (<see cref="ComputeLineStartSeconds"/> simply
     /// never uses it, reaching for <see cref="InterjectionOverlapSeconds"/> instead) so that marking
-    /// one line as an interjection never reshuffles every LATER transition's own jitter.
+    /// one line as an interjection never reshuffles every LATER transition's own jitter either.
     /// </summary>
-    internal static IReadOnlyList<double> ComputeGapsSeconds(int transitionCount, int seed)
+    internal static IReadOnlyList<double> ComputeGapsSeconds(int transitionCount, int seed, IReadOnlyList<bool> sameSpeaker)
     {
+        if (sameSpeaker.Count != transitionCount)
+        {
+            throw new ArgumentException(
+                $"sameSpeaker must carry exactly {transitionCount} entries (one per transition); got {sameSpeaker.Count}.",
+                nameof(sameSpeaker));
+        }
+
         var rng = new Random(seed);
         var gaps = new double[transitionCount];
         for (var i = 0; i < transitionCount; i++)
-            gaps[i] = MinGapSeconds + (rng.NextDouble() * (MaxGapSeconds - MinGapSeconds));
+        {
+            var maxGap = sameSpeaker[i] ? SameSpeakerMaxGapSeconds : MaxGapSeconds;
+            gaps[i] = MinGapSeconds + (rng.NextDouble() * (maxGap - MinGapSeconds));
+        }
 
         return gaps;
     }

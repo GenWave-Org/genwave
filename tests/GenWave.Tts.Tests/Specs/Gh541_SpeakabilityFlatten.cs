@@ -8,6 +8,13 @@
 // "76" from "76 degrees" mangles copy; HOW a number is read is gh-#211's lexicon problem), and
 // intra-word apostrophes/hyphens ("we'll" stripped to "well" is a different word on air).
 //
+// SPEC F198.1 (gh-#703, STORY-465, PLAN T546) narrows this ruling for one mark family: a comma
+// now survives verbatim (the pinned engines DO take it as a correct pause), and a loose colon,
+// semicolon, spaced dash, or ellipsis is spoken as a comma too instead of closing up to nothing.
+// Every scenario below that exercised a comma or a spaced-dash/ellipsis pause is re-pinned to the
+// new F198.1 output; every other scenario (quotes, elision apostrophes, intra-word marks) is
+// untouched by F198 and still pins the original gh-#541 behavior.
+//
 // BDD specification — xUnit. Every scenario drives SpeechText.Normalize with an empty correction
 // set: the flatten is a fixed pass, not an operator rule, and must hold with nothing configured.
 
@@ -22,13 +29,14 @@ public static class FeatureSpeakabilityFlatten
     public static class ScenarioDeansExhibitsFromTheBoothLogs
     {
         [Fact]
-        public static void The_spaced_pause_dash_disappears()
+        public static void The_spaced_pause_dash_speaks_as_a_comma()
         {
             // Given the first gh-#541 booth-log exhibit / When it is normalized
             var spoken = Flatten("time to clear the waters with some sonic turmoil - lyonn's 'iceberg' is heading our way");
 
-            // Then the dash is gone and the quoted title closes up, while the contraction survives
-            Assert.Equal("time to clear the waters with some sonic turmoil lyonn's iceberg is heading our way", spoken);
+            // Then the dash speaks as a comma (SPEC F198.1, gh-#703) and the quoted title closes
+            // up, while the contraction survives
+            Assert.Equal("time to clear the waters with some sonic turmoil, lyonn's iceberg is heading our way", spoken);
         }
 
         [Fact]
@@ -37,21 +45,23 @@ public static class FeatureSpeakabilityFlatten
             // Given the second exhibit's elision words
             var spoken = Flatten("Comin' right up, you know the track that's gonna get those toes tappin'");
 
-            // Then comin'/tappin' lose the trailing pause mark but that's keeps its contraction
-            Assert.Equal("comin right up you know the track that's gonna get those toes tappin", spoken);
+            // Then comin'/tappin' lose the trailing pause mark, that's keeps its contraction, and
+            // the comma after "up" survives (SPEC F198.1, gh-#703 — a comma is no longer stripped)
+            Assert.Equal("comin right up, you know the track that's gonna get those toes tappin", spoken);
         }
     }
 
     public static class ScenarioCommaVocative
     {
         [Fact]
-        public static void The_comma_before_a_vocative_is_removed()
+        public static void The_comma_before_a_vocative_survives()
         {
             // Given gh-#292's on-air exhibit
             var spoken = Flatten("Hold on to your hats, folks. We have a great track coming up.");
 
-            // Then the copy runs straight through the vocative and keeps its sentence boundary
-            Assert.Equal("hold on to your hats folks. we have a great track coming up.", spoken);
+            // Then the copy keeps its comma and sentence boundary (SPEC F198.1, gh-#703 supersedes
+            // gh-#292/#541's blanket comma strip: the pinned engines take a comma as a correct pause)
+            Assert.Equal("hold on to your hats, folks. we have a great track coming up.", spoken);
         }
     }
 
@@ -63,8 +73,9 @@ public static class FeatureSpeakabilityFlatten
             // Given gh-#432's on-air exhibit shape
             var spoken = Flatten("a brass and glass record from the collection, Lyonn's The Symphony makes its way in");
 
-            // Then nothing mid-sentence can read as a sentence start
-            Assert.Equal("a brass and glass record from the collection lyonn's the symphony makes its way in", spoken);
+            // Then nothing mid-sentence can read as a sentence start, and the comma survives
+            // (SPEC F198.1, gh-#703)
+            Assert.Equal("a brass and glass record from the collection, lyonn's the symphony makes its way in", spoken);
         }
     }
 
@@ -88,23 +99,26 @@ public static class FeatureSpeakabilityFlatten
         }
 
         [Fact]
-        public static void An_intra_word_hyphen_survives_where_a_pause_dash_does_not()
+        public static void An_intra_word_hyphen_survives_where_a_pause_dash_speaks_as_a_comma()
         {
             var spoken = Flatten("A brass-and-glass sound - pure gold");
 
-            Assert.Equal("a brass-and-glass sound pure gold", spoken);
+            // The intra-word hyphen is untouched; the spaced pause-dash speaks as a comma
+            // (SPEC F198.1, gh-#703)
+            Assert.Equal("a brass-and-glass sound, pure gold", spoken);
         }
     }
 
     public static class ScenarioEllipsesAndQuotes
     {
         [Fact]
-        public static void An_ellipsis_becomes_a_plain_space()
+        public static void An_ellipsis_speaks_as_a_comma()
         {
-            // Given the pause-maker in both spellings / Then neither leaves a mark behind
+            // Given the pause-maker in both spellings / Then each speaks as a comma
+            // (SPEC F198.1, gh-#703 — an ellipsis used to close up to a plain space)
             var spoken = Flatten("Hold on to your hats… folks... here it comes");
 
-            Assert.Equal("hold on to your hats folks here it comes", spoken);
+            Assert.Equal("hold on to your hats, folks, here it comes", spoken);
         }
 
         [Fact]

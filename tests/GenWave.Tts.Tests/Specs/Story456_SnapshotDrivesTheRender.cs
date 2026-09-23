@@ -152,9 +152,13 @@ public static class FeatureSnapshotDrivesTheRender
         [Fact]
         public void RendersSuccessfully() => Assert.NotNull(rendered);
 
-        /// <summary>F189.3 — the planned correction fired on the text that reached the inner synthesizer.</summary>
+        /// <summary>
+        /// F189.3 — the planned correction fired on the text that reached the inner synthesizer.
+        /// The loose colon now speaks as a comma (SPEC F198.1, gh-#703) rather than closing up to
+        /// nothing — unrelated to this fact's own faulting-cache resilience.
+        /// </summary>
         [Fact]
-        public void AppliesThePlannedCorrection() => Assert.Equal("now playing maa-cloud.", inner.LastText);
+        public void AppliesThePlannedCorrection() => Assert.Equal("now playing, maa-cloud.", inner.LastText);
     }
 
     public sealed class ScenarioTwoSnapshotsSameText : IAsyncLifetime

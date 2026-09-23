@@ -143,7 +143,9 @@ public static class FeatureGh491RulesOverCorrections
             {
                 await normalizer.SynthesizeAsync(context, CancellationToken.None);
 
-                Assert.Equal("gee-wave presents macleod.", inner.LastText);
+                // The loose colon now speaks as a comma (SPEC F198.1, gh-#703) rather than closing
+                // up to nothing — unrelated to this spec's own gh-#491 precedence rule.
+                Assert.Equal("gee-wave presents, macleod.", inner.LastText);
             }
             finally
             {
@@ -164,7 +166,8 @@ public static class FeatureGh491RulesOverCorrections
             {
                 await normalizer.SynthesizeAsync(new TtsRenderContext(Text, "af_heart", Kind: null), CancellationToken.None);
 
-                Assert.Equal("now playing maa-cloud.", inner.LastText);
+                // The loose colon in Text now speaks as a comma (SPEC F198.1, gh-#703).
+                Assert.Equal("now playing, maa-cloud.", inner.LastText);
             }
             finally
             {
@@ -188,7 +191,8 @@ public static class FeatureGh491RulesOverCorrections
             {
                 await normalizer.SynthesizeAsync(context, CancellationToken.None);
 
-                Assert.Equal("next maa-cloud dunkin.", inner.LastText);
+                // The loose colon now speaks as a comma (SPEC F198.1, gh-#703).
+                Assert.Equal("next, maa-cloud dunkin.", inner.LastText);
             }
             finally
             {

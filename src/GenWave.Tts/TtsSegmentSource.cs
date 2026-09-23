@@ -67,7 +67,12 @@ public sealed class TtsSegmentSource(
     // identical copy + fingerprints — the same no-fingerprint-moves shape as the merge flip — so
     // the bump re-keys every evergreen clip once and the flattened render replaces the cached
     // punctuation pauses instead of them airing forever.
-    internal const string MergePolicyVersion = "f97.4+gh541";
+    // "+gh703": SPEC F198.2 (STORY-465, PLAN T546) narrows that same flatten again — a comma now
+    // survives, and a loose colon/semicolon/spaced-dash/ellipsis speaks as one instead of closing
+    // up to silence (F198.1). Same no-fingerprint-moves shape, same reason for the bump: every
+    // evergreen clip re-renders once and picks up the new pauses instead of airing the pre-F198
+    // punctuation forever.
+    internal const string MergePolicyVersion = "f97.4+gh541+gh703";
 
     public async Task<MediaItem?> RenderAsync(SegmentRequest request, CancellationToken ct)
     {

@@ -212,7 +212,10 @@ public static class FeatureCorrectionsObservability
                 "/api/tts/preview",
                 new { text = "Coming up, a deep cut from MacLeod.", voice = "af_heart" });
             Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
-            Assert.Equal("coming up a deep cut from muh-cloud.", engine.LastText);
+
+            // The literal comma in the fixture copy survives the flatten (SPEC F198.1, gh-#703)
+            // instead of being stripped — unrelated to this scenario's own observability behavior.
+            Assert.Equal("coming up, a deep cut from muh-cloud.", engine.LastText);
 
             // Then an Information log line naming the rule exists (SPEC F68.7 as amended by
             // F97.5/F100.1, PLAN T142) — the level is pinned here, not just the message content,

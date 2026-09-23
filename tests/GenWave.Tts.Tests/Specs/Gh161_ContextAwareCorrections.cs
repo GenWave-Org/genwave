@@ -135,7 +135,9 @@ public static class FeatureContextAwareCorrections
                 [new SpeechCorrection("tear", "tair") { WhenFollowedBy = "it up|through" }]);
 
             var result = SpeechText.Normalize("We tear it up tonight; no tear was shed.", rules);
-            Assert.Equal("we tair it up tonight no tear was shed.", result);
+            // The loose semicolon now speaks as a comma (SPEC F198.1, gh-#703) instead of closing
+            // up to nothing — unrelated to this spec's own context-alternative matching.
+            Assert.Equal("we tair it up tonight, no tear was shed.", result);
         }
     }
 
