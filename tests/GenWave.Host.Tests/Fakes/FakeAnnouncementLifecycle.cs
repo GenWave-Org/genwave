@@ -24,6 +24,14 @@ sealed class FakeAnnouncementLifecycle : IAnnouncementLifecycle
     /// the total, idempotent-safe transition's own null outcome.</summary>
     public HashSet<long> AiredOutcomeIsNull { get; } = [];
 
+    /// <summary>Scripts <see cref="MarkAiredAsync"/> to throw instead of returning (STORY-469, PLAN
+    /// T554) — a stand-in for a transient store fault the drain's own retry loop must survive. Every
+    /// call while this is greater than zero decrements it and throws
+    /// <see cref="InvalidOperationException"/>, AFTER still recording the call in
+    /// <see cref="MarkAiredCalls"/>/<see cref="CallOrder"/> so a spec can count attempts, not just
+    /// outcomes. Once it reaches zero, calls fall through to the normal scripted outcome above.</summary>
+    public int MarkAiredFailuresRemaining { get; set; }
+
     /// <summary>Every id <see cref="ReArmAsync"/> was asked to re-arm, in call order.</summary>
     public List<long> ReArmCalls { get; } = [];
 
@@ -75,6 +83,13 @@ sealed class FakeAnnouncementLifecycle : IAnnouncementLifecycle
     {
         CallOrder.Add(nameof(MarkAiredAsync));
         MarkAiredCalls.Add(id);
+
+        if (MarkAiredFailuresRemaining > 0)
+        {
+            MarkAiredFailuresRemaining--;
+            throw new InvalidOperationException("scripted store fault");
+        }
+
         if (AiredOutcomeIsNull.Contains(id))
             return Task.FromResult((int?)null);
 

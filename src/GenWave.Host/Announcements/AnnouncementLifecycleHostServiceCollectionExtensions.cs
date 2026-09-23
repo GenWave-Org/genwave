@@ -17,14 +17,16 @@ static class AnnouncementLifecycleHostServiceCollectionExtensions
 {
     public static IServiceCollection AddGenWaveAnnouncementLifecycle(this IServiceCollection services)
     {
-        // The aired-confirmation queue (SPEC F143.3). Bounded small: at most 2 announcements vend
-        // per unit (SPEC F144.1), so a backlog here would already mean dozens of units aired between
-        // drain ticks — a bound this station's real traffic never approaches, existing only to cap
-        // memory against a genuinely pathological DB outage. TryWrite (never WriteAsync) is the only
-        // writer, so FullMode never blocks the publishing sink — see BoothLogServiceCollectionExtensions'
-        // own identical remarks one seam over.
-        var airedChannel = Channel.CreateBounded<AnnouncementAiredSignal>(
-            new BoundedChannelOptions(64) { FullMode = BoundedChannelFullMode.Wait });
+        // The aired-confirmation queue (SPEC F143.3, F202.1). Unbounded, deliberately: a dropped
+        // signal here is a lost aired stamp — the row stays claimed and the guardian re-arms it a
+        // full ReArmGrace (6 minutes) later, re-airing an announcement that already aired once. A
+        // bound would only ever risk trading that outcome for memory this producer never actually
+        // consumes — at most 2 announcements vend per unit (SPEC F144.1), so growth here tracks real
+        // station traffic, not any cap this channel could impose. TryWrite is still the only writer
+        // (never WriteAsync) — see BoothLogServiceCollectionExtensions' own identical remarks one seam
+        // over.
+        var airedChannel = Channel.CreateUnbounded<AnnouncementAiredSignal>(
+            new UnboundedChannelOptions { SingleReader = true });
         services.AddSingleton(airedChannel.Reader);
         services.AddSingleton(airedChannel.Writer);
 
