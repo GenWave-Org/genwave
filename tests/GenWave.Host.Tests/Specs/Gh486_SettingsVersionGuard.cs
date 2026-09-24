@@ -21,6 +21,7 @@ using Microsoft.Extensions.Options;
 using GenWave.Host.Api;
 using GenWave.Host.Configuration;
 using GenWave.Host.Tests.Fakes;
+using GenWave.Host.Tests.Support;
 using GenWave.Tts;
 
 namespace GenWave.Host.Tests.Specs;
@@ -120,7 +121,8 @@ public static class FeatureSettingsVersionGuard
             store,
             new SettingValidator(config),
             NullLogger<SettingsController>.Instance,
-            new FakeIconPackStore())
+            new FakeIconPackStore(),
+            TestSettingCopy.Real())
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
         };

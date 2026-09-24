@@ -32,6 +32,7 @@ using GenWave.Host.Api;
 using GenWave.Host.Configuration;
 using GenWave.Host.Options;
 using GenWave.Host.Tests.Fakes;
+using GenWave.Host.Tests.Support;
 using GenWave.Loudness;
 using GenWave.MediaLibrary.Options;
 using GenWave.Tts;
@@ -82,7 +83,7 @@ public static class FeatureSeededDefaults
     }
 
     static SettingsController BuildController(IConfiguration config, IStationSettingsStore store) =>
-        new(config, store, new SettingValidator(config), NullLogger<SettingsController>.Instance, new FakeIconPackStore())
+        new(config, store, new SettingValidator(config), NullLogger<SettingsController>.Instance, new FakeIconPackStore(), TestSettingCopy.Real())
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
         };

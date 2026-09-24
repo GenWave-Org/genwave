@@ -28,6 +28,7 @@ using GenWave.Host.Catalog;
 using GenWave.Host.Configuration;
 using GenWave.Host.Icons;
 using GenWave.Host.Tests.Fakes;
+using GenWave.Host.Tests.Support;
 
 namespace GenWave.Host.Tests.Specs;
 
@@ -514,7 +515,7 @@ public static class FeatureIconPacksSwapTheChrome
             var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>()).Build();
             var controller = new SettingsController(
                 config, new FakeSettingsStore(), new SettingValidator(config), NullLogger<SettingsController>.Instance,
-                iconPackStore: iconPackStore)
+                iconPackStore: iconPackStore, settingCopy: TestSettingCopy.Real())
             {
                 ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
             };
@@ -589,7 +590,7 @@ public static class FeatureIconPacksSwapTheChrome
             var capturingLogger = new CapturingLogger<SettingsController>();
             var controller = new SettingsController(
                 config, new FakeSettingsStore(), new SettingValidator(config), capturingLogger,
-                iconPackStore: new ThrowingIconPackStore())
+                iconPackStore: new ThrowingIconPackStore(), settingCopy: TestSettingCopy.Real())
             {
                 ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
             };

@@ -32,6 +32,7 @@ using GenWave.Host.Auth;
 using GenWave.Host.Configuration;
 using GenWave.Host.Options;
 using GenWave.Host.Tests.Fakes;
+using GenWave.Host.Tests.Support;
 // Alias to disambiguate from the GenWave.Host.Options namespace (mirrors Story012's precedent).
 using ExtOptions = Microsoft.Extensions.Options.Options;
 
@@ -138,7 +139,7 @@ public static class FeatureStationIdentityLive
 
         var settingsController = new SettingsController(
             root, store, new SettingValidator(root), NullLogger<SettingsController>.Instance,
-            new FakeIconPackStore())
+            new FakeIconPackStore(), TestSettingCopy.Real())
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
         };

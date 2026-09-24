@@ -43,24 +43,22 @@ public static class StationSettingsAllowlist
     /// </summary>
     /// <summary>
     /// <c>Llm:ReasoningEffort</c>'s choices (gh-#620), in <see cref="GenWave.Core.Llm.ReasoningEffort.Accepted"/>'s
-    /// own order with <see cref="GenWave.Core.Llm.ReasoningEffort.Default"/> flagged — labels only
-    /// here, so the vocabulary can never drift from the validator's (<see cref="SettingValidator"/>
-    /// checks <see cref="GenWave.Core.Llm.ReasoningEffort.IsValid"/> directly).
+    /// own order with <see cref="GenWave.Core.Llm.ReasoningEffort.Default"/> flagged. The in-code
+    /// <see cref="SettingChoice.Label"/> here is just the raw value (PLAN T574 — this table's own
+    /// static snapshot is never what an operator sees: <see cref="GenWave.Host.Api.SettingsController"/>'s
+    /// GET/PUT response replaces every choice's label with its resx <c>Choice.Llm:ReasoningEffort.{value}</c>
+    /// entry, via <see cref="SettingCopy.TryChoiceLabel"/>, the same live-resolution split
+    /// <see cref="ThemeChoices"/>/<see cref="IconPackChoices"/> already keep between this frozen
+    /// table and their own request-time source). Formerly carried five hand-written English
+    /// sentences (the deleted <c>ReasoningEffortLabel</c> helper) — ported verbatim into the resx
+    /// instead (PLAN T573), so the vocabulary still can never drift from the validator's
+    /// (<see cref="SettingValidator"/> checks <see cref="GenWave.Core.Llm.ReasoningEffort.IsValid"/>
+    /// directly, off <see cref="SettingChoice.Value"/>, never <see cref="SettingChoice.Label"/>).
     /// </summary>
     static readonly IReadOnlyList<SettingChoice> ReasoningEffortChoices =
         GenWave.Core.Llm.ReasoningEffort.Accepted
-            .Select(value => new SettingChoice(value, ReasoningEffortLabel(value), value == GenWave.Core.Llm.ReasoningEffort.Default))
+            .Select(value => new SettingChoice(value, value, value == GenWave.Core.Llm.ReasoningEffort.Default))
             .ToList();
-
-    static string ReasoningEffortLabel(string value) => value switch
-    {
-        GenWave.Core.Llm.ReasoningEffort.None => "None — answer directly (thinking models skip their chain-of-thought)",
-        GenWave.Core.Llm.ReasoningEffort.Low => "Low — think briefly first",
-        GenWave.Core.Llm.ReasoningEffort.Medium => "Medium — think before answering",
-        GenWave.Core.Llm.ReasoningEffort.High => "High — think at length (slow; needs a generous Llm:TimeoutSeconds)",
-        GenWave.Core.Llm.ReasoningEffort.Omit => "Omit — send no reasoning field (for a backend that rejects it)",
-        _ => value,
-    };
 
     static readonly IReadOnlyList<SettingChoice> ShippedThemeChoices =
         ThemeCatalog.LoadShipped().All
