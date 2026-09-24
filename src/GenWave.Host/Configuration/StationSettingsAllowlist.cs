@@ -147,8 +147,8 @@ public static class StationSettingsAllowlist
     public static readonly IReadOnlyList<AllowedSetting> All = new AllowedSetting[]
     {
         // ── Live knobs (IOptionsMonitor re-binds without restart) ─────────────────
-        new("Loudness:TargetLufs",                            SettingApplyMode.Live,          SettingKind.Number,     "LUFS"),
-        new("Loudness:CeilingDbtp",                           SettingApplyMode.Live,          SettingKind.Number,     "dBTP"),
+        new("Loudness:TargetLufs", SettingApplyMode.Live, SettingKind.Number, "LUFS", SettingGroup.Sound, Min: -40.0, Max: 0.0),
+        new("Loudness:CeilingDbtp", SettingApplyMode.Live, SettingKind.Number, "dBTP", SettingGroup.Sound, Min: -12.0, Max: 0.0),
 
         // Station identity (SPEC F44.1, F44.2, F44.5, closes gitea-#196) — read live through
         // IStationIdentityProvider by the Orchestrator (SegmentRequest stamping), AuthController
@@ -157,29 +157,29 @@ public static class StationSettingsAllowlist
         // stream/directory name (icy-name, STATION_NAME env) only catches up on the next ENGINE
         // restart — the admin UI badges this via FIELD_HELP_TEXT (SPEC F44.5), not a different
         // apply-mode; the api-side effects (patter, /api/stations, this console) are genuinely live.
-        new("Station:Name",                                   SettingApplyMode.Live,          SettingKind.String,     ""),
+        new("Station:Name", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Station),
         // Station:Tagline (SPEC F207.1, STORY-474, PLAN T561) — the About page's subtitle. Blank is
         // valid (unlike Name's IsNonBlank guard); no Icecast round-trip at all, so it carries none of
         // Station:Name's restart caveat.
-        new("Station:Tagline",                                SettingApplyMode.Live,          SettingKind.String,     ""),
-        new("Station:Voice",                                  SettingApplyMode.Live,          SettingKind.String,     ""),
+        new("Station:Tagline", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Station),
+        new("Station:Voice", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Voice),
 
-        new("Station:Cadence:LeadInBeforeEachTrack",          SettingApplyMode.Live,          SettingKind.Boolean,    ""),
-        new("Station:Cadence:BackAnnounceAfterEachTrack",     SettingApplyMode.Live,          SettingKind.Boolean,    ""),
-        new("Station:Cadence:StationIdEveryNUnits",           SettingApplyMode.Live,          SettingKind.Number,     "count"),
+        new("Station:Cadence:LeadInBeforeEachTrack", SettingApplyMode.Live, SettingKind.Boolean, "", SettingGroup.Announcements),
+        new("Station:Cadence:BackAnnounceAfterEachTrack", SettingApplyMode.Live, SettingKind.Boolean, "", SettingGroup.Announcements),
+        new("Station:Cadence:StationIdEveryNUnits", SettingApplyMode.Live, SettingKind.Number, "count", SettingGroup.Announcements, Min: 0, Max: 1000),
         // Main rotation scope — live so a PUT takes effect on the very next /media/random call
         // without an api restart.  An empty list equals a silent station; SettingValidator
         // rejects it on the live-edit path (F23.1).
-        new("Station:Scope:LibraryIds",                       SettingApplyMode.Live,          SettingKind.NumberList, ""),
+        new("Station:Scope:LibraryIds", SettingApplyMode.Live, SettingKind.NumberList, "", SettingGroup.Station),
         // Safe-rotation scope — live so a K4 PUT takes effect on the next /internal/safe-track
         // call without an api restart.  NumberList mirrors the long[] shape; K4 wires the PUT
         // validation and the SettingValidator entry.
-        new("Station:SafeScope:LibraryIds",                   SettingApplyMode.Live,          SettingKind.NumberList, ""),
+        new("Station:SafeScope:LibraryIds", SettingApplyMode.Live, SettingKind.NumberList, "", SettingGroup.Station),
         // Rotation anti-repeat/artist-separation knobs (SPEC F41.6, closes gitea-#210/gitea-#213) — live so a
         // PUT here reaches the very next selection (Orchestrator) / ring write (PlayoutFeeder) with
         // no api restart. 0 legally disables either knob.
-        new("Station:Rotation:RecentWindow",                  SettingApplyMode.Live,          SettingKind.Number,     "tracks"),
-        new("Station:Rotation:ArtistSeparation",              SettingApplyMode.Live,          SettingKind.Number,     "tracks"),
+        new("Station:Rotation:RecentWindow", SettingApplyMode.Live, SettingKind.Number, "tracks", SettingGroup.Station, Min: 0, Max: 10000),
+        new("Station:Rotation:ArtistSeparation", SettingApplyMode.Live, SettingKind.Number, "tracks", SettingGroup.Station, Min: 0, Max: 100),
 
         // Station-default segment envelope (SPEC F80.1, F81.1/F81.3, STORY-212) — the v1 24/7,
         // no-schedule-grid envelope the eventual envelope-only provider (a later task) consumes.
@@ -189,9 +189,9 @@ public static class StationSettingsAllowlist
         // no genre constraint (F81.1). EnergyMin/EnergyMax are the [0,1] percentile band (F80.1);
         // 0/1 is the full range, i.e. no energy constraint. Live so a PUT reaches the envelope-only
         // provider's very next pick with no api restart, once that provider exists.
-        new("Station:Envelope:Genres",                       SettingApplyMode.Live,          SettingKind.String,     ""),
-        new("Station:Envelope:EnergyMin",                     SettingApplyMode.Live,          SettingKind.Number,     ""),
-        new("Station:Envelope:EnergyMax",                     SettingApplyMode.Live,          SettingKind.Number,     ""),
+        new("Station:Envelope:Genres", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Station),
+        new("Station:Envelope:EnergyMin", SettingApplyMode.Live, SettingKind.Number, "", SettingGroup.Station, Min: 0.0, Max: 1.0),
+        new("Station:Envelope:EnergyMax", SettingApplyMode.Live, SettingKind.Number, "", SettingGroup.Station, Min: 0.0, Max: 1.0),
 
         // Spectator surface (SPEC F62.1, F62.8, STORY-167/170) — both read live via
         // IOptionsMonitor<StationOptions> by SurfaceGateMiddleware (SpectatorMode) and the
@@ -199,15 +199,15 @@ public static class StationSettingsAllowlist
         // request with no api restart. SpectatorMode is the F62.1 kill switch (false = every
         // SpectatorSurfaceAttribute route 404s, the surface does not exist); PublicStreamUrl is
         // legally empty (the about panel hides the player until the operator sets it).
-        new("Station:SpectatorMode",                          SettingApplyMode.Live,          SettingKind.Boolean,    ""),
-        new("Station:PublicStreamUrl",                        SettingApplyMode.Live,          SettingKind.String,     ""),
+        new("Station:SpectatorMode", SettingApplyMode.Live, SettingKind.Boolean, "", SettingGroup.Community),
+        new("Station:PublicStreamUrl", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Community),
 
         // Artwork/station-icon URL base (SPEC F88.4–F88.5, STORY-223, PLAN T85) — read live via
         // IOptionsMonitor<StationOptions> by ArtworkUrlResolver on every feeder push, so a PUT here
         // reaches the very next push with no api restart. Empty is legal and is the default: F88.5's
         // contract is that NO url= annotation is ever emitted (music or TTS) while this is blank,
         // exactly mirroring PublicStreamUrl's "empty hides the player" shape just above.
-        new("Station:PublicBaseUrl",                          SettingApplyMode.Live,          SettingKind.String,     ""),
+        new("Station:PublicBaseUrl", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Community),
 
         // Listener requests (SPEC F87.2, F87.6, STORY-224, PLAN T86) — the three live-editable
         // knobs on StationRequestsOptions (the rest of the F87 throttle surface binds from the
@@ -218,9 +218,9 @@ public static class StationSettingsAllowlist
         // very next request with no api restart. OverrideEnvelope (default true) governs whether a
         // matched request bypasses envelope genre/energy and rotation-recency at fulfillment
         // (T90). WindowMinutes is how long an unfulfilled request stays live before expiring.
-        new("Station:Requests:Enabled",                       SettingApplyMode.Live,          SettingKind.Boolean,    ""),
-        new("Station:Requests:OverrideEnvelope",               SettingApplyMode.Live,          SettingKind.Boolean,    ""),
-        new("Station:Requests:WindowMinutes",                  SettingApplyMode.Live,          SettingKind.Number,     "minutes"),
+        new("Station:Requests:Enabled", SettingApplyMode.Live, SettingKind.Boolean, "", SettingGroup.Community),
+        new("Station:Requests:OverrideEnvelope", SettingApplyMode.Live, SettingKind.Boolean, "", SettingGroup.Community),
+        new("Station:Requests:WindowMinutes", SettingApplyMode.Live, SettingKind.Number, "minutes", SettingGroup.Community, Min: 1, Max: 1440),
 
         // The station-level rotation signal's Live switch (SPEC F150.2, F155.1, STORY-380, PLAN
         // T357, gh-#529) — the ONE Gardener knob on this allowlist; every other Gardener:* key is
@@ -231,7 +231,7 @@ public static class StationSettingsAllowlist
         // above). No consumer yet — T366 wires the live read (IOptionsMonitor<StationOptions> by the
         // thumbs endpoint), so a PUT here reaches the very next request with no api restart once
         // that read exists; the key/allowlist row itself is what T357 owns.
-        new("Station:Thumbs:Enabled",                         SettingApplyMode.Live,          SettingKind.Boolean,    ""),
+        new("Station:Thumbs:Enabled", SettingApplyMode.Live, SettingKind.Boolean, "", SettingGroup.Community),
 
         // TTS/LLM endpoint liveness (SPEC F36.1–F36.4, T8): KokoroTtsSynthesizer/KokoroVoiceLister
         // and LlmCopyWriter read these via IOptionsMonitor per call (no boot-frozen BaseAddress), so
@@ -239,7 +239,7 @@ public static class StationSettingsAllowlist
         // legally empty (F34.2 — blurbs stay templated); Tts:Endpoint is not, since there is no
         // "disabled TTS" state. Llm:ApiKey is deliberately absent from this list — env-only secret
         // (F19.3), never readable or writable through this API (see SettingValidator's rejection).
-        new("Tts:Endpoint",                                   SettingApplyMode.Live,          SettingKind.String,     ""),
+        new("Tts:Endpoint", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Voice),
         // Operator pronunciation corrections (SPEC F68.1, F68.5, STORY-185) — a JSON-encoded array
         // of {from, to} pairs stored as ONE opaque string-kind value (the overlay only expands a
         // stored array into indexed keys for arrays of SCALARS, not objects — see
@@ -247,7 +247,7 @@ public static class StationSettingsAllowlist
         // (GenWave.Tts) reads it via IOptionsMonitor<TtsCorrectionsOptions> and rebuilds the
         // compiled SpeechCorrectionSet on every change — a PUT here reaches the very next render
         // with no api restart.
-        new("Tts:Corrections",                                SettingApplyMode.Live,          SettingKind.String,     ""),
+        new("Tts:Corrections", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Voice),
         // Station pronunciation rules (SPEC F97.1, F97.3, STORY-253) — a JSON-encoded array of
         // {pattern, word, ipa} rules stored as ONE opaque string-kind value, the identical
         // "overlay can't expand an array of objects" idiom as Tts:Corrections just above.
@@ -255,7 +255,7 @@ public static class StationSettingsAllowlist
         // and rebuilds the compiled PronunciationRuleSet on every change — a PUT here reaches the
         // very next render with no api restart. Merged with the active persona card's own rules,
         // card winning on conflict (F97.4) — see PersonaOverStationMerge.
-        new("Tts:Pronunciations",                             SettingApplyMode.Live,          SettingKind.String,     ""),
+        new("Tts:Pronunciations", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Voice),
         // Piper local-fallback engine, LEGACY single-hop shape (SPEC F70.1, STORY-190, gh-#147):
         // FallbackTtsSynthesizer (GenWave.Tts) reads both via IOptionsMonitor<TtsFallbackOptions>
         // per render, so a PUT here reaches the very next render with no api restart. These two
@@ -266,8 +266,8 @@ public static class StationSettingsAllowlist
         // change); the shipped compose.yaml sets a real value for its own `piper` sidecar. Voice is
         // documentation only (see TtsFallbackProfile.Voice's schema remarks) — never sent on the
         // wire for the piper engine.
-        new("Tts:Fallback:Endpoint",                          SettingApplyMode.Live,          SettingKind.String,     ""),
-        new("Tts:Fallback:Voice",                             SettingApplyMode.Live,          SettingKind.String,     ""),
+        new("Tts:Fallback:Endpoint", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Voice),
+        new("Tts:Fallback:Voice", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Voice),
         // Per-kind TTS engine override map (SPEC F70.3, STORY-191): a JSON-encoded object mapping
         // SegmentKind names to an engine name ("kokoro"/"piper"), e.g.
         // {"StationId":"piper","LeadIn":"kokoro"} — the same "single opaque string-kind setting"
@@ -277,10 +277,10 @@ public static class StationSettingsAllowlist
         // every change — a PUT here reaches the very next render with no api restart. Empty/absent
         // is legal and is the default (F70.3): every kind falls through to the existing F70.1
         // health-based Kokoro/Piper routing, unchanged.
-        new("Tts:EngineByKind",                               SettingApplyMode.Live,          SettingKind.String,     ""),
-        new("Llm:Endpoint",                                   SettingApplyMode.Live,          SettingKind.String,     ""),
-        new("Llm:Model",                                      SettingApplyMode.Live,          SettingKind.String,     ""),
-        new("Llm:TimeoutSeconds",                             SettingApplyMode.Live,          SettingKind.Number,     "seconds"),
+        new("Tts:EngineByKind", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Voice),
+        new("Llm:Endpoint", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Voice),
+        new("Llm:Model", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Voice),
+        new("Llm:TimeoutSeconds", SettingApplyMode.Live, SettingKind.Number, "seconds", SettingGroup.Voice, Min: 1, Max: 300),
 
         // F44.2 allowlist completion (closes gitea-#197) — six more boot-frozen consumers migrate to a
         // live provider/IOptionsMonitor read at use time:
@@ -309,37 +309,37 @@ public static class StationSettingsAllowlist
         // SettingValidator is the ONLY floor-enforcement surface for these three at either boot or
         // live-edit time, exactly the existing GW_XFADE_*/GW_SAFE_GAP_SECONDS precedent ("No bound
         // options class; rules enforced purely in this validator").
-        new("Tts:RenderBudgetSeconds",                        SettingApplyMode.Live,          SettingKind.Number,     "seconds"),
-        new("Tts:BlurbRetentionHours",                        SettingApplyMode.Live,          SettingKind.Number,     "hours"),
-        new("Llm:MaxCopyChars",                               SettingApplyMode.Live,          SettingKind.Number,     "chars"),
-        new("Admin:PlayHistoryCapacity",                      SettingApplyMode.Live,          SettingKind.Number,     "entries"),
-        new("Library:ScanIntervalSeconds",                    SettingApplyMode.Live,          SettingKind.Number,     "seconds"),
-        new("Library:EnrichmentConcurrency",                  SettingApplyMode.Live,          SettingKind.Number,     "workers"),
+        new("Tts:RenderBudgetSeconds", SettingApplyMode.Live, SettingKind.Number, "seconds", SettingGroup.Voice, Min: 1, Max: 600),
+        new("Tts:BlurbRetentionHours", SettingApplyMode.Live, SettingKind.Number, "hours", SettingGroup.Voice, Min: 1, Max: 8760),
+        new("Llm:MaxCopyChars", SettingApplyMode.Live, SettingKind.Number, "chars", SettingGroup.Voice, Min: 1, Max: 10000),
+        new("Admin:PlayHistoryCapacity", SettingApplyMode.Live, SettingKind.Number, "entries", SettingGroup.System, Min: 1, Max: 5000),
+        new("Library:ScanIntervalSeconds", SettingApplyMode.Live, SettingKind.Number, "seconds", SettingGroup.Library, Min: 1, Max: 86400),
+        new("Library:EnrichmentConcurrency", SettingApplyMode.Live, SettingKind.Number, "workers", SettingGroup.Library, Min: 1, Max: 32),
 
         // Scan availability grace (SPEC F58.3, closes gitea-#223) — ScanService reads
         // IOptionsMonitor<ScanOptions>.CurrentValue fresh per tick, the SAME live shape as
         // Library:ScanIntervalSeconds directly above (a live PUT governs the very next scan tick's
         // missing-diff, no api restart), so this carries the identical Live apply-mode badge.
-        new("Library:Scan:MissThreshold",                     SettingApplyMode.Live,          SettingKind.Number,     "misses"),
+        new("Library:Scan:MissThreshold", SettingApplyMode.Live, SettingKind.Number, "misses", SettingGroup.Library, Min: 1, Max: 20),
 
         // MusicBrainz year lookup (SPEC F48.5, X5, closes gitea-#208) — Enabled/Endpoint are read fresh
         // per backfill tick/call via IOptionsMonitor<YearLookupOptions> (MusicBrainzYearLookup/
         // EnrichmentService.BackfillYearLookupAsync), the same F36.2 typed-client shape as
         // Tts:Endpoint/Llm:Endpoint above — a PUT here reaches the very next tick, no api restart.
         // Enabled is the kill switch: false stops claiming before the next tick.
-        new("Library:YearLookup:Enabled",                     SettingApplyMode.Live,          SettingKind.Boolean,    ""),
-        new("Library:YearLookup:Endpoint",                    SettingApplyMode.Live,          SettingKind.String,     ""),
+        new("Library:YearLookup:Enabled", SettingApplyMode.Live, SettingKind.Boolean, "", SettingGroup.Library),
+        new("Library:YearLookup:Endpoint", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Library),
         // MinScore only changes behavior the next time a row is looked up (an already-stamped
         // row's outcome is not retroactively re-judged) — the F44.3 Enrichment apply-mode, same
         // badge as the CueDetection/Energy pair below.
-        new("Library:YearLookup:MinScore",                    SettingApplyMode.Enrichment,    SettingKind.Number,     "score"),
+        new("Library:YearLookup:MinScore", SettingApplyMode.Enrichment, SettingKind.Number, "score", SettingGroup.Library, Min: 0, Max: 100),
 
         // ── Engine-restart knobs (Liquidsoap env vars; effective on next engine boot) ──
-        new("GW_XFADE_MIN",         SettingApplyMode.EngineRestart, SettingKind.Number, "seconds"),
-        new("GW_XFADE_MAX",         SettingApplyMode.EngineRestart, SettingKind.Number, "seconds"),
+        new("GW_XFADE_MIN", SettingApplyMode.EngineRestart, SettingKind.Number, "seconds", SettingGroup.Sound, Min: 0.0, Max: 30.0),
+        new("GW_XFADE_MAX", SettingApplyMode.EngineRestart, SettingKind.Number, "seconds", SettingGroup.Sound, Min: 0.0, Max: 30.0),
         // Inter-safe-track silence gap (F29.6/F29.8, STORY-100) — mirrors GW_XFADE_* exactly:
         // same wire key naming, same EngineRestart apply mode, same Number kind/seconds unit.
-        new("GW_SAFE_GAP_SECONDS",  SettingApplyMode.EngineRestart, SettingKind.Number, "seconds"),
+        new("GW_SAFE_GAP_SECONDS", SettingApplyMode.EngineRestart, SettingKind.Number, "seconds", SettingGroup.Sound, Min: 0.0, Max: 600.0),
 
         // ── Enrichment-mode knobs (F44.3): consumed only when a file is (re-)analyzed. Both are
         // TOP-LEVEL properties on CueDetectionOptions/EnergyOptions, but neither options class has
@@ -348,8 +348,8 @@ public static class StationSettingsAllowlist
         // above. FfmpegCueAnalyzer/FfmpegEnergyAnalyzer read IOptionsMonitor<T>.CurrentValue fresh
         // per AnalyzeAsync call, so an edit here is visible on the NEXT enrichment, never retroactive
         // for an already-enriched row.
-        new("Library:CueDetection:MinSilenceDurationSec",     SettingApplyMode.Enrichment,    SettingKind.Number,     "seconds"),
-        new("Library:Energy:WindowSeconds",                   SettingApplyMode.Enrichment,    SettingKind.Number,     "seconds"),
+        new("Library:CueDetection:MinSilenceDurationSec", SettingApplyMode.Enrichment, SettingKind.Number, "seconds", SettingGroup.Library, Min: 0.0, Max: 60.0),
+        new("Library:Energy:WindowSeconds", SettingApplyMode.Enrichment, SettingKind.Number, "seconds", SettingGroup.Library, Min: 0.0, Max: 60.0),
 
         // Dependency health probes (SPEC F70.2 AC1/AC3/AC5, gh-#125) — DependencyHealthProbeService
         // hands the prober a Func<DependencyProbeCadence> that reads IOptionsMonitor fresh, and the
@@ -367,21 +367,21 @@ public static class StationSettingsAllowlist
         // .ValidateDataAnnotations().ValidateOnStart() in Program.cs, so all three [Range(1, ...)]
         // attributes are genuinely enforced at boot; SettingValidator adds the F53.1 ceilings that
         // only apply on the settings-API path.
-        new("DependencyHealth:ProbeIntervalSeconds",          SettingApplyMode.Live,          SettingKind.Number,     "seconds"),
-        new("DependencyHealth:ProbeTimeoutSeconds",           SettingApplyMode.Live,          SettingKind.Number,     "seconds"),
-        new("DependencyHealth:UnhealthyThreshold",            SettingApplyMode.Live,          SettingKind.Number,     "failures"),
+        new("DependencyHealth:ProbeIntervalSeconds", SettingApplyMode.Live, SettingKind.Number, "seconds", SettingGroup.System, Min: 1, Max: 3600),
+        new("DependencyHealth:ProbeTimeoutSeconds", SettingApplyMode.Live, SettingKind.Number, "seconds", SettingGroup.System, Min: 1, Max: 300),
+        new("DependencyHealth:UnhealthyThreshold", SettingApplyMode.Live, SettingKind.Number, "failures", SettingGroup.System, Min: 1, Max: 10),
 
         // LLM degradation pin (SPEC F69.3, STORY-188) — DegradationController (GenWave.Tts) reads
         // this fresh via IOptionsMonitor<LlmOptions> on every evaluation, so a live PUT here
         // pins/unpins the mode with no api restart. "auto" (the LlmOptions default) leaves the
         // mode fully automatic; "normal"/"soft"/"hard" holds it.
-        new("Llm:DegradationPin",                             SettingApplyMode.Live,          SettingKind.String,     ""),
+        new("Llm:DegradationPin", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Voice),
 
         // Reasoning control (gh-#620) — the THIRD SettingKind.Choice key, and the first with a
         // STATIC choice list (Station:Theme/Station:IconPack resolve theirs live off a catalog): the
         // vocabulary is ReasoningEffort.Accepted, fixed at build time, so the frozen list IS the
         // truth here. Live so a PUT reaches the very next completions request on all five posters.
-        new("Llm:ReasoningEffort",                            SettingApplyMode.Live,          SettingKind.Choice,     "", ReasoningEffortChoices),
+        new("Llm:ReasoningEffort", SettingApplyMode.Live, SettingKind.Choice, "", SettingGroup.Voice, ReasoningEffortChoices),
 
         // Persona Catalog origin (SPEC F90.1, STORY-234, PLAN T99) — CommunityCatalogAccessor reads
         // this fresh via IOptionsMonitor<CommunityOptions>, so a live PUT here reaches the very next
@@ -389,14 +389,14 @@ public static class StationSettingsAllowlist
         // index.json; EMPTY is the F90.1 fail-closed kill switch — both catalog endpoints 404 and
         // the admin UI hides the shelf, the same F87.2/F61 surface-off idiom as every other kill
         // switch on this list.
-        new("Community:CatalogIndexUrl",                      SettingApplyMode.Live,          SettingKind.String,     ""),
+        new("Community:CatalogIndexUrl", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Community),
 
         // Audience posture (SPEC F95.1, STORY-250, PLAN T111) — everyone (default, fail-closed) |
         // mature. Live so a PUT here reaches the very next selection query with no api restart,
         // once T114 wires the shared pool predicate (rotation, request matcher, boundary bias —
         // F95.4). No consumers yet: this task only adds the allowlist entry, the StationOptions
         // property, and the SettingValidator guard.
-        new("Station:Audience",                               SettingApplyMode.Live,          SettingKind.String,     ""),
+        new("Station:Audience", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Community),
 
         // Station timezone (gh-#117; extended gh-#224) — an IANA id (e.g. America/Edmonton) every
         // "station-local now" read (LLM/patter clocks, the schedule grid's slot resolution, taste
@@ -404,7 +404,7 @@ public static class StationSettingsAllowlist
         // the honest "container's own clock" state, pre-gh-#117 behavior unchanged. Live so a PUT
         // here reaches the very next prompt build / SegmentRequest stamp with no api restart —
         // OptionsMonitorStationClockProvider re-resolves IOptionsMonitor<StationOptions> per call.
-        new("Station:Timezone",                               SettingApplyMode.Live,          SettingKind.String,     ""),
+        new("Station:Timezone", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Station),
 
         // Theme selection (SPEC F102.14, F102.15, F103.7, STORY-265/271, PLAN T163/T183) — closed
         // CHOICE, not free text: a typo in a String value would silently fail to resolve (F102.6's
@@ -424,7 +424,7 @@ public static class StationSettingsAllowlist
         // case so that branch of T164's resolution logic never actually fires against a real
         // deployment. A fresh deploy with no key present resolves to the shipped default exactly
         // because the chain has a floor, not because appsettings.json states one.
-        new("Station:Theme",                                  SettingApplyMode.Live,          SettingKind.Choice,     "", ShippedThemeChoices),
+        new("Station:Theme", SettingApplyMode.Live, SettingKind.Choice, "", SettingGroup.Station, ShippedThemeChoices),
 
         // Icon pack selection (SPEC F130.4, STORY-337, PLAN T303) — the admin chrome's third
         // swappable layer, the SAME SettingKind.Choice shape Station:Theme established immediately
@@ -440,7 +440,7 @@ public static class StationSettingsAllowlist
         // IconPackChoices carries it first, flagged IsDefault, on every station regardless of how many
         // packs are installed); a value naming an uninstalled pack (the F130.5 fail-open uninstall —
         // DELETE never touches this setting) resolves the same way, never an error.
-        new("Station:IconPack",                               SettingApplyMode.Live,          SettingKind.Choice,     "", []),
+        new("Station:IconPack", SettingApplyMode.Live, SettingKind.Choice, "", SettingGroup.Station, []),
 
         // The F107 context seam (SPEC F107.2/F107.7, F108.1-F108.2, F109.1, STORY-297, PLAN T226) —
         // Context:{Key}:* per registered IContextProvider (weather, history today; any future
@@ -450,20 +450,20 @@ public static class StationSettingsAllowlist
         // F107.2/F108.1); SegmentCadenceMinutes/PatterCadenceMinutes/PersonaId all default to the
         // NoOp answer (60/0/null) when unset — see ContextProviderSettings' own remarks for why
         // null/0/negative PersonaId all mean "the on-air DJ".
-        new("Context:Weather:Enabled",                        SettingApplyMode.Live,          SettingKind.Boolean,    ""),
+        new("Context:Weather:Enabled", SettingApplyMode.Live, SettingKind.Boolean, "", SettingGroup.Announcements),
         // F108.2's segment-cadence floor (30 minutes, "the ruled hard max of twice an hour") is
         // enforced HERE at write time — SettingValidator's own weather-specific range (F2/F4 fix,
         // T226 review) — the operator-facing rule; WeatherContextProvider's own
         // ICadenceFlooredContextProvider capability, consulted directly by ContextPipeline, is the
         // structural backstop for a value that reaches it some other way (an appsettings/env
         // override, which never passes through this validator at all).
-        new("Context:Weather:SegmentCadenceMinutes",          SettingApplyMode.Live,          SettingKind.Number,     "minutes"),
-        new("Context:Weather:PatterCadenceMinutes",           SettingApplyMode.Live,          SettingKind.Number,     "minutes"),
-        new("Context:Weather:PersonaId",                      SettingApplyMode.Live,          SettingKind.Number,     ""),
-        new("Context:History:Enabled",                        SettingApplyMode.Live,          SettingKind.Boolean,    ""),
-        new("Context:History:SegmentCadenceMinutes",          SettingApplyMode.Live,          SettingKind.Number,     "minutes"),
-        new("Context:History:PatterCadenceMinutes",           SettingApplyMode.Live,          SettingKind.Number,     "minutes"),
-        new("Context:History:PersonaId",                      SettingApplyMode.Live,          SettingKind.Number,     ""),
+        new("Context:Weather:SegmentCadenceMinutes", SettingApplyMode.Live, SettingKind.Number, "minutes", SettingGroup.Announcements, Min: 30, Max: 1440),
+        new("Context:Weather:PatterCadenceMinutes", SettingApplyMode.Live, SettingKind.Number, "minutes", SettingGroup.Announcements, Min: 0, Max: 1440),
+        new("Context:Weather:PersonaId", SettingApplyMode.Live, SettingKind.Number, "", SettingGroup.Announcements, Min: 0, Max: int.MaxValue),
+        new("Context:History:Enabled", SettingApplyMode.Live, SettingKind.Boolean, "", SettingGroup.Announcements),
+        new("Context:History:SegmentCadenceMinutes", SettingApplyMode.Live, SettingKind.Number, "minutes", SettingGroup.Announcements, Min: 1, Max: 1440),
+        new("Context:History:PatterCadenceMinutes", SettingApplyMode.Live, SettingKind.Number, "minutes", SettingGroup.Announcements, Min: 0, Max: 1440),
+        new("Context:History:PersonaId", SettingApplyMode.Live, SettingKind.Number, "", SettingGroup.Announcements, Min: 0, Max: int.MaxValue),
 
         // Station broadcast location (SPEC F108.1, F108.3, PLAN T226) — read live through
         // IStationLocationProvider by WeatherContextProvider, so a PUT here reaches the very next
@@ -472,16 +472,16 @@ public static class StationSettingsAllowlist
         // own fail-closed check, not this validator's) — WeatherContextProvider degrades to "off"
         // rather than erroring on a bad value. SpokenName is the ONLY location string ever spoken
         // (F108.3); blank means no place name is ever spoken.
-        new("Station:Location:Latitude",                      SettingApplyMode.Live,          SettingKind.String,     ""),
-        new("Station:Location:Longitude",                     SettingApplyMode.Live,          SettingKind.String,     ""),
-        new("Station:Location:SpokenName",                    SettingApplyMode.Live,          SettingKind.String,     ""),
+        new("Station:Location:Latitude", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Announcements),
+        new("Station:Location:Longitude", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Announcements),
+        new("Station:Location:SpokenName", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Announcements),
 
         // Clock-anchored imaging knobs (SPEC F110.1/F110.3, gh-#381) — allowlisted now per PLAN
         // T226, read starting PLAN T230's top-of-hour producer (called by the same ContextTickerService
         // this task adds). Both off by default — mirrors Station:Audience's own T111 precedent (the
         // property + allowlist entry land before the first consumer).
-        new("Station:Imaging:ClockAnchoredIdents",            SettingApplyMode.Live,          SettingKind.Boolean,    ""),
-        new("Station:Imaging:TimeAnnouncements",              SettingApplyMode.Live,          SettingKind.Boolean,    ""),
+        new("Station:Imaging:ClockAnchoredIdents", SettingApplyMode.Live, SettingKind.Boolean, "", SettingGroup.Announcements),
+        new("Station:Imaging:TimeAnnouncements", SettingApplyMode.Live, SettingKind.Boolean, "", SettingGroup.Announcements),
         // TimeDate elapsed-due expiry budget (SPEC F124.4/F141.1, gh-#469/gh-#526, PLAN T269/T326) —
         // read live through IStationImagingSettingsProvider by SpeechDeferralQueue.TryDequeueDue's own
         // expiry check (Orchestrator forwards the value fresh once per unit), so a PUT here reaches the
@@ -491,7 +491,7 @@ public static class StationSettingsAllowlist
         // Seconds, not minutes (F141.1's own unit change, replacing the prior TimeAnnouncementStaleMinutes
         // key outright): a drain inside this budget but more than 90 seconds past the armed hour speaks
         // the honest "just past" variant instead of the classic line (Orchestrator's own remarks).
-        new("Station:Imaging:TimeAnnouncementBudgetSeconds",  SettingApplyMode.Live,          SettingKind.Number,     "seconds"),
+        new("Station:Imaging:TimeAnnouncementBudgetSeconds", SettingApplyMode.Live, SettingKind.Number, "seconds", SettingGroup.Announcements, Min: 1, Max: 86400),
 
         // Show-flavor patter line (SPEC F116.3, STORY-308, PLAN T249) — an ordinary LeadIn/BackAnnounce
         // break during a show may carry the show's flavor as spoken color, sharing F107.5's own single
@@ -500,7 +500,7 @@ public static class StationSettingsAllowlist
         // a PUT here reaches the very next eligible break with no api restart. 0 (the default) disables
         // it entirely — an opt-in feature, not a default-on one (mirrors Context:{Key}:PatterCadenceMinutes's
         // own "0 = off" floor immediately above).
-        new("Station:Shows:PatterCadenceMinutes",             SettingApplyMode.Live,          SettingKind.Number,     "minutes"),
+        new("Station:Shows:PatterCadenceMinutes", SettingApplyMode.Live, SettingKind.Number, "minutes", SettingGroup.Announcements, Min: 0, Max: 1440),
 
         // Crosstalk two-voice banter, the duration-fit knob (SPEC F127.4, STORY-326, PLAN T282) —
         // CrosstalkScriptWriter (GenWave.Tts) reads this fresh via IOptionsMonitor<CrosstalkOptions>
@@ -508,7 +508,7 @@ public static class StationSettingsAllowlist
         // restart. Defaults to the ratified 50s (PLAN T333 amendment); an estimate over target
         // discards the WHOLE exchange rather than trimming a line (F127.4 — a cut dialogue line
         // breaks the reaction to it).
-        new("Crosstalk:DurationTargetSeconds",                SettingApplyMode.Live,          SettingKind.Number,     "seconds"),
+        new("Crosstalk:DurationTargetSeconds", SettingApplyMode.Live, SettingKind.Number, "seconds", SettingGroup.Announcements, Min: 5, Max: 120),
         // Crosstalk scope/cadence (SPEC F127.8, STORY-328, PLAN T285) — Shows is a JSON array of
         // enabled show SLUGS, never display names (T175's "names slugs, not labels" rule — a rename
         // must never silently kill banter forever; the Station:Envelope:Genres opaque-string-kind
@@ -518,8 +518,8 @@ public static class StationSettingsAllowlist
         // casting/eligibility check with no api restart. EveryNthAiring defaults to 1 (every eligible
         // airing carries banter) — the counting itself is a LATER task's own concern (PLAN T287's
         // vend gate).
-        new("Crosstalk:Shows",                                SettingApplyMode.Live,          SettingKind.String,     ""),
-        new("Crosstalk:EveryNthAiring",                       SettingApplyMode.Live,          SettingKind.Number,     "airings"),
+        new("Crosstalk:Shows", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Announcements),
+        new("Crosstalk:EveryNthAiring", SettingApplyMode.Live, SettingKind.Number, "airings", SettingGroup.Announcements, Min: 1, Max: 100),
 
         // The ads seam's five Live knobs (SPEC F158.3, F159.3, F159.4, F163.1, STORY-388/389/391,
         // PLAN T397/T402). EveryNUnits is the StationIdEveryNUnits twin — read live through
@@ -544,11 +544,11 @@ public static class StationSettingsAllowlist
         // GenWave.Ads — wider than the guardian's own grace alone, since the repair sweep cannot see a
         // spot before the tick AFTER it went ready) — an aged, operator-disabled ready ad row past
         // that window is left exactly as the operator set it, forever.
-        new("Station:Ads:EveryNUnits",                        SettingApplyMode.Live,          SettingKind.Number,     "count"),
-        new("Station:Ads:TargetCount",                        SettingApplyMode.Live,          SettingKind.Number,     "spots"),
-        new("Station:Ads:RefreshDays",                        SettingApplyMode.Live,          SettingKind.Number,     "days"),
-        new("Station:Ads:AutoApprove",                        SettingApplyMode.Live,          SettingKind.Boolean,    ""),
-        new("Station:Ads:AntiRepeatWindow",                   SettingApplyMode.Live,          SettingKind.Number,     "sponsors"),
+        new("Station:Ads:EveryNUnits", SettingApplyMode.Live, SettingKind.Number, "count", SettingGroup.Sponsors, Min: 0, Max: 1000),
+        new("Station:Ads:TargetCount", SettingApplyMode.Live, SettingKind.Number, "spots", SettingGroup.Sponsors, Min: 0, Max: 100),
+        new("Station:Ads:RefreshDays", SettingApplyMode.Live, SettingKind.Number, "days", SettingGroup.Sponsors, Min: 1, Max: 365),
+        new("Station:Ads:AutoApprove", SettingApplyMode.Live, SettingKind.Boolean, "", SettingGroup.Sponsors),
+        new("Station:Ads:AntiRepeatWindow", SettingApplyMode.Live, SettingKind.Number, "sponsors", SettingGroup.Sponsors, Min: 0, Max: 50),
 
         // The ads cast/bed settings split (SPEC F170.1, STORY-405, PLAN T417): three MORE
         // Station:Ads:* Live knobs, alongside the five above — the jingle/voice-pack ROOTS and byte
@@ -566,15 +566,20 @@ public static class StationSettingsAllowlist
         // ends, in milliseconds — 300 (the default) mirrors a typical radio ad's bed fade, 100-1000
         // keeps an operator from setting a fade so short it clicks or so long it swallows the whole
         // spot.
-        new("Station:Ads:AnnouncerVoice",                     SettingApplyMode.Live,          SettingKind.String,     ""),
-        new("Station:Ads:CastVoices",                         SettingApplyMode.Live,          SettingKind.String,     ""),
-        new("Station:Ads:BedFadeMs",                          SettingApplyMode.Live,          SettingKind.Number,     "ms"),
+        new("Station:Ads:AnnouncerVoice", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Sponsors),
+        new("Station:Ads:CastVoices", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Sponsors),
+        new("Station:Ads:BedFadeMs", SettingApplyMode.Live, SettingKind.Number, "ms", SettingGroup.Sponsors, Min: 100, Max: 1000),
         // BedDuckDb (gh-#746) is how many dB UNDER the voice the background music sits in a generated
         // ad — the mixer places it relative to what the voice and bed actually measure, so -12 means
         // -12 whatever the pack's mastering level. -60..0: 0 is no ducking at all, -60 is effectively
         // silent. Previously the env-only Ads:BedDuckDb, moved here so an operator can tune it by ear
         // on a running station; a change makes every existing preview report stale (AdPreviewKey).
-        new("Station:Ads:BedDuckDb",                          SettingApplyMode.Live,          SettingKind.Number,     "dB"),
+        // Min/Max moved off SettingValidator's own internal const fields onto this record (PLAN T572)
+        // — the range itself is UNCHANGED (-60..0), a refactor, not a behaviour change. STORY-477's AC4 text
+        // names -30 as the floor; the shipped floor has always been -60 (AdLiveSettingsReader.MinBedDuckDb,
+        // appsettings.json mirror the same -60), so this record keeps the shipped number. /plan owes a
+        // rewrite of STORY-477 AC4 to match; T572's own spec (below) PUTs -61 and asserts the 400.
+        new("Station:Ads:BedDuckDb", SettingApplyMode.Live, SettingKind.Number, "dB", SettingGroup.Sponsors, Min: -60.0, Max: 0.0),
     };
 
     /// <summary>All operator-editable settings, keyed by configuration key.</summary>

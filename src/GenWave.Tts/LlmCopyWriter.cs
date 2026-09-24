@@ -172,7 +172,8 @@ public sealed class LlmCopyWriter(
     /// finding): the OTHER end of the same poison-every-call risk the floor guards against.
     /// <see cref="LlmOptions.MaxCopyChars"/> is <c>[Range(1, int.MaxValue)]</c> at the options
     /// layer — an env-set <c>int.MaxValue</c> would otherwise derive a nonsense <c>max_tokens</c>
-    /// in the hundreds of millions. The admin settings surface (<c>SettingValidator.MaxCopyCharsMax</c>)
+    /// in the hundreds of millions. The admin settings surface (the <c>Llm:MaxCopyChars</c> row's own
+    /// <c>Max</c> on <c>GenWave.Host.Configuration.StationSettingsAllowlist</c>, PLAN T572)
     /// caps an operator's live edit at 10000 chars, which this same formula would derive to ~3333
     /// tokens — 4096 is a conventional completion-length ceiling that sits comfortably above that
     /// surface's own maximum while still bounding the raw options layer.

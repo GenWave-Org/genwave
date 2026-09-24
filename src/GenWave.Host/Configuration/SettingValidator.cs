@@ -48,200 +48,17 @@ public sealed partial class SettingValidator
         validators = BuildValidators(this.themeCatalog);
     }
 
-    // ── Range constants — kept here so SettingValidator and the [Range] annotations on the
-    //    options classes reference the SAME numbers.  [Range] attributes cannot reference
-    //    non-const expressions, so the options files carry their own literals; these consts
-    //    are the single point of truth that both sides are checked against in review.
-    //    If you change a bound here, change the matching [Range] on the options property too.
-
-    internal const double TargetLufsMin  = -40.0;   // LoudnessOptions.TargetLufs [Range(-40, 0)]
-    internal const double TargetLufsMax  =   0.0;
-
-    internal const double CeilingDbtpMin = -12.0;   // LoudnessOptions.CeilingDbtp [Range(-12, 0)]
-    internal const double CeilingDbtpMax =   0.0;   // positive = above digital FS — nonsense
-
-    // GW_XFADE_MIN / GW_XFADE_MAX — Liquidsoap crossfade seconds.
-    // No bound options class; rules enforced purely in this validator.
-    internal const double XfadeMinValue = 0.0;      // exclusive — both must be > 0
-    internal const double XfadeMaxValue = 30.0;     // F53.1 ceiling (inclusive, closes gitea-#221)
-
-    // GW_SAFE_GAP_SECONDS — inter-safe-track silence gap (F29.6/F29.8, STORY-100).
-    // No bound options class; rules enforced purely in this validator.
-    internal const double SafeGapMinValue = 0.0;    // inclusive — 0 legally disables the gap (F29.6)
-    internal const double SafeGapMaxValue = 600.0;  // F53.1 ceiling (inclusive)
-
-    // F44.2/F44.3 allowlist completion (closes gitea-#197) — floors mirror each key's [Range] where one
-    // exists (TtsOptions/LlmOptions, both boot-enforced via ValidateDataAnnotations); the remaining
-    // four have NO bound options-class validation at all (plain Configure<T>), so this validator is
-    // their ONLY floor, exactly the GW_XFADE_*/GW_SAFE_GAP_SECONDS precedent above.
-    //
-    // F53.1 (closes gitea-#221) pairs every one of these floors with a ceiling — the settings API's only
-    // fat-finger guard; boot validation (ValidateDataAnnotations / StationOptionsValidator) is
-    // deliberately NOT tightened to match (F53.2), so these Max consts have no [Range] counterpart.
-    internal const int RenderBudgetSecondsMin = 1;      // TtsOptions.RenderBudgetSeconds [Range(1, int.MaxValue)]
-    internal const int RenderBudgetSecondsMax = 600;
-    internal const int BlurbRetentionHoursMin = 1;      // TtsOptions.BlurbRetentionHours [Range(1, int.MaxValue)]
-    internal const int BlurbRetentionHoursMax = 8760;   // 1 year
-    internal const int MaxCopyCharsMin        = 1;      // LlmOptions.MaxCopyChars [Range(1, int.MaxValue)]
-    internal const int MaxCopyCharsMax        = 10000;
-    internal const int PlayHistoryCapacityMin = 1;      // no bound options class — a 0-capacity ring has no operator value
-    internal const int PlayHistoryCapacityMax = 5000;
-    internal const int ScanIntervalSecondsMin = 1;      // no bound options class — mirrors ScanService's own Math.Max(1, …) clamp
-    internal const int ScanIntervalSecondsMax = 86400;  // 1 day
-    internal const int EnrichmentConcurrencyMin = 1;    // no bound options class — mirrors EnrichmentService's own Math.Max(1, …) clamp
-    internal const int EnrichmentConcurrencyMax = 32;
-
-    // Library:Scan:MissThreshold (SPEC F58.3, closes gitea-#223) — ScanOptions.MissThreshold carries a
-    // documentation-only [Range(1, 20)] (same "no bound IValidateOptions" shape as the two Library:*
-    // keys above); this validator is the actual floor/ceiling enforcement at both boot (via the
-    // station.settings overlay, which always routes through this API) and live-edit time.
-    internal const int ScanMissThresholdMin = 1;
-    internal const int ScanMissThresholdMax = 20;
-    internal const double MinSilenceDurationSecMin = 0.0;   // exclusive — a 0s "minimum silence" is not a silence detector
-    internal const double MinSilenceDurationSecMax = 60.0;
-    internal const double EnergyWindowSecondsMin = 0.0;     // exclusive — a 0s measurement window measures nothing
-    internal const double EnergyWindowSecondsMax = 60.0;
-
-    // Llm:TimeoutSeconds — LlmOptions.TimeoutSeconds [Range(1, int.MaxValue)]; F53.1 ceiling below.
-    internal const int LlmTimeoutSecondsMin = 1;
-    internal const int LlmTimeoutSecondsMax = 300;
-
-    // DependencyHealth:* (SPEC F70.2, gh-#125) — floors mirror DependencyHealthOptions' own
-    // [Range(1, int.MaxValue)] (boot-enforced via ValidateDataAnnotations); the ceilings are F53.1
-    // settings-API-only. The interval ceiling is an hour: anything longer is indistinguishable from
-    // "probing is off", and the operator has a real kill switch in the endpoint settings instead.
-    // The threshold ceiling of 10 is deliberately tight — threshold × interval is how long a
-    // genuinely dead dependency stays undetected, so 10 at the default 30s cadence is already a
-    // 5-minute blind spot and further is a footgun, not a tuning option.
-    internal const int ProbeIntervalSecondsMin = 1;
-    internal const int ProbeIntervalSecondsMax = 3600;
-    internal const int ProbeTimeoutSecondsMin = 1;
-    internal const int ProbeTimeoutSecondsMax = 300;
-    internal const int UnhealthyThresholdMin = 1;
-    internal const int UnhealthyThresholdMax = 10;
-
-    // Rotation/cadence knobs (SPEC F41.6/F42.2) — floor stays 0 (0 legally disables the knob;
-    // [Range(0, int.MaxValue)] on the nested options class is documentation-only, StationOptionsValidator
-    // is the real boot floor and is NOT tightened per F53.2). F53.1 adds the ceiling below.
-    internal const int RotationRecentWindowMax     = 10000;
-    internal const int RotationArtistSeparationMax = 100;
-    internal const int StationIdEveryNUnitsMax     = 1000;
-
-    // Library:YearLookup:MinScore (SPEC F48.2/F48.5, X5) — YearLookupOptions.MinScore [Range(0, 100)].
-    internal const int YearLookupMinScoreMin = 0;
-    internal const int YearLookupMinScoreMax = 100;
-
-    // Station:Envelope:EnergyMin/EnergyMax (SPEC F80.1, F81.1, STORY-212) — StationEnvelopeOptions'
-    // own [Range(0.0, 1.0)] (documentation-only; StationOptionsValidator is the real boot floor,
-    // same "nested class, root ValidateDataAnnotations() doesn't recurse" story as the rotation/
-    // cadence knobs above). Min <= Max is a ValidateBatch cross-field check, mirroring GW_XFADE_*.
-    internal const double EnvelopeEnergyMin = 0.0;
-    internal const double EnvelopeEnergyMax = 1.0;
-
-    // Station:Requests:WindowMinutes (SPEC F87.6, STORY-224) — StationRequestsOptions' own
-    // [Range(1, int.MaxValue)] floor (documentation-only; StationOptionsValidator is the real boot
-    // floor, same nested-class story as the rotation/cadence/envelope knobs above). F53.1 adds the
-    // ceiling: 1440 minutes (24h) is generous headroom before "the window never closes" stops
-    // meaning anything.
-    internal const int RequestsWindowMinutesMin = 1;
-    internal const int RequestsWindowMinutesMax = 1440;
-
-    // Context:{Key}:SegmentCadenceMinutes/PatterCadenceMinutes (SPEC F107.2/F107.5, F108.2, PLAN
-    // T226) — floors mirror ContextProviderSettings' own contract: no options class exists for a
-    // dynamic Context:{Key}:* key (no bound [Range]/IValidateOptions at all), so this validator is
-    // the operator-facing write-time floor. History (and any future non-floored provider) uses the
-    // generic 1-minute floor below; weather ALONE carries SPEC F108.2's own extra 30-minute floor
-    // (F2 fix, T226 review — the write-time range genuinely enforces it, not merely a comment
-    // claiming it does) via WeatherSegmentCadenceMinutesMin. Both provider's own
-    // GenWave.Context.ICadenceFlooredContextProvider capability, consulted directly by
-    // GenWave.Context.ContextPipeline (F4 fix), is the structural backstop for a value that reaches
-    // the pipeline some way other than this validator (an appsettings/env override). Both
-    // PatterCadenceMinutes floor at 0 — 0 legally means "off" (F107.5). All four share the generic
-    // 1440-minute (24h) F53.1 ceiling every other "minutes" knob on this list uses.
-    internal const int ContextSegmentCadenceMinutesMin = 1;
-    internal const int ContextSegmentCadenceMinutesMax = 1440;
-    internal const int WeatherSegmentCadenceMinutesMin = 30;
-    internal const int WeatherSegmentCadenceMinutesMax = 1440;
-    internal const int ContextPatterCadenceMinutesMin = 0;
-    internal const int ContextPatterCadenceMinutesMax = 1440;
-
-    // Station:Shows:PatterCadenceMinutes (SPEC F116.3, STORY-308, PLAN T249) — StationShowsOptions'
-    // own documentation-only [Range] (StationOptionsValidator is the real boot floor, the
-    // StationCadenceOptions precedent). Floor stays 0 — 0 legally means "off" (F116.3, mirrors
-    // ContextPatterCadenceMinutesMin's own "0 = off" floor immediately above); ceiling is the same
-    // generic 1440-minute (24h) F53.1 cap every other "minutes" knob on this list uses.
-    internal const int ShowsPatterCadenceMinutesMin = 0;
-    internal const int ShowsPatterCadenceMinutesMax = 1440;
-
-    // Station:Imaging:TimeAnnouncementBudgetSeconds (SPEC F124.4/F141.1, gh-#469/gh-#526, STORY-321/355,
-    // PLAN T269/T326) — StationImagingOptions' own documentation-only [Range] (StationOptionsValidator
-    // is the real boot floor, the StationCadenceOptions precedent). Floor is 1, not 0 — unlike the
-    // "0 = off" cadence knobs above, 0 has no honest meaning here (a TimeDate is never NOT stale at 0
-    // seconds, which would drop every single one undrained — that is not what a live-editable budget
-    // is for). Ceiling is 86400s (24h) — the same generic one-day cap the "minutes" knobs elsewhere on
-    // this list express as 1440 minutes, translated to this knob's own seconds grain (F141.1).
-    internal const int TimeAnnouncementBudgetSecondsMin = 1;
-    internal const int TimeAnnouncementBudgetSecondsMax = 86400;
-
-    // Context:{Key}:PersonaId (SPEC F107.7, PLAN T226) — ContextProviderSettings' own remarks: null,
-    // 0, and any negative value all mean "the on-air DJ"; only a positive value names an explicit
-    // persona. The floor here is a fat-finger guard (F53.1's own ethos), not a domain requirement —
-    // a negative value would still resolve safely if it slipped through some other path.
-    internal const int ContextPersonaIdMin = 0;
-
-    // Crosstalk:DurationTargetSeconds (SPEC F127.4, STORY-326, PLAN T282; amended PLAN T333 to the
-    // ratified 50s default) — CrosstalkOptions' own [Range(1, int.MaxValue)] (boot-enforced via
-    // ValidateDataAnnotations, the Llm:MaxCopyChars precedent); this validator adds the F53.1
-    // settings-API-only ceiling. Floor of 5s guards a degenerate near-zero target from rejecting
-    // every exchange outright; 120s (2 minutes) is comfortably past the ratified 50s default while
-    // still bounding a fat-finger entry.
-    internal const int CrosstalkDurationTargetSecondsMin = 5;
-    internal const int CrosstalkDurationTargetSecondsMax = 120;
-
-    // Crosstalk:EveryNthAiring (SPEC F127.8, STORY-328, PLAN T285) — CrosstalkOptions' own
-    // [Range(1, int.MaxValue)] (boot-enforced via ValidateDataAnnotations); this validator adds the
-    // F53.1 settings-API-only ceiling. Floor of 1 mirrors the option's own default ("every eligible
-    // airing carries banter" — 0 has no honest meaning, unlike the "0 = off" cadence knobs
-    // elsewhere in this file, since Shows being empty is ALREADY the off switch for this feature).
-    // 100 is a generous ceiling — "1 every 100 shows" is already indistinguishable from off.
-    internal const int CrosstalkEveryNthAiringMin = 1;
-    internal const int CrosstalkEveryNthAiringMax = 100;
+    // ── Non-range constants ──────────────────────────────────────────────────────────────────────
+    //    Every Number-key Min/Max moved onto its own AllowedSetting record (SPEC F205.1, STORY-477,
+    //    PLAN T572) — StationSettingsAllowlist.ByKey is now the single point of truth both the
+    //    per-key check below (IsIntInRange/IsDoubleInRange/IsDoubleAboveAndAtMost, reading
+    //    setting.Min/Max) and BuildRangeError's 400 message read. The two consts below are NOT
+    //    Number-key ranges (list counts on String-kind keys), so they stay here.
 
     // Crosstalk:Shows (SPEC F127.8, STORY-328, PLAN T285 review F4) — a fat-finger guard on entry
     // count, the F53.1 ceiling shape every other array-valued key on this list already carries; no
     // real station names anywhere close to this many shows.
     internal const int CrosstalkShowsMaxCount = 50;
-
-    // Station:Ads:* (SPEC F158.3, F159.3, F163.1, STORY-388, PLAN T397) — every bound literally per
-    // F163.1's own table, not a judged F53.1 ceiling like most pairs above: EveryNUnits mirrors
-    // StationIdEveryNUnitsMax's own 0-1000 shape exactly (documentation-only [Range] on
-    // StationAdsOptions; StationOptionsValidator is the real boot floor, the identical nested-class
-    // story every knob above carries). TargetCount/RefreshDays/AntiRepeatWindow have no bound
-    // options class at all (TargetCount/RefreshDays: no consumer wired yet, T400-T402's own job;
-    // AntiRepeatWindow: GenWave.Ads.AdSpotAntiRepeatOptions is deliberately Live-shaped/unvalidated,
-    // that class's own remarks) — this validator is their ONLY floor, the GW_XFADE_MIN/
-    // Admin:PlayHistoryCapacity precedent.
-    internal const int AdsEveryNUnitsMin = 0;
-    internal const int AdsEveryNUnitsMax = 1000;
-    internal const int AdsTargetCountMin = 0;
-    internal const int AdsTargetCountMax = 100;
-    internal const int AdsRefreshDaysMin = 1;
-    internal const int AdsRefreshDaysMax = 365;
-    internal const int AdsAntiRepeatWindowMin = 0;
-    internal const int AdsAntiRepeatWindowMax = 50;
-
-    // Station:Ads:BedFadeMs (SPEC F170.1, STORY-405, PLAN T417) — the offline ad mixer's
-    // background-music fade duration, milliseconds. 100 floor guards against an inaudible/clicky
-    // fade; 1000 ceiling guards against a fade so long it swallows the whole spot (typical spot
-    // length is single-digit seconds).
-    internal const int AdsBedFadeMsMin = 100;
-    internal const int AdsBedFadeMsMax = 1000;
-
-    // Station:Ads:BedDuckDb (gh-#746) — how many dB under the voice the background music sits in a
-    // generated ad. 0 = no ducking, -60 = effectively silent (AdLiveSettingsReader's own clamp and
-    // appsettings.json's default carry the same numbers — change one, change all three).
-    internal const double AdsBedDuckDbMin = -60.0;
-    internal const double AdsBedDuckDbMax = 0.0;
 
     // Station:Ads:CastVoices (SPEC F170.1, STORY-405, PLAN T417) — a comma-separated list of Kokoro
     // voice ids, F53.1's fat-finger entry-count ceiling shape (the Crosstalk:Shows precedent above):
@@ -250,6 +67,12 @@ public sealed partial class SettingValidator
     // most 16 — no real ad cast needs more voices than that.
     internal const int AdsCastVoicesMaxCount = 16;
 
+    // Looks up a Number-key's own AllowedSetting row — the single source of truth for its Min/Max
+    // (PLAN T572). Used by every per-key range check and by BuildRangeError; a KeyNotFoundException
+    // here would mean the key is missing from the allowlist entirely, an allowlist bug the Validate()
+    // caller's own ContainsKey guard already rules out for every real call.
+    static AllowedSetting Setting(string key) => StationSettingsAllowlist.ByKey[key];
+
     // Maps each allowlisted key to a per-key (range + type) validator. An instance method (not a
     // static field) purely because the Station:Theme entry below closes over the constructor's own
     // themeCatalog — every other entry is a plain static delegate exactly as before.
@@ -257,8 +80,8 @@ public sealed partial class SettingValidator
         new(StringComparer.OrdinalIgnoreCase)
         {
             // LoudnessOptions — doubles with range
-            ["Loudness:TargetLufs"]   = v => IsDoubleInRange(v, TargetLufsMin,  TargetLufsMax),
-            ["Loudness:CeilingDbtp"]  = v => IsDoubleInRange(v, CeilingDbtpMin, CeilingDbtpMax),
+            ["Loudness:TargetLufs"]   = v => IsDoubleInRange(v, Setting("Loudness:TargetLufs")),
+            ["Loudness:CeilingDbtp"]  = v => IsDoubleInRange(v, Setting("Loudness:CeilingDbtp")),
 
             // Station identity (SPEC F44.1/F44.2, closes gitea-#196) — non-blank strings; boot already
             // guards both via [Required]/[MinLength(1)] on the StationOptions TOP-LEVEL properties
@@ -277,7 +100,7 @@ public sealed partial class SettingValidator
 
             // StationCadenceOptions — int in [0, 1000] (mirrors [Range(0, int.MaxValue)] floor; F53.1
             // adds the ceiling). 0 disables station IDs entirely (SPEC F42.2, STORY-136).
-            ["Station:Cadence:StationIdEveryNUnits"] = v => IsIntInRange(v, 0, StationIdEveryNUnitsMax),
+            ["Station:Cadence:StationIdEveryNUnits"] = v => IsIntInRange(v, Setting("Station:Cadence:StationIdEveryNUnits")),
 
             // Main rotation scope — same shape and constraints as SafeScope.  An empty list
             // equals a silent station; non-empty is enforced here, on the live-edit path
@@ -292,8 +115,8 @@ public sealed partial class SettingValidator
 
             // Rotation knobs (SPEC F41.6) — integers in [0, ceiling]; 0 legally disables either knob
             // (mirrors StationRotationOptions' [Range(0, int.MaxValue)] floor; F53.1 adds the ceiling).
-            ["Station:Rotation:RecentWindow"] = v => IsIntInRange(v, 0, RotationRecentWindowMax),
-            ["Station:Rotation:ArtistSeparation"] = v => IsIntInRange(v, 0, RotationArtistSeparationMax),
+            ["Station:Rotation:RecentWindow"] = v => IsIntInRange(v, Setting("Station:Rotation:RecentWindow")),
+            ["Station:Rotation:ArtistSeparation"] = v => IsIntInRange(v, Setting("Station:Rotation:ArtistSeparation")),
 
             // Spectator surface (SPEC F62.1, F62.8, STORY-167/170). SpectatorMode is a plain bool
             // kill switch, same shape as the Cadence/YearLookup:Enabled bools above. PublicStreamUrl
@@ -350,26 +173,26 @@ public sealed partial class SettingValidator
 
             // LLM completion budget in seconds (F36.2) — floor mirrors LlmOptions'
             // [Range(1, int.MaxValue)]; F53.1 adds the ceiling.
-            ["Llm:TimeoutSeconds"] = v => IsIntInRange(v, LlmTimeoutSecondsMin, LlmTimeoutSecondsMax),
+            ["Llm:TimeoutSeconds"] = v => IsIntInRange(v, Setting("Llm:TimeoutSeconds")),
 
             // F44.2 allowlist completion (closes gitea-#197) — six more live keys join the validator.
             // RenderBudgetSeconds/BlurbRetentionHours/MaxCopyChars floors mirror their options' own
             // [Range(1, int.MaxValue)] (boot-enforced via ValidateDataAnnotations); the remaining
             // three have no bound options-class validation, so this is their only floor. F53.1 pairs
             // every one of these floors with a ceiling (settings-API-only, F53.2).
-            ["Tts:RenderBudgetSeconds"] = v => IsIntInRange(v, RenderBudgetSecondsMin, RenderBudgetSecondsMax),
-            ["Tts:BlurbRetentionHours"] = v => IsIntInRange(v, BlurbRetentionHoursMin, BlurbRetentionHoursMax),
-            ["Llm:MaxCopyChars"] = v => IsIntInRange(v, MaxCopyCharsMin, MaxCopyCharsMax),
-            ["Admin:PlayHistoryCapacity"] = v => IsIntInRange(v, PlayHistoryCapacityMin, PlayHistoryCapacityMax),
-            ["Library:ScanIntervalSeconds"] = v => IsIntInRange(v, ScanIntervalSecondsMin, ScanIntervalSecondsMax),
-            ["Library:EnrichmentConcurrency"] = v => IsIntInRange(v, EnrichmentConcurrencyMin, EnrichmentConcurrencyMax),
-            ["Library:Scan:MissThreshold"] = v => IsIntInRange(v, ScanMissThresholdMin, ScanMissThresholdMax),
+            ["Tts:RenderBudgetSeconds"] = v => IsIntInRange(v, Setting("Tts:RenderBudgetSeconds")),
+            ["Tts:BlurbRetentionHours"] = v => IsIntInRange(v, Setting("Tts:BlurbRetentionHours")),
+            ["Llm:MaxCopyChars"] = v => IsIntInRange(v, Setting("Llm:MaxCopyChars")),
+            ["Admin:PlayHistoryCapacity"] = v => IsIntInRange(v, Setting("Admin:PlayHistoryCapacity")),
+            ["Library:ScanIntervalSeconds"] = v => IsIntInRange(v, Setting("Library:ScanIntervalSeconds")),
+            ["Library:EnrichmentConcurrency"] = v => IsIntInRange(v, Setting("Library:EnrichmentConcurrency")),
+            ["Library:Scan:MissThreshold"] = v => IsIntInRange(v, Setting("Library:Scan:MissThreshold")),
 
             // Dependency-probe cadence (SPEC F70.2 AC1/AC3/AC5, gh-#125) — all three live, all
             // three floored by DependencyHealthOptions' own [Range(1, int.MaxValue)] at boot.
-            ["DependencyHealth:ProbeIntervalSeconds"] = v => IsIntInRange(v, ProbeIntervalSecondsMin, ProbeIntervalSecondsMax),
-            ["DependencyHealth:ProbeTimeoutSeconds"] = v => IsIntInRange(v, ProbeTimeoutSecondsMin, ProbeTimeoutSecondsMax),
-            ["DependencyHealth:UnhealthyThreshold"] = v => IsIntInRange(v, UnhealthyThresholdMin, UnhealthyThresholdMax),
+            ["DependencyHealth:ProbeIntervalSeconds"] = v => IsIntInRange(v, Setting("DependencyHealth:ProbeIntervalSeconds")),
+            ["DependencyHealth:ProbeTimeoutSeconds"] = v => IsIntInRange(v, Setting("DependencyHealth:ProbeTimeoutSeconds")),
+            ["DependencyHealth:UnhealthyThreshold"] = v => IsIntInRange(v, Setting("DependencyHealth:UnhealthyThreshold")),
 
             // MusicBrainz year lookup (SPEC F48.5, X5, closes gitea-#208). Enabled is a plain bool kill
             // switch; Endpoint mirrors Tts:Endpoint's own "must be a non-empty absolute http/https
@@ -377,23 +200,23 @@ public sealed partial class SettingValidator
             // mirrors YearLookupOptions' own [Range(0, 100)].
             ["Library:YearLookup:Enabled"] = IsBool,
             ["Library:YearLookup:Endpoint"] = v => !string.IsNullOrEmpty(v) && IsAbsoluteHttpUri(v),
-            ["Library:YearLookup:MinScore"] = v => IsIntInRange(v, YearLookupMinScoreMin, YearLookupMinScoreMax),
+            ["Library:YearLookup:MinScore"] = v => IsIntInRange(v, Setting("Library:YearLookup:MinScore")),
 
             // Engine crossfade knobs — exclusive-positive floor, F53.1 inclusive ceiling; cross-field
             // (MIN ≤ MAX) is in ValidateBatch.
-            ["GW_XFADE_MIN"] = v => IsDoubleAboveAndAtMost(v, XfadeMinValue, XfadeMaxValue),
-            ["GW_XFADE_MAX"] = v => IsDoubleAboveAndAtMost(v, XfadeMinValue, XfadeMaxValue),
+            ["GW_XFADE_MIN"] = v => IsDoubleAboveAndAtMost(v, Setting("GW_XFADE_MIN")),
+            ["GW_XFADE_MAX"] = v => IsDoubleAboveAndAtMost(v, Setting("GW_XFADE_MAX")),
 
             // Inter-safe-track silence gap — negative is rejected; 0 is legal (disables the gap,
             // F29.6), so the lower bound is inclusive (unlike the exclusive GW_XFADE_* bound).
             // F53.1 adds the inclusive ceiling.
-            ["GW_SAFE_GAP_SECONDS"] = v => IsDoubleInRange(v, SafeGapMinValue, SafeGapMaxValue),
+            ["GW_SAFE_GAP_SECONDS"] = v => IsDoubleInRange(v, Setting("GW_SAFE_GAP_SECONDS")),
 
             // F44.3 enrichment-mode keys — a 0s floor makes no sense for either (a "minimum
             // silence" of 0s detects nothing; a 0s energy window measures nothing), so both are
             // exclusive-positive like GW_XFADE_*; F53.1 adds the inclusive ceiling.
-            ["Library:CueDetection:MinSilenceDurationSec"] = v => IsDoubleAboveAndAtMost(v, MinSilenceDurationSecMin, MinSilenceDurationSecMax),
-            ["Library:Energy:WindowSeconds"] = v => IsDoubleAboveAndAtMost(v, EnergyWindowSecondsMin, EnergyWindowSecondsMax),
+            ["Library:CueDetection:MinSilenceDurationSec"] = v => IsDoubleAboveAndAtMost(v, Setting("Library:CueDetection:MinSilenceDurationSec")),
+            ["Library:Energy:WindowSeconds"] = v => IsDoubleAboveAndAtMost(v, Setting("Library:Energy:WindowSeconds")),
 
             // LLM degradation pin (SPEC F69.3, STORY-188) — exactly the four values
             // DegradationController's parser recognizes; case-insensitive, mirroring that parser.
@@ -408,8 +231,8 @@ public sealed partial class SettingValidator
             // array of non-blank strings; empty ("[]" or blank) is legal — no genre constraint.
             // EnergyMin/EnergyMax are doubles in [0,1]; Min <= Max is checked in ValidateBatch.
             ["Station:Envelope:Genres"] = IsValidGenresArray,
-            ["Station:Envelope:EnergyMin"] = v => IsDoubleInRange(v, EnvelopeEnergyMin, EnvelopeEnergyMax),
-            ["Station:Envelope:EnergyMax"] = v => IsDoubleInRange(v, EnvelopeEnergyMin, EnvelopeEnergyMax),
+            ["Station:Envelope:EnergyMin"] = v => IsDoubleInRange(v, Setting("Station:Envelope:EnergyMin")),
+            ["Station:Envelope:EnergyMax"] = v => IsDoubleInRange(v, Setting("Station:Envelope:EnergyMax")),
 
             // Listener requests (SPEC F87.2, F87.6, STORY-224, PLAN T86) — Enabled is the F87.2 kill
             // switch (plain bool, same shape as every other surface toggle above); OverrideEnvelope
@@ -417,7 +240,7 @@ public sealed partial class SettingValidator
             // StationRequestsOptions' own [Range(1, int.MaxValue)] floor; F53.1 adds the ceiling.
             ["Station:Requests:Enabled"] = IsBool,
             ["Station:Requests:OverrideEnvelope"] = IsBool,
-            ["Station:Requests:WindowMinutes"] = v => IsIntInRange(v, RequestsWindowMinutesMin, RequestsWindowMinutesMax),
+            ["Station:Requests:WindowMinutes"] = v => IsIntInRange(v, Setting("Station:Requests:WindowMinutes")),
 
             // The station-level rotation signal's Live switch (SPEC F150.2, F155.1, STORY-380, PLAN
             // T357) — plain bool kill switch, same shape as Station:Requests:Enabled above.
@@ -464,13 +287,13 @@ public sealed partial class SettingValidator
             ["Context:Weather:Enabled"] = IsBool,
             // Weather's own SPEC F108.2 floor (30, not the generic 1) — see this class's own
             // Context:{Key}:SegmentCadenceMinutes remarks above (F2 fix, T226 review).
-            ["Context:Weather:SegmentCadenceMinutes"] = v => IsIntInRange(v, WeatherSegmentCadenceMinutesMin, WeatherSegmentCadenceMinutesMax),
-            ["Context:Weather:PatterCadenceMinutes"] = v => IsIntInRange(v, ContextPatterCadenceMinutesMin, ContextPatterCadenceMinutesMax),
-            ["Context:Weather:PersonaId"] = v => IsIntInRange(v, ContextPersonaIdMin, int.MaxValue),
+            ["Context:Weather:SegmentCadenceMinutes"] = v => IsIntInRange(v, Setting("Context:Weather:SegmentCadenceMinutes")),
+            ["Context:Weather:PatterCadenceMinutes"] = v => IsIntInRange(v, Setting("Context:Weather:PatterCadenceMinutes")),
+            ["Context:Weather:PersonaId"] = v => IsIntInRange(v, Setting("Context:Weather:PersonaId")),
             ["Context:History:Enabled"] = IsBool,
-            ["Context:History:SegmentCadenceMinutes"] = v => IsIntInRange(v, ContextSegmentCadenceMinutesMin, ContextSegmentCadenceMinutesMax),
-            ["Context:History:PatterCadenceMinutes"] = v => IsIntInRange(v, ContextPatterCadenceMinutesMin, ContextPatterCadenceMinutesMax),
-            ["Context:History:PersonaId"] = v => IsIntInRange(v, ContextPersonaIdMin, int.MaxValue),
+            ["Context:History:SegmentCadenceMinutes"] = v => IsIntInRange(v, Setting("Context:History:SegmentCadenceMinutes")),
+            ["Context:History:PatterCadenceMinutes"] = v => IsIntInRange(v, Setting("Context:History:PatterCadenceMinutes")),
+            ["Context:History:PersonaId"] = v => IsIntInRange(v, Setting("Context:History:PersonaId")),
 
             // Station broadcast location (SPEC F108.1, F108.3, PLAN T226) — free text, deliberately
             // unvalidated (StationLocation's own remarks: "blank or invalid" is
@@ -488,18 +311,18 @@ public sealed partial class SettingValidator
             // PLAN T269/T326) — same "1 minimum, 1-day ceiling" shape as Context:{Key}:SegmentCadenceMinutes
             // above, expressed in seconds (F141.1).
             ["Station:Imaging:TimeAnnouncementBudgetSeconds"] =
-                v => IsIntInRange(v, TimeAnnouncementBudgetSecondsMin, TimeAnnouncementBudgetSecondsMax),
+                v => IsIntInRange(v, Setting("Station:Imaging:TimeAnnouncementBudgetSeconds")),
 
             // Show-flavor patter line cadence (SPEC F116.3, STORY-308, PLAN T249) — same
             // "0 = off, 1440 ceiling" shape as Context:{Key}:PatterCadenceMinutes above.
-            ["Station:Shows:PatterCadenceMinutes"] = v => IsIntInRange(v, ShowsPatterCadenceMinutesMin, ShowsPatterCadenceMinutesMax),
+            ["Station:Shows:PatterCadenceMinutes"] = v => IsIntInRange(v, Setting("Station:Shows:PatterCadenceMinutes")),
 
             // Crosstalk duration-fit target (SPEC F127.4, STORY-326, PLAN T282) — floor of 5s
-            // guards a degenerate near-zero target from rejecting every exchange outright (see
-            // CrosstalkDurationTargetSecondsMin's own remarks); F53.1 adds the settings-API ceiling
+            // guards a degenerate near-zero target from rejecting every exchange outright (see this
+            // key's own Min/Max on StationSettingsAllowlist); F53.1 adds the settings-API ceiling
             // on top of CrosstalkOptions' own boot-enforced [Range(1, int.MaxValue)].
             ["Crosstalk:DurationTargetSeconds"] =
-                v => IsIntInRange(v, CrosstalkDurationTargetSecondsMin, CrosstalkDurationTargetSecondsMax),
+                v => IsIntInRange(v, Setting("Crosstalk:DurationTargetSeconds")),
 
             // Crosstalk:Shows (SPEC F127.8, STORY-328, PLAN T285 review F4) — a JSON array of show
             // SLUGS, never display names/labels (T175's "names slugs, not labels" rule — the
@@ -510,24 +333,24 @@ public sealed partial class SettingValidator
             // Crosstalk:EveryNthAiring (SPEC F127.8, STORY-328, PLAN T285) — floor mirrors
             // CrosstalkOptions' own [Range(1, int.MaxValue)]; F53.1 adds the ceiling.
             ["Crosstalk:EveryNthAiring"] =
-                v => IsIntInRange(v, CrosstalkEveryNthAiringMin, CrosstalkEveryNthAiringMax),
+                v => IsIntInRange(v, Setting("Crosstalk:EveryNthAiring")),
 
             // Station:Ads:* (SPEC F158.3, F159.3, F163.1, STORY-388, PLAN T397) — every range lands
-            // straight off F163.1's own table (see this class's own Ads consts remarks above).
-            ["Station:Ads:EveryNUnits"] = v => IsIntInRange(v, AdsEveryNUnitsMin, AdsEveryNUnitsMax),
-            ["Station:Ads:TargetCount"] = v => IsIntInRange(v, AdsTargetCountMin, AdsTargetCountMax),
-            ["Station:Ads:RefreshDays"] = v => IsIntInRange(v, AdsRefreshDaysMin, AdsRefreshDaysMax),
+            // straight off F163.1's own table (see each key's own Min/Max on StationSettingsAllowlist).
+            ["Station:Ads:EveryNUnits"] = v => IsIntInRange(v, Setting("Station:Ads:EveryNUnits")),
+            ["Station:Ads:TargetCount"] = v => IsIntInRange(v, Setting("Station:Ads:TargetCount")),
+            ["Station:Ads:RefreshDays"] = v => IsIntInRange(v, Setting("Station:Ads:RefreshDays")),
             ["Station:Ads:AutoApprove"] = IsBool,
             ["Station:Ads:AntiRepeatWindow"] =
-                v => IsIntInRange(v, AdsAntiRepeatWindowMin, AdsAntiRepeatWindowMax),
+                v => IsIntInRange(v, Setting("Station:Ads:AntiRepeatWindow")),
 
             // Station:Ads:AnnouncerVoice/CastVoices/BedFadeMs (SPEC F170.1, STORY-405, PLAN T417) —
-            // the cast/bed half of the settings split; see this class's own AdsBedFadeMsMin/Max and
-            // AdsCastVoicesMaxCount remarks above.
+            // the cast/bed half of the settings split; see BedFadeMs/BedDuckDb's own Min/Max on
+            // StationSettingsAllowlist and this class's own AdsCastVoicesMaxCount remarks above.
             ["Station:Ads:AnnouncerVoice"] = IsValidAnnouncerVoice,
             ["Station:Ads:CastVoices"] = IsValidCastVoices,
-            ["Station:Ads:BedFadeMs"] = v => IsIntInRange(v, AdsBedFadeMsMin, AdsBedFadeMsMax),
-            ["Station:Ads:BedDuckDb"] = v => IsDoubleInRange(v, AdsBedDuckDbMin, AdsBedDuckDbMax),
+            ["Station:Ads:BedFadeMs"] = v => IsIntInRange(v, Setting("Station:Ads:BedFadeMs")),
+            ["Station:Ads:BedDuckDb"] = v => IsDoubleInRange(v, Setting("Station:Ads:BedDuckDb")),
         };
 
     // ── Per-key validation ─────────────────────────────────────────────────────────────────────
@@ -608,18 +431,23 @@ public sealed partial class SettingValidator
         return null;
     }
 
-    // Inclusive both bounds (used for the F53.1-ceilinged doubles that already had an inclusive
-    // floor, e.g. GW_SAFE_GAP_SECONDS, and for the pre-existing Loudness:* keys).
-    static bool IsDoubleInRange(string v, double min, double max) =>
-        double.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out var d)
-        && d >= min && d <= max;
+    // Inclusive both bounds — reads Min/Max off the key's own AllowedSetting row (PLAN T572) rather
+    // than a literal pair, used for the F53.1-ceilinged doubles that already had an inclusive floor,
+    // e.g. GW_SAFE_GAP_SECONDS, and for the pre-existing Loudness:* keys. setting.Min/Max are
+    // null-checked, never null-forgiven, for every Number-kind allowlist entry.
+    static bool IsDoubleInRange(string v, AllowedSetting setting) =>
+        setting.Min.HasValue && setting.Max.HasValue
+        && double.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out var d)
+        && d >= setting.Min.Value && d <= setting.Max.Value;
 
-    // Exclusive lower bound, inclusive upper bound (used by GW_XFADE_MIN/MAX and the two
-    // enrichment-mode keys — a 0s floor makes no sense for any of them, so the floor stays
-    // exclusive; F53.1 adds the inclusive ceiling).
-    static bool IsDoubleAboveAndAtMost(string v, double exclusiveLower, double inclusiveUpper) =>
-        double.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out var d)
-        && d > exclusiveLower && d <= inclusiveUpper;
+    // Exclusive lower bound, inclusive upper bound — reads Min/Max off the key's own AllowedSetting
+    // row (PLAN T572); used by GW_XFADE_MIN/MAX and the two enrichment-mode keys, where a 0s floor
+    // makes no sense for any of them, so the floor stays exclusive (F53.1 adds the inclusive
+    // ceiling).
+    static bool IsDoubleAboveAndAtMost(string v, AllowedSetting setting) =>
+        setting.Min.HasValue && setting.Max.HasValue
+        && double.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out var d)
+        && d > setting.Min.Value && d <= setting.Max.Value;
 
     static bool IsBool(string v) =>
         bool.TryParse(v, out _);
@@ -634,11 +462,16 @@ public sealed partial class SettingValidator
     // a second 120 minted here.
     static bool IsValidStationTagline(string v) => v.Length <= ShowBudgets.TaglineMaxChars;
 
-    // Inclusive both bounds (used for every F53.1-ceilinged int, plus the pre-existing
-    // Library:YearLookup:MinScore). min may be 0 (rotation/cadence knobs, where 0 disables the
-    // knob) or 1 (everywhere else a "positive int" floor previously stood alone).
-    static bool IsIntInRange(string v, int min, int max) =>
-        int.TryParse(v, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) && n >= min && n <= max;
+    // Inclusive both bounds — reads Min/Max off the key's own AllowedSetting row (PLAN T572); used
+    // for every F53.1-ceilinged int, plus the pre-existing Library:YearLookup:MinScore. The stored
+    // Min may be 0 (rotation/cadence knobs, where 0 disables the knob) or 1 (everywhere else a
+    // "positive int" floor previously stood alone). double->int truncation is exact here: every
+    // Number-kind int bound (including int.MaxValue on the two PersonaId ceilings) is well within
+    // double's 53-bit exact-integer range.
+    static bool IsIntInRange(string v, AllowedSetting setting) =>
+        setting.Min.HasValue && setting.Max.HasValue
+        && int.TryParse(v, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n)
+        && n >= (int)setting.Min.Value && n <= (int)setting.Max.Value;
 
     // Llm:Model has no shape to police beyond "is a string" — the per-key Validators dictionary
     // requires a delegate for every allowlisted key, so this documents "no constraint" explicitly
@@ -1097,24 +930,24 @@ public sealed partial class SettingValidator
         var k when k.Equals("Station:Voice", StringComparison.OrdinalIgnoreCase)
             => $"Value for '{key}' must not be blank.",
         var k when k.Equals("Loudness:TargetLufs",  StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be a number in [{TargetLufsMin}, {TargetLufsMax}].",
+            => $"Value '{value}' is not valid for '{key}'. Must be a number in [{Setting(key).Min}, {Setting(key).Max}].",
         var k when k.Equals("Loudness:CeilingDbtp",  StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be a number in [{CeilingDbtpMin}, {CeilingDbtpMax}].",
+            => $"Value '{value}' is not valid for '{key}'. Must be a number in [{Setting(key).Min}, {Setting(key).Max}].",
         var k when k.Equals("GW_XFADE_MIN", StringComparison.OrdinalIgnoreCase) ||
                    k.Equals("GW_XFADE_MAX", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be greater than {XfadeMinValue} and at most {XfadeMaxValue}.",
+            => $"Value '{value}' is not valid for '{key}'. Must be greater than {Setting(key).Min} and at most {Setting(key).Max}.",
         var k when k.Equals("GW_SAFE_GAP_SECONDS", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be a number between {SafeGapMinValue} and {SafeGapMaxValue}, inclusive.",
+            => $"Value '{value}' is not valid for '{key}'. Must be a number between {Setting(key).Min} and {Setting(key).Max}, inclusive.",
         var k when k.Equals("Station:Scope:LibraryIds", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be a non-empty JSON array of positive integer library ids, e.g. [1] or [1,2].",
         var k when k.Equals("Station:SafeScope:LibraryIds", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be a JSON array of positive integer library ids (empty is permitted for degraded-mode; main scope requires non-empty), e.g. [] or [1,2].",
         var k when k.Equals("Station:Rotation:RecentWindow", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be an integer between 0 and {RotationRecentWindowMax} (0 disables).",
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (0 disables).",
         var k when k.Equals("Station:Rotation:ArtistSeparation", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be an integer between 0 and {RotationArtistSeparationMax} (0 disables).",
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (0 disables).",
         var k when k.Equals("Station:Cadence:StationIdEveryNUnits", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be an integer between 0 and {StationIdEveryNUnitsMax} (0 disables).",
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (0 disables).",
         var k when k.Equals("Tts:Endpoint", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be a non-empty absolute http/https URL.",
         var k when k.Equals("Tts:Corrections", StringComparison.OrdinalIgnoreCase)
@@ -1130,37 +963,37 @@ public sealed partial class SettingValidator
         var k when k.Equals("Llm:Endpoint", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an absolute http/https URL, or empty to disable LLM-authored copy.",
         var k when k.Equals("Llm:TimeoutSeconds", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {LlmTimeoutSecondsMin} and {LlmTimeoutSecondsMax} (seconds).",
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (seconds).",
         var k when k.Equals("Tts:RenderBudgetSeconds", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {RenderBudgetSecondsMin} and {RenderBudgetSecondsMax} (seconds).",
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (seconds).",
         var k when k.Equals("Tts:BlurbRetentionHours", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {BlurbRetentionHoursMin} and {BlurbRetentionHoursMax} (hours).",
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (hours).",
         var k when k.Equals("Llm:MaxCopyChars", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {MaxCopyCharsMin} and {MaxCopyCharsMax} (characters).",
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (characters).",
         var k when k.Equals("Admin:PlayHistoryCapacity", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {PlayHistoryCapacityMin} and {PlayHistoryCapacityMax} (entries).",
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (entries).",
         var k when k.Equals("Library:ScanIntervalSeconds", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {ScanIntervalSecondsMin} and {ScanIntervalSecondsMax} (seconds).",
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (seconds).",
         var k when k.Equals("Library:EnrichmentConcurrency", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {EnrichmentConcurrencyMin} and {EnrichmentConcurrencyMax} (workers).",
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (workers).",
         var k when k.Equals("Library:Scan:MissThreshold", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {ScanMissThresholdMin} and {ScanMissThresholdMax} (consecutive misses).",
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (consecutive misses).",
         var k when k.Equals("DependencyHealth:ProbeIntervalSeconds", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {ProbeIntervalSecondsMin} and {ProbeIntervalSecondsMax} (seconds).",
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (seconds).",
         var k when k.Equals("DependencyHealth:ProbeTimeoutSeconds", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {ProbeTimeoutSecondsMin} and {ProbeTimeoutSecondsMax} (seconds).",
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (seconds).",
         var k when k.Equals("DependencyHealth:UnhealthyThreshold", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {UnhealthyThresholdMin} and {UnhealthyThresholdMax} (consecutive failures).",
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (consecutive failures).",
         var k when k.Equals("Library:YearLookup:Enabled", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be a boolean (true/false).",
         var k when k.Equals("Library:YearLookup:Endpoint", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be a non-empty absolute http/https URL.",
         var k when k.Equals("Library:YearLookup:MinScore", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be an integer in [{YearLookupMinScoreMin}, {YearLookupMinScoreMax}].",
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer in [{Setting(key).Min}, {Setting(key).Max}].",
         var k when k.Equals("Library:CueDetection:MinSilenceDurationSec", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be greater than {MinSilenceDurationSecMin} and at most {MinSilenceDurationSecMax}.",
+            => $"Value '{value}' is not valid for '{key}'. Must be greater than {Setting(key).Min} and at most {Setting(key).Max}.",
         var k when k.Equals("Library:Energy:WindowSeconds", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be greater than {EnergyWindowSecondsMin} and at most {EnergyWindowSecondsMax}.",
+            => $"Value '{value}' is not valid for '{key}'. Must be greater than {Setting(key).Min} and at most {Setting(key).Max}.",
         var k when k.Equals("Station:PublicStreamUrl", StringComparison.OrdinalIgnoreCase) ||
                    k.Equals("Station:PublicBaseUrl", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be empty, an absolute http/https URL, " +
@@ -1173,12 +1006,12 @@ public sealed partial class SettingValidator
             => $"Value '{value}' is not valid for '{key}'. Must be a JSON array of non-blank genre names, e.g. [] or [\"Rock\",\"Jazz\"].",
         var k when k.Equals("Station:Envelope:EnergyMin", StringComparison.OrdinalIgnoreCase) ||
                    k.Equals("Station:Envelope:EnergyMax", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be a number in [{EnvelopeEnergyMin}, {EnvelopeEnergyMax}].",
+            => $"Value '{value}' is not valid for '{key}'. Must be a number in [{Setting(key).Min}, {Setting(key).Max}].",
         var k when k.Equals("Station:Requests:Enabled", StringComparison.OrdinalIgnoreCase) ||
                    k.Equals("Station:Requests:OverrideEnvelope", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be a boolean (true/false).",
         var k when k.Equals("Station:Requests:WindowMinutes", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {RequestsWindowMinutesMin} and {RequestsWindowMinutesMax} (minutes).",
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (minutes).",
         var k when k.Equals("Station:Thumbs:Enabled", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be a boolean (true/false).",
         var k when k.Equals("Community:CatalogIndexUrl", StringComparison.OrdinalIgnoreCase)
@@ -1203,12 +1036,12 @@ public sealed partial class SettingValidator
                    k.Equals("Context:History:Enabled", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be a boolean (true/false).",
         var k when k.Equals("Context:Weather:SegmentCadenceMinutes", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {WeatherSegmentCadenceMinutesMin} and {WeatherSegmentCadenceMinutesMax} (minutes) — {WeatherSegmentCadenceMinutesMin} is SPEC F108.2's enforced floor (twice an hour, at most).",
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (minutes) — {Setting(key).Min} is SPEC F108.2's enforced floor (twice an hour, at most).",
         var k when k.Equals("Context:History:SegmentCadenceMinutes", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {ContextSegmentCadenceMinutesMin} and {ContextSegmentCadenceMinutesMax} (minutes).",
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (minutes).",
         var k when k.Equals("Context:Weather:PatterCadenceMinutes", StringComparison.OrdinalIgnoreCase) ||
                    k.Equals("Context:History:PatterCadenceMinutes", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {ContextPatterCadenceMinutesMin} and {ContextPatterCadenceMinutesMax} (minutes); 0 disables patter for this provider.",
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (minutes); 0 disables patter for this provider.",
         var k when k.Equals("Context:Weather:PersonaId", StringComparison.OrdinalIgnoreCase) ||
                    k.Equals("Context:History:PersonaId", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be a non-negative integer; 0 defers to the on-air DJ.",
@@ -1216,25 +1049,25 @@ public sealed partial class SettingValidator
                    k.Equals("Station:Imaging:TimeAnnouncements", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be a boolean (true/false).",
         var k when k.Equals("Station:Shows:PatterCadenceMinutes", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {ShowsPatterCadenceMinutesMin} and {ShowsPatterCadenceMinutesMax} (minutes); 0 disables the show-flavor line.",
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (minutes); 0 disables the show-flavor line.",
         var k when k.Equals("Crosstalk:DurationTargetSeconds", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {CrosstalkDurationTargetSecondsMin} and {CrosstalkDurationTargetSecondsMax} (seconds).",
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (seconds).",
         var k when k.Equals("Crosstalk:Shows", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be a JSON array of unique show SLUGS " +
                $"(lowercase letters, digits, single hyphens — not display names), at most {CrosstalkShowsMaxCount} " +
                "entries, e.g. [] or [\"morning-drive\"]. Empty means the feature is off.",
         var k when k.Equals("Crosstalk:EveryNthAiring", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {CrosstalkEveryNthAiringMin} and {CrosstalkEveryNthAiringMax} (airings).",
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (airings).",
         var k when k.Equals("Station:Ads:EveryNUnits", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {AdsEveryNUnitsMin} and {AdsEveryNUnitsMax} (0 disables ad spots).",
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (0 disables ad spots).",
         var k when k.Equals("Station:Ads:TargetCount", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {AdsTargetCountMin} and {AdsTargetCountMax} (spots).",
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (spots).",
         var k when k.Equals("Station:Ads:RefreshDays", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {AdsRefreshDaysMin} and {AdsRefreshDaysMax} (days).",
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (days).",
         var k when k.Equals("Station:Ads:AutoApprove", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be a boolean (true/false).",
         var k when k.Equals("Station:Ads:AntiRepeatWindow", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {AdsAntiRepeatWindowMin} and {AdsAntiRepeatWindowMax} (sponsors).",
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (sponsors).",
         var k when k.Equals("Station:Ads:AnnouncerVoice", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be empty (use the station's own " +
                "voice), or a single Kokoro voice id (lowercase letters, digits, underscores, " +
@@ -1245,9 +1078,9 @@ public sealed partial class SettingValidator
                "digits, underscores, hyphens — e.g. af_nova,am_michael), each unique, no " +
                "surrounding spaces.",
         var k when k.Equals("Station:Ads:BedFadeMs", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {AdsBedFadeMsMin} and {AdsBedFadeMsMax} (milliseconds).",
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (milliseconds).",
         var k when k.Equals("Station:Ads:BedDuckDb", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be a number in [{AdsBedDuckDbMin}, {AdsBedDuckDbMax}] (dB under the voice).",
+            => $"Value '{value}' is not valid for '{key}'. Must be a number in [{Setting(key).Min}, {Setting(key).Max}] (dB under the voice).",
         _ => $"Value '{value}' is not valid for '{key}'.",
     };
 }

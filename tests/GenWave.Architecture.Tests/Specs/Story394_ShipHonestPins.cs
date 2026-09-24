@@ -162,10 +162,10 @@ public static class FeatureShipHonestPins
             }
 
             // The validator enforces a real numeric range on every non-boolean, non-string row — the
-            // ceiling itself passes, one past it fails (SettingValidator's own AdsEveryNUnitsMin/Max
-            // etc. are `internal` with no InternalsVisibleTo grant into this project, so the bounds
-            // are re-asserted here as bare numbers, matched against SettingValidator.cs's own
-            // comment — change one, change the other).
+            // ceiling itself passes, one past it fails. Bounds are re-asserted here as bare numbers
+            // (deliberately not read off StationSettingsAllowlist.ByKey[key].Min/Max, PLAN T572 —
+            // this pin's whole point is to catch the allowlist row itself drifting), matched against
+            // that row's own Min/Max — change one, change the other.
             var validator = new SettingValidator(new ConfigurationBuilder().Build());
 
             AssertRangeEnforced(validator, "Station:Ads:EveryNUnits", min: 0, max: 1000);
