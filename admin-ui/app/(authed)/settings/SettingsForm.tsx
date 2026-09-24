@@ -21,7 +21,7 @@ import { EngineByKindSettingControl } from "./EngineByKindSettingControl";
 import { PersonaSettingControl } from "./PersonaSettingControl";
 import { SafeScopeAvailabilityBadge } from "./SafeScopeAvailabilityBadge";
 import { SettingHelpFlyover } from "./SettingHelpFlyover";
-import { groupSettingsBySection } from "./settings-sections";
+import { filterSectionsByQuery, groupSettingsBySection, type SettingsSection } from "./settings-sections";
 import {
   isValidationProblemDetails,
   type SettingChoice,
@@ -198,18 +198,19 @@ function changedEntries(
 }
 
 /**
- * The first key in `fieldErrors` when the settings are walked in the SAME order SettingsForm's
- * own JSX renders them (`groupSettingsBySection`, section-by-section, key-by-key within a
- * section) — "DOM order" without querying the live tree. Used by the gh-#144/gh-#425 focus fix:
- * with the former per-area tab strip gone, a 400 on a field far above the Save button is
- * otherwise silent, so the first offending field takes focus instead. `null` when nothing in
- * `fieldErrors` matches a rendered key.
+ * The first key in `fieldErrors` when `sections` are walked section-by-section, key-by-key
+ * within a section — "DOM order" without querying the live tree. Takes the UNFILTERED
+ * `allSections` the caller already computed (T577 round 2 review note) rather than regrouping
+ * `settings` itself, so there is exactly one place that decides section order. Used by the
+ * gh-#144/gh-#425 focus fix: with the former per-area tab strip gone, a 400 on a field far above
+ * the Save button is otherwise silent, so the first offending field takes focus instead. `null`
+ * when nothing in `fieldErrors` matches a key in `sections`.
  */
 function firstErroredKeyInDomOrder(
-  settings: SettingDto[],
+  sections: readonly SettingsSection[],
   fieldErrors: Record<string, string[]>
 ): string | null {
-  for (const section of groupSettingsBySection(settings)) {
+  for (const section of sections) {
     for (const setting of section.settings) {
       if (fieldErrors[setting.key] !== undefined) return setting.key;
     }
@@ -302,16 +303,36 @@ export function SettingsForm({
    * `null` — a one-shot signal, not a persisted "focused field" concept.
    */
   const [pendingFocusKey, setPendingFocusKey] = useState<string | null>(null);
+  /**
+   * SPEC F205.5, STORY-478 AC7 — the search box's staged text. Filtering is presentation-only
+   * (see {@link filterSectionsByQuery}): it never touches `values`/`original`/`versions`, so a
+   * field hidden by a search stays fully staged, dirty-tracked, and part of the next Save's PUT
+   * batch even though it isn't currently rendered.
+   */
+  const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
     if (pendingFocusKey === null) return;
+    const control = document.getElementById(`setting-${pendingFocusKey}`);
+    if (control === null) {
+      // T577 round 2 review F1 — decided HERE, at focus time, off the CURRENT search box text,
+      // never off a `visibleSections` snapshot captured before `handleSubmit`'s own `await`: a
+      // search typed while a save is pending must still be honored once the rejection lands, not
+      // read through a stale closure. Only clear the search when the key actually belongs to
+      // this page's settings (a mistargeted key — should never happen — leaves the search alone
+      // rather than wiping it for nothing). Clearing re-renders `visibleSections` unfiltered, and
+      // since `searchQuery` is a dependency below, this effect runs again and finds the control.
+      if (settings.some((s) => s.key === pendingFocusKey)) {
+        setSearchQuery("");
+      }
+      return;
+    }
     // jsdom (this repo's test runner) has no scrollIntoView implementation at all — guard it,
     // never call it bare, or every spec that reaches this effect throws.
-    const control = document.getElementById(`setting-${pendingFocusKey}`);
-    control?.focus();
-    control?.scrollIntoView?.();
+    control.focus();
+    control.scrollIntoView?.();
     setPendingFocusKey(null);
-  }, [pendingFocusKey]);
+  }, [pendingFocusKey, searchQuery, settings]);
 
   function handleTextChange(key: string): (e: React.ChangeEvent<HTMLInputElement>) => void {
     return (e) => {
@@ -370,6 +391,14 @@ export function SettingsForm({
     };
   }
 
+  // SPEC F205.5, STORY-478 AC5–AC7 — `allSections` is the unfiltered, enum-ordered grouping (the
+  // DOM order `firstErroredKeyInDomOrder` walks); `visibleSections` is what actually renders once
+  // the search box's text narrows it. Recomputed every render off `settings`/`searchQuery` rather
+  // than memoized — this page's setting count is small (well under a hundred rows) and neither
+  // function does anything heavier than array filtering.
+  const allSections = groupSettingsBySection(settings);
+  const visibleSections = filterSectionsByQuery(allSections, searchQuery);
+
   async function handleSubmit(e: FormEvent<HTMLFormElement>): Promise<void> {
     e.preventDefault();
 
@@ -398,7 +427,8 @@ export function SettingsForm({
       setStatus({ kind: "idle" });
       // gh-#144, T576 round 3 (R2-3) — this block never reaches the PUT, so the 400-path focus
       // effect above never fires for it; without this, nothing moves the operator to the field
-      // that just silently rejected their save.
+      // that just silently rejected their save. The `pendingFocusKey` effect itself decides
+      // whether the search box needs clearing (T577 round 2 review F1) — this call never needs to.
       setPendingFocusKey(blockingChange.key);
       return;
     }
@@ -538,7 +568,16 @@ export function SettingsForm({
         // operator correct the value and retry (the K5 stuck-Saving regression class).
         setStatus({ kind: "idle" });
         setFieldErrors(nextFieldErrors);
-        setPendingFocusKey(firstErroredKeyInDomOrder(settings, nextFieldErrors));
+        // firstErroredKeyInDomOrder walks the UNFILTERED section order (T577 ruling) — the field
+        // that takes focus is the first one in server/section order, not the first one currently
+        // visible through the search box. The `pendingFocusKey` effect itself decides whether the
+        // search box needs clearing to reveal it (T577 round 2 review F1).
+        const erroredKey = firstErroredKeyInDomOrder(allSections, nextFieldErrors);
+        if (erroredKey !== null) {
+          setPendingFocusKey(erroredKey);
+        } else {
+          setPendingFocusKey(null);
+        }
         return;
       }
 
@@ -577,6 +616,11 @@ export function SettingsForm({
       <RotationCouplingNotice recentWindow={recentWindowValue} />
     ) : null;
 
+  // SPEC F205.5 AC7 — while the operator is searching, the trailing dedicated-API surface
+  // (PronunciationRulesControl, threaded in via `trailingContent`) is not itself filterable, so it
+  // hides rather than sit below an otherwise-empty or partially-filtered settings list.
+  const isSearching = searchQuery.trim() !== "";
+
   return (
     <form onSubmit={(e) => { void handleSubmit(e); }} className="flex flex-col gap-6">
       {status.kind === "noChanges" && (
@@ -585,35 +629,77 @@ export function SettingsForm({
         </p>
       )}
 
-      {groupSettingsBySection(settings).map((section) => (
-        <SectionCard key={section.id} title={section.label}>
-          {section.settings.map((setting) => (
-            <SettingField
-              key={setting.key}
-              setting={setting}
-              value={values[setting.key] ?? ""}
-              savedValue={original[setting.key] ?? ""}
-              errors={fieldErrors[setting.key] ?? []}
-              isPending={isPending}
-              libraries={libraries}
-              isSafeScopeField={setting.key === SAFE_SCOPE_KEY}
-              safeScopeEffectivelyEmpty={safeScopeEffectivelyEmpty}
-              rotationCouplingNotice={setting.key === ARTIST_SEPARATION_KEY ? rotationCouplingNotice : null}
-              timeZone={timeZone}
-              onTextChange={handleTextChange(setting.key)}
-              onCheckboxChange={handleCheckboxChange(setting.key)}
-              onMultiSelectChange={handleMultiSelectChange(setting.key)}
-              onSemanticChange={handleSemanticChange(setting.key)}
-            />
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor="settings-search" className="text-[0.82rem] font-semibold text-mute">
+          Search settings
+        </label>
+        <input
+          id="settings-search"
+          type="search"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.currentTarget.value)}
+          placeholder="Filter by label or help text"
+          className="h-9 w-full max-w-md rounded-[6px] border border-line bg-surface px-2 text-[0.85rem] text-ink"
+        />
+      </div>
+
+      <div className="flex flex-col gap-6 md:flex-row md:items-start">
+        {/* SPEC F205.5 AC6 — one link per RENDERED (post-filter) section, sticky on md+; below md
+            it stacks above the sections instead, un-stuck, and wraps rather than force a
+            horizontal scroll at phone width. */}
+        <nav
+          aria-label="Settings sections"
+          className="flex flex-row flex-wrap gap-x-4 gap-y-1 md:sticky md:top-4 md:w-44 md:shrink-0 md:flex-col md:flex-nowrap md:gap-1 md:self-start"
+        >
+          {visibleSections.map((section) => (
+            <a
+              key={section.id}
+              href={`#settings-section-${section.id}`}
+              className="text-[0.82rem] text-mute hover:text-ink"
+            >
+              {section.label}
+            </a>
           ))}
-        </SectionCard>
-      ))}
+        </nav>
+
+        <div className="flex min-w-0 flex-1 flex-col gap-6">
+          {visibleSections.length === 0 ? (
+            // T577 round 2 review F4 — only while actually searching: an empty `settings` array
+            // with no search text renders nothing at all, matching pre-search-box HEAD.
+            isSearching && <p className="text-[0.85rem] text-mute">No settings match</p>
+          ) : (
+            visibleSections.map((section) => (
+              <SectionCard key={section.id} id={`settings-section-${section.id}`} title={section.label}>
+                {section.settings.map((setting) => (
+                  <SettingField
+                    key={setting.key}
+                    setting={setting}
+                    value={values[setting.key] ?? ""}
+                    savedValue={original[setting.key] ?? ""}
+                    errors={fieldErrors[setting.key] ?? []}
+                    isPending={isPending}
+                    libraries={libraries}
+                    isSafeScopeField={setting.key === SAFE_SCOPE_KEY}
+                    safeScopeEffectivelyEmpty={safeScopeEffectivelyEmpty}
+                    rotationCouplingNotice={setting.key === ARTIST_SEPARATION_KEY ? rotationCouplingNotice : null}
+                    timeZone={timeZone}
+                    onTextChange={handleTextChange(setting.key)}
+                    onCheckboxChange={handleCheckboxChange(setting.key)}
+                    onMultiSelectChange={handleMultiSelectChange(setting.key)}
+                    onSemanticChange={handleSemanticChange(setting.key)}
+                  />
+                ))}
+              </SectionCard>
+            ))
+          )}
+        </div>
+      </div>
 
       {/* T145 review F3, T576 — mounted at the end of the page, after every section card: AC1
           calls for a TTS surface, and this keeps SettingsForm agnostic of which dedicated-API
           surface a page wants (the timeZone injection precedent) rather than importing
-          PronunciationRulesControl directly. */}
-      {trailingContent}
+          PronunciationRulesControl directly. T577 — hidden while the search box is filtering. */}
+      {!isSearching && trailingContent}
 
       <Button type="submit" disabled={isPending} className="self-start">
         {isPending ? "Saving…" : "Save settings"}
@@ -627,13 +713,15 @@ export function SettingsForm({
 // ---------------------------------------------------------------------------
 
 interface SectionCardProps {
+  /** Anchor id the sticky index's `href="#..."` link targets (SPEC F205.5 AC6). */
+  id: string;
   title: string;
   children: ReactNode;
 }
 
-function SectionCard({ title, children }: SectionCardProps): ReactNode {
+function SectionCard({ id, title, children }: SectionCardProps): ReactNode {
   return (
-    <section aria-label={title} className="rounded-[6px] border border-line bg-surface p-5">
+    <section id={id} aria-label={title} className="rounded-[6px] border border-line bg-surface p-5">
       <h2 className="font-display text-[1.1rem] text-ink">{title}</h2>
       <div className="mt-4 flex flex-col gap-5">{children}</div>
     </section>

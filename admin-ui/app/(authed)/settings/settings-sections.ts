@@ -1,108 +1,84 @@
 import type { SettingDto } from "./settings-types";
 
 /**
- * Display grouping for the settings page (SPEC F28.12). Presentation-only —
- * PUT semantics and key names are unchanged; this module only decides which
- * card a key's field renders under.
+ * Display grouping for the settings page (SPEC F205.5, STORY-478, PLAN T577). Presentation-only —
+ * PUT semantics and key names are unchanged; this module only decides which card, in which order,
+ * a key's field renders under. Sections come straight off the descriptor's own
+ * {@link SettingDto.group} (PLAN T574/T576) — never derived from the key — so a key's section is
+ * whatever the server assigned it, and this file carries no key-to-section mapping of its own.
+ *
+ * `GROUP_ORDER` mirrors `GenWave.Host.Configuration.SettingGroup`'s member order one-for-one (the
+ * lowercase enum names `SettingDto.group.id` already carries) — a one-line connascence with that
+ * C# enum, kept in sync by hand; no automated parity check pins the two together.
  */
-export type SectionId = "loudness" | "playout" | "station" | "scope" | "safe" | "library" | "other";
-
-/** Fixed render order — sections with no matching fields are simply omitted. */
-export const SECTION_ORDER: readonly SectionId[] = [
-  "loudness",
-  "playout",
-  "station",
-  "scope",
-  "safe",
+export const GROUP_ORDER: readonly string[] = [
+  "sound",
+  "voice",
+  "announcements",
+  "sponsors",
   "library",
-  "other",
+  "community",
+  "station",
+  "system",
 ];
 
-export const SECTION_LABELS: Readonly<Record<SectionId, string>> = {
-  loudness: "Loudness",
-  playout: "Playout",
-  station: "Station",
-  scope: "Scope",
-  // gh-#149 display rename: the section holding Station:SafeScope:*/GW_SAFE_GAP_SECONDS is
-  // labeled "Station sounds"; the section id and the setting KEYS deliberately stay "safe".
-  safe: "Station sounds",
-  library: "Library",
-  other: "Other",
-};
-
-/**
- * Maps a setting key to its section by prefix, mirroring the authoritative
- * key list in `GenWave.Host.Configuration.StationSettingsAllowlist`:
- *   - `Loudness:*`                                             → Loudness
- *   - `Station:Cadence:*`, `Station:Rotation:*`, `GW_XFADE_*`   → Playout
- *   - `Station:Name`, `Station:Tagline`, `Station:Voice`        → Station
- *   - `Station:SafeScope:*`, `GW_SAFE_GAP_SECONDS`              → Safe
- *   - `Station:Scope:*`                                         → Scope
- *   - `Library:*`                                               → Library
- * Anything else falls back to "other" so a future allowlist addition is
- * surfaced rather than silently dropped from the page.
- *
- * `station` is a minimal V7 addition (SPEC F44.1/F44.5) carrying only the exact keys below
- * (`Station:Tagline` joined them at PLAN T561, SPEC F207.1) — NOT a `Station:` prefix rule, which
- * would also swallow Cadence/Rotation/Scope/SafeScope.
- * V8 (SPEC F44.8) adds the `library` section for every `Library:*` key. `Station:Persona:ActiveId`
- * (a V8 addition to this section) is retired outright (SPEC F91.5, PLAN T120/T127) — the format
- * clock is the only thing that names an on-air persona now, and this section carries no
- * replacement key for it. The Tts and Llm namespaces (including the three V8 additions —
- * RenderBudgetSeconds, BlurbRetentionHours, MaxCopyChars) have no obvious section of their own and
- * fall through to `other`, unchanged from before V8.
- */
-export function sectionForKey(key: string): SectionId {
-  if (key.startsWith("Loudness:")) return "loudness";
-  if (key === "Station:Name" || key === "Station:Tagline" || key === "Station:Voice") return "station";
-  // Station:Rotation:* (SPEC F41.6) joins Station:Cadence:*/GW_XFADE_* in Playout — its prefix
-  // doesn't overlap Station:Scope:*/Station:SafeScope:*, so it carries none of that pair's
-  // check-order pitfall (see the SafeScope-before-Scope note below).
-  if (
-    key.startsWith("Station:Cadence:") ||
-    key.startsWith("Station:Rotation:") ||
-    key.startsWith("GW_XFADE")
-  )
-    return "playout";
-  // SafeScope is checked before the plainer Scope prefix so it doesn't fall
-  // through to "scope" (Station:SafeScope:* would otherwise match Station:Scope's
-  // shorter prefix if the check order were reversed).
-  // GW_SAFE_GAP_SECONDS (F29.8, STORY-100) is the engine-side sibling knob to SafeScope,
-  // so it renders in the same Safe group.
-  if (key.startsWith("Station:SafeScope:") || key === "GW_SAFE_GAP_SECONDS") return "safe";
-  if (key.startsWith("Station:Scope:")) return "scope";
-  // Every Library:* key (ScanIntervalSeconds, EnrichmentConcurrency, the enrichment-mode
-  // CueDetection/Energy pair) — SPEC F44.8, closes gitea-#197.
-  if (key.startsWith("Library:")) return "library";
-  return "other";
-}
-
 export interface SettingsSection {
-  id: SectionId;
+  id: string;
   label: string;
   settings: SettingDto[];
 }
 
 /**
- * Groups settings into display sections in `SECTION_ORDER`, preserving each
- * key's relative order within its section. Sections with no matching fields
- * are omitted rather than rendered empty.
+ * Groups settings into display sections by `setting.group.id`, ordered per `GROUP_ORDER`, with
+ * each key keeping its server-supplied relative order within its section. A group id
+ * `GROUP_ORDER` doesn't know about — a future server addition this client hasn't caught up to —
+ * renders AFTER every known section, in first-seen order, rather than being dropped: the same
+ * fail-open posture the old prefix-based "other" fallback had.
  */
 export function groupSettingsBySection(settings: SettingDto[]): SettingsSection[] {
-  const bySection = new Map<SectionId, SettingDto[]>();
+  const bySection = new Map<string, SettingsSection>();
   for (const setting of settings) {
-    const id = sectionForKey(setting.key);
-    const bucket = bySection.get(id);
-    if (bucket) {
-      bucket.push(setting);
+    const id = setting.group.id;
+    const existing = bySection.get(id);
+    if (existing) {
+      existing.settings.push(setting);
     } else {
-      bySection.set(id, [setting]);
+      bySection.set(id, { id, label: setting.group.label, settings: [setting] });
     }
   }
 
-  return SECTION_ORDER.filter((id) => bySection.has(id)).map((id) => ({
-    id,
-    label: SECTION_LABELS[id],
-    settings: bySection.get(id) ?? [],
-  }));
+  const known: SettingsSection[] = [];
+  for (const id of GROUP_ORDER) {
+    const section = bySection.get(id);
+    if (section) known.push(section);
+  }
+
+  const knownIds = new Set(GROUP_ORDER);
+  const unknown = [...bySection.values()].filter((section) => !knownIds.has(section.id));
+
+  return [...known, ...unknown];
+}
+
+/**
+ * Filters each section's settings to those whose `label` or `help` contains `query` as a
+ * case-insensitive substring (SPEC F205.5, STORY-478 AC7) — never the key, never the value. A
+ * blank/whitespace-only query is a no-op (every section renders unfiltered); a section left with
+ * no matching settings is dropped entirely, taking its index entry with it.
+ */
+export function filterSectionsByQuery(
+  sections: readonly SettingsSection[],
+  query: string
+): SettingsSection[] {
+  const needle = query.trim().toLowerCase();
+  if (needle === "") return [...sections];
+
+  return sections
+    .map((section) => ({
+      ...section,
+      settings: section.settings.filter(
+        (setting) =>
+          setting.label.toLowerCase().includes(needle) || setting.help.toLowerCase().includes(needle)
+      ),
+    }))
+    .filter((section) => section.settings.length > 0);
 }
