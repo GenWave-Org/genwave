@@ -2,11 +2,15 @@
 //
 // BDD specification — xUnit. PLAN T572's five facts (AC1, AC2, AC3 ×2, AC4, AC13) are real bodies —
 // AllowedSetting.Group/Min/Max/ChoiceSource now exist and SettingValidator reads ranges off the
-// record (see StationSettingsAllowlist/SettingValidator's own remarks). Everything T573/T574 owns
-// (label/help/group/range/choices copy, the localizer, the fallback culture, the missing-key boot
-// guard) stays [Fact(Skip = ...)] with a loud body — remove the Skip only in the task that makes it
-// green. Each Given comment names the arrange the scenario needs.
+// record (see StationSettingsAllowlist/SettingValidator's own remarks). PLAN T573's facts (AC5, AC14,
+// plus its own SettingCopy-seam culture-fallback fact) are real bodies too — SettingsResources.resx,
+// SettingsResources, SettingCopy, and the AddLocalization()/UseRequestLocalization() pipeline now
+// exist (see those types' own remarks). Everything T574 owns (the GET /api/settings DTO carrying
+// label/help/group/range/choices copy, AC6-AC8) stays [Fact(Skip = ...)] with a loud body — remove
+// the Skip only in the task that makes it green. Each Given comment names the arrange the scenario
+// needs.
 
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.RegularExpressions;
@@ -16,6 +20,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Localization;
 using GenWave.Host.Configuration;
 
 namespace GenWave.Host.Tests.Specs;
@@ -73,11 +78,72 @@ file sealed class Story477SettingsWebFactory : WebApplicationFactory<Program>
     }
 }
 
+/// <summary>
+/// Wraps a real <see cref="IStringLocalizer{SettingsResources}"/> and reports exactly one name as
+/// <see cref="LocalizedString.ResourceNotFound"/> (AC14, PLAN T573) — everything else passes straight
+/// through to the real resx lookup, so this proves the missing-key path in isolation rather than
+/// faking the whole localizer.
+/// </summary>
+file sealed class LabelMissingLocalizer : IStringLocalizer<SettingsResources>
+{
+    readonly IStringLocalizer<SettingsResources> inner;
+    readonly string missingName;
+
+    public LabelMissingLocalizer(IStringLocalizer<SettingsResources> inner, string missingName)
+    {
+        this.inner = inner;
+        this.missingName = missingName;
+    }
+
+    public LocalizedString this[string name] =>
+        name == missingName ? new LocalizedString(name, name, resourceNotFound: true) : inner[name];
+
+    public LocalizedString this[string name, params object[] arguments] =>
+        name == missingName
+            ? new LocalizedString(name, name, resourceNotFound: true)
+            : inner[name, arguments];
+
+    public IEnumerable<LocalizedString> GetAllStrings(bool includeParentCultures) =>
+        inner.GetAllStrings(includeParentCultures).Where(s => s.Name != missingName);
+}
+
+/// <summary>
+/// Boots the real host with one resx entry deliberately missing (AC14, PLAN T573) — everything else
+/// (routing, health check, <see cref="SettingCopy"/>'s own DI registration) is the genuine production
+/// wiring; only <see cref="IStringLocalizer{SettingsResources}"/> is swapped for
+/// <see cref="LabelMissingLocalizer"/>.
+/// </summary>
+file sealed class Story477MissingLabelWebFactory : WebApplicationFactory<Program>
+{
+    internal const string MissingLabelName = "Station:Ads:BedDuckDb.Label";
+
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        builder.UseEnvironment("Development");
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
+        builder.UseSetting("Admin:Password", Story477SettingsWebFactory.Password);
+
+        builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<IHostedService>();
+
+            services.RemoveAll<IStationSettingsStore>();
+            services.AddSingleton<IStationSettingsStore>(new Story477FakeSettingsStore());
+
+            services.RemoveAll<IStringLocalizer<SettingsResources>>();
+            services.AddSingleton<IStringLocalizer<SettingsResources>>(sp =>
+            {
+                var real = new StringLocalizer<SettingsResources>(sp.GetRequiredService<IStringLocalizerFactory>());
+                return new LabelMissingLocalizer(real, MissingLabelName);
+            });
+        });
+    }
+}
+
 // ── Specs ────────────────────────────────────────────────────────────────────────────────────────
 
 public static class FeatureSettingsdescriptorstableandcopy
 {
-    const string PendingT573 = "pending: T573 — Settings descriptors table and copy (STORY-477)";
     const string PendingT574 = "pending: T574 — Settings descriptors table and copy (STORY-477)";
 
     static async Task LoginAsync(HttpClient client)
@@ -189,13 +255,39 @@ public static class FeatureSettingsdescriptorstableandcopy
                 (status, body.Contains("[-60, 0]", StringComparison.Ordinal)));
     }
 
-    public sealed class ScenarioTheLocalizer
+    public sealed class ScenarioTheLocalizer : IAsyncLifetime
     {
-        // Given: IStringLocalizer<SettingsResources>, "Ads:BedDuckDb.Label", en (T573)
+        // Given: IStringLocalizer<SettingsResources>, "Station:Ads:BedDuckDb.Label", en (T573)
 
-        /// <summary>AC5 — a non-empty plain label</summary>
-        [Fact(Skip = PendingT573)]
-        public void ServesTheLabel() => Assert.Fail(PendingT573);
+        // Story477SettingsWebFactory is `file`-scoped, so it cannot appear in this public class's own
+        // member signature (CS9051) — the field is typed as the base class instead.
+        readonly WebApplicationFactory<Program> factory = new Story477SettingsWebFactory();
+        string label = "";
+
+        public Task InitializeAsync()
+        {
+            var originalCulture = CultureInfo.CurrentUICulture;
+            try
+            {
+                CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo("en");
+                var localizer = factory.Services.GetRequiredService<IStringLocalizer<SettingsResources>>();
+                label = localizer["Station:Ads:BedDuckDb.Label"];
+            }
+            finally
+            {
+                CultureInfo.CurrentUICulture = originalCulture;
+            }
+            return Task.CompletedTask;
+        }
+
+        public async Task DisposeAsync() => await factory.DisposeAsync();
+
+        /// <summary>AC5 — a non-empty plain label, distinct from the raw resx name itself (the one
+        /// expression that rules out both an empty string and a silent fall-through to the missing-key
+        /// fallback).</summary>
+        [Fact]
+        public void ServesTheLabel() =>
+            Assert.True(!string.IsNullOrEmpty(label) && label != "Station:Ads:BedDuckDb.Label");
     }
 
     public sealed class ScenarioGetSettingsInEnglish
@@ -227,9 +319,49 @@ public static class FeatureSettingsdescriptorstableandcopy
     {
         // Given: Accept-Language: fr, no fr resx
 
-        /// <summary>AC8 — en strings</summary>
-        [Fact(Skip = PendingT573)]
-        public void FallsBackToEnglish() => Assert.Fail(PendingT573);
+        /// <summary>AC8 — en strings, over the GET /api/settings HTTP surface (T574 wires the DTO to
+        /// SettingCopy; ScenarioTheSettingCopyInAnUnknownCulture below proves the same fallback at the
+        /// SettingCopy seam directly, T573's own share of this behaviour).</summary>
+        [Fact(Skip = PendingT574)]
+        public void FallsBackToEnglish() => Assert.Fail(PendingT574);
+    }
+
+    public sealed class ScenarioTheSettingCopyInAnUnknownCulture : IAsyncLifetime
+    {
+        // Given: SettingCopy.Label("Station:Ads:BedDuckDb"), en then fr, no fr resx (T573)
+
+        // Story477SettingsWebFactory is `file`-scoped, so it cannot appear in this public class's own
+        // member signature (CS9051) — the field is typed as the base class instead.
+        readonly WebApplicationFactory<Program> factory = new Story477SettingsWebFactory();
+        string enLabel = "";
+        string frLabel = "";
+
+        public Task InitializeAsync()
+        {
+            var settingCopy = factory.Services.GetRequiredService<SettingCopy>();
+            var originalCulture = CultureInfo.CurrentUICulture;
+            try
+            {
+                CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo("en");
+                enLabel = settingCopy.Label("Station:Ads:BedDuckDb");
+
+                CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo("fr");
+                frLabel = settingCopy.Label("Station:Ads:BedDuckDb");
+            }
+            finally
+            {
+                CultureInfo.CurrentUICulture = originalCulture;
+            }
+            return Task.CompletedTask;
+        }
+
+        public async Task DisposeAsync() => await factory.DisposeAsync();
+
+        /// <summary>T573 — no fr resx ships, so ResourceManager's own neutral-culture fallback serves
+        /// the same label SettingCopy would return under en, proven at the SettingCopy seam directly
+        /// rather than through GET /api/settings (T574's job).</summary>
+        [Fact]
+        public void FallsBackToTheEnglishLabel() => Assert.Equal(enLabel, frLabel);
     }
 
     public sealed class ScenarioTheExistingSettingsApi : IAsyncLifetime
@@ -266,13 +398,33 @@ public static class FeatureSettingsdescriptorstableandcopy
     // SAD PATH
     // ---------------------------------------------------------------------
 
-    public sealed class ScenarioAKeyWithNoCopy
+    public sealed class ScenarioAKeyWithNoCopy : IAsyncLifetime
     {
-        // Given: a test host whose resx lacks one key
+        // Given: a test host whose resx lacks "Station:Ads:BedDuckDb.Label" (LabelMissingLocalizer)
 
-        /// <summary>AC14 — boots and serves label = key</summary>
-        [Fact(Skip = PendingT573)]
-        public void DoesNotFailTheBoot() => Assert.Fail(PendingT573);
+        readonly WebApplicationFactory<Program> factory = new Story477MissingLabelWebFactory();
+        HttpStatusCode healthStatus;
+        string label = "";
+
+        public async Task InitializeAsync()
+        {
+            using var client = factory.CreateClient();
+            var health = await client.GetAsync("/health");
+            healthStatus = health.StatusCode;
+
+            var settingCopy = factory.Services.GetRequiredService<SettingCopy>();
+            label = settingCopy.Label("Station:Ads:BedDuckDb");
+        }
+
+        public async Task DisposeAsync() => await factory.DisposeAsync();
+
+        /// <summary>AC14 — a missing resx entry never fails the boot.</summary>
+        [Fact]
+        public void BootsSuccessfully() => Assert.Equal(HttpStatusCode.OK, healthStatus);
+
+        /// <summary>AC14 — a missing resx entry serves the key itself as the label.</summary>
+        [Fact]
+        public void ServesTheKeyAsTheLabel() => Assert.Equal("Station:Ads:BedDuckDb", label);
     }
 
 }

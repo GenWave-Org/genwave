@@ -1,0 +1,735 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    Microsoft ResX Schema
+
+    Version 2.0
+
+    The primary goals of this format are:
+
+    - Recovery of every possible information from the file, even the schema is lost.
+    - Chance of the file being modified with an XML or Text editor at any time.
+
+    Example:
+
+    ... ado.net/XML headers & schema ...
+    <resheader name="resmimetype">text/microsoft-resx</resheader>
+    <resheader name="version">2.0</resheader>
+    <resheader name="reader">System.Resources.ResXResourceReader, System.Windows.Forms, ...</resheader>
+    <resheader name="writer">System.Resources.ResXResourceWriter, System.Windows.Forms, ...</resheader>
+    <data name="Name1"><value>this is my long string</value><comment>this is a comment</comment></data>
+    <data name="Color1" type="System.Drawing.Color, System.Drawing">Blue</data>
+    <data name="Bitmap1" mimetype="application/x-microsoft.net.object.binary.base64">
+        <value>[base64 mime encoded serialized .NET Framework object]</value>
+    </data>
+    <data name="Icon1" type="System.Drawing.Icon, System.Drawing" mimetype="application/x-microsoft.net.object.bytearray.base64">
+        <value>[base64 mime encoded string representing a byte array form of the .NET Framework object]</value>
+        <comment>This is a comment</comment>
+    </data>
+
+    There are any number of "resheader" rows that contain simple name/value pairs.
+
+    Each data row contains a name, and value. The row also contains a type or mimetype.
+    Type corresponds to a .NET class that support text/value conversion through the
+    TypeConverter architecture. Classes that don't support this are serialized and
+    stored with the mimetype set.
+
+    The mimetype is used for serialized objects, and tells the ResXResourceReader how
+    to depersist the object. This is currently not extensible. For a given mimetype
+    the value must be set accordingly:
+
+    Note - application/x-microsoft.net.object.binary.base64 is the format that the
+    ResXResourceWriter will generate, but the reader can read any of the formats
+    listed below.
+
+    mimetype: application/x-microsoft.net.object.binary.base64
+    value   : the object must be serialized with
+            : System.Runtime.Serialization.Formatters.Binary.BinaryFormatter
+            : and then encoded with base64 encoding.
+
+    mimetype: application/x-microsoft.net.object.soap.base64
+    value   : the object must be serialized with
+            : System.Runtime.Serialization.Formatters.Soap.SoapFormatter
+            : and then encoded with base64 encoding.
+
+    mimetype: application/x-microsoft.net.object.bytearray.base64
+    value   : The object must be serialized into a byte array
+            : using a System.ComponentModel.TypeConverter
+            : and then encoded with base64 encoding.
+    -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+
+  <!--
+    Operator-facing copy for every StationSettingsAllowlist.All key (SPEC F205.2, STORY-477,
+    PLAN T573) — {Key}.Label / {Key}.Help for all 83 settings, Group.{id}.Label for every
+    SettingGroup member, and Choice.{Key}.{value} for Llm:ReasoningEffort's five values. Ported
+    from admin-ui's FIELD_HELP_TEXT (T576 will delete that copy once the settings GET response
+    carries these instead — T574's job). Edits made while porting: dropped every "Accepted
+    range"/"Must be ..." sentence that only restated a Min/Max the AllowedSetting record already
+    carries (T574 serves that from the record itself — a second copy would drift); reworded the
+    handful of sentences whose only jargon was a raw colon-syntax setting key into plain words;
+    dropped a leftover internal spec citation, "(F108.1)", that had no place in operator-facing
+    copy. See T573's own build report for the itemized list.
+
+    SettingCopy.ChoiceLabel has no Choice.Station:Theme.* or Choice.Station:IconPack.* entries by
+    design — both keys' choices are live catalog data (installed themes / icon packs), not a
+    fixed vocabulary this resx can enumerate; their labels ride the SettingChoice objects
+    ThemeChoices/IconPackChoices already carry (F205.7 territory, out of T573's scope).
+  -->
+
+  <!-- ── Groups (SettingGroup enum members, lowercased) ─────────────────────────────────── -->
+  <data name="Group.sound.Label" xml:space="preserve">
+    <value>Sound</value>
+  </data>
+  <data name="Group.voice.Label" xml:space="preserve">
+    <value>Voice</value>
+  </data>
+  <data name="Group.announcements.Label" xml:space="preserve">
+    <value>Announcements</value>
+  </data>
+  <data name="Group.sponsors.Label" xml:space="preserve">
+    <value>Sponsors</value>
+  </data>
+  <data name="Group.library.Label" xml:space="preserve">
+    <value>Library</value>
+  </data>
+  <data name="Group.community.Label" xml:space="preserve">
+    <value>Community</value>
+  </data>
+  <data name="Group.station.Label" xml:space="preserve">
+    <value>Station</value>
+  </data>
+  <data name="Group.system.Label" xml:space="preserve">
+    <value>System</value>
+  </data>
+
+  <!-- ── Loudness ─────────────────────────────────────────────────────────────────────────── -->
+  <data name="Loudness:TargetLufs.Label" xml:space="preserve">
+    <value>Loudness target</value>
+  </data>
+  <data name="Loudness:TargetLufs.Help" xml:space="preserve">
+    <value>The loudness target the mix is normalized toward, in LUFS — every track is gained to match it before crossfading.</value>
+  </data>
+  <data name="Loudness:CeilingDbtp.Label" xml:space="preserve">
+    <value>Peak limit (true peak)</value>
+  </data>
+  <data name="Loudness:CeilingDbtp.Help" xml:space="preserve">
+    <value>The true-peak ceiling the mix must not exceed, in dBTP — guards against inter-sample clipping downstream.</value>
+  </data>
+
+  <!-- ── Station identity ─────────────────────────────────────────────────────────────────── -->
+  <data name="Station:Name.Label" xml:space="preserve">
+    <value>Station name</value>
+  </data>
+  <data name="Station:Name.Help" xml:space="preserve">
+    <value>The public Icecast stream/directory name updates on the next engine restart; patter, metadata, and this console update immediately.</value>
+  </data>
+  <data name="Station:Tagline.Label" xml:space="preserve">
+    <value>Station tagline</value>
+  </data>
+  <data name="Station:Tagline.Help" xml:space="preserve">
+    <value>A short line shown under the station name on the About page. Optional — leave blank to show no tagline. Up to 120 characters.</value>
+  </data>
+  <data name="Station:Voice.Label" xml:space="preserve">
+    <value>Station voice</value>
+  </data>
+  <data name="Station:Voice.Help" xml:space="preserve">
+    <value>The Kokoro voice used for station-branded patter (station IDs, time/date, lead-ins, back-announces) whenever no persona is active.</value>
+  </data>
+
+  <!-- ── Cadence ──────────────────────────────────────────────────────────────────────────── -->
+  <data name="Station:Cadence:LeadInBeforeEachTrack.Label" xml:space="preserve">
+    <value>Spoken intro before each track</value>
+  </data>
+  <data name="Station:Cadence:LeadInBeforeEachTrack.Help" xml:space="preserve">
+    <value>When on, a short spoken lead-in airs immediately before each track begins.</value>
+  </data>
+  <data name="Station:Cadence:BackAnnounceAfterEachTrack.Label" xml:space="preserve">
+    <value>Name each song after it plays</value>
+  </data>
+  <data name="Station:Cadence:BackAnnounceAfterEachTrack.Help" xml:space="preserve">
+    <value>When on, a short spoken back-announce airs immediately after each track ends.</value>
+  </data>
+  <data name="Station:Cadence:StationIdEveryNUnits.Label" xml:space="preserve">
+    <value>Station name frequency (station ID)</value>
+  </data>
+  <data name="Station:Cadence:StationIdEveryNUnits.Help" xml:space="preserve">
+    <value>Set to 0 to turn station IDs off entirely — no station ID ever airs.</value>
+  </data>
+
+  <!-- ── Scope ────────────────────────────────────────────────────────────────────────────── -->
+  <data name="Station:Scope:LibraryIds.Label" xml:space="preserve">
+    <value>Main rotation libraries</value>
+  </data>
+  <data name="Station:Scope:LibraryIds.Help" xml:space="preserve">
+    <value>The libraries the main rotation picks tracks from — must name at least one library, or the station has nothing to play.</value>
+  </data>
+  <data name="Station:SafeScope:LibraryIds.Label" xml:space="preserve">
+    <value>Station sounds libraries</value>
+  </data>
+  <data name="Station:SafeScope:LibraryIds.Help" xml:space="preserve">
+    <value>The libraries holding Station sounds — the always-airable station segments (IDs, jingles, sweepers, liners) played when the main rotation drains. An empty list is legal and falls back to silence (mksafe).</value>
+  </data>
+
+  <!-- ── Rotation resilience + artist separation ─────────────────────────────────────────── -->
+  <data name="Station:Rotation:RecentWindow.Label" xml:space="preserve">
+    <value>Anti-repeat window</value>
+  </data>
+  <data name="Station:Rotation:RecentWindow.Help" xml:space="preserve">
+    <value>How many recently-played tracks the rotation avoids repeating. 0 disables anti-repeat entirely.</value>
+  </data>
+  <data name="Station:Rotation:ArtistSeparation.Label" xml:space="preserve">
+    <value>Artist separation</value>
+  </data>
+  <data name="Station:Rotation:ArtistSeparation.Help" xml:space="preserve">
+    <value>How many of the recent tracks must pass before the same artist can repeat. Separation is limited by the anti-repeat window above — it reads the same recent-tracks window, so a value deeper than that window has no additional effect, and an anti-repeat window of 0 disables artist separation too.</value>
+  </data>
+
+  <!-- ── Station-default segment envelope ────────────────────────────────────────────────── -->
+  <data name="Station:Envelope:Genres.Label" xml:space="preserve">
+    <value>Allowed genres</value>
+  </data>
+  <data name="Station:Envelope:Genres.Help" xml:space="preserve">
+    <value>The genre allow-list the station's single 24/7 envelope admits — a track outside this list never enters rotation. A JSON array of genre names; empty means every genre is allowed.</value>
+  </data>
+  <data name="Station:Envelope:EnergyMin.Label" xml:space="preserve">
+    <value>Minimum energy</value>
+  </data>
+  <data name="Station:Envelope:EnergyMin.Help" xml:space="preserve">
+    <value>The lowest energy percentile the envelope admits (0 = the least energetic ready track in the library).</value>
+  </data>
+  <data name="Station:Envelope:EnergyMax.Label" xml:space="preserve">
+    <value>Maximum energy</value>
+  </data>
+  <data name="Station:Envelope:EnergyMax.Help" xml:space="preserve">
+    <value>The highest energy percentile the envelope admits (1 = the most energetic ready track in the library).</value>
+  </data>
+
+  <!-- ── Spectator surface ────────────────────────────────────────────────────────────────── -->
+  <data name="Station:SpectatorMode.Label" xml:space="preserve">
+    <value>Spectator mode</value>
+  </data>
+  <data name="Station:SpectatorMode.Help" xml:space="preserve">
+    <value>Public read-only spectator page and API. Off by default; when on, /spectator serves without login.</value>
+  </data>
+  <data name="Station:PublicStreamUrl.Label" xml:space="preserve">
+    <value>Public stream URL</value>
+  </data>
+  <data name="Station:PublicStreamUrl.Help" xml:space="preserve">
+    <value>Public stream URL for the spectator page player (e.g. /stream behind the reference proxy). Empty hides the player.</value>
+  </data>
+  <data name="Station:PublicBaseUrl.Label" xml:space="preserve">
+    <value>Public base URL</value>
+  </data>
+  <data name="Station:PublicBaseUrl.Help" xml:space="preserve">
+    <value>Public base URL feeder pushes resolve per-track artwork and station-icon URLs against (e.g. https://your-station.example). Empty means no artwork URL is ever sent to listening clients.</value>
+  </data>
+
+  <!-- ── Listener requests ────────────────────────────────────────────────────────────────── -->
+  <data name="Station:Requests:Enabled.Label" xml:space="preserve">
+    <value>Listener requests</value>
+  </data>
+  <data name="Station:Requests:Enabled.Help" xml:space="preserve">
+    <value>Public listener request line. Off by default; when off, the request endpoint 404s like any other disabled surface.</value>
+  </data>
+  <data name="Station:Requests:OverrideEnvelope.Label" xml:space="preserve">
+    <value>Requests skip genre and energy limits</value>
+  </data>
+  <data name="Station:Requests:OverrideEnvelope.Help" xml:space="preserve">
+    <value>When on, a matched request bypasses the envelope's genre/energy band and rotation-recency to air sooner — operator never-play/eligibility vetoes still apply either way.</value>
+  </data>
+  <data name="Station:Requests:WindowMinutes.Label" xml:space="preserve">
+    <value>Request expiry window</value>
+  </data>
+  <data name="Station:Requests:WindowMinutes.Help" xml:space="preserve">
+    <value>How long an unfulfilled request stays eligible to air before it expires.</value>
+  </data>
+
+  <!-- ── Thumbs ───────────────────────────────────────────────────────────────────────────── -->
+  <data name="Station:Thumbs:Enabled.Label" xml:space="preserve">
+    <value>Listener thumbs</value>
+  </data>
+  <data name="Station:Thumbs:Enabled.Help" xml:space="preserve">
+    <value>Anonymous thumbs up/down on the spectator now-playing card; off means the thumbs endpoint and controls do not exist (404).</value>
+  </data>
+
+  <!-- ── TTS / LLM endpoints ──────────────────────────────────────────────────────────────── -->
+  <data name="Tts:Endpoint.Label" xml:space="preserve">
+    <value>Speech service URL (TTS)</value>
+  </data>
+  <data name="Tts:Endpoint.Help" xml:space="preserve">
+    <value>The Kokoro TTS service base URL used to render all spoken patter — must be a non-empty absolute http/https URL; there is no "disabled TTS" state.</value>
+  </data>
+  <data name="Tts:Corrections.Label" xml:space="preserve">
+    <value>Pronunciation corrections</value>
+  </data>
+  <data name="Tts:Corrections.Help" xml:space="preserve">
+    <value>Operator pronunciation corrections applied to every spoken line before it reaches the TTS engine (e.g. "MacLeod" to "Muh-cloud"). Each rule can carry optional context conditions for heteronyms — "wind" to "wynd" only when followed by "down" or "up" — so the other sense ("a strong wind") stays untouched. Empty means no corrections.</value>
+  </data>
+  <data name="Tts:Pronunciations.Label" xml:space="preserve">
+    <value>Station pronunciation rules</value>
+  </data>
+  <data name="Tts:Pronunciations.Help" xml:space="preserve">
+    <value>Station pronunciation rules the Kokoro voice engine honors directly (IPA phoneme overrides, e.g. pattern "Reykjavík" to ipa "/ˈreɪkjaviːk/") rather than text substitutions. A rule's optional word narrows which occurrence of a longer pattern gets the override, disambiguating heteronyms like "wind". The active persona's own rules win when both name the same pattern/word. Empty means no station pronunciation rules.</value>
+  </data>
+  <data name="Tts:Fallback:Endpoint.Label" xml:space="preserve">
+    <value>Backup speech service URL</value>
+  </data>
+  <data name="Tts:Fallback:Endpoint.Help" xml:space="preserve">
+    <value>The Piper local fallback TTS service base URL — hop 1 of the fallback chain, used automatically when Kokoro is unhealthy or a render fails. Leave empty to disable the fallback engine entirely. Ignored when the deployment configures a fallback profile chain, which replaces this single hop with an operator-built list of fallback engines.</value>
+  </data>
+  <data name="Tts:Fallback:Voice.Label" xml:space="preserve">
+    <value>Backup speech voice</value>
+  </data>
+  <data name="Tts:Fallback:Voice.Help" xml:space="preserve">
+    <value>The Piper voice model the fallback service is expected to be running — display-only: Piper bakes one voice into the sidecar and has no per-request selector, so this is never sent with a render; it only documents what compose deployed. In a fallback profile chain each hop carries its own voice instead — honored on the wire for Kokoro-kind hops, display-only for Piper hops.</value>
+  </data>
+  <data name="Tts:EngineByKind.Label" xml:space="preserve">
+    <value>Engine by speech kind</value>
+  </data>
+  <data name="Tts:EngineByKind.Help" xml:space="preserve">
+    <value>Pins specific speech kinds to a specific engine, e.g. StationId to Piper so a short ident always uses the cheap voice. Add one override row per kind (StationId, LeadIn, BackAnnounce, TimeDate, SignOff, SignOn); kinds without an override use the normal Kokoro-first, Piper-fallback routing.</value>
+  </data>
+  <data name="Llm:Endpoint.Label" xml:space="preserve">
+    <value>AI writer URL (LLM)</value>
+  </data>
+  <data name="Llm:Endpoint.Help" xml:space="preserve">
+    <value>The LLM completion service base URL used to author patter copy — leave empty to disable LLM-authored copy and fall back to templated copy.</value>
+  </data>
+  <data name="Llm:Model.Label" xml:space="preserve">
+    <value>AI writer model</value>
+  </data>
+  <data name="Llm:Model.Help" xml:space="preserve">
+    <value>The model name requested from the LLM endpoint — free text, meaningful only when that endpoint is set.</value>
+  </data>
+  <data name="Llm:TimeoutSeconds.Label" xml:space="preserve">
+    <value>AI writer time limit</value>
+  </data>
+  <data name="Llm:TimeoutSeconds.Help" xml:space="preserve">
+    <value>How long an LLM completion request is allowed to run before falling back to templated copy.</value>
+  </data>
+
+  <!-- ── F44.2 allowlist completion ───────────────────────────────────────────────────────── -->
+  <data name="Tts:RenderBudgetSeconds.Label" xml:space="preserve">
+    <value>Speech render time limit</value>
+  </data>
+  <data name="Tts:RenderBudgetSeconds.Help" xml:space="preserve">
+    <value>How long a single TTS render is allowed to take before it is abandoned.</value>
+  </data>
+  <data name="Tts:BlurbRetentionHours.Label" xml:space="preserve">
+    <value>Speech clip cache lifetime</value>
+  </data>
+  <data name="Tts:BlurbRetentionHours.Help" xml:space="preserve">
+    <value>How long a rendered TTS blurb stays cached before the garbage-collection sweep removes it.</value>
+  </data>
+  <data name="Llm:MaxCopyChars.Label" xml:space="preserve">
+    <value>Longest written DJ line</value>
+  </data>
+  <data name="Llm:MaxCopyChars.Help" xml:space="preserve">
+    <value>The maximum length, in characters, of LLM-authored patter copy — longer completions are truncated.</value>
+  </data>
+  <data name="Admin:PlayHistoryCapacity.Label" xml:space="preserve">
+    <value>Play history capacity</value>
+  </data>
+  <data name="Admin:PlayHistoryCapacity.Help" xml:space="preserve">
+    <value>How many recent plays the play-history ring keeps before the oldest entry is dropped.</value>
+  </data>
+  <data name="Library:ScanIntervalSeconds.Label" xml:space="preserve">
+    <value>Library scan interval</value>
+  </data>
+  <data name="Library:ScanIntervalSeconds.Help" xml:space="preserve">
+    <value>How often the library scans for new or changed files, in seconds.</value>
+  </data>
+  <data name="Library:EnrichmentConcurrency.Label" xml:space="preserve">
+    <value>Tracks analyzed at once</value>
+  </data>
+  <data name="Library:EnrichmentConcurrency.Help" xml:space="preserve">
+    <value>How many tracks are analyzed (loudness, cue points, energy, tags) in parallel during enrichment.</value>
+  </data>
+
+  <!-- ── Scan availability grace ──────────────────────────────────────────────────────────── -->
+  <data name="Library:Scan:MissThreshold.Label" xml:space="preserve">
+    <value>Scan miss threshold</value>
+  </data>
+  <data name="Library:Scan:MissThreshold.Help" xml:space="preserve">
+    <value>How many consecutive scan ticks a file may be missing from the library folder before it is marked unavailable — a higher value rides out a brief NFS/mount blip without pulling a track from rotation.</value>
+  </data>
+
+  <!-- ── MusicBrainz year lookup ──────────────────────────────────────────────────────────── -->
+  <data name="Library:YearLookup:Enabled.Label" xml:space="preserve">
+    <value>Year lookup</value>
+  </data>
+  <data name="Library:YearLookup:Enabled.Help" xml:space="preserve">
+    <value>When on, tracks missing a release year get one looked up from MusicBrainz during enrichment. Turning it off stops future lookups; years already filled stay.</value>
+  </data>
+  <data name="Library:YearLookup:Endpoint.Label" xml:space="preserve">
+    <value>Year lookup endpoint</value>
+  </data>
+  <data name="Library:YearLookup:Endpoint.Help" xml:space="preserve">
+    <value>The MusicBrainz web service base URL used to look up a missing release year — must be a non-empty absolute http/https URL.</value>
+  </data>
+  <data name="Library:YearLookup:MinScore.Label" xml:space="preserve">
+    <value>Year lookup confidence</value>
+  </data>
+  <data name="Library:YearLookup:MinScore.Help" xml:space="preserve">
+    <value>The minimum MusicBrainz match confidence a candidate must reach before its year is accepted.</value>
+  </data>
+
+  <!-- ── Engine-restart knobs ─────────────────────────────────────────────────────────────── -->
+  <data name="GW_XFADE_MIN.Label" xml:space="preserve">
+    <value>Shortest song overlap (crossfade)</value>
+  </data>
+  <data name="GW_XFADE_MIN.Help" xml:space="preserve">
+    <value>The shortest crossfade duration the engine uses between tracks, in seconds.</value>
+  </data>
+  <data name="GW_XFADE_MAX.Label" xml:space="preserve">
+    <value>Longest song overlap</value>
+  </data>
+  <data name="GW_XFADE_MAX.Help" xml:space="preserve">
+    <value>The longest crossfade duration the engine uses between tracks, in seconds.</value>
+  </data>
+  <data name="GW_SAFE_GAP_SECONDS.Label" xml:space="preserve">
+    <value>Station sounds gap</value>
+  </data>
+  <data name="GW_SAFE_GAP_SECONDS.Help" xml:space="preserve">
+    <value>The silence gap the engine inserts between consecutive Station sounds (safe-rotation) tracks, in seconds. 0 disables the gap.</value>
+  </data>
+
+  <!-- ── Enrichment-mode knobs ────────────────────────────────────────────────────────────── -->
+  <data name="Library:CueDetection:MinSilenceDurationSec.Label" xml:space="preserve">
+    <value>Shortest silence to trim</value>
+  </data>
+  <data name="Library:CueDetection:MinSilenceDurationSec.Help" xml:space="preserve">
+    <value>The shortest silent region, in seconds, that counts as a cue point during trim detection. Applies the next time a file is (re-)analyzed.</value>
+  </data>
+  <data name="Library:Energy:WindowSeconds.Label" xml:space="preserve">
+    <value>Energy analysis window</value>
+  </data>
+  <data name="Library:Energy:WindowSeconds.Help" xml:space="preserve">
+    <value>The length of the intro/outro window measured for energy analysis, in seconds. Applies the next time a file is (re-)analyzed.</value>
+  </data>
+
+  <!-- ── Dependency health probes ─────────────────────────────────────────────────────────── -->
+  <data name="DependencyHealth:ProbeIntervalSeconds.Label" xml:space="preserve">
+    <value>Health probe interval</value>
+  </data>
+  <data name="DependencyHealth:ProbeIntervalSeconds.Help" xml:space="preserve">
+    <value>How often the station checks that Kokoro, Piper, Ollama and Icecast are still answering, in seconds. Applies to the next check — no restart.</value>
+  </data>
+  <data name="DependencyHealth:ProbeTimeoutSeconds.Label" xml:space="preserve">
+    <value>Health probe timeout</value>
+  </data>
+  <data name="DependencyHealth:ProbeTimeoutSeconds.Help" xml:space="preserve">
+    <value>How long one health check waits for an answer before counting as a failure, in seconds. Kokoro stops answering while it renders a clip, so a budget shorter than a typical render reports it down when it is merely busy.</value>
+  </data>
+  <data name="DependencyHealth:UnhealthyThreshold.Label" xml:space="preserve">
+    <value>Unhealthy threshold</value>
+  </data>
+  <data name="DependencyHealth:UnhealthyThreshold.Help" xml:space="preserve">
+    <value>How many checks in a row must fail before the station treats a service as down and starts using its fallback. 1 reacts fastest but flips on a single missed check; the default 2 ignores one-off blips. Higher values mean a genuinely dead service goes unnoticed for this many checks.</value>
+  </data>
+
+  <!-- ── LLM degradation ──────────────────────────────────────────────────────────────────── -->
+  <data name="Llm:DegradationPin.Label" xml:space="preserve">
+    <value>AI writer fallback mode</value>
+  </data>
+  <data name="Llm:DegradationPin.Help" xml:space="preserve">
+    <value>Pins the LLM degradation mode instead of letting it auto-adjust to failures/recoveries. "auto" (default) follows automatically; "normal", "soft", or "hard" holds that mode until this is set back to "auto".</value>
+  </data>
+
+  <!-- ── Reasoning control ────────────────────────────────────────────────────────────────── -->
+  <data name="Llm:ReasoningEffort.Label" xml:space="preserve">
+    <value>AI writer thinking effort</value>
+  </data>
+  <data name="Llm:ReasoningEffort.Help" xml:space="preserve">
+    <value>How much a thinking-capable model (gemma4, qwen3, deepseek-r1, magistral) may think before it answers. "None" (default) makes it answer directly — otherwise its chain-of-thought spends the whole copy budget and every line comes back empty. "Low"/"Medium"/"High" let it think, at the cost of time. "Omit" sends no reasoning field at all, for a third-party OpenAI-compatible backend that rejects it. Ordinary models ignore this. Changes apply live.</value>
+  </data>
+  <data name="Choice.Llm:ReasoningEffort.none" xml:space="preserve">
+    <value>None — answer directly (thinking models skip their chain-of-thought)</value>
+  </data>
+  <data name="Choice.Llm:ReasoningEffort.low" xml:space="preserve">
+    <value>Low — think briefly first</value>
+  </data>
+  <data name="Choice.Llm:ReasoningEffort.medium" xml:space="preserve">
+    <value>Medium — think before answering</value>
+  </data>
+  <data name="Choice.Llm:ReasoningEffort.high" xml:space="preserve">
+    <value>High — think at length (slow; needs a generous response timeout)</value>
+  </data>
+  <data name="Choice.Llm:ReasoningEffort.omit" xml:space="preserve">
+    <value>Omit — send no reasoning field (for a backend that rejects it)</value>
+  </data>
+
+  <!-- ── Persona Catalog ──────────────────────────────────────────────────────────────────── -->
+  <data name="Community:CatalogIndexUrl.Label" xml:space="preserve">
+    <value>Persona catalog URL</value>
+  </data>
+  <data name="Community:CatalogIndexUrl.Help" xml:space="preserve">
+    <value>Where the Persona Catalog browses and imports personas from. Leave empty to disable the Persona Catalog entirely — both catalog endpoints stop responding and this admin UI hides the shelf. Changes apply live.</value>
+  </data>
+
+  <!-- ── Audience posture ─────────────────────────────────────────────────────────────────── -->
+  <data name="Station:Audience.Label" xml:space="preserve">
+    <value>Explicit content</value>
+  </data>
+  <data name="Station:Audience.Help" xml:space="preserve">
+    <value>Everyone ("everyone", the default) keeps every track stamped explicit out of the pool entirely — it never plays, displays, or reaches the DJ's mouth. Mature ("mature") plays everything, unmasked. Changes apply live.</value>
+  </data>
+
+  <!-- ── Station timezone ──────────────────────────────────────────────────────────────────── -->
+  <data name="Station:Timezone.Label" xml:space="preserve">
+    <value>Station timezone</value>
+  </data>
+  <data name="Station:Timezone.Help" xml:space="preserve">
+    <value>The IANA timezone the DJ's spoken date/time follows (e.g. America/Edmonton). Empty uses the container's own clock. Changes apply live. The schedule grid and persona taste gates follow it too, so changing it immediately shifts which slot is on the air.</value>
+  </data>
+
+  <!-- ── Theme selection ──────────────────────────────────────────────────────────────────── -->
+  <data name="Station:Theme.Label" xml:space="preserve">
+    <value>Station theme</value>
+  </data>
+  <data name="Station:Theme.Help" xml:space="preserve">
+    <value>The station's active theme, by slug (e.g. cats-whisker) — must name one of the shipped themes; an unrecognized slug is rejected outright rather than silently failing to resolve. Changes apply live.</value>
+  </data>
+  <!-- No Choice.Station:Theme.* entries here by design — see the file-level remarks above. -->
+
+  <!-- ── Icon pack selection ──────────────────────────────────────────────────────────────── -->
+  <data name="Station:IconPack.Label" xml:space="preserve">
+    <value>Icon pack</value>
+  </data>
+  <data name="Station:IconPack.Help" xml:space="preserve">
+    <value>The station's active icon pack, by slug — fed by the packs installed on the Community Catalog. Empty (the default) uses the house icons. Uninstalling the active pack leaves this value dangling; the admin chrome falls back to house icons rather than erroring. Changes apply live.</value>
+  </data>
+  <!-- No Choice.Station:IconPack.* entries here by design — see the file-level remarks above. -->
+
+  <!-- ── The F107 context seam (weather, history) ─────────────────────────────────────────── -->
+  <data name="Context:Weather:Enabled.Label" xml:space="preserve">
+    <value>Weather segments</value>
+  </data>
+  <data name="Context:Weather:Enabled.Help" xml:space="preserve">
+    <value>Airs a weather segment/patter line sourced from Open-Meteo. Off by default; also requires the station's broadcast location (latitude and longitude) — blank or invalid coordinates leave weather off even when this is on.</value>
+  </data>
+  <data name="Context:Weather:SegmentCadenceMinutes.Label" xml:space="preserve">
+    <value>Weather segment cadence</value>
+  </data>
+  <data name="Context:Weather:SegmentCadenceMinutes.Help" xml:space="preserve">
+    <value>How often a fresh weather segment may air, in minutes.</value>
+  </data>
+  <data name="Context:Weather:PatterCadenceMinutes.Label" xml:space="preserve">
+    <value>Weather mentions in DJ chat</value>
+  </data>
+  <data name="Context:Weather:PatterCadenceMinutes.Help" xml:space="preserve">
+    <value>How often a compact weather line may be folded into patter, in minutes — independent of the segment cadence above. 0 disables weather patter lines.</value>
+  </data>
+  <data name="Context:Weather:PersonaId.Label" xml:space="preserve">
+    <value>Weather persona</value>
+  </data>
+  <data name="Context:Weather:PersonaId.Help" xml:space="preserve">
+    <value>Which persona voices weather segments. 0 defers to the on-air DJ (the unset default does the same).</value>
+  </data>
+  <data name="Context:History:Enabled.Label" xml:space="preserve">
+    <value>History segments</value>
+  </data>
+  <data name="Context:History:Enabled.Help" xml:space="preserve">
+    <value>Airs a this-day-in-history segment/patter line sourced from Wikimedia's On This Day feed. Off by default.</value>
+  </data>
+  <data name="Context:History:SegmentCadenceMinutes.Label" xml:space="preserve">
+    <value>History segment cadence</value>
+  </data>
+  <data name="Context:History:SegmentCadenceMinutes.Help" xml:space="preserve">
+    <value>How often a fresh history segment may air, in minutes.</value>
+  </data>
+  <data name="Context:History:PatterCadenceMinutes.Label" xml:space="preserve">
+    <value>History mentions in DJ chat</value>
+  </data>
+  <data name="Context:History:PatterCadenceMinutes.Help" xml:space="preserve">
+    <value>How often a compact history line may be folded into patter, in minutes — independent of the segment cadence above. 0 disables history patter lines.</value>
+  </data>
+  <data name="Context:History:PersonaId.Label" xml:space="preserve">
+    <value>History persona</value>
+  </data>
+  <data name="Context:History:PersonaId.Help" xml:space="preserve">
+    <value>Which persona voices history segments. 0 defers to the on-air DJ (the unset default does the same).</value>
+  </data>
+
+  <!-- ── Station broadcast location ────────────────────────────────────────────────────────── -->
+  <data name="Station:Location:Latitude.Label" xml:space="preserve">
+    <value>Station latitude</value>
+  </data>
+  <data name="Station:Location:Latitude.Help" xml:space="preserve">
+    <value>Signed decimal degrees only (negative = south), with a period as the decimal separator — e.g. 51.0447 or -33.8688. Accepted range: -90 to 90; only the first 4 decimal places are used. Degrees-minutes-seconds and degrees-decimal-minutes formats are not accepted. Used only to fetch weather — never spoken or logged. Blank behaves exactly like an invalid value: weather stays silently off.</value>
+  </data>
+  <data name="Station:Location:Longitude.Label" xml:space="preserve">
+    <value>Station longitude</value>
+  </data>
+  <data name="Station:Location:Longitude.Help" xml:space="preserve">
+    <value>Signed decimal degrees only (negative = west), with a period as the decimal separator — e.g. -114.0719 or 151.2093. Accepted range: -180 to 180; only the first 4 decimal places are used. Degrees-minutes-seconds and degrees-decimal-minutes formats are not accepted. Used only to fetch weather — never spoken or logged. Blank behaves exactly like an invalid value: weather stays silently off.</value>
+  </data>
+  <data name="Station:Location:SpokenName.Label" xml:space="preserve">
+    <value>Spoken location name</value>
+  </data>
+  <data name="Station:Location:SpokenName.Help" xml:space="preserve">
+    <value>The only location text ever spoken or logged, e.g. "Calgary" — coordinates themselves never air. Blank means weather segments name no place at all.</value>
+  </data>
+
+  <!-- ── Clock-anchored imaging ───────────────────────────────────────────────────────────── -->
+  <data name="Station:Imaging:ClockAnchoredIdents.Label" xml:space="preserve">
+    <value>Station name at the top of the hour</value>
+  </data>
+  <data name="Station:Imaging:ClockAnchoredIdents.Help" xml:space="preserve">
+    <value>When on, a station ID airs at the top of every hour in addition to the regular cadence count. Off by default.</value>
+  </data>
+  <data name="Station:Imaging:TimeAnnouncements.Label" xml:space="preserve">
+    <value>Top-of-hour time announcement</value>
+  </data>
+  <data name="Station:Imaging:TimeAnnouncements.Help" xml:space="preserve">
+    <value>When on, a spoken time announcement airs at the top of every hour. Off by default.</value>
+  </data>
+  <data name="Station:Imaging:TimeAnnouncementBudgetSeconds.Label" xml:space="preserve">
+    <value>Time announcement budget</value>
+  </data>
+  <data name="Station:Imaging:TimeAnnouncementBudgetSeconds.Help" xml:space="preserve">
+    <value>A time announcement that drains more than this many seconds late (accounting for whatever is already queued ahead of it) is dropped instead of airing a stale hour — a late ident is fine, a late time check is not. Within the budget but more than 90 seconds late, the announcement airs an honest "just past" variant instead of staying silent. Defaults to 420.</value>
+  </data>
+
+  <!-- ── Show-flavor patter line ──────────────────────────────────────────────────────────── -->
+  <data name="Station:Shows:PatterCadenceMinutes.Label" xml:space="preserve">
+    <value>Show theme mentions in DJ chat</value>
+  </data>
+  <data name="Station:Shows:PatterCadenceMinutes.Help" xml:space="preserve">
+    <value>How often a show's flavor may color an ordinary lead-in/back-announce, in minutes — shares the same one-line slot as the context patter lines above; a due context fact always wins. 0 disables the show-flavor line.</value>
+  </data>
+
+  <!-- ── Crosstalk two-voice banter ───────────────────────────────────────────────────────── -->
+  <data name="Crosstalk:DurationTargetSeconds.Label" xml:space="preserve">
+    <value>Two-host banter length limit</value>
+  </data>
+  <data name="Crosstalk:DurationTargetSeconds.Help" xml:space="preserve">
+    <value>The longest a generated two-voice banter exchange may run, in seconds, before it is discarded and skipped rather than aired. Defaults to 50.</value>
+  </data>
+  <data name="Crosstalk:Shows.Label" xml:space="preserve">
+    <value>Shows with two-host banter (crosstalk)</value>
+  </data>
+  <data name="Crosstalk:Shows.Help" xml:space="preserve">
+    <value>A JSON array of show slugs allowed to carry two-voice banter — a show's stable URL-safe identity, not its display name (e.g. "morning-drive" for a show named "Morning Drive"), e.g. ["morning-drive"]. Empty (the default) turns the feature off entirely — no station's sound changes on upgrade until a show is named here.</value>
+  </data>
+  <data name="Crosstalk:EveryNthAiring.Label" xml:space="preserve">
+    <value>Two-host banter frequency</value>
+  </data>
+  <data name="Crosstalk:EveryNthAiring.Help" xml:space="preserve">
+    <value>How many eligible airings of an enabled show pass before one carries banter — 1 (the default) airs every time.</value>
+  </data>
+
+  <!-- ── Ads seam ──────────────────────────────────────────────────────────────────────────── -->
+  <data name="Station:Ads:EveryNUnits.Label" xml:space="preserve">
+    <value>Ad frequency</value>
+  </data>
+  <data name="Station:Ads:EveryNUnits.Help" xml:space="preserve">
+    <value>A ready ad spot airs every N units, the same cadence shape as the station-ID count above — 0 (the default) disables ad spots entirely.</value>
+  </data>
+  <data name="Station:Ads:TargetCount.Label" xml:space="preserve">
+    <value>Ad stock target</value>
+  </data>
+  <data name="Station:Ads:TargetCount.Help" xml:space="preserve">
+    <value>How many generated spots the ad-spot worker keeps in the pipeline — draft, approved, rendering, or ready — refilling as spots retire or are discarded. Your own spots never count. Defaults to 12.</value>
+  </data>
+  <data name="Station:Ads:RefreshDays.Label" xml:space="preserve">
+    <value>Ad refresh interval</value>
+  </data>
+  <data name="Station:Ads:RefreshDays.Help" xml:space="preserve">
+    <value>A ready spot older than this many days is retired and the stock refills — keeps ad copy from going stale. Defaults to 30.</value>
+  </data>
+  <data name="Station:Ads:AutoApprove.Label" xml:space="preserve">
+    <value>Auto-approve ads</value>
+  </data>
+  <data name="Station:Ads:AutoApprove.Help" xml:space="preserve">
+    <value>When off (the default), a freshly generated spot waits in draft for the owner's approval before it can ever air. When on, generation flows straight to approved.</value>
+  </data>
+  <data name="Station:Ads:AntiRepeatWindow.Label" xml:space="preserve">
+    <value>Ad sponsor anti-repeat</value>
+  </data>
+  <data name="Station:Ads:AntiRepeatWindow.Help" xml:space="preserve">
+    <value>How many of the most recently aired sponsors are excluded from the next ad pick, so the same sponsor does not come back to back. Defaults to 5.</value>
+  </data>
+  <data name="Station:Ads:AnnouncerVoice.Label" xml:space="preserve">
+    <value>Ad announcer voice</value>
+  </data>
+  <data name="Station:Ads:AnnouncerVoice.Help" xml:space="preserve">
+    <value>The Kokoro voice cast as an ad's announcer. Empty (the default) uses the station's own voice instead of a separate one. Accepted value: empty, or a single voice id (e.g. af_nova).</value>
+  </data>
+  <data name="Station:Ads:CastVoices.Label" xml:space="preserve">
+    <value>Ad cast voice pool</value>
+  </data>
+  <data name="Station:Ads:CastVoices.Help" xml:space="preserve">
+    <value>The pool of Kokoro voices an ad may cast for its other speaking roles, as a comma-separated list of voice ids with no spaces, up to 16 ids. Defaults to af_nova,am_michael,bf_alice,am_onyx.</value>
+  </data>
+  <data name="Station:Ads:BedFadeMs.Label" xml:space="preserve">
+    <value>Ad background music fade-out</value>
+  </data>
+  <data name="Station:Ads:BedFadeMs.Help" xml:space="preserve">
+    <value>How long the background music takes to fade out at the end of a generated ad, as the voice ends, in milliseconds. Defaults to 300.</value>
+  </data>
+  <data name="Station:Ads:BedDuckDb.Label" xml:space="preserve">
+    <value>Music under the voice in ads</value>
+  </data>
+  <data name="Station:Ads:BedDuckDb.Help" xml:space="preserve">
+    <value>How far below the voice the background music sits in a generated ad, in decibels, measured against the voice so the number means the same whatever the music's own level. Defaults to -12. 0 means no ducking at all, -60 is effectively silent. Changing it makes existing previews out of date until they are rendered again.</value>
+  </data>
+</root>

@@ -381,6 +381,14 @@ builder.Services.AddOptions<ScanOptions>().ValidateOnStart();
 // AboutController both call, so their two responses can never independently drift.
 builder.Services.AddSingleton<AttributionProjector>();
 
+// Settings copy (SPEC F205.2, STORY-477, PLAN T573) — AddLocalization() registers
+// IStringLocalizer<T>/IStringLocalizerFactory; SettingCopy is the one seam every consumer (T574's
+// settings DTO, today; nothing else yet) reads a setting's label/help/group/choice copy through,
+// wrapping IStringLocalizer<SettingsResources> so a missing resx entry degrades instead of
+// throwing — see that type's own remarks for the fallback shape.
+builder.Services.AddLocalization();
+builder.Services.AddSingleton<SettingCopy>();
+
 builder.Services.AddControllers();
 
 // Liveness endpoint for the compose healthcheck. No checks registered = 200 Healthy when up.
@@ -439,6 +447,22 @@ app.UseForwardedHeaders();
 // even error responses (401, 403, 500) carry the header. See NoCacheApiMiddleware.
 app.UseMiddleware<NoCacheApiMiddleware>();
 app.UseRouting();
+
+// Request localization (SPEC F205.2, STORY-477, PLAN T573) — governs which culture
+// IStringLocalizer<SettingsResources> (SettingCopy's own dependency, registered above) resolves
+// copy against per request. Placed immediately after UseRouting — the documented position
+// (https://learn.microsoft.com/aspnet/core/fundamentals/middleware/index, "Request Localization"
+// must run early, before anything downstream that reads the request's culture) — and before every
+// middleware below, none of which reads culture today but any of which might render
+// culture-dependent text later. AcceptLanguageHeaderRequestCultureProvider is the ONLY provider:
+// this API has no "?culture=" query string or culture cookie in its surface, so the default
+// QueryString/Cookie providers are removed rather than left as unused, unauthenticated culture
+// switches.
+//
+// Copy culture and format culture are deliberately split: Accept-Language moves only the UI culture
+// (resx copy); number/date formatting stays invariant. SettingsLocalization.CreateOptions says why.
+app.UseRequestLocalization(
+    SettingsLocalization.CreateOptions(SettingsCultures.Discover(AppContext.BaseDirectory).ToList()));
 
 // Surface gate (SPEC F61, F62.2): decides whether a route EXISTS before identity is ever
 // consulted. Must run after UseRouting (needs the matched endpoint's metadata) and before

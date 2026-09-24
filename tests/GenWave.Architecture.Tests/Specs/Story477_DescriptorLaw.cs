@@ -11,7 +11,7 @@ public static class FeatureDescriptorlaw
 
     public sealed class ScenarioKeysAndCopy
     {
-        // Given: AllowedSetting keys × Settings.resx entries
+        // Given: AllowedSetting keys × SettingsResources.resx entries
 
         /// <summary>AC9 — every key has .Label and .Help</summary>
         [Fact(Skip = Pending)]
