@@ -34,8 +34,9 @@ public static class AdLiveSettingsReader
     internal const int DefaultBedFadeMs = 300;
 
     /// <summary>
-    /// The SAME 100-1000 range <c>SettingValidator.AdsBedFadeMsMin</c>/<c>AdsBedFadeMsMax</c>
-    /// already enforces at PUT-time (GenWave.Host, T417) — hardcoded here rather than referenced
+    /// The SAME 100-1000 range the <c>Station:Ads:BedFadeMs</c> row on
+    /// <c>GenWave.Host.Configuration.StationSettingsAllowlist</c> (its own <c>Min</c>/<c>Max</c>,
+    /// PLAN T572) already enforces at PUT-time (GenWave.Host, T417) — hardcoded here rather than referenced
     /// (L10: GenWave.Ads must never reference GenWave.Host) as a defensive second gate: a value that
     /// somehow reached this table unvalidated (a direct DB edit, a future write path that skips the
     /// validator) still clamps to a sane render before it ever reaches ffmpeg — the same
@@ -49,8 +50,10 @@ public static class AdLiveSettingsReader
     /// <summary>gh-#746 — <c>Station:Ads:BedDuckDb</c>'s own default and clamp: how many dB UNDER the
     /// voice the background music sits in a generated ad (the mixer makes it relative to what the voice
     /// and bed actually measure). −12 is the ordinary radio bed level; 0 = no ducking at all; −60 =
-    /// effectively silent. Mirrors <c>appsettings.json</c>'s <c>Station:Ads:BedDuckDb</c> and
-    /// <c>SettingValidator</c>'s <c>AdsBedDuckDbMin/Max</c> — change one, change all three.</summary>
+    /// effectively silent. Mirrors <c>appsettings.json</c>'s <c>Station:Ads:BedDuckDb</c> and the
+    /// <c>Station:Ads:BedDuckDb</c> row's own <c>Min</c>/<c>Max</c> on
+    /// <c>GenWave.Host.Configuration.StationSettingsAllowlist</c> (PLAN T572) — change one, change all
+    /// three.</summary>
     internal const double DefaultBedDuckDb = -12.0;
     internal const double MinBedDuckDb = -60.0;
     internal const double MaxBedDuckDb = 0.0;

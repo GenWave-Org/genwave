@@ -327,7 +327,8 @@ public static class FeatureSponsorSettingsOptionsLawsAndTheRelease
                 new UnreachableSettingsStore(),
                 new SettingValidator(config),
                 NullLogger<SettingsController>.Instance,
-                new FakeIconPackStore())
+                new FakeIconPackStore(),
+                TestSettingCopy.Real())
             {
                 ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
             };

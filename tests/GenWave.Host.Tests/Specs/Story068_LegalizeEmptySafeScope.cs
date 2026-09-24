@@ -153,7 +153,7 @@ public static class FeatureLegalizeEmptySafeScope
             .Build();
 
         static SettingsController BuildController(IConfiguration config, IStationSettingsStore store, ILogger<SettingsController> logger) =>
-            new(config, store, new SettingValidator(config), logger, new FakeIconPackStore())
+            new(config, store, new SettingValidator(config), logger, new FakeIconPackStore(), TestSettingCopy.Real())
             {
                 ControllerContext = new ControllerContext
                 {

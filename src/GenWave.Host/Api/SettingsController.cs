@@ -31,6 +31,10 @@ public sealed class SettingsController(
     SettingValidator validator,
     ILogger<SettingsController> logger,
     IIconPackStore iconPackStore,
+    // Resolves each SettingDto's label/help/group/choice copy for the request's culture (SPEC
+    // F205.3). Required, like iconPackStore: a missing registration fails at activation instead
+    // of silently serving label = key.
+    SettingCopy settingCopy,
     ThemeCatalog? injectedThemeCatalog = null) : ControllerBase
 {
     /// <summary>
@@ -63,14 +67,12 @@ public sealed class SettingsController(
 
         var items = StationSettingsAllowlist.All.Select(allowed =>
         {
-            var rawValue  = allowed.Kind == SettingKind.NumberList
+            var rawValue = allowed.Kind == SettingKind.NumberList
                 ? GetNumberListJson(configuration, allowed.Key)
                 : configuration[allowed.Key] ?? string.Empty;
-            var source    = overrideKeys.ContainsKey(allowed.Key) ? "override" : "default";
-            var applyMode = ApplyModeWireValue(allowed.ApplyMode);
-            var kind      = KindWireValue(allowed.Kind);
-            var version   = versions.GetValueOrDefault(allowed.Key, 0);
-            return new SettingDto(allowed.Key, rawValue, source, applyMode, kind, allowed.Unit, ChoicesFor(allowed, iconPackChoices), version);
+            var source  = overrideKeys.ContainsKey(allowed.Key) ? "override" : "default";
+            var version = versions.GetValueOrDefault(allowed.Key, 0);
+            return BuildDto(allowed, rawValue, source, version, iconPackChoices);
         }).ToList();
 
         return Ok(items);
@@ -217,21 +219,60 @@ public sealed class SettingsController(
         var iconPackChoices = await IconPackChoicesAsync(ct);
         var result = updates.Select(u =>
         {
-            var allowed   = StationSettingsAllowlist.ByKey[u.Key];
-            var rawValue  = allowed.Kind == SettingKind.NumberList
+            var allowed  = StationSettingsAllowlist.ByKey[u.Key];
+            var rawValue = allowed.Kind == SettingKind.NumberList
                 ? (GetNumberListJson(configuration, u.Key) is { Length: > 0 } json ? json : u.Value ?? string.Empty)
                 : configuration[u.Key] ?? u.Value;
-            var source    = overrideKeys.ContainsKey(u.Key) ? "override" : "default";
-            var applyMode = ApplyModeWireValue(allowed.ApplyMode);
-            var kind      = KindWireValue(allowed.Kind);
-            var version   = versions.GetValueOrDefault(u.Key, 0);
-            return new SettingDto(u.Key, rawValue, source, applyMode, kind, allowed.Unit, ChoicesFor(allowed, iconPackChoices), version);
+            var source  = overrideKeys.ContainsKey(u.Key) ? "override" : "default";
+            var version = versions.GetValueOrDefault(u.Key, 0);
+            return BuildDto(allowed, rawValue, source, version, iconPackChoices);
         }).ToList();
 
         return Ok(result);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Builds one <see cref="SettingDto"/> row — the ONE place GET's and PUT's response shapes are
+    /// assembled (SPEC F205.3, STORY-477, PLAN T574), so the two can never drift apart the way
+    /// <see cref="ApplyModeWireValue"/>/<see cref="KindWireValue"/> already guarantee for the fields
+    /// they cover. <paramref name="rawValue"/>/<paramref name="source"/>/<paramref name="version"/>
+    /// are resolved by the caller (GET reads every allowlisted key; PUT reads only the keys just
+    /// written) — everything else (label/help/group copy, range, resolved choice labels) is read
+    /// straight off <paramref name="allowed"/> and <see cref="settingCopy"/>, identically for both.
+    /// </summary>
+    SettingDto BuildDto(
+        AllowedSetting allowed, string rawValue, string source, long version,
+        IReadOnlyList<SettingChoice> iconPackChoices) =>
+        new(
+            allowed.Key,
+            rawValue,
+            source,
+            ApplyModeWireValue(allowed.ApplyMode),
+            KindWireValue(allowed.Kind),
+            allowed.Unit,
+            settingCopy.Label(allowed.Key),
+            settingCopy.Help(allowed.Key),
+            new SettingGroupDto(settingCopy.GroupId(allowed.Group), settingCopy.GroupLabel(allowed.Group)),
+            allowed.Min,
+            allowed.Max,
+            LocalizedChoicesFor(allowed, iconPackChoices),
+            version);
+
+    /// <summary>
+    /// <see cref="ChoicesFor"/>'s raw choice list, with each choice's label resolved for the
+    /// request culture (SPEC F205.3, PLAN T574) — the resx <c>Choice.{key}.{value}</c> entry when
+    /// one exists (e.g. every <c>Llm:ReasoningEffort</c> value), otherwise the choice's OWN label
+    /// unchanged (<c>Station:Theme</c>/<c>Station:IconPack</c>'s catalog-sourced display names,
+    /// which the resx deliberately never enumerates — see <see cref="SettingCopy.TryChoiceLabel"/>'s
+    /// own remarks for why <see cref="SettingCopy.ChoiceLabel"/>'s plain value fallback would
+    /// silently clobber those instead).
+    /// </summary>
+    IReadOnlyList<SettingChoice>? LocalizedChoicesFor(AllowedSetting allowed, IReadOnlyList<SettingChoice> iconPackChoices) =>
+        ChoicesFor(allowed, iconPackChoices)?
+            .Select(choice => choice with { Label = settingCopy.TryChoiceLabel(allowed.Key, choice.Value) ?? choice.Label })
+            .ToList();
 
     /// <summary>
     /// Choices to present for one allowlisted entry, THIS request — <c>Station:Theme</c> widens to

@@ -33,6 +33,7 @@ using GenWave.Host.Configuration;
 using GenWave.Host.Options;
 using GenWave.Host.Seeding;
 using GenWave.Host.Tests.Fakes;
+using GenWave.Host.Tests.Support;
 using GenWave.Tts;
 
 namespace GenWave.Host.Tests.Specs;
@@ -510,7 +511,7 @@ public static class FeatureSafeSeedOnBootInProcess
             store.SeedOperatorRow(SafeLoopSeedMarkerStore.Key, "\"2026-01-01T00:00:00Z\"");
             var controller = new SettingsController(
                 config, store, new SettingValidator(config), NullLogger<SettingsController>.Instance,
-                new FakeIconPackStore())
+                new FakeIconPackStore(), TestSettingCopy.Real())
             {
                 ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
             };

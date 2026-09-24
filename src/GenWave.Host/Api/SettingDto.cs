@@ -26,12 +26,37 @@ namespace GenWave.Host.Api;
 ///   Short unit label for display (e.g. <c>"LUFS"</c>, <c>"seconds"</c>).
 ///   Empty string for booleans.
 /// </param>
+/// <param name="Label">
+///   The plain-English label for this key (SPEC F205.3, STORY-477, PLAN T574), resolved for the
+///   request culture via <see cref="Configuration.SettingCopy.Label"/> — falls back to
+///   <see cref="Key"/> itself when the resx carries no entry (never empty).
+/// </param>
+/// <param name="Help">
+///   The operator-facing help sentence for this key, resolved for the request culture via
+///   <see cref="Configuration.SettingCopy.Help"/> — falls back to an empty string when the resx
+///   carries no entry.
+/// </param>
+/// <param name="Group">
+///   The admin UI section this key is grouped under (SPEC F205.1/F205.3), with its label resolved
+///   for the request culture — see <see cref="SettingGroupDto"/>.
+/// </param>
+/// <param name="Min">
+///   The inclusive lower bound for a <see cref="Kind"/> of <c>"number"</c>, carried straight off
+///   <see cref="Configuration.AllowedSetting.Min"/> — <see langword="null"/> for every other kind.
+/// </param>
+/// <param name="Max">
+///   The inclusive upper bound for a <see cref="Kind"/> of <c>"number"</c>, carried straight off
+///   <see cref="Configuration.AllowedSetting.Max"/> — <see langword="null"/> for every other kind.
+/// </param>
 /// <param name="Choices">
 ///   The closed set of valid <see cref="SettingChoice"/> value/label pairs, present only when
 ///   <paramref name="Kind"/> is <c>"choice"</c> (e.g. every shipped ∪ owner theme, slug plus
 ///   display name, for <c>Station:Theme</c> — PLAN T183) — lets a client render a <c>&lt;select&gt;</c> instead of a text
 ///   box, with a real display label rather than a raw slug, so a typo cannot produce an
-///   unresolvable value (SPEC F102.14). <see langword="null"/> for every other kind.
+///   unresolvable value (SPEC F102.14). Each choice's label is resolved for the request culture
+///   when the resx carries a <c>Choice.{Key}.{value}</c> entry for it (PLAN T574); a Choice key
+///   whose vocabulary is live catalog data instead (<c>Station:Theme</c>, <c>Station:IconPack</c>)
+///   keeps its own catalog-sourced label unchanged. <see langword="null"/> for every other kind.
 /// </param>
 /// <param name="Version">
 ///   Optimistic-concurrency token (gh-#486): the key's currently stored version, or <c>0</c> when no
@@ -47,5 +72,10 @@ public sealed record SettingDto(
     string ApplyMode,
     string Kind,
     string Unit,
+    string Label,
+    string Help,
+    SettingGroupDto Group,
+    double? Min = null,
+    double? Max = null,
     IReadOnlyList<SettingChoice>? Choices = null,
     long Version = 0);

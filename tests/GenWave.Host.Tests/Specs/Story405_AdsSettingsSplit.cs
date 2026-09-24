@@ -10,6 +10,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using GenWave.Host.Api;
 using GenWave.Host.Configuration;
 using GenWave.Host.Tests.Fakes;
+using GenWave.Host.Tests.Support;
 
 namespace GenWave.Host.Tests.Specs;
 
@@ -50,7 +51,8 @@ public static class FeatureAdsSettingsAreLiveAndPacksSettingsAreEnvOnly
             store,
             new SettingValidator(config),
             NullLogger<SettingsController>.Instance,
-            new FakeIconPackStore())
+            new FakeIconPackStore(),
+            TestSettingCopy.Real())
         {
             ControllerContext = new ControllerContext
             {

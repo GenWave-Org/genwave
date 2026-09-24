@@ -19,6 +19,7 @@ using GenWave.Host.Configuration;
 using GenWave.Host.Options;
 using GenWave.Host.Playout;
 using GenWave.Host.Tests.Fakes;
+using GenWave.Host.Tests.Support;
 using GenWave.Orchestration;
 using GenWave.TestSupport;
 using GenWave.TestSupport.Fakes;
@@ -88,7 +89,8 @@ public static class FeatureSettingsSurfaceCompletion
             store,
             new SettingValidator(config),
             NullLogger<SettingsController>.Instance,
-            new FakeIconPackStore())
+            new FakeIconPackStore(),
+            TestSettingCopy.Real())
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
         };
