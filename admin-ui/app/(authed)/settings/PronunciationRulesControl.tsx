@@ -446,11 +446,12 @@ const COLUMN_COUNT = 7;
 /**
  * Pronunciation rules editor (SPEC F97, F100.3, STORY-254, PLAN T145) — reads and writes
  * `GET/POST/PUT/DELETE /api/pronunciations` directly (T144), never the `Tts:Pronunciations`
- * settings blob. Mounted by the Settings page (`page.tsx`) through `SettingsForm`'s `ttsTabExtra`
- * prop (PLAN T145 review F3), which lands it INSIDE the TTS tabpanel, right after that tab's own
- * section cards — genuinely beside the raw `Tts:Pronunciations` field (kept as-is; it stays a
- * legitimate hand-edit escape hatch, per that field's own documented remarks), not a page-level
- * section below the whole tabbed form.
+ * settings blob. Mounted by the Settings page (`page.tsx`) through `SettingsForm`'s
+ * `trailingContent` prop (PLAN T145 review F3; renamed from `ttsTabExtra` in T576 when the former
+ * TTS tabpanel was removed), which lands it at the end of the page, after every section card —
+ * including the one holding the raw `Tts:Pronunciations` field (kept as-is; it stays a legitimate
+ * hand-edit escape hatch, per that field's own documented remarks), not folded into a section card
+ * itself.
  *
  * <b>Why not `SETTING_CONTROL_REGISTRY` (the `CorrectionsSettingControl` precedent).</b> The
  * registry's `value`/`onChange` contract stages one opaque string into the page-wide changed-keys
@@ -461,14 +462,14 @@ const COLUMN_COUNT = 7;
  * behind a page-wide Save. Forcing that shape into `SettingControlProps` would mean either faking
  * a value/onChange round-trip nothing reads, or fighting the batch-save model outright.
  *
- * <b>Why `ttsTabExtra`, not `SettingsForm` importing this component directly.</b> A first attempt
- * mounted this unconditionally inside `SettingsForm`'s own tab loop (keyed on `tab.prefix`) —
- * reverted: that gave every `SettingsForm` consumer carrying any `Tts:*` key (its own extensive
- * jsdom spec suite included) an unmocked `fetch("/api/pronunciations")` as a side effect of merely
- * rendering, corrupting those specs' own sequenced-fetch call counts. `ttsTabExtra` is an inert
- * `ReactNode` prop `SettingsForm` renders without ever importing or knowing about this component —
- * a page that doesn't pass it (every existing spec) renders byte-identical to before, the same
- * injection-point idiom as that form's own `timeZone` prop.
+ * <b>Why `trailingContent`, not `SettingsForm` importing this component directly.</b> A first
+ * attempt mounted this unconditionally inside `SettingsForm`'s own tab loop (keyed on
+ * `tab.prefix`) — reverted: that gave every `SettingsForm` consumer carrying any `Tts:*` key (its
+ * own extensive jsdom spec suite included) an unmocked `fetch("/api/pronunciations")` as a side
+ * effect of merely rendering, corrupting those specs' own sequenced-fetch call counts.
+ * `trailingContent` is an inert `ReactNode` prop `SettingsForm` renders without ever importing or
+ * knowing about this component — a page that doesn't pass it (every existing spec) renders
+ * byte-identical to before, the same injection-point idiom as that form's own `timeZone` prop.
  *
  * Station rows are editable/deletable inline (the `CorrectionsSettingControl` row idiom, adapted
  * to immediate writes: an explicit Save/Cancel per row rather than a call on every keystroke, so a
@@ -785,7 +786,7 @@ export function PronunciationRulesControl(): ReactNode {
         )}
 
         {/* T145 review round 3 — deliberately a <div>, never a <form>: this control is mounted
-            inside SettingsForm's own page-wide <form> (via ttsTabExtra). A <form> nested inside
+            inside SettingsForm's own page-wide <form> (via trailingContent). A <form> nested inside
             another <form> is invalid HTML — a real browser silently STRIPS the inner element, so
             an onSubmit handler here would never bind, and a type="submit" button would instead
             submit the OUTER SettingsForm natively (a full navigation to bare /settings, no POST

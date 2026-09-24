@@ -15,6 +15,7 @@ import { Toaster } from "@/components/ui/toast";
 import { SettingsForm } from "../app/(authed)/settings/SettingsForm";
 import type { SettingDto } from "../app/(authed)/settings/SettingsForm";
 import type { LibraryDto } from "../lib/library";
+import { settingDto } from "./setting-fixture";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -29,19 +30,19 @@ const SAFE_SCOPE_EMPTY_CONSEQUENCE =
 /** One setting per canonical section (Loudness/Playout/Scope/Safe) — covers STORY-091's grouping. */
 function makeGroupedSettings(): SettingDto[] {
   return [
-    { key: "Loudness:TargetLufs", value: "-16", source: "default", applyMode: "live", kind: "number", unit: "LUFS" },
-    { key: "Loudness:CeilingDbtp", value: "-1", source: "default", applyMode: "live", kind: "number", unit: "dBTP" },
-    {
+    settingDto({ key: "Loudness:TargetLufs", value: "-16", source: "default", applyMode: "live", kind: "number", unit: "LUFS" }),
+    settingDto({ key: "Loudness:CeilingDbtp", value: "-1", source: "default", applyMode: "live", kind: "number", unit: "dBTP" }),
+    settingDto({
       key: "Station:Cadence:LeadInBeforeEachTrack",
       value: "true",
       source: "default",
       applyMode: "live",
       kind: "boolean",
       unit: "",
-    },
-    { key: "GW_XFADE_MAX", value: "8", source: "override", applyMode: "engine-restart", kind: "number", unit: "seconds" },
-    { key: SCOPE_KEY, value: "[1]", source: "override", applyMode: "live", kind: "number-list", unit: "" },
-    { key: SAFE_SCOPE_KEY, value: "[2]", source: "override", applyMode: "live", kind: "number-list", unit: "" },
+    }),
+    settingDto({ key: "GW_XFADE_MAX", value: "8", source: "override", applyMode: "engine-restart", kind: "number", unit: "seconds" }),
+    settingDto({ key: SCOPE_KEY, value: "[1]", source: "override", applyMode: "live", kind: "number-list", unit: "" }),
+    settingDto({ key: SAFE_SCOPE_KEY, value: "[2]", source: "override", applyMode: "live", kind: "number-list", unit: "" }),
   ];
 }
 
@@ -124,10 +125,9 @@ describe("Feature: Settings grouped sections", () => {
         <SettingsForm settings={makeGroupedSettings()} libraries={makeLibraries()} />
       );
 
-      // gh-#144 — the Loudness section now lives on the Loudness area tab, whose panel stays
-      // mounted but `hidden` while the default Station tab is active; `hidden: true` reaches it.
-      // The grouping assertions below are unchanged.
-      const loudness = screen.getByRole("heading", { name: "Loudness", hidden: true });
+      // T576 — SettingsForm renders every section on one page (the former per-area tab strip is
+      // gone), so every heading below is plainly visible with no `hidden: true` escape hatch needed.
+      const loudness = screen.getByRole("heading", { name: "Loudness" });
       const playout = screen.getByRole("heading", { name: "Playout" });
       const scope = screen.getByRole("heading", { name: "Scope" });
       const safe = screen.getByRole("heading", { name: "Station sounds" });
@@ -186,14 +186,14 @@ describe("Feature: Settings grouped sections", () => {
     it("places GW_SAFE_GAP_SECONDS in the Safe group with the engine-restart badge", async () => {
       const settings: SettingDto[] = [
         ...makeGroupedSettings(),
-        {
+        settingDto({
           key: "GW_SAFE_GAP_SECONDS",
           value: "7",
           source: "default",
           applyMode: "engine-restart",
           kind: "number",
           unit: "seconds",
-        },
+        }),
       ];
       renderWithProviders(
         <SettingsForm settings={settings} libraries={makeLibraries()} />
@@ -209,14 +209,14 @@ describe("Feature: Settings grouped sections", () => {
     });
 
     it("lands an unrecognized/future key in a fallback section instead of dropping it", () => {
-      const futureSetting: SettingDto = {
+      const futureSetting: SettingDto = settingDto({
         key: "Station:Future:Knob",
         value: "1",
         source: "default",
         applyMode: "live",
         kind: "number",
         unit: "",
-      };
+      });
       renderWithProviders(<SettingsForm settings={[futureSetting]} libraries={[]} />);
 
       expect(screen.getByRole("heading", { name: "Other" })).toBeInTheDocument();

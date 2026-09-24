@@ -18,6 +18,7 @@ import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "@/components/ui/toast";
 import { SettingsForm } from "../app/(authed)/settings/SettingsForm";
 import type { SettingDto } from "../app/(authed)/settings/SettingsForm";
+import { settingDto } from "./setting-fixture";
 import type { LibraryDto } from "../lib/library";
 import { DashboardView } from "../app/(authed)/dashboard/DashboardView";
 
@@ -33,7 +34,7 @@ const RAW_PALETTE_CLASS = /\b(?:bg|text|border)-(?:red|orange|amber|yellow|rose)
 const RAW_HEX_CLASS = /#[0-9a-fA-F]{3,6}\b/;
 
 function makeSafeScopeSetting(override: Partial<SettingDto> = {}): SettingDto {
-  return {
+  return settingDto({
     key: SAFE_SCOPE_KEY,
     value: "[1]",
     source: "override",
@@ -41,7 +42,7 @@ function makeSafeScopeSetting(override: Partial<SettingDto> = {}): SettingDto {
     kind: "number-list",
     unit: "",
     ...override,
-  };
+  });
 }
 
 function makeLibraries(): LibraryDto[] {

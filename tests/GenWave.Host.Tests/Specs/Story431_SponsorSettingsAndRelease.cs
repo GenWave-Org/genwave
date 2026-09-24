@@ -3,9 +3,10 @@
 // BDD specification — xUnit. This file carries T433's own five ACs (AC1–AC4, AC7); AC5 (L10) is
 // T443's, over in GenWave.Architecture.Tests. AC6 is T453's, implemented below.
 //
-// AC1's key-list parity is Story151_SeededDefaults.cs's own FeatureSettingsHelpKeysParity fact's
-// job; this file's own facts instead pin the three things only THIS task's wording edit can break:
-// the runtime 400 message, the FIELD_HELP_TEXT wording, and the TS mirror still carrying the key.
+// AC1's key-list parity is Story151_SeededDefaults.cs's job; this file's own facts instead pin the
+// two things only THIS task's wording edit can break: the runtime 400 message, and the resx help
+// copy SettingCopy resolves server-side (SPEC F205.4, PLAN T574/T576 — the client no longer carries
+// its own help-text mirror to keep in step).
 // AC2/AC3 drive the real GenWave.Ads.AdsServiceCollectionExtensions.AddGenWaveAds registration through a
 // WebApplicationFactory<Program> boot — the Story380 GardenerKnobsWebFactory shape — so both facts
 // prove production wiring, not a hand-built options chain. AC4 drives the real SettingsController
@@ -18,7 +19,6 @@
 // one this same PR produced, and every release after this one proves the surface held steady
 // since the last regeneration.
 
-using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -62,39 +62,13 @@ public static class FeatureSponsorSettingsOptionsLawsAndTheRelease
 
     public sealed class ScenarioAntiRepeatWindowHelpTextChanged
     {
-        static string SettingsFormTsxPath() =>
-            Path.Combine(RepoRoot(), "admin-ui", "app", "(authed)", "settings", "SettingsForm.tsx");
-
-        static string SettingsHelpKeysTsPath() =>
-            Path.Combine(RepoRoot(), "admin-ui", "app", "(authed)", "settings", "settings-help-keys.ts");
-
-        /// <summary>
-        /// Extracts the (possibly multi-line, string-concatenated) <c>FIELD_HELP_TEXT</c> value for
-        /// <c>"Station:Ads:AntiRepeatWindow"</c> — bounded from that key's own marker to the next
-        /// dictionary entry (a line starting with two spaces and a quote, the Story151
-        /// bounded-region idiom), so this makes no assumption about which key comes next.
-        /// </summary>
-        static string AntiRepeatWindowHelpText()
-        {
-            var path = SettingsFormTsxPath();
-            var text = File.ReadAllText(path);
-
-            const string marker = "\"Station:Ads:AntiRepeatWindow\":";
-            var start = text.IndexOf(marker, StringComparison.Ordinal);
-            Assert.True(start >= 0, $"could not find '{marker}' in {path}");
-            var valueStart = start + marker.Length;
-
-            var nextEntry = Regex.Match(text[valueStart..], "\n  \"");
-            Assert.True(nextEntry.Success, $"could not find the next FIELD_HELP_TEXT entry after '{marker}' in {path}");
-            var valueText = text[valueStart..(valueStart + nextEntry.Index)];
-
-            return string.Concat(Regex.Matches(valueText, "\"([^\"]*)\"").Select(m => m.Groups[1].Value));
-        }
-
         [Fact]
         public void TheHelpTextSaysSponsor()
         {
-            var helpText = AntiRepeatWindowHelpText();
+            // T576 (SPEC F205.4) — help copy is server-resolved via SettingCopy over the shipped
+            // resx, the same seam GET /api/settings itself reads; no client-side FIELD_HELP_TEXT
+            // mirror exists to string-parse anymore.
+            var helpText = TestSettingCopy.Real().Help("Station:Ads:AntiRepeatWindow");
 
             // F173.3: the unit becomes sponsors — the wording (previously "spots"/"ad") names the
             // sponsor, not the individual spot.
@@ -119,23 +93,6 @@ public static class FeatureSponsorSettingsOptionsLawsAndTheRelease
             Assert.NotNull(message);
             Assert.Contains("sponsors", message, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("spots", message, StringComparison.OrdinalIgnoreCase);
-        }
-
-        [Fact]
-        public void TheF56HelpKeyParitySpecStillPasses()
-        {
-            // Claim 1 (F173.3): the FIELD_HELP_TEXT entry itself no longer names the unit "spot" —
-            // this is the literal wording edit T433 makes, so this claim (not a re-run of
-            // Story151's key-LIST parity fact, which is wording-blind) is the one that goes red if
-            // the rename is reverted.
-            var helpText = AntiRepeatWindowHelpText();
-            Assert.DoesNotContain("spot", helpText, StringComparison.OrdinalIgnoreCase);
-
-            // Claim 2 (F176.1): the key survives the wording edit on the TS-mirror side too —
-            // still allowlisted (Story151's own fact) AND still helped (this claim), never one
-            // without the other.
-            var tsMirrorText = File.ReadAllText(SettingsHelpKeysTsPath());
-            Assert.Contains("\"Station:Ads:AntiRepeatWindow\"", tsMirrorText, StringComparison.Ordinal);
         }
     }
 

@@ -13,60 +13,69 @@ import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "@/components/ui/toast";
 import { SettingsForm } from "../app/(authed)/settings/SettingsForm";
 import type { SettingDto } from "../app/(authed)/settings/SettingsForm";
+import { settingDto } from "./setting-fixture";
 
 /** One setting per section this file cares about — station/playout/library, live + enrichment. */
 function makeSettings(): SettingDto[] {
   return [
-    { key: "Station:Name", value: "GenWave", source: "default", applyMode: "live", kind: "string", unit: "" },
-    { key: "Station:Voice", value: "af_heart", source: "default", applyMode: "live", kind: "string", unit: "" },
-    {
+    settingDto({
+      key: "Station:Name",
+      value: "GenWave",
+      source: "default",
+      applyMode: "live",
+      kind: "string",
+      unit: "",
+      help: "help for Station:Name",
+    }),
+    settingDto({ key: "Station:Voice", value: "af_heart", source: "default", applyMode: "live", kind: "string", unit: "" }),
+    settingDto({
       key: "Station:Cadence:StationIdEveryNUnits",
       value: "4",
       source: "default",
       applyMode: "live",
       kind: "number",
       unit: "count",
-    },
-    {
+    }),
+    settingDto({
       key: "Station:Rotation:RecentWindow",
       value: "20",
       source: "default",
       applyMode: "live",
       kind: "number",
       unit: "tracks",
-    },
-    {
+    }),
+    settingDto({
       key: "Library:ScanIntervalSeconds",
       value: "60",
       source: "default",
       applyMode: "live",
       kind: "number",
       unit: "seconds",
-    },
-    {
+    }),
+    settingDto({
       key: "Library:EnrichmentConcurrency",
       value: "4",
       source: "default",
       applyMode: "live",
       kind: "number",
       unit: "workers",
-    },
-    {
+    }),
+    settingDto({
       key: "Library:CueDetection:MinSilenceDurationSec",
       value: "0.5",
       source: "default",
       applyMode: "enrichment",
       kind: "number",
       unit: "seconds",
-    },
-    {
+    }),
+    settingDto({
       key: "Library:Energy:WindowSeconds",
       value: "12",
       source: "default",
       applyMode: "enrichment",
       kind: "number",
       unit: "seconds",
-    },
+    }),
   ];
 }
 
@@ -119,10 +128,9 @@ describe("Feature: The settings page groups every tunable honestly", () => {
     it("renders a library section holding the Library:* keys (F44.8)", () => {
       renderWithProviders(<SettingsForm settings={makeSettings()} />);
 
-      // gh-#144 — Library:* keys render on the Library area tab, whose panel stays mounted but
-      // `hidden` while the default Station tab is active; `hidden: true` reaches it. The
-      // containment assertions below are unchanged.
-      const library = screen.getByRole("heading", { name: "Library", hidden: true });
+      // T576 — SettingsForm renders every section on one page (the former per-area tab strip is
+      // gone), so this heading is plainly visible with no `hidden: true` escape hatch needed.
+      const library = screen.getByRole("heading", { name: "Library" });
       const librarySection = within(library.closest("section")!);
 
       expect(librarySection.getByLabelText(/Library:ScanIntervalSeconds/)).toBeInTheDocument();
@@ -150,24 +158,61 @@ describe("Feature: The settings page groups every tunable honestly", () => {
       expect(screen.getAllByText("applies at next enrichment")).toHaveLength(2);
     });
 
-    it("badges Station:Name live with the icy-name engine-restart caveat copy (F44.5)", () => {
+    it("renders the Station:Name help flyover, which carries the Icecast engine-restart caveat in production (F44.5)", () => {
+      // The shipped caveat wording itself is pinned against the real resx in
+      // Story138_StationIdentityLive.cs (TestSettingCopy.Real().Help("Station:Name")) — this
+      // fixture's help text is neutral on purpose so this spec can't drift into re-asserting its
+      // own fixture (T576 round 3, R2-1).
       renderWithProviders(<SettingsForm settings={makeSettings()} />);
 
-      const station = screen.getByRole("heading", { name: "Station" });
-      const stationSection = within(station.closest("section")!);
-
-      expect(stationSection.getByLabelText(/Station:Name/).closest("div")).toHaveTextContent("Station:Name");
-      // The field badges "live" (not "applies at next enrichment"/"applies after engine restart") …
-      expect(screen.getAllByText("live").length).toBeGreaterThan(0);
-      // … with the Icecast-name caveat copy rendered alongside it (SPEC F44.5, shipped V7).
-      expect(screen.getByText(/Icecast stream\/directory name updates on the next engine restart/i))
-        .toBeInTheDocument();
+      expect(screen.getByTestId("setting-help-Station:Name")).toBeInTheDocument();
     });
+  });
 
-    it("states '0 disables' on the StationIdEveryNUnits field (F42.2)", () => {
-      renderWithProviders(<SettingsForm settings={makeSettings()} />);
+  describe("Scenario: the save model stays page-wide across sections", () => {
+    // Re-homed from the now-deleted settings-area-tabs.spec.tsx (gh-#144's tab strip retired,
+    // T576): the save model itself never depended on tabs — one form, one changed-keys PUT — so
+    // this fact still holds now that sections (not tabs) are what separates Station from Library.
+    //
+    // A dedicated fixture, not the file's shared makeSettings(): that one carries Station:Voice,
+    // whose registry-backed VoiceSettingControl fetches /api/voices on mount and would double-
+    // count against the single shared fetch mock below — this scenario is about the PUT, not
+    // about registry controls.
+    function makeCrossSectionSettings(): SettingDto[] {
+      return [
+        settingDto({ key: "Station:Name", value: "GenWave", source: "default", applyMode: "live", kind: "string", unit: "" }),
+        settingDto({
+          key: "Library:EnrichmentConcurrency",
+          value: "4",
+          source: "default",
+          applyMode: "live",
+          kind: "number",
+          unit: "workers",
+        }),
+      ];
+    }
 
-      expect(screen.getByText(/0 disables station IDs/i)).toBeInTheDocument();
+    it("one Save submits staged changes from several sections in a single PUT", async () => {
+      const mockFetch = makeFetchMock(200);
+      renderWithProviders(<SettingsForm settings={makeCrossSectionSettings()} />);
+
+      fireEvent.change(screen.getByLabelText(/Station:Name/), { target: { value: "New Name" } });
+      fireEvent.change(screen.getByLabelText(/Library:EnrichmentConcurrency/), {
+        target: { value: "8" },
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /save settings/i }));
+        await Promise.resolve();
+      });
+
+      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+      const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+      const body = JSON.parse(init.body as string) as Array<{ key: string; value: string }>;
+      expect(body).toEqual([
+        { key: "Station:Name", value: "New Name" },
+        { key: "Library:EnrichmentConcurrency", value: "8" },
+      ]);
     });
   });
 

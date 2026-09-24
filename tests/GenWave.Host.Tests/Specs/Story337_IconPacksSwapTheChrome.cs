@@ -132,8 +132,9 @@ public static class FeatureIconPacksSwapTheChrome
 
         // Parity guard (PLAN T68's own golden-table idiom, applied to the icon-name contract):
         // string-parses admin-ui/app/(authed)/_components/icons.tsx directly for its `XxxIcon`
-        // export set (no TS toolchain runs inside xUnit — the Story151/FeatureSettingsHelpKeysParity
-        // repo-content-fact idiom) and asserts IconNameContract.Names against the derived set. Unlike
+        // export set (no TS toolchain runs inside xUnit — the same repo-content-fact idiom
+        // Story192_PersonaSlugParity.cs's Slugify parity guard uses) and
+        // asserts IconNameContract.Names against the derived set. Unlike
         // the Slugify parity guard, icons.tsx itself IS the one source SPEC F130.2 names — there is no
         // separately authored TS mirror to keep in step.
         static string RepoRoot =>
@@ -172,10 +173,9 @@ public static class FeatureIconPacksSwapTheChrome
         // three regex LITERALS (`PATH_DATA_PATTERN`/`POINTS_PATTERN`/`ICON_NAME_PATTERN`) rather than
         // importing this parser's grammar (no shared build step crosses the C#/TS boundary at build
         // time), so this fact is what keeps them from drifting apart silently. Extraction stays
-        // deliberately dumb — string-parses the .ts source directly, the same
-        // Story151/FeatureSettingsHelpKeysParity repo-content-fact idiom
-        // `TheIconNameContractMatchesTheHouseIconExports` above already applies to icons.tsx; no TS
-        // toolchain runs inside xUnit.
+        // deliberately dumb — string-parses the .ts source directly, the same repo-content-fact
+        // idiom `TheIconNameContractMatchesTheHouseIconExports` above already
+        // applies to icons.tsx; no TS toolchain runs inside xUnit.
         static string IconPackTsPath =>
             Path.Combine(RepoRoot, "admin-ui", "lib", "icon-pack.ts");
 

@@ -4,8 +4,11 @@
 // Story136_* spec files.
 //
 // Runner: Jest (jsdom) + @testing-library/react. Implemented V6 (2026-07-14): the "0 disables"
-// helper copy is delivered through SettingsForm's FIELD_HELP_TEXT map (a small additive lookup,
-// same shape as EMPTY_LIST_POLICIES) rather than a new metadata layer.
+// helper copy is delivered through the setting's own DTO-carried `help` text (T576 — the server's
+// SettingCopy/resx is the sole source, no client-side FIELD_HELP_TEXT lookup anymore). The pin on
+// the SHIPPED wording itself moved to Story136_StationIdCadenceValidation.cs, reading the real
+// resx via TestSettingCopy.Real() — a jest spec asserting copy its own fixture supplied would be
+// circular. This file keeps the functional half: a 0 submission is accepted without error.
 
 import { describe, it, expect, beforeEach, afterEach, jest } from "@jest/globals";
 import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
@@ -15,11 +18,12 @@ import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "@/components/ui/toast";
 import { SettingsForm } from "../app/(authed)/settings/SettingsForm";
 import type { SettingDto } from "../app/(authed)/settings/SettingsForm";
+import { settingDto } from "./setting-fixture";
 
 const STATION_ID_KEY = "Station:Cadence:StationIdEveryNUnits";
 
 function makeStationIdSetting(overrides: Partial<SettingDto> = {}): SettingDto {
-  return {
+  return settingDto({
     key: STATION_ID_KEY,
     value: "4",
     source: "default",
@@ -27,7 +31,7 @@ function makeStationIdSetting(overrides: Partial<SettingDto> = {}): SettingDto {
     kind: "number",
     unit: "count",
     ...overrides,
-  };
+  });
 }
 
 function makeFetchMock(status: number, body: unknown = {}): jest.MockedFunction<typeof fetch> {
@@ -69,12 +73,6 @@ describe("Feature: The station-ID field says what zero means", () => {
   });
 
   describe("Scenario: the off switch is discoverable", () => {
-    it("states '0 disables' on the StationIdEveryNUnits settings field (F42.2)", () => {
-      renderWithProviders(<SettingsForm settings={[makeStationIdSetting()]} />);
-
-      expect(screen.getByText(/0 disables station IDs/i)).toBeInTheDocument();
-    });
-
     it("accepts a 0 submission without an inline validation error (F42.2)", async () => {
       const mockFetch = makeFetchMock(200);
       renderWithProviders(<SettingsForm settings={[makeStationIdSetting()]} />);

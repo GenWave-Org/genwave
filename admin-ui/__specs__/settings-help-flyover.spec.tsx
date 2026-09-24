@@ -4,8 +4,8 @@
 // F54 pushed help coverage to 100% of the allowlist, which made the always-on help paragraphs a
 // wall of prose. The copy now lives in a per-title `?` flyover: shown on hover, on keyboard
 // focus, and pinned open by click/tap (touch has no hover). The panel stays MOUNTED and merely
-// `hidden` while closed — that is what keeps the settings-help-coverage parity gate's
-// `setting-help-<key>` testids working unchanged, and gives `aria-describedby` a stable target.
+// `hidden` while closed — that keeps the `setting-help-<key>` testids stable for specs
+// and gives `aria-describedby` a stable target.
 // Inline space under the control is reserved for warnings (ApplyModeBadge, the rotation-coupling
 // notice, SafeScope badges, validation errors) — pinned here by the "warnings stay inline"
 // scenario.
@@ -21,6 +21,7 @@ import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "@/components/ui/toast";
 import { SettingsForm } from "../app/(authed)/settings/SettingsForm";
 import type { SettingDto } from "../app/(authed)/settings/SettingsForm";
+import { settingDto } from "./setting-fixture";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -29,16 +30,20 @@ import type { SettingDto } from "../app/(authed)/settings/SettingsForm";
 const RECENT_WINDOW_KEY = "Station:Rotation:RecentWindow";
 const ARTIST_SEPARATION_KEY = "Station:Rotation:ArtistSeparation";
 
+// The flyover only renders when `help` is non-blank (T576) — every fixture below carries its own
+// explicit help copy rather than leaning on a shared FIELD_HELP_TEXT lookup, which is now gone
+// (the server's SettingCopy/resx is the sole source of help text).
 function makeNumberSetting(key: string, value: string, overrides: Partial<SettingDto> = {}): SettingDto {
-  return {
+  return settingDto({
     key,
     value,
     source: "default",
     applyMode: "live",
     kind: "number",
     unit: "count",
+    help: "Counts the most recently-played tracks that stay off the rotation.",
     ...overrides,
-  };
+  });
 }
 
 function renderWithProviders(node: ReactElement): ReturnType<typeof render> {
@@ -67,7 +72,7 @@ function helpPanel(key: string): HTMLElement {
 
 describe("Feature: settings help lives in a ? flyover on the title", () => {
   describe("Scenario: the page renders without the help prose visible", () => {
-    it("the help panel is mounted (parity gate keeps its testid) but hidden until asked for", () => {
+    it("the help panel is mounted (its testid stays stable) but hidden until asked for", () => {
       renderWithProviders(
         <SettingsForm settings={[makeNumberSetting(RECENT_WINDOW_KEY, "50")]} />
       );

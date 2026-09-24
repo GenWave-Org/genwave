@@ -13,21 +13,25 @@ import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "@/components/ui/toast";
 import { SettingsForm } from "../app/(authed)/settings/SettingsForm";
 import type { SettingDto } from "../app/(authed)/settings/SettingsForm";
+import { settingDto } from "./setting-fixture";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 function makeAudienceSetting(overrides: Partial<SettingDto> = {}): SettingDto {
-  return {
+  return settingDto({
     key: "Station:Audience",
     value: "everyone",
     source: "default",
     applyMode: "live",
     kind: "string",
     unit: "",
+    // The flyover only renders when `help` is non-blank (T576) — this fixture carries its own
+    // explicit help copy so the "still shows the existing help text" spec below still holds.
+    help: "Everyone (default) keeps explicit tracks out of the pool entirely.",
     ...overrides,
-  };
+  });
 }
 
 interface MockResponseSpec {
@@ -156,7 +160,7 @@ describe("Feature: Station:Audience's dedicated Settings control", () => {
       renderWithProviders(
         <SettingsForm
           settings={[
-            { key: "Llm:Model", value: "gpt", source: "default", applyMode: "live", kind: "string", unit: "" },
+            settingDto({ key: "Llm:Model", value: "gpt", source: "default", applyMode: "live", kind: "string", unit: "" }),
           ]}
         />
       );

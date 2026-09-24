@@ -57,14 +57,15 @@ export default async function SettingsPage({}: Record<string, never>): Promise<R
         {/* T145 (SPEC F97, F100.3, STORY-254, review F3) — PronunciationRulesControl is a
             dedicated-API surface (reads a merged station∪persona view no settings key carries;
             writes immediately, never the page-wide Save batch), so it can't register in
-            SettingsForm's per-key SETTING_CONTROL_REGISTRY. Threaded in via `ttsTabExtra` rather
-            than SettingsForm importing it directly: it lands inside the TTS tabpanel (AC1's "TTS
-            surface", beside the raw Tts:Pronunciations field), while every other SettingsForm
-            consumer — including its own jsdom spec suite — stays unaware this component exists. */}
+            SettingsForm's per-key SETTING_CONTROL_REGISTRY. Threaded in via `trailingContent`
+            rather than SettingsForm importing it directly: it lands at the end of the page, after
+            every section card (T576 — the former TTS tabpanel is gone, every section renders on
+            one page now), while every other SettingsForm consumer — including its own jsdom spec
+            suite — stays unaware this component exists. */}
         <SettingsForm
           settings={settings}
           libraries={libraries}
-          ttsTabExtra={<PronunciationRulesControl />}
+          trailingContent={<PronunciationRulesControl />}
         />
       </div>
     </main>

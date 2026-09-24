@@ -23,6 +23,7 @@ import { Toaster } from "@/components/ui/toast";
 import { SettingsForm } from "../app/(authed)/settings/SettingsForm";
 import type { SettingDto } from "../app/(authed)/settings/SettingsForm";
 import type { LibraryDto } from "../lib/library";
+import { settingDto } from "./setting-fixture";
 
 // ---------------------------------------------------------------------------
 // Fixtures — settings-page scenarios
@@ -31,7 +32,7 @@ import type { LibraryDto } from "../lib/library";
 const MAIN_SCOPE_KEY = "Station:Scope:LibraryIds";
 
 function makeMainScopeSetting(override: Partial<SettingDto> = {}): SettingDto {
-  return {
+  return settingDto({
     key: MAIN_SCOPE_KEY,
     value: "[1]",
     source: "override",
@@ -39,7 +40,7 @@ function makeMainScopeSetting(override: Partial<SettingDto> = {}): SettingDto {
     kind: "number-list",
     unit: "",
     ...override,
-  };
+  });
 }
 
 function makeLibraries(): LibraryDto[] {
@@ -220,14 +221,14 @@ describe("Feature: Main rotation scope on the settings page", () => {
   describe("Scenario: submitting a scope change", () => {
     it("submits only the changed setting via PUT /api/settings (W6 changed-fields pattern)", async () => {
       const mockFetch = makeSettingsFetchMock(200);
-      const untouchedSetting: SettingDto = {
+      const untouchedSetting: SettingDto = settingDto({
         key: "Loudness:TargetLufs",
         value: "-16",
         source: "default",
         applyMode: "live",
         kind: "number",
         unit: "LUFS",
-      };
+      });
 
       renderWithProviders(
         <SettingsForm
@@ -284,8 +285,10 @@ describe("Feature: Main rotation scope on the settings page", () => {
 
   // -------------------------------------------------------------------------
   describe("Scenario: rejecting an empty selection", () => {
-    it("blocks save with an inline field error when every library is deselected", async () => {
-      const mockFetch = makeSettingsFetchMock(200);
+    let mockFetch: jest.MockedFunction<typeof fetch>;
+
+    beforeEach(async () => {
+      mockFetch = makeSettingsFetchMock(200);
 
       renderWithProviders(
         <SettingsForm
@@ -301,7 +304,9 @@ describe("Feature: Main rotation scope on the settings page", () => {
         fireEvent.click(screen.getByRole("button", { name: /save settings/i }));
         await Promise.resolve();
       });
+    });
 
+    it("blocks save with an inline field error when every library is deselected", () => {
       // Blocked client-side: no PUT was ever sent
       expect(mockFetch).not.toHaveBeenCalled();
 
@@ -312,26 +317,15 @@ describe("Feature: Main rotation scope on the settings page", () => {
       expect(screen.queryByRole("status")).toBeNull();
     });
 
-    it("does NOT offer a confirm-dialog override (unlike SafeScope's empty-with-confirm)", async () => {
-      makeSettingsFetchMock(200);
-
-      renderWithProviders(
-        <SettingsForm
-          settings={[makeMainScopeSetting({ value: "[1]" })]}
-          libraries={makeLibraries()}
-        />
-      );
-
-      const select = screen.getByRole("listbox") as HTMLSelectElement;
-      selectOptions(select, []);
-
-      await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: /save settings/i }));
-        await Promise.resolve();
-      });
-
+    it("does NOT offer a confirm-dialog override (unlike SafeScope's empty-with-confirm)", () => {
       // Unlike SafeScope's useConfirm() modal, main scope never prompts — it just blocks.
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    it("moves focus to the blocked Station:Scope:LibraryIds control (gh-#144, T576 round 3 R2-3)", () => {
+      // With the former tab strip gone, nothing else moved the operator to the field a
+      // client-side block silently rejected (setPendingFocusKey in the block branch, SettingsForm.tsx).
+      expect(document.activeElement).toBe(document.getElementById("setting-Station:Scope:LibraryIds"));
     });
   });
 

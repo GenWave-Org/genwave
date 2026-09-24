@@ -16,6 +16,7 @@ import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "@/components/ui/toast";
 import { SettingsForm } from "../app/(authed)/settings/SettingsForm";
 import type { SettingDto } from "../app/(authed)/settings/SettingsForm";
+import { settingDto } from "./setting-fixture";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -34,7 +35,7 @@ function makePersonaIdSetting(
   key: string,
   overrides: Partial<SettingDto> = {}
 ): SettingDto {
-  return {
+  return settingDto({
     key,
     value: "0",
     source: "default",
@@ -42,7 +43,7 @@ function makePersonaIdSetting(
     kind: "number",
     unit: "",
     ...overrides,
-  };
+  });
 }
 
 interface MockResponseSpec {

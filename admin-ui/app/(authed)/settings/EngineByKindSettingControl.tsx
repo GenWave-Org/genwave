@@ -158,7 +158,10 @@ export function EngineByKindSettingControl({
   const canAddRow = !disabled && canonicalKind(draftKind) !== null;
 
   return (
-    <div id={controlId} className="flex flex-col gap-4">
+    // tabIndex={-1}: a plain <div> is never a `.focus()` target on its own (T576 round 3, R2-2)
+    // — this makes the 400-validation-scrolls-and-focuses-the-field seam work here too, without
+    // adding a tab stop.
+    <div id={controlId} tabIndex={-1} className="flex flex-col gap-4">
       {isDirty && (
         <p
           data-testid="engine-by-kind-dirty-notice"

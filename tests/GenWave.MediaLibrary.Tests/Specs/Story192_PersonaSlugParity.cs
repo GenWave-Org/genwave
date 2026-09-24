@@ -6,9 +6,10 @@
 //
 // admin-ui/__specs__/persona-slug.parity-cases.ts is the ONE authored case table (each row a
 // [name, expectedSlug] pair); admin-ui/__specs__/persona-slug.spec.ts asserts the real personaSlug
-// against it. This fact is the C# half: it string-parses that SAME .ts file (the
-// Story151/FeatureSettingsHelpKeysParity repo-content-fact idiom — no TS toolchain runs inside
-// xUnit) and asserts the real LegacyPersonaCardMapper.Slugify against the same rows. It lives here
+// against it. This fact is the C# half: it string-parses that SAME .ts file (the same
+// repo-content-fact idiom Story337_IconPacksSwapTheChrome.cs's icon-name-contract parity guard
+// uses — no TS toolchain runs inside xUnit) and asserts the real
+// LegacyPersonaCardMapper.Slugify against the same rows. It lives here
 // (GenWave.MediaLibrary.Tests), not Host.Tests, because Slugify is internal and only this test
 // project carries the InternalsVisibleTo grant from GenWave.MediaLibrary. A change to EITHER
 // implementation that stops matching a row fails a spec on THAT toolchain, never a silent

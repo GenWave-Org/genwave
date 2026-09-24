@@ -30,11 +30,30 @@ export interface SettingChoice {
 }
 
 /**
+ * The descriptor's group — one of `SettingGroup`'s C# members, wire-cased (STORY-478, PLAN T576;
+ * SPEC F205.3/F205.4). `id` is the lowercase enum name (`sound`, `voice`, `announcements`,
+ * `sponsors`, `library`, `community`, `station`, `system`) and doubles as the future section's
+ * anchor id (T577); `label` is the operator-facing group heading, already resolved server-side.
+ */
+export interface SettingGroupDto {
+  id: string;
+  label: string;
+}
+
+/**
  * Wire shape of one row from `GET /api/settings` (unchanged by the Q9 regroup — SPEC F28.12).
  * `"choice"` is a T163 addition (SPEC F102.14, STORY-265): a value restricted to `choices`, the
  * shipped themes for `Station:Theme` today. `SettingsForm`'s per-key control registry
  * (`SETTING_CONTROL_REGISTRY`) renders it via `ChoiceSettingControl` (T175), the generic control
  * for this kind — kind-based dispatch never has to know about `"choice"` at all.
+ *
+ * `label`/`help`/`group`/`min`/`max` are PLAN T574's descriptor fields (STORY-477, SPEC F205.3) —
+ * the server resolves them (culture-aware label/help/group text, `SettingCeiling` bounds) so the
+ * admin UI never carries its own client-side copy table for this text (STORY-478, PLAN T576, SPEC
+ * F205.4). They are REQUIRED, not optional: the server always sends them on every row,
+ * so a fixture/test double that omits one is a real gap, not backward compatibility to preserve —
+ * `__specs__/setting-fixture.ts`'s `settingDto()` fills innocuous defaults for the specs that don't
+ * care.
  */
 export interface SettingDto {
   key: string;
@@ -52,6 +71,17 @@ export interface SettingDto {
    * unconditional last-write-wins write.
    */
   version?: number;
+  /** The plain-English field label — rendered in place of the raw key (SPEC F205.4, AC1). */
+  label: string;
+  /** The help sentence, or `""` when the resx carries none — an empty/whitespace value renders no
+   * flyover at all (SPEC F205.4, AC2). */
+  help: string;
+  /** The section this key belongs to (T577 groups by it; T576 reads only its presence). */
+  group: SettingGroupDto;
+  /** The number input's `min` attribute, or `null` for no lower bound (SPEC F205.4, AC3). */
+  min: number | null;
+  /** The number input's `max` attribute, or `null` for no upper bound (SPEC F205.4, AC3). */
+  max: number | null;
 }
 
 /**

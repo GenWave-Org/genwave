@@ -9,7 +9,7 @@
 //
 // The EXPECTED_* fixtures below are deliberately hand-typed copies of the backend's value sets —
 // NOT imports from the control — so a one-sided edit (control or backend mirror) fails here, the
-// same independent-authoring ethos as settings-help-keys.ts' parity guard.
+// same independent-authoring ethos that once anchored settings-help-keys.ts' parity guard.
 //
 // Runner: Jest (jsdom) + @testing-library/react — renderWithProviders/makeSequencedFetchMock
 // style per settings-corrections-control.spec.tsx.
@@ -22,6 +22,7 @@ import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "@/components/ui/toast";
 import { SettingsForm } from "../app/(authed)/settings/SettingsForm";
 import type { SettingDto } from "../app/(authed)/settings/SettingsForm";
+import { settingDto } from "./setting-fixture";
 
 // ---------------------------------------------------------------------------
 // Backend value-set fixtures (independently authored — see header)
@@ -50,7 +51,7 @@ const EXPECTED_ENGINES = ["kokoro", "piper"];
 const SAVED_MAP = JSON.stringify({ StationId: "piper", LeadIn: "kokoro" });
 
 function makeEngineByKindSetting(overrides: Partial<SettingDto> = {}): SettingDto {
-  return {
+  return settingDto({
     key: "Tts:EngineByKind",
     value: SAVED_MAP,
     source: "override",
@@ -58,7 +59,7 @@ function makeEngineByKindSetting(overrides: Partial<SettingDto> = {}): SettingDt
     kind: "string",
     unit: "",
     ...overrides,
-  };
+  });
 }
 
 interface MockResponseSpec {

@@ -14,9 +14,9 @@ namespace GenWave.Host.Icons;
 /// <para>
 /// PARITY (PLAN T68's own golden-table idiom, applied here): <c>Story337_IconPacksSwapTheChrome.cs</c>'s
 /// own <c>TheIconNameContractMatchesTheHouseIconExports</c> fact string-parses <c>icons.tsx</c>
-/// directly (no TS toolchain runs inside xUnit — the same "repo-content-fact" trick
-/// <c>FeatureSettingsHelpKeysParity</c> (tests/GenWave.Host.Tests/Specs/Story151_SeededDefaults.cs)
-/// already established) and asserts this exact set against every derived name — a change to EITHER
+/// directly (no TS toolchain runs inside xUnit — the same "repo-content-fact" idiom the Slugify
+/// parity guard in <c>Story192_PersonaSlugParity.cs</c> also uses) and asserts
+/// this exact set against every derived name — a change to EITHER
 /// side that drifts from the other fails that fact, never a silent one-sided drift. Unlike the
 /// Slugify parity guard (PLAN T68, <c>Story192_PersonaSlugParity.cs</c>), there is no separately
 /// authored TS case table to keep in step: <c>icons.tsx</c> IS the one source SPEC F130.2 names; this

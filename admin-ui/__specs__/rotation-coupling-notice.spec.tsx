@@ -13,6 +13,7 @@ import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "@/components/ui/toast";
 import { SettingsForm } from "../app/(authed)/settings/SettingsForm";
 import type { SettingDto } from "../app/(authed)/settings/SettingsForm";
+import { settingDto } from "./setting-fixture";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -21,15 +22,19 @@ import type { SettingDto } from "../app/(authed)/settings/SettingsForm";
 const RECENT_WINDOW_KEY = "Station:Rotation:RecentWindow";
 const ARTIST_SEPARATION_KEY = "Station:Rotation:ArtistSeparation";
 
+// F56.1's help-copy pin (ArtistSeparation names the RecentWindow coupling) moved to xUnit in
+// Story136_StationIdCadenceValidation.cs, reading the shipped resx via TestSettingCopy.Real() —
+// a jest spec asserting copy its own fixture supplied would be circular. This file keeps only the
+// live notice behaviour (F56.2, F56.4), which genuinely depends on SettingsForm's runtime logic.
 function rotationSetting(key: string, value: string): SettingDto {
-  return {
+  return settingDto({
     key,
     value,
     source: "default",
     applyMode: "live",
     kind: "number",
     unit: "tracks",
-  };
+  });
 }
 
 function makeRotationSettings(recentWindow: string, artistSeparation: string): SettingDto[] {
@@ -75,24 +80,6 @@ describe("Feature: ArtistSeparation discloses its RecentWindow coupling", () => 
   afterEach(() => {
     global.fetch = originalFetch;
     jest.clearAllMocks();
-  });
-
-  describe("Scenario: the help text names the coupling", () => {
-    it("Station:Rotation:ArtistSeparation's help text states separation is limited by RecentWindow (F56.1)", () => {
-      renderWithProviders(<SettingsForm settings={makeRotationSettings("20", "2")} />);
-
-      expect(
-        screen.getByTestId(`setting-help-${ARTIST_SEPARATION_KEY}`)
-      ).toHaveTextContent(/limited by RecentWindow/i);
-    });
-
-    it("the help text states RecentWindow=0 disables artist separation too (F56.1)", () => {
-      renderWithProviders(<SettingsForm settings={makeRotationSettings("20", "2")} />);
-
-      expect(
-        screen.getByTestId(`setting-help-${ARTIST_SEPARATION_KEY}`)
-      ).toHaveTextContent(/RecentWindow=0 disables artist separation too/i);
-    });
   });
 
   describe("Scenario: a live inline notice flags the capped shape", () => {
