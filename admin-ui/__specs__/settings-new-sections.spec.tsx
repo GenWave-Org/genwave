@@ -4,69 +4,88 @@
 //
 // Runner: Jest (jsdom) + @testing-library/react. Implemented V8 (2026-07-14) against
 // settings-sections.ts and SettingsForm.
+//
+// T577 (SPEC F205.5, STORY-478 AC5-AC7): the "the new sections exist" scenario that used to live
+// here (Station:Name/Voice under "Station", Library:* under "Library", Rotation keys sharing
+// "Playout" with Cadence keys) pinned the key-PREFIX sectioning `sectionForKey` used to do — that
+// mechanism is gone. Sections now come straight off each descriptor's own server-assigned `group`
+// (never derived from the key here), so "does the right key land in the right section" is a
+// server-catalog fact (`Host.Tests`), and "does the client honor a descriptor's `group`" is now
+// covered generically by settings-descriptor-form.spec.tsx's AC5/AC6/unrecognized-group scenarios.
+// The rest of this file — badges, help flyover, cross-section save, validation — never depended on
+// that mechanism and is unchanged.
 
 import { describe, it, expect, beforeEach, afterEach, jest } from "@jest/globals";
-import { render, screen, fireEvent, act, waitFor, within } from "@testing-library/react";
+import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/jest-globals";
 import type { ReactElement } from "react";
 import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "@/components/ui/toast";
 import { SettingsForm } from "../app/(authed)/settings/SettingsForm";
 import type { SettingDto } from "../app/(authed)/settings/SettingsForm";
+import { settingDto } from "./setting-fixture";
 
 /** One setting per section this file cares about — station/playout/library, live + enrichment. */
 function makeSettings(): SettingDto[] {
   return [
-    { key: "Station:Name", value: "GenWave", source: "default", applyMode: "live", kind: "string", unit: "" },
-    { key: "Station:Voice", value: "af_heart", source: "default", applyMode: "live", kind: "string", unit: "" },
-    {
+    settingDto({
+      key: "Station:Name",
+      value: "GenWave",
+      source: "default",
+      applyMode: "live",
+      kind: "string",
+      unit: "",
+      help: "help for Station:Name",
+    }),
+    settingDto({ key: "Station:Voice", value: "af_heart", source: "default", applyMode: "live", kind: "string", unit: "" }),
+    settingDto({
       key: "Station:Cadence:StationIdEveryNUnits",
       value: "4",
       source: "default",
       applyMode: "live",
       kind: "number",
       unit: "count",
-    },
-    {
+    }),
+    settingDto({
       key: "Station:Rotation:RecentWindow",
       value: "20",
       source: "default",
       applyMode: "live",
       kind: "number",
       unit: "tracks",
-    },
-    {
+    }),
+    settingDto({
       key: "Library:ScanIntervalSeconds",
       value: "60",
       source: "default",
       applyMode: "live",
       kind: "number",
       unit: "seconds",
-    },
-    {
+    }),
+    settingDto({
       key: "Library:EnrichmentConcurrency",
       value: "4",
       source: "default",
       applyMode: "live",
       kind: "number",
       unit: "workers",
-    },
-    {
+    }),
+    settingDto({
       key: "Library:CueDetection:MinSilenceDurationSec",
       value: "0.5",
       source: "default",
       applyMode: "enrichment",
       kind: "number",
       unit: "seconds",
-    },
-    {
+    }),
+    settingDto({
       key: "Library:Energy:WindowSeconds",
       value: "12",
       source: "default",
       applyMode: "enrichment",
       kind: "number",
       unit: "seconds",
-    },
+    }),
   ];
 }
 
@@ -105,44 +124,6 @@ describe("Feature: The settings page groups every tunable honestly", () => {
     jest.clearAllMocks();
   });
 
-  describe("Scenario: the new sections exist", () => {
-    it("renders a station section holding Station:Name and Station:Voice (F44.8)", () => {
-      renderWithProviders(<SettingsForm settings={makeSettings()} />);
-
-      const station = screen.getByRole("heading", { name: "Station" });
-      const stationSection = within(station.closest("section")!);
-
-      expect(stationSection.getByLabelText(/Station:Name/)).toBeInTheDocument();
-      expect(stationSection.getByLabelText(/Station:Voice/)).toBeInTheDocument();
-    });
-
-    it("renders a library section holding the Library:* keys (F44.8)", () => {
-      renderWithProviders(<SettingsForm settings={makeSettings()} />);
-
-      // gh-#144 — Library:* keys render on the Library area tab, whose panel stays mounted but
-      // `hidden` while the default Station tab is active; `hidden: true` reaches it. The
-      // containment assertions below are unchanged.
-      const library = screen.getByRole("heading", { name: "Library", hidden: true });
-      const librarySection = within(library.closest("section")!);
-
-      expect(librarySection.getByLabelText(/Library:ScanIntervalSeconds/)).toBeInTheDocument();
-      expect(librarySection.getByLabelText(/Library:EnrichmentConcurrency/)).toBeInTheDocument();
-      expect(librarySection.getByLabelText(/Library:CueDetection:MinSilenceDurationSec/)).toBeInTheDocument();
-      expect(librarySection.getByLabelText(/Library:Energy:WindowSeconds/)).toBeInTheDocument();
-    });
-
-    it("places the Station:Rotation:* keys under playout (F44.8)", () => {
-      renderWithProviders(<SettingsForm settings={makeSettings()} />);
-
-      const playout = screen.getByRole("heading", { name: "Playout" });
-      const playoutSection = within(playout.closest("section")!);
-
-      expect(playoutSection.getByLabelText(/Station:Rotation:RecentWindow/)).toBeInTheDocument();
-      // Rotation keys share the group with the pre-existing cadence key — never their own section.
-      expect(playoutSection.getByLabelText(/Station:Cadence:StationIdEveryNUnits/)).toBeInTheDocument();
-    });
-  });
-
   describe("Scenario: badges match apply-modes", () => {
     it("badges the enrichment-mode keys 'applies at next enrichment' — the third apply-mode (F44.3)", () => {
       renderWithProviders(<SettingsForm settings={makeSettings()} />);
@@ -150,24 +131,61 @@ describe("Feature: The settings page groups every tunable honestly", () => {
       expect(screen.getAllByText("applies at next enrichment")).toHaveLength(2);
     });
 
-    it("badges Station:Name live with the icy-name engine-restart caveat copy (F44.5)", () => {
+    it("renders the Station:Name help flyover, which carries the Icecast engine-restart caveat in production (F44.5)", () => {
+      // The shipped caveat wording itself is pinned against the real resx in
+      // Story138_StationIdentityLive.cs (TestSettingCopy.Real().Help("Station:Name")) — this
+      // fixture's help text is neutral on purpose so this spec can't drift into re-asserting its
+      // own fixture (T576 round 3, R2-1).
       renderWithProviders(<SettingsForm settings={makeSettings()} />);
 
-      const station = screen.getByRole("heading", { name: "Station" });
-      const stationSection = within(station.closest("section")!);
-
-      expect(stationSection.getByLabelText(/Station:Name/).closest("div")).toHaveTextContent("Station:Name");
-      // The field badges "live" (not "applies at next enrichment"/"applies after engine restart") …
-      expect(screen.getAllByText("live").length).toBeGreaterThan(0);
-      // … with the Icecast-name caveat copy rendered alongside it (SPEC F44.5, shipped V7).
-      expect(screen.getByText(/Icecast stream\/directory name updates on the next engine restart/i))
-        .toBeInTheDocument();
+      expect(screen.getByTestId("setting-help-Station:Name")).toBeInTheDocument();
     });
+  });
 
-    it("states '0 disables' on the StationIdEveryNUnits field (F42.2)", () => {
-      renderWithProviders(<SettingsForm settings={makeSettings()} />);
+  describe("Scenario: the save model stays page-wide across sections", () => {
+    // Re-homed from the now-deleted settings-area-tabs.spec.tsx (gh-#144's tab strip retired,
+    // T576): the save model itself never depended on tabs — one form, one changed-keys PUT — so
+    // this fact still holds now that sections (not tabs) are what separates Station from Library.
+    //
+    // A dedicated fixture, not the file's shared makeSettings(): that one carries Station:Voice,
+    // whose registry-backed VoiceSettingControl fetches /api/voices on mount and would double-
+    // count against the single shared fetch mock below — this scenario is about the PUT, not
+    // about registry controls.
+    function makeCrossSectionSettings(): SettingDto[] {
+      return [
+        settingDto({ key: "Station:Name", value: "GenWave", source: "default", applyMode: "live", kind: "string", unit: "" }),
+        settingDto({
+          key: "Library:EnrichmentConcurrency",
+          value: "4",
+          source: "default",
+          applyMode: "live",
+          kind: "number",
+          unit: "workers",
+        }),
+      ];
+    }
 
-      expect(screen.getByText(/0 disables station IDs/i)).toBeInTheDocument();
+    it("one Save submits staged changes from several sections in a single PUT", async () => {
+      const mockFetch = makeFetchMock(200);
+      renderWithProviders(<SettingsForm settings={makeCrossSectionSettings()} />);
+
+      fireEvent.change(screen.getByLabelText(/Station:Name/), { target: { value: "New Name" } });
+      fireEvent.change(screen.getByLabelText(/Library:EnrichmentConcurrency/), {
+        target: { value: "8" },
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /save settings/i }));
+        await Promise.resolve();
+      });
+
+      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+      const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+      const body = JSON.parse(init.body as string) as Array<{ key: string; value: string }>;
+      expect(body).toEqual([
+        { key: "Station:Name", value: "New Name" },
+        { key: "Library:EnrichmentConcurrency", value: "8" },
+      ]);
     });
   });
 

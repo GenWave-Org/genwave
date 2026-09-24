@@ -7,8 +7,8 @@
  * single source of truth pinning both sides:
  *   - `persona-slug.spec.ts` imports this array and asserts the REAL `personaSlug` against every row.
  *   - The C# theory `FeaturePersonaSlugParity` (tests/GenWave.MediaLibrary.Tests/Specs/
- *     Story192_PersonaSlugParity.cs — the Story151/FeatureSettingsHelpKeysParity repo-content-fact
- *     idiom; no TS toolchain runs inside xUnit) string-parses THIS array out of this file's text and
+ *     Story192_PersonaSlugParity.cs — the Story151 repo-content-fact idiom; no TS toolchain runs
+ *     inside xUnit) string-parses THIS array out of this file's text and
  *     asserts the REAL `LegacyPersonaCardMapper.Slugify` against the same rows. It lives in
  *     GenWave.MediaLibrary.Tests, not Host.Tests, because `Slugify` is `internal` and only that test
  *     project carries the `InternalsVisibleTo` grant.

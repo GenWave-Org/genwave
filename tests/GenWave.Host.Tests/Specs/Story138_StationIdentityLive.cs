@@ -256,4 +256,20 @@ public static class FeatureStationIdentityLive
             Assert.Equal("GenWave", rig.IdentityProvider.Current.Name);
         }
     }
+
+    // ---------------------------------------------------------------------
+    // Shipped help copy (F44.5) — re-homed from admin-ui/__specs__ (T576 round 3): the Icecast
+    // engine-restart caveat is product copy, not UI behavior, so the pin belongs on the resx this
+    // file already owns, not on a jest fixture that merely echoes it back to itself.
+    // ---------------------------------------------------------------------
+
+    public sealed class ScenarioNameHelpTextStatesTheIcecastRestartCaveat
+    {
+        [Fact]
+        public void TheHelpTextMatchesTheIcecastRestartCaveat() =>
+            Assert.Equal(
+                "The public Icecast stream/directory name updates on the next engine restart; " +
+                    "patter, metadata, and this console update immediately.",
+                TestSettingCopy.Real().Help("Station:Name"));
+    }
 }

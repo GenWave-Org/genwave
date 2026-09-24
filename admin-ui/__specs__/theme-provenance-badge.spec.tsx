@@ -32,6 +32,7 @@ import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "@/components/ui/toast";
 import { SettingsForm } from "../app/(authed)/settings/SettingsForm";
 import type { SettingDto } from "../app/(authed)/settings/SettingsForm";
+import { settingDto } from "./setting-fixture";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -44,7 +45,7 @@ const FILE_IMPORTED_AT = "2026-07-20T14:32:00Z";
  * station accumulates over time; `value` (the currently SAVED theme) defaults to the shipped
  * default so tests can flip it independently of which choices carry provenance (review F1). */
 function makeThemeSetting(overrides: Partial<SettingDto> = {}): SettingDto {
-  return {
+  return settingDto({
     key: "Station:Theme",
     value: "cats-whisker",
     source: "default",
@@ -62,13 +63,13 @@ function makeThemeSetting(overrides: Partial<SettingDto> = {}): SettingDto {
       { value: "aurora-glow", label: "Aurora Glow", importedFrom: "file", importedAt: FILE_IMPORTED_AT },
     ],
     ...overrides,
-  };
+  });
 }
 
 /** Every choice is a shipped default — no `station.theme` row backs any of them, so none carry
  * `importedFrom`/`importedAt` (SPEC F103.11, "no owner row exists"). */
 function makeShippedOnlyThemeSetting(): SettingDto {
-  return {
+  return settingDto({
     key: "Station:Theme",
     value: "cats-whisker",
     source: "default",
@@ -79,7 +80,7 @@ function makeShippedOnlyThemeSetting(): SettingDto {
       { value: "cats-whisker", label: "Cat's Whisker", isDefault: true },
       { value: "sunroom", label: "Sunroom" },
     ],
-  };
+  });
 }
 
 function renderWithProviders(node: ReactElement): ReturnType<typeof render> {

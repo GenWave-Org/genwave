@@ -1,5 +1,5 @@
 // STORY-151 — Every setting explains itself (Epic Y / SPEC F55.1, closes gitea-#231) — seeded-defaults
-// half. The help-text/UI half lives in admin-ui/__specs__/settings-help-coverage.spec.tsx.
+// half.
 //
 // BDD specification — xUnit. Y6 implements: appsettings.json seeds the Library:* defaults that
 // previously existed only as C# property initializers, invisible to IConfiguration — GET
@@ -14,14 +14,25 @@
 // deliberately NOT seeded: their C# default IS empty (F34.2 — empty is the honest disabled
 // state), so ScenarioFreshDeployHasNoLyingBlanks below excludes exactly those two.
 //
-// This file also carries FeatureSettingsHelpKeysParity (SPEC F55.3) — the C#-side half of the
-// help-text coverage parity guard. Y6 owns no other xUnit spec file, and the mirror it guards
-// (admin-ui/app/(authed)/settings/settings-help-keys.ts) is the TS-side anchor the jest
-// settings-help-coverage.spec.tsx fixture is built from, so the two live together here rather
-// than in a new file.
+// FeatureSettingsHelpKeysParity (SPEC F55.3) — the C#-side half of the help-text coverage parity
+// guard this file used to carry — is retired as of STORY-478/PLAN T576 (SPEC F205.4): help copy
+// is now server-resolved onto SettingDto.Help (SettingCopy/the resx) and read straight off the
+// wire by admin-ui's settings-descriptor-form.spec.tsx, so there is no TS-side mirror left for a
+// C#-side fact to stay in parity with.
+//
+// T576 round 2 review fix: this file also re-homes the individual help-copy pins that used to
+// live in the now-deleted admin-ui/__specs__/settings-help-coverage.spec.tsx (F168.4 BedFadeMs
+// tail-only fade, gh-#746 BedDuckDb "measured against the voice", F55.2 the YearLookup reword,
+// gh-#427 the Latitude/Longitude ±90/±180 range prose) — see ScenarioHelpCopyRegressions below.
+// That spec's F53.3 range-in-prose pins for the five Number-kind keys (EnrichmentConcurrency,
+// PlayHistoryCapacity, ArtistSeparation, GW_XFADE_MIN, MinSilenceDurationSec) are NOT re-homed:
+// their help text no longer states a numeric range at all — that job now belongs to
+// AllowedSetting.Min/Max, which Story477_DescriptorLaw's EveryNumberIsRanged already pins for
+// every Number-kind key. Latitude/Longitude are SettingKind.String (not Number), so that law
+// doesn't cover them and their help text still states the range in prose — those two ARE
+// re-homed below.
 
 using System.Globalization;
-using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
@@ -499,60 +510,74 @@ public static class FeatureSeededDefaults
             Assert.Equal("default", sibling.Source);
         }
     }
-}
 
-/// <summary>
-/// SPEC F55.3 (closes gitea-#230, gitea-#231) — the C#-side half of the settings-help-text coverage parity
-/// guard. Jest cannot read <see cref="StationSettingsAllowlist"/> directly, so
-/// <c>admin-ui/app/(authed)/settings/settings-help-keys.ts</c> carries an independently-authored
-/// mirror of <see cref="StationSettingsAllowlist.All"/>'s key list; the jest
-/// <c>settings-help-coverage.spec.tsx</c> spec builds its synthetic settings fixture from THAT
-/// list and asserts every one of those keys renders help text. This fact is the other half: it
-/// string-parses that same .ts file (the Story107/Story074/Story102 repo-content-fact idiom — no
-/// TS toolchain runs inside the xUnit runner) and asserts its key list is equal, in order, to
-/// <see cref="StationSettingsAllowlist.All"/> — so a key added to only ONE side (the C# allowlist,
-/// or the TS mirror) fails a spec on BOTH toolchains, never a silent drift.
-/// </summary>
-public static class FeatureSettingsHelpKeysParity
-{
-    static string RepoRoot =>
-        Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+    // ---------------------------------------------------------------------
+    // Help-copy pins re-homed from the deleted settings-help-coverage.spec.tsx (T576 round 2) —
+    // see the file-header remark above for what was, and wasn't, re-homed and why.
+    // ---------------------------------------------------------------------
 
-    static string SettingsHelpKeysTsPath =>
-        Path.Combine(RepoRoot, "admin-ui", "app", "(authed)", "settings", "settings-help-keys.ts");
-
-    /// <summary>
-    /// Extracts the quoted string literals inside the <c>SETTINGS_HELP_KEYS</c> array literal
-    /// only — bounded to that one array so a quoted word inside a doc comment elsewhere in the
-    /// file can never leak into the parsed key list.
-    /// </summary>
-    static IReadOnlyList<string> ParseTsHelpKeyList()
+    public sealed class ScenarioBedFadeMsHelpTextIsTailOnly
     {
-        var text = File.ReadAllText(SettingsHelpKeysTsPath);
+        const string Key = "Station:Ads:BedFadeMs";
 
-        const string startMarker = "SETTINGS_HELP_KEYS = [";
-        var start = text.IndexOf(startMarker, StringComparison.Ordinal);
-        Assert.True(start >= 0, $"could not find '{startMarker}' in {SettingsHelpKeysTsPath}");
-        var arrayBodyStart = start + startMarker.Length;
+        [Fact]
+        public void TheHelpTextStatesTheTailFade() =>
+            Assert.Contains(
+                "fade out at the end of a generated ad, as the voice ends",
+                TestSettingCopy.Real().Help(Key),
+                StringComparison.Ordinal);
 
-        var end = text.IndexOf("] as const", arrayBodyStart, StringComparison.Ordinal);
-        Assert.True(end >= 0, $"could not find the closing '] as const' in {SettingsHelpKeysTsPath}");
-
-        var arrayBody = text[arrayBodyStart..end];
-        return Regex.Matches(arrayBody, "\"([^\"]+)\"")
-            .Select(m => m.Groups[1].Value)
-            .ToList();
+        [Fact]
+        public void TheHelpTextNeverMentionsAFadeIn() =>
+            Assert.DoesNotContain(
+                "fades in",
+                TestSettingCopy.Real().Help(Key),
+                StringComparison.Ordinal);
     }
 
-    public sealed class ScenarioTsMirrorMatchesTheAllowlist
+    public sealed class ScenarioBedDuckDbHelpTextIsMeasuredAgainstTheVoice
+    {
+        const string Key = "Station:Ads:BedDuckDb";
+
+        [Fact]
+        public void TheHelpTextStatesItSitsBelowTheVoice() =>
+            Assert.Contains(
+                "below the voice",
+                TestSettingCopy.Real().Help(Key),
+                StringComparison.Ordinal);
+
+        [Fact]
+        public void TheHelpTextStatesItIsMeasuredAgainstTheVoice() =>
+            Assert.Contains(
+                "measured against the voice",
+                TestSettingCopy.Real().Help(Key),
+                StringComparison.Ordinal);
+    }
+
+    public sealed class ScenarioYearLookupHelpTextReadsLikeEnglish
     {
         [Fact]
-        public void SettingsHelpKeysTsListsExactlyTheAllowlistKeysInOrder()
-        {
-            var tsKeys = ParseTsHelpKeyList();
-            var allowlistKeys = StationSettingsAllowlist.All.Select(a => a.Key).ToList();
+        public void TheHelpTextMatchesTheF552Reword() =>
+            Assert.Equal(
+                "When on, tracks missing a release year get one looked up from MusicBrainz " +
+                    "during enrichment. Turning it off stops future lookups; years already filled stay.",
+                TestSettingCopy.Real().Help("Library:YearLookup:Enabled"));
+    }
 
-            Assert.Equal(allowlistKeys, tsKeys);
-        }
+    public sealed class ScenarioLatLonHelpTextStatesTheAcceptedRange
+    {
+        [Fact]
+        public void LatitudeHelpTextStatesMinus90To90() =>
+            Assert.Contains(
+                "-90 to 90",
+                TestSettingCopy.Real().Help("Station:Location:Latitude"),
+                StringComparison.Ordinal);
+
+        [Fact]
+        public void LongitudeHelpTextStatesMinus180To180() =>
+            Assert.Contains(
+                "-180 to 180",
+                TestSettingCopy.Real().Help("Station:Location:Longitude"),
+                StringComparison.Ordinal);
     }
 }

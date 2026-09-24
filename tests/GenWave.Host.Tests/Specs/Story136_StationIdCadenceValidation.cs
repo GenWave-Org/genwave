@@ -22,11 +22,19 @@
 // Same review pass flagged the identical dead-attribute shape on StationRotationOptions
 // (RecentWindow, ArtistSeparation) — StationOptionsValidator now guards both, proven below
 // alongside the cadence facts.
+//
+// T576 round 2 review fix: the "0 disables" (F42.2) and "limited by the anti-repeat window
+// above" (F56.1) copy pins used to live in admin-ui/__specs__/station-id-disable-copy.spec.tsx
+// and rotation-coupling-notice.spec.tsx, asserting against a `help:` string their own fixture
+// supplied — circular by construction, and the fixture text drifted from what actually ships.
+// They move here, reading the real shipped resx through TestSettingCopy.Real(), following the
+// pattern in Story431_SponsorSettingsAndRelease.cs's ScenarioAntiRepeatWindowHelpTextChanged.
 
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using GenWave.Host.Configuration;
 using GenWave.Host.Options;
+using GenWave.Host.Tests.Support;
 
 namespace GenWave.Host.Tests.Specs;
 
@@ -161,5 +169,38 @@ public static class FeatureStationIdCadenceValidation
                 result.FailureMessage ?? string.Empty,
                 StringComparison.Ordinal);
         }
+    }
+
+    // ---------------------------------------------------------------------
+    // Shipped help copy (F42.2, F56.1) — re-homed from admin-ui/__specs__ (T576 round 2)
+    // ---------------------------------------------------------------------
+
+    public sealed class ScenarioStationIdHelpTextStatesTheOffSwitch
+    {
+        [Fact]
+        public void TheHelpTextStatesZeroTurnsStationIdsOff() =>
+            Assert.Contains(
+                "Set to 0 to turn station IDs off entirely",
+                TestSettingCopy.Real().Help(Key),
+                StringComparison.Ordinal);
+    }
+
+    public sealed class ScenarioArtistSeparationHelpTextNamesTheRecentWindowCoupling
+    {
+        const string RotationKey = "Station:Rotation:ArtistSeparation";
+
+        [Fact]
+        public void TheHelpTextStatesSeparationIsLimitedByTheAntiRepeatWindow() =>
+            Assert.Contains(
+                "limited by the anti-repeat window above",
+                TestSettingCopy.Real().Help(RotationKey),
+                StringComparison.Ordinal);
+
+        [Fact]
+        public void TheHelpTextStatesAZeroWindowDisablesArtistSeparationToo() =>
+            Assert.Contains(
+                "an anti-repeat window of 0 disables artist separation too",
+                TestSettingCopy.Real().Help(RotationKey),
+                StringComparison.Ordinal);
     }
 }

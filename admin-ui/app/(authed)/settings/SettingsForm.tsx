@@ -5,7 +5,6 @@ import {
   useState,
   type ComponentType,
   type FormEvent,
-  type KeyboardEvent,
   type ReactNode,
 } from "react";
 import { Button } from "@/components/ui/button";
@@ -22,9 +21,7 @@ import { EngineByKindSettingControl } from "./EngineByKindSettingControl";
 import { PersonaSettingControl } from "./PersonaSettingControl";
 import { SafeScopeAvailabilityBadge } from "./SafeScopeAvailabilityBadge";
 import { SettingHelpFlyover } from "./SettingHelpFlyover";
-import type { SettingsHelpKey } from "./settings-help-keys";
-import { groupSettingsBySection } from "./settings-sections";
-import { groupSettingsByTab, type SettingsAreaTab } from "./settings-tabs";
+import { filterSectionsByQuery, groupSettingsBySection, type SettingsSection } from "./settings-sections";
 import {
   isValidationProblemDetails,
   type SettingChoice,
@@ -48,15 +45,15 @@ interface SettingsFormProps {
    * same StatusTiles/BoothLogFeed/LlmCallsFeed/`PersonasClient` idiom, not a bespoke one. */
   timeZone?: string;
   /**
-   * Extra content mounted at the end of the TTS tabpanel, after its own section cards (PLAN T145
-   * review F3) — the escape hatch for a dedicated-API surface (`PronunciationRulesControl`) whose
+   * Extra content mounted at the end of the page, after every section card (PLAN T145 review
+   * F3) — the escape hatch for a dedicated-API surface (`PronunciationRulesControl`) whose
    * read/write shape cannot fit the per-key `SETTING_CONTROL_REGISTRY` (see that component's own
    * remarks: it reads a merged view no settings key carries and writes immediately, never through
    * the page-wide Save batch). `SettingsForm` stays ignorant of any specific dedicated-API
    * surface — `page.tsx` supplies the element — so a caller that omits this prop (every existing
    * spec) renders byte-identical to before, the same injection-point idiom as {@link timeZone}.
    */
-  ttsTabExtra?: ReactNode;
+  trailingContent?: ReactNode;
 }
 
 type SaveStatus = { kind: "idle" } | { kind: "saving" } | { kind: "noChanges" };
@@ -66,9 +63,6 @@ const MAIN_SCOPE_KEY = "Station:Scope:LibraryIds";
 const RECENT_WINDOW_KEY = "Station:Rotation:RecentWindow";
 const ARTIST_SEPARATION_KEY = "Station:Rotation:ArtistSeparation";
 const THEME_KEY = "Station:Theme";
-/** {@link SettingsAreaTab.prefix} value `ttsTabExtra` (PLAN T145 review F3) mounts under —
- * `tabPrefixForKey`'s verbatim prefix for every `Tts:*` key, not the lowercased tab id. */
-const TTS_TAB_PREFIX = "Tts";
 
 /**
  * Whole-document settings keys guarded by optimistic concurrency (gh-#486) — the two JSON-array
@@ -109,384 +103,9 @@ const EMPTY_LIST_POLICIES: Record<string, EmptyListPolicy> = {
 };
 
 /**
- * Per-field helper copy keyed by setting key, rendered in the title's `?` flyover
- * ({@link SettingHelpFlyover}, gh-#145 — previously an always-on paragraph under the input;
- * inline space below the control is now reserved for warnings) (SPEC F42.2, STORY-136). A small
- * additive lookup — same shape as {@link EMPTY_LIST_POLICIES} above — rather than a new
- * metadata layer.
- *
- * SPEC F55.3 (closes gitea-#230, gitea-#231) grows this map from 3 entries to full allowlist coverage — every
- * key in {@link SETTINGS_HELP_KEYS} (mirroring `StationSettingsAllowlist.All`) has one
- * plain-language sentence: what the knob does and, for the F53-ceilinged keys, its accepted range
- * (copy matches `SettingValidator`'s actual bounds — see `settings-help-coverage.spec.tsx`'s
- * parity guard, which fails the build if a future allowlist key lands here without an entry).
- */
-const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
-  // ── Loudness (both bounds pre-exist F53; already documented as "carrying both bounds") ──────
-  "Loudness:TargetLufs":
-    "The loudness target the mix is normalized toward, in LUFS — every track is gained to match " +
-    "it before crossfading. Accepted range: -40 to 0.",
-  "Loudness:CeilingDbtp":
-    "The true-peak ceiling the mix must not exceed, in dBTP — guards against inter-sample " +
-    "clipping downstream. Accepted range: -12 to 0.",
-
-  // ── Station identity (SPEC F44.1, F44.2, F44.5) ───────────────────────────────────────────────
-  // Station:Name badges live (the api-side effects are genuinely immediate) but the Icecast
-  // stream/directory name is read by the engine from STATION_NAME at container start, so this one
-  // field carries an engine-restart caveat alongside its live badge.
-  "Station:Name":
-    "The public Icecast stream/directory name updates on the next engine restart; patter, " +
-    "metadata, and this console update immediately.",
-  "Station:Tagline":
-    "A short line shown under the station name on the About page. Optional — leave blank to show " +
-    "no tagline. Up to 120 characters.",
-  "Station:Voice":
-    "The Kokoro voice used for station-branded patter (station IDs, time/date, lead-ins, " +
-    "back-announces) whenever no persona is active.",
-
-  // ── Cadence ────────────────────────────────────────────────────────────────────────────────
-  "Station:Cadence:LeadInBeforeEachTrack":
-    "When on, a short spoken lead-in airs immediately before each track begins.",
-  "Station:Cadence:BackAnnounceAfterEachTrack":
-    "When on, a short spoken back-announce airs immediately after each track ends.",
-  "Station:Cadence:StationIdEveryNUnits":
-    "0 disables station IDs entirely — no station ID ever airs. Accepted range: 0–1000.",
-
-  // ── Scope ──────────────────────────────────────────────────────────────────────────────────
-  "Station:Scope:LibraryIds":
-    "The libraries the main rotation picks tracks from — must name at least one library, or the " +
-    "station has nothing to play.",
-  "Station:SafeScope:LibraryIds":
-    "The libraries holding Station sounds — the always-airable station segments (IDs, jingles, " +
-    "sweepers, liners) played when the main rotation drains. An empty list is legal and falls " +
-    "back to silence (mksafe).",
-  // ── Rotation resilience + artist separation (SPEC F41.6, F53.1, F56.1, closes gitea-#210/gitea-#213/gitea-#227) ─
-  "Station:Rotation:RecentWindow":
-    "How many recently-played tracks the rotation avoids repeating. 0 disables anti-repeat " +
-    "entirely. Accepted range: 0–10000.",
-  "Station:Rotation:ArtistSeparation":
-    "How many of the recent tracks must pass before the same artist can repeat. Separation is " +
-    "limited by RecentWindow — it reads the same recent-tracks window, so a value deeper than " +
-    "RecentWindow has no additional effect, and RecentWindow=0 disables artist separation too. " +
-    "Accepted range: 0–100.",
-
-  // ── Station-default segment envelope (SPEC F80.1, F81.1, F81.3, STORY-212) ──────────────────
-  "Station:Envelope:Genres":
-    "The genre allow-list the station's single 24/7 envelope admits — a track outside this list " +
-    "never enters rotation. A JSON array of genre names; empty means every genre is allowed.",
-  "Station:Envelope:EnergyMin":
-    "The lowest energy percentile the envelope admits (0 = the least energetic ready track in " +
-    "the library). Accepted range: 0–1.",
-  "Station:Envelope:EnergyMax":
-    "The highest energy percentile the envelope admits (1 = the most energetic ready track in " +
-    "the library). Accepted range: 0–1.",
-
-  // ── Spectator surface (SPEC F62.1, F62.8, STORY-167/170) ─────────────────────────────────────
-  "Station:SpectatorMode":
-    "Public read-only spectator page and API. Off by default; when on, /spectator serves " +
-    "without login.",
-  "Station:PublicStreamUrl":
-    "Public stream URL for the spectator page player (e.g. /stream behind the reference proxy). " +
-    "Empty hides the player.",
-  "Station:PublicBaseUrl":
-    "Public base URL feeder pushes resolve per-track artwork and station-icon URLs against " +
-    "(e.g. https://your-station.example). Empty means no artwork URL is ever sent to listening " +
-    "clients.",
-
-  // ── Listener requests (SPEC F87.2, F87.6, STORY-224) ─────────────────────────────────────────
-  "Station:Requests:Enabled":
-    "Public listener request line. Off by default; when off, the request endpoint 404s like any " +
-    "other disabled surface.",
-  "Station:Requests:OverrideEnvelope":
-    "When on, a matched request bypasses the envelope's genre/energy band and rotation-recency " +
-    "to air sooner — operator never-play/eligibility vetoes still apply either way.",
-  "Station:Requests:WindowMinutes":
-    "How long an unfulfilled request stays eligible to air before it expires. Accepted range: " +
-    "1–1440.",
-
-  // ── Thumbs — the station-level rotation signal (SPEC F150.2, F155.1, STORY-380) ──────────────
-  "Station:Thumbs:Enabled":
-    "Anonymous 👍/👎 on the spectator now-playing card; off = the thumbs endpoint and controls " +
-    "do not exist (404).",
-
-  // ── TTS / LLM endpoints (SPEC F36.1–F36.4) ─────────────────────────────────────────────────
-  "Tts:Endpoint":
-    "The Kokoro TTS service base URL used to render all spoken patter — must be a non-empty " +
-    "absolute http/https URL; there is no \"disabled TTS\" state.",
-  "Tts:Corrections":
-    "Operator pronunciation corrections applied to every spoken line before it reaches the TTS " +
-    "engine (e.g. \"MacLeod\" → \"Muh-cloud\"). Each rule can carry optional context conditions " +
-    "for heteronyms — \"wind\" → \"wynd\" only when followed by \"down|up\" — so the other sense " +
-    "(\"a strong wind\") stays untouched. Empty means no corrections.",
-  "Tts:Pronunciations":
-    "Station pronunciation rules the Kokoro voice engine honors directly (IPA phoneme overrides, " +
-    "e.g. pattern \"Reykjavík\" → ipa \"/ˈreɪkjaviːk/\") rather than text substitutions. A rule's " +
-    "optional word narrows which occurrence of a longer pattern gets the override, disambiguating " +
-    "heteronyms like \"wind\". The active persona's own rules win when both name the same " +
-    "pattern/word. Empty means no station pronunciation rules.",
-  "Tts:Fallback:Endpoint":
-    "The Piper local fallback TTS service base URL — hop 1 of the fallback chain, used " +
-    "automatically when Kokoro is unhealthy or a render fails. Leave empty to disable the " +
-    "fallback engine entirely. Ignored when the deployment configures a Tts:Fallback:Profiles " +
-    "chain, which replaces this single hop with an operator-built list of fallback engines.",
-  "Tts:Fallback:Voice":
-    "The Piper voice model the fallback service is expected to be running — display-only: " +
-    "Piper bakes one voice into the sidecar and has no per-request selector, so this is never " +
-    "sent with a render; it only documents what compose deployed. In a Tts:Fallback:Profiles " +
-    "chain each hop carries its own voice instead — honored on the wire for Kokoro-kind hops, " +
-    "display-only for Piper hops.",
-  "Tts:EngineByKind":
-    "Pins specific speech kinds to a specific engine, e.g. StationId to Piper so a short ident " +
-    "always uses the cheap voice. Add one override row per kind (StationId, LeadIn, " +
-    "BackAnnounce, TimeDate, SignOff, SignOn); kinds without an override use the normal " +
-    "Kokoro-first, Piper-fallback routing.",
-  "Llm:Endpoint":
-    "The LLM completion service base URL used to author patter copy — leave empty to disable " +
-    "LLM-authored copy and fall back to templated copy.",
-  "Llm:Model":
-    "The model name requested from the LLM endpoint — free text, meaningful only when " +
-    "Llm:Endpoint is set.",
-  "Llm:TimeoutSeconds":
-    "How long an LLM completion request is allowed to run before falling back to templated " +
-    "copy. Accepted range: 1–300.",
-
-  // ── F44.2 allowlist completion (closes gitea-#197) ───────────────────────────────────────────────
-  "Tts:RenderBudgetSeconds":
-    "How long a single TTS render is allowed to take before it is abandoned. Accepted range: " +
-    "1–600.",
-  "Tts:BlurbRetentionHours":
-    "How long a rendered TTS blurb stays cached before the garbage-collection sweep removes it. " +
-    "Accepted range: 1–8760.",
-  "Llm:MaxCopyChars":
-    "The maximum length, in characters, of LLM-authored patter copy — longer completions are " +
-    "truncated. Accepted range: 1–10000.",
-  "Admin:PlayHistoryCapacity":
-    "How many recent plays the play-history ring keeps before the oldest entry is dropped. " +
-    "Accepted range: 1–5000.",
-  "Library:ScanIntervalSeconds":
-    "How often the library scans for new or changed files, in seconds. Accepted range: 1–86400.",
-  "Library:EnrichmentConcurrency":
-    "How many tracks are analyzed (loudness, cue points, energy, tags) in parallel during " +
-    "enrichment. Accepted range: 1–32.",
-
-  // ── Scan availability grace (SPEC F58.3, closes gitea-#223) ──────────────────────────────────────
-  "Library:Scan:MissThreshold":
-    "How many consecutive scan ticks a file may be missing from the library folder before it is " +
-    "marked unavailable — a higher value rides out a brief NFS/mount blip without pulling a " +
-    "track from rotation. Accepted range: 1–20.",
-
-  // ── MusicBrainz year lookup (SPEC F48.5, F55.1, F55.2, closes gitea-#208/gitea-#230) ───────────────────
-  // F55.2 exact reword (closes gitea-#230) — verbatim per SPEC.
-  "Library:YearLookup:Enabled":
-    "When on, tracks missing a release year get one looked up from MusicBrainz during " +
-    "enrichment. Turning it off stops future lookups; years already filled stay.",
-  "Library:YearLookup:Endpoint":
-    "The MusicBrainz web service base URL used to look up a missing release year — must be a " +
-    "non-empty absolute http/https URL.",
-  "Library:YearLookup:MinScore":
-    "The minimum MusicBrainz match confidence (0-100) a candidate must reach before its year is " +
-    "accepted. Accepted range: 0–100.",
-
-  // ── Engine-restart knobs ────────────────────────────────────────────────────────────────────
-  "GW_XFADE_MIN":
-    "The shortest crossfade duration the engine uses between tracks, in seconds. Must be " +
-    "greater than 0, at most 30.",
-  "GW_XFADE_MAX":
-    "The longest crossfade duration the engine uses between tracks, in seconds. Must be " +
-    "greater than 0, at most 30.",
-  "GW_SAFE_GAP_SECONDS":
-    "The silence gap the engine inserts between consecutive Station sounds (safe-rotation) " +
-    "tracks, in seconds. 0 disables the gap. Accepted range: 0–600.",
-
-  // ── Enrichment-mode knobs (F44.3) ──────────────────────────────────────────────────────────
-  "Library:CueDetection:MinSilenceDurationSec":
-    "The shortest silent region, in seconds, that counts as a cue point during trim detection. " +
-    "Applies the next time a file is (re-)analyzed. Must be greater than 0, at most 60.",
-  "Library:Energy:WindowSeconds":
-    "The length of the intro/outro window measured for energy analysis, in seconds. Applies " +
-    "the next time a file is (re-)analyzed. Must be greater than 0, at most 60.",
-
-  // ── Dependency health probes (SPEC F70.2, gh-#125) ─────────────────────────────────────────
-  "DependencyHealth:ProbeIntervalSeconds":
-    "How often the station checks that Kokoro, Piper, Ollama and Icecast are still answering, in " +
-    "seconds. Applies to the next check — no restart. Must be between 1 and 3600.",
-  "DependencyHealth:ProbeTimeoutSeconds":
-    "How long one health check waits for an answer before counting as a failure, in seconds. " +
-    "Kokoro stops answering while it renders a clip, so a budget shorter than a typical render " +
-    "reports it down when it is merely busy. Must be between 1 and 300.",
-  "DependencyHealth:UnhealthyThreshold":
-    "How many checks in a row must fail before the station treats a service as down and starts " +
-    "using its fallback. 1 reacts fastest but flips on a single missed check; the default 2 " +
-    "ignores one-off blips. Higher values mean a genuinely dead service goes unnoticed for this " +
-    "many checks. Must be between 1 and 10.",
-
-  // ── LLM degradation (SPEC F69.3) ───────────────────────────────────────────────────────────
-  "Llm:DegradationPin":
-    "Pins the LLM degradation mode instead of letting it auto-adjust to failures/recoveries. " +
-    "\"auto\" (default) follows automatically; \"normal\", \"soft\", or \"hard\" holds that mode " +
-    "until this is set back to \"auto\".",
-
-  // ── Reasoning control (gh-#620) ────────────────────────────────────────────────────────────
-  "Llm:ReasoningEffort":
-    "How much a thinking-capable model (gemma4, qwen3, deepseek-r1, magistral) may think before it " +
-    "answers. \"None\" (default) makes it answer directly — otherwise its chain-of-thought spends " +
-    "the whole copy budget and every line comes back empty. \"Low\"/\"Medium\"/\"High\" let it " +
-    "think, at the cost of time. \"Omit\" sends no reasoning field at all, for a third-party " +
-    "OpenAI-compatible backend that rejects it. Ordinary models ignore this. Changes apply live.",
-
-  // ── Persona Catalog (SPEC F90.1, STORY-234) ────────────────────────────────────────────────
-  "Community:CatalogIndexUrl":
-    "Where the Persona Catalog browses and imports personas from. Leave empty to disable the " +
-    "Persona Catalog entirely — both catalog endpoints stop responding and this admin UI hides " +
-    "the shelf. Changes apply live.",
-
-  // ── Audience posture (SPEC F95.1, STORY-250) ───────────────────────────────────────────────
-  "Station:Audience":
-    "\"everyone\" (default) keeps every track stamped explicit out of the pool entirely — it " +
-    "never plays, displays, or reaches the DJ's mouth. \"mature\" plays everything, unmasked. " +
-    "Changes apply live.",
-
-  // ── Station timezone (gh-#117, gh-#224) ────────────────────────────────────────────────────
-  "Station:Timezone":
-    "The IANA timezone the DJ's spoken date/time follows (e.g. America/Edmonton). Empty uses " +
-    "the container's own clock. Changes apply live. The schedule grid and persona taste gates " +
-    "follow it too, so changing it immediately shifts which slot is on the air.",
-
-  // ── Theme selection (SPEC F102.14, F102.15, STORY-265, PLAN T163) ─────────────────────────
-  "Station:Theme":
-    "The station's active theme, by slug (e.g. cats-whisker) — must name one of the shipped " +
-    "themes; an unrecognized slug is rejected outright rather than silently failing to " +
-    "resolve. Changes apply live.",
-
-  // ── Icon pack selection (SPEC F130.4, STORY-337, PLAN T303) ───────────────────────────────
-  "Station:IconPack":
-    "The station's active icon pack, by slug — fed by the packs installed on the Community " +
-    "Catalog. Empty (the default) uses the house icons. Uninstalling the active pack leaves " +
-    "this value dangling; the admin chrome falls back to house icons rather than erroring. " +
-    "Changes apply live.",
-
-  // ── The F107 context seam (SPEC F107.2/F107.7, F108.1-F108.2, F109.1, STORY-297, PLAN T226) ──
-  "Context:Weather:Enabled":
-    "Airs a weather segment/patter line sourced from Open-Meteo. Off by default; also requires " +
-    "Station:Location:Latitude/Longitude — blank or invalid coordinates leave weather off even " +
-    "when this is on.",
-  "Context:Weather:SegmentCadenceMinutes":
-    "How often a fresh weather segment may air, in minutes. Accepted range: 30–1440 (30 minutes " +
-    "is the enforced floor — twice an hour, at most).",
-  "Context:Weather:PatterCadenceMinutes":
-    "How often a compact weather line may be folded into patter, in minutes — independent of " +
-    "the segment cadence above. 0 disables weather patter lines. Accepted range: 0–1440.",
-  "Context:Weather:PersonaId":
-    "Which persona voices weather segments. 0 defers to the on-air DJ (the unset default does the same).",
-  "Context:History:Enabled":
-    "Airs a this-day-in-history segment/patter line sourced from Wikimedia's On This Day feed. " +
-    "Off by default.",
-  "Context:History:SegmentCadenceMinutes":
-    "How often a fresh history segment may air, in minutes. Accepted range: 1–1440.",
-  "Context:History:PatterCadenceMinutes":
-    "How often a compact history line may be folded into patter, in minutes — independent of " +
-    "the segment cadence above. 0 disables history patter lines. Accepted range: 0–1440.",
-  "Context:History:PersonaId":
-    "Which persona voices history segments. 0 defers to the on-air DJ (the unset default does the same).",
-
-  // ── Station broadcast location (SPEC F108.1, F108.3, PLAN T226, gh-#427) ──────────────────
-  "Station:Location:Latitude":
-    "Signed decimal degrees only (negative = south), with a period as the decimal separator — " +
-    "e.g. 51.0447 or -33.8688. Accepted range: -90 to 90; only the first 4 decimal places are " +
-    "used. Degrees-minutes-seconds and degrees-decimal-minutes formats are NOT accepted. Used " +
-    "only to fetch weather — never spoken or logged. Blank behaves exactly like an invalid " +
-    "value: weather stays silently off (F108.1).",
-  "Station:Location:Longitude":
-    "Signed decimal degrees only (negative = west), with a period as the decimal separator — " +
-    "e.g. -114.0719 or 151.2093. Accepted range: -180 to 180; only the first 4 decimal places " +
-    "are used. Degrees-minutes-seconds and degrees-decimal-minutes formats are NOT accepted. " +
-    "Used only to fetch weather — never spoken or logged. Blank behaves exactly like an invalid " +
-    "value: weather stays silently off (F108.1).",
-  "Station:Location:SpokenName":
-    "The only location text ever spoken or logged, e.g. \"Calgary\" — coordinates themselves " +
-    "never air. Blank means weather segments name no place at all.",
-
-  // ── Clock-anchored imaging (SPEC F110.1/F110.3, gh-#381) ───────────────────────────────────
-  "Station:Imaging:ClockAnchoredIdents":
-    "When on, a station ID airs at the top of every hour in addition to the regular cadence " +
-    "count. Off by default.",
-  "Station:Imaging:TimeAnnouncements":
-    "When on, a spoken time announcement airs at the top of every hour. Off by default.",
-  "Station:Imaging:TimeAnnouncementBudgetSeconds":
-    "A time announcement that drains more than this many seconds late (accounting for whatever is " +
-    "already queued ahead of it) is dropped instead of airing a stale hour — a late ident is fine, " +
-    "a late time check is not. Within the budget but more than 90 seconds late, the announcement " +
-    "airs an honest \"just past\" variant instead of staying silent. Accepted range: 1–86400. " +
-    "Defaults to 420.",
-
-  // ── Show-flavor patter line (SPEC F116.3) ───────────────────────────────────────────────────
-  "Station:Shows:PatterCadenceMinutes":
-    "How often a show's flavor may color an ordinary lead-in/back-announce, in minutes — shares " +
-    "the same one-line slot as the context patter lines above; a due context fact always wins. " +
-    "0 disables the show-flavor line. Accepted range: 0–1440.",
-
-  // ── Crosstalk two-voice banter (SPEC F127.4, F127.8) ────────────────────────────────────────
-  "Crosstalk:DurationTargetSeconds":
-    "The longest a generated two-voice banter exchange may run, in seconds, before it is " +
-    "discarded and skipped rather than aired. Defaults to 50. Accepted range: 5–120.",
-  "Crosstalk:Shows":
-    "A JSON array of show SLUGS allowed to carry two-voice banter — a show's stable URL-safe " +
-    "identity, not its display name (e.g. \"morning-drive\" for a show named \"Morning Drive\"), " +
-    "e.g. [\"morning-drive\"]. Empty (the default) turns the feature off entirely — no station's " +
-    "sound changes on upgrade until a show is named here.",
-  "Crosstalk:EveryNthAiring":
-    "How many eligible airings of an enabled show pass before one carries banter — 1 (the " +
-    "default) airs every time. Accepted range: 1–100.",
-
-  // ── Ads seam (SPEC F158.3, F159.3, F159.4, F163.1) ──────────────────────────────────────────
-  "Station:Ads:EveryNUnits":
-    "A ready ad spot airs every N units, the same cadence shape as the station-ID count above — " +
-    "0 (the default) disables ad spots entirely. Accepted range: 0–1000.",
-  "Station:Ads:TargetCount":
-    "How many generated spots the ad-spot worker keeps in the pipeline — draft, approved, rendering, " +
-    "or ready — refilling as spots retire or are discarded. Your own spots never count. " +
-    "Defaults to 12. Accepted range: 0–100.",
-  "Station:Ads:RefreshDays":
-    "A ready spot older than this many days is retired and the stock refills — keeps ad copy " +
-    "from going stale. Defaults to 30. Accepted range: 1–365.",
-  "Station:Ads:AutoApprove":
-    "When off (the default), a freshly generated spot waits in draft for the owner's approval " +
-    "before it can ever air. When on, generation flows straight to approved.",
-  "Station:Ads:AntiRepeatWindow":
-    "How many of the most recently aired sponsors are excluded from the next ad pick, so the " +
-    "same sponsor does not come back to back. Defaults to 5. Accepted range: 0–50.",
-  "Station:Ads:AnnouncerVoice":
-    "The Kokoro voice cast as an ad's announcer. Empty (the default) uses the station's own " +
-    "voice instead of a separate one. Accepted value: empty, or a single voice id (e.g. af_nova).",
-  "Station:Ads:CastVoices":
-    "The pool of Kokoro voices an ad may cast for its other speaking roles, as a comma-separated " +
-    "list of voice ids with no spaces, up to 16 ids. Defaults to af_nova,am_michael,bf_alice,am_onyx.",
-  "Station:Ads:BedFadeMs":
-    "How long the background music takes to fade out at the end of a generated ad, as the voice " +
-    "ends, in milliseconds. Defaults to 300. Accepted range: 100–1000.",
-  "Station:Ads:BedDuckDb":
-    "How far below the voice the background music sits in a generated ad, in decibels, measured " +
-    "against the voice so the number means the same whatever the music's own level. Defaults to " +
-    "-12. 0 means no ducking at all, -60 is effectively silent. Changing it makes existing " +
-    "previews out of date until they are rendered again. Accepted range: -60–0.",
-};
-
-/**
- * Looks up help copy for an arbitrary rendered key. `FIELD_HELP_TEXT` is typed as
- * `Record<SettingsHelpKey, string>` so the compiler itself enforces full allowlist coverage
- * (an entry missing or misspelled fails `tsc`, not just a spec) — but `setting.key` at render
- * time is a plain `string`, so the lookup widens the record's key type to look it up safely.
- * Widening the KEY type this way is not a value lie: it never lets a wrong VALUE through, it
- * only relaxes what strings may be used to look one up, and still returns `undefined` for any
- * key `FIELD_HELP_TEXT` doesn't carry.
- */
-function helpTextFor(key: string): string | undefined {
-  return (FIELD_HELP_TEXT as Record<string, string | undefined>)[key];
-}
-
-/**
- * Per-key control-override registry (SPEC F54.1) — the `FIELD_HELP_TEXT` precedent applied to
- * whole controls instead of a help sentence. A key present here renders its registered component
+ * Per-key control-override registry (SPEC F54.1) — the same additive-lookup shape as
+ * {@link EMPTY_LIST_POLICIES} above, applied to whole controls instead of a help sentence. A key
+ * present here renders its registered component
  * in place of `SettingField`'s kind-based chain; keys absent keep that shipped rendering
  * unchanged. Zero API/wire changes: this only decides *which control* renders, never what gets
  * submitted — every registered control still lands its value in the same `values` map and rides
@@ -578,6 +197,27 @@ function changedEntries(
     });
 }
 
+/**
+ * The first key in `fieldErrors` when `sections` are walked section-by-section, key-by-key
+ * within a section — "DOM order" without querying the live tree. Takes the UNFILTERED
+ * `allSections` the caller already computed (T577 round 2 review note) rather than regrouping
+ * `settings` itself, so there is exactly one place that decides section order. Used by the
+ * gh-#144/gh-#425 focus fix: with the former per-area tab strip gone, a 400 on a field far above
+ * the Save button is otherwise silent, so the first offending field takes focus instead. `null`
+ * when nothing in `fieldErrors` matches a key in `sections`.
+ */
+function firstErroredKeyInDomOrder(
+  sections: readonly SettingsSection[],
+  fieldErrors: Record<string, string[]>
+): string | null {
+  for (const section of sections) {
+    for (const setting of section.settings) {
+      if (fieldErrors[setting.key] !== undefined) return setting.key;
+    }
+  }
+  return null;
+}
+
 /** Parse a JSON array-string like "[1,2]" into an array of numbers. Returns [] on any error. */
 function parseLibraryIds(value: string): number[] {
   if (value === "") return [];
@@ -621,21 +261,11 @@ function parseRotationCount(raw: string | undefined): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-/** Element id of an area tab's button — `aria-labelledby` target for its panel (gh-#144). */
-function settingsTabButtonId(tabId: string): string {
-  return `settings-tab-${tabId}`;
-}
-
-/** Element id of an area tab's panel — `aria-controls` target for its tab button (gh-#144). */
-function settingsTabPanelId(tabId: string): string {
-  return `settings-tabpanel-${tabId}`;
-}
-
 export function SettingsForm({
   settings,
   libraries = [],
   timeZone,
-  ttsTabExtra,
+  trailingContent,
 }: SettingsFormProps): ReactNode {
   const confirm = useConfirm();
   /**
@@ -665,82 +295,44 @@ export function SettingsForm({
    * messages (F28.9: field-level errors stay inline, never a page-wide banner).
    */
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
-
   /**
-   * gh-#144 — the page is one tab strip per settings AREA (key prefix), with the shipped
-   * section cards nested under each tab. Every panel stays MOUNTED and merely `hidden` while
-   * inactive (the SettingHelpFlyover precedent): the save model stays page-wide — one form,
-   * one `values` map, one changed-keys PUT across every tab — and the help-coverage parity
-   * gate keeps addressing every key's testid without caring which tab is showing.
+   * gh-#144/gh-#425 — the key of the first errored field (DOM order) after a 400, or `null`
+   * between saves. The former per-area tab strip auto-switched to the offending tab on a 400;
+   * with every section on one page now, a field far above the Save button is otherwise silent.
+   * Consumed by the effect below, which focuses and scrolls to it, then clears itself back to
+   * `null` — a one-shot signal, not a persisted "focused field" concept.
    */
-  const tabs = groupSettingsByTab(settings);
-  /** `null` = no explicit choice yet — the first tab renders active until the URL or a click says otherwise. */
-  const [activeTabId, setActiveTabId] = useState<string | null>(null);
-  const effectiveTabId = activeTabId ?? tabs[0]?.id ?? "";
-
+  const [pendingFocusKey, setPendingFocusKey] = useState<string | null>(null);
   /**
-   * Deep-link (gh-#144): the initial URL's `?tab=` picks the landing tab, once, on mount —
-   * unknown or absent values keep the first tab. Read post-mount (never in the initializer) so
-   * server and hydration renders agree; later tab churn is state-driven (explicit activation
-   * writes the URL, the 400 auto-switch deliberately does not), so this must not re-run and
-   * snap the operator back to the URL's tab.
+   * SPEC F205.5, STORY-478 AC7 — the search box's staged text. Filtering is presentation-only
+   * (see {@link filterSectionsByQuery}): it never touches `values`/`original`/`versions`, so a
+   * field hidden by a search stays fully staged, dirty-tracked, and part of the next Save's PUT
+   * batch even though it isn't currently rendered.
    */
+  const [searchQuery, setSearchQuery] = useState("");
+
   useEffect(() => {
-    const requested = new URLSearchParams(window.location.search).get("tab");
-    if (requested !== null && tabs.some((tab) => tab.id === requested)) {
-      setActiveTabId(requested);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only by design (see above)
-  }, []);
-
-  /** Explicit tab activation (click / arrow keys) — the only path that writes `?tab=` back to the URL. */
-  function selectTab(tabId: string): void {
-    setActiveTabId(tabId);
-    const url = new URL(window.location.href);
-    url.searchParams.set("tab", tabId);
-    window.history.replaceState(null, "", url);
-  }
-
-  /**
-   * Roving-tabindex arrow navigation per the WAI-ARIA tabs pattern: Left/Right step (wrapping),
-   * Home/End jump, selection follows focus. Vertical keys are left alone — the strip is
-   * horizontal.
-   */
-  function handleTabKeyDown(index: number): (e: KeyboardEvent<HTMLButtonElement>) => void {
-    return (e) => {
-      let nextIndex: number;
-      switch (e.key) {
-        case "ArrowRight":
-          nextIndex = (index + 1) % tabs.length;
-          break;
-        case "ArrowLeft":
-          nextIndex = (index - 1 + tabs.length) % tabs.length;
-          break;
-        case "Home":
-          nextIndex = 0;
-          break;
-        case "End":
-          nextIndex = tabs.length - 1;
-          break;
-        default:
-          return;
+    if (pendingFocusKey === null) return;
+    const control = document.getElementById(`setting-${pendingFocusKey}`);
+    if (control === null) {
+      // T577 round 2 review F1 — decided HERE, at focus time, off the CURRENT search box text,
+      // never off a `visibleSections` snapshot captured before `handleSubmit`'s own `await`: a
+      // search typed while a save is pending must still be honored once the rejection lands, not
+      // read through a stale closure. Only clear the search when the key actually belongs to
+      // this page's settings (a mistargeted key — should never happen — leaves the search alone
+      // rather than wiping it for nothing). Clearing re-renders `visibleSections` unfiltered, and
+      // since `searchQuery` is a dependency below, this effect runs again and finds the control.
+      if (settings.some((s) => s.key === pendingFocusKey)) {
+        setSearchQuery("");
       }
-      e.preventDefault();
-      const next = tabs[nextIndex];
-      if (next === undefined) return;
-      selectTab(next.id);
-      document.getElementById(settingsTabButtonId(next.id))?.focus();
-    };
-  }
-
-  /**
-   * First tab (in strip order) carrying any of the given keys — where a save rejection lands
-   * the operator. `undefined` only if none of the keys render on this page at all.
-   */
-  function firstTabWithAnyKey(keys: readonly string[]): string | undefined {
-    const keySet = new Set(keys);
-    return tabs.find((tab) => tab.settings.some((s) => keySet.has(s.key)))?.id;
-  }
+      return;
+    }
+    // jsdom (this repo's test runner) has no scrollIntoView implementation at all — guard it,
+    // never call it bare, or every spec that reaches this effect throws.
+    control.focus();
+    control.scrollIntoView?.();
+    setPendingFocusKey(null);
+  }, [pendingFocusKey, searchQuery, settings]);
 
   function handleTextChange(key: string): (e: React.ChangeEvent<HTMLInputElement>) => void {
     return (e) => {
@@ -799,6 +391,14 @@ export function SettingsForm({
     };
   }
 
+  // SPEC F205.5, STORY-478 AC5–AC7 — `allSections` is the unfiltered, enum-ordered grouping (the
+  // DOM order `firstErroredKeyInDomOrder` walks); `visibleSections` is what actually renders once
+  // the search box's text narrows it. Recomputed every render off `settings`/`searchQuery` rather
+  // than memoized — this page's setting count is small (well under a hundred rows) and neither
+  // function does anything heavier than array filtering.
+  const allSections = groupSettingsBySection(settings);
+  const visibleSections = filterSectionsByQuery(allSections, searchQuery);
+
   async function handleSubmit(e: FormEvent<HTMLFormElement>): Promise<void> {
     e.preventDefault();
 
@@ -824,13 +424,12 @@ export function SettingsForm({
         ...prev,
         [blockingChange.key]: [policy?.kind === "block" ? policy.message : ""],
       }));
-      // gh-#144 — Save is page-wide, so the blocked field may sit on a hidden tab. An inline
-      // error nobody can see is a silent failure; land the operator on the offending tab.
-      const blockedTabId = firstTabWithAnyKey([blockingChange.key]);
-      if (blockedTabId !== undefined) {
-        setActiveTabId(blockedTabId);
-      }
       setStatus({ kind: "idle" });
+      // gh-#144, T576 round 3 (R2-3) — this block never reaches the PUT, so the 400-path focus
+      // effect above never fires for it; without this, nothing moves the operator to the field
+      // that just silently rejected their save. The `pendingFocusKey` effect itself decides
+      // whether the search box needs clearing (T577 round 2 review F1) — this call never needs to.
+      setPendingFocusKey(blockingChange.key);
       return;
     }
 
@@ -969,16 +568,15 @@ export function SettingsForm({
         // operator correct the value and retry (the K5 stuck-Saving regression class).
         setStatus({ kind: "idle" });
         setFieldErrors(nextFieldErrors);
-        // gh-#144/gh-#425 — the rejected batch may span tabs the operator isn't looking at.
-        // Auto-switch to the first tab (strip order) carrying an OFFENDING key: a per-key
-        // failure names its own tab precisely; a batch-wide-only failure (no per-key entries at
-        // all) falls back to any changed key, matching the pre-per-key behavior. The other
-        // implicated tabs stay flagged by their danger dot in the strip.
-        const offendingKeys =
-          Object.keys(keyedErrors).length > 0 ? Object.keys(keyedErrors) : changed.map((c) => c.key);
-        const offendingTabId = firstTabWithAnyKey(offendingKeys);
-        if (offendingTabId !== undefined) {
-          setActiveTabId(offendingTabId);
+        // firstErroredKeyInDomOrder walks the UNFILTERED section order (T577 ruling) — the field
+        // that takes focus is the first one in server/section order, not the first one currently
+        // visible through the search box. The `pendingFocusKey` effect itself decides whether the
+        // search box needs clearing to reveal it (T577 round 2 review F1).
+        const erroredKey = firstErroredKeyInDomOrder(allSections, nextFieldErrors);
+        if (erroredKey !== null) {
+          setPendingFocusKey(erroredKey);
+        } else {
+          setPendingFocusKey(null);
         }
         return;
       }
@@ -1018,12 +616,10 @@ export function SettingsForm({
       <RotationCouplingNotice recentWindow={recentWindowValue} />
     ) : null;
 
-  /**
-   * gh-#144 — the same string diff Save submits, reduced to a key set so each tab can flag
-   * staged-but-unsaved work. Because it reads `changedEntries(original, values, versions)`
-   * verbatim, a tab's dirty dot can never disagree with what "Save settings" will actually send.
-   */
-  const dirtyKeySet = new Set(changedEntries(original, values, versions).map((entry) => entry.key));
+  // SPEC F205.5 AC7 — while the operator is searching, the trailing dedicated-API surface
+  // (PronunciationRulesControl, threaded in via `trailingContent`) is not itself filterable, so it
+  // hides rather than sit below an otherwise-empty or partially-filtered settings list.
+  const isSearching = searchQuery.trim() !== "";
 
   return (
     <form onSubmit={(e) => { void handleSubmit(e); }} className="flex flex-col gap-6">
@@ -1033,66 +629,78 @@ export function SettingsForm({
         </p>
       )}
 
-      {tabs.length > 0 && (
-        <div role="tablist" aria-label="Settings areas" className="flex flex-wrap gap-x-1 border-b-2 border-line">
-          {tabs.map((tab, index) => (
-            <SettingsAreaTabButton
-              key={tab.id}
-              tab={tab}
-              isActive={tab.id === effectiveTabId}
-              isDirty={tab.settings.some((s) => dirtyKeySet.has(s.key))}
-              hasErrors={tab.settings.some((s) => (fieldErrors[s.key] ?? []).length > 0)}
-              onSelect={() => selectTab(tab.id)}
-              onKeyDown={handleTabKeyDown(index)}
-            />
-          ))}
-        </div>
-      )}
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor="settings-search" className="text-[0.82rem] font-semibold text-mute">
+          Search settings
+        </label>
+        <input
+          id="settings-search"
+          type="search"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.currentTarget.value)}
+          placeholder="Filter by label or help text"
+          className="h-9 w-full max-w-md rounded-[6px] border border-line bg-surface px-2 text-[0.85rem] text-ink"
+        />
+      </div>
 
-      {tabs.map((tab) => (
-        <div
-          key={tab.id}
-          id={settingsTabPanelId(tab.id)}
-          role="tabpanel"
-          aria-labelledby={settingsTabButtonId(tab.id)}
-          hidden={tab.id !== effectiveTabId}
-          tabIndex={0}
-          className="flex flex-col gap-6 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      <div className="flex flex-col gap-6 md:flex-row md:items-start">
+        {/* SPEC F205.5 AC6 — one link per RENDERED (post-filter) section, sticky on md+; below md
+            it stacks above the sections instead, un-stuck, and wraps rather than force a
+            horizontal scroll at phone width. */}
+        <nav
+          aria-label="Settings sections"
+          className="flex flex-row flex-wrap gap-x-4 gap-y-1 md:sticky md:top-4 md:w-44 md:shrink-0 md:flex-col md:flex-nowrap md:gap-1 md:self-start"
         >
-          {groupSettingsBySection(tab.settings).map((section) => (
-            <SectionCard key={section.id} title={section.label}>
-              {section.settings.map((setting) => (
-                <SettingField
-                  key={setting.key}
-                  setting={setting}
-                  value={values[setting.key] ?? ""}
-                  savedValue={original[setting.key] ?? ""}
-                  errors={fieldErrors[setting.key] ?? []}
-                  isPending={isPending}
-                  libraries={libraries}
-                  isSafeScopeField={setting.key === SAFE_SCOPE_KEY}
-                  safeScopeEffectivelyEmpty={safeScopeEffectivelyEmpty}
-                  rotationCouplingNotice={setting.key === ARTIST_SEPARATION_KEY ? rotationCouplingNotice : null}
-                  timeZone={timeZone}
-                  onTextChange={handleTextChange(setting.key)}
-                  onCheckboxChange={handleCheckboxChange(setting.key)}
-                  onMultiSelectChange={handleMultiSelectChange(setting.key)}
-                  onSemanticChange={handleSemanticChange(setting.key)}
-                />
-              ))}
-            </SectionCard>
+          {visibleSections.map((section) => (
+            <a
+              key={section.id}
+              href={`#settings-section-${section.id}`}
+              className="text-[0.82rem] text-mute hover:text-ink"
+            >
+              {section.label}
+            </a>
           ))}
+        </nav>
 
-          {/* T145 review F3 — mounted INSIDE the TTS tabpanel (not a page-level sibling below the
-              Save button): AC1 calls for a TTS surface, and this keeps SettingsForm agnostic of
-              which dedicated-API surface a page wants (the timeZone injection precedent) rather
-              than importing PronunciationRulesControl directly. */}
-          {tab.prefix === TTS_TAB_PREFIX && ttsTabExtra}
+        <div className="flex min-w-0 flex-1 flex-col gap-6">
+          {visibleSections.length === 0 ? (
+            // T577 round 2 review F4 — only while actually searching: an empty `settings` array
+            // with no search text renders nothing at all, matching pre-search-box HEAD.
+            isSearching && <p className="text-[0.85rem] text-mute">No settings match</p>
+          ) : (
+            visibleSections.map((section) => (
+              <SectionCard key={section.id} id={`settings-section-${section.id}`} title={section.label}>
+                {section.settings.map((setting) => (
+                  <SettingField
+                    key={setting.key}
+                    setting={setting}
+                    value={values[setting.key] ?? ""}
+                    savedValue={original[setting.key] ?? ""}
+                    errors={fieldErrors[setting.key] ?? []}
+                    isPending={isPending}
+                    libraries={libraries}
+                    isSafeScopeField={setting.key === SAFE_SCOPE_KEY}
+                    safeScopeEffectivelyEmpty={safeScopeEffectivelyEmpty}
+                    rotationCouplingNotice={setting.key === ARTIST_SEPARATION_KEY ? rotationCouplingNotice : null}
+                    timeZone={timeZone}
+                    onTextChange={handleTextChange(setting.key)}
+                    onCheckboxChange={handleCheckboxChange(setting.key)}
+                    onMultiSelectChange={handleMultiSelectChange(setting.key)}
+                    onSemanticChange={handleSemanticChange(setting.key)}
+                  />
+                ))}
+              </SectionCard>
+            ))
+          )}
         </div>
-      ))}
+      </div>
 
-      {/* One Save for the whole page (gh-#144): outside every tabpanel, so it renders whichever
-          tab is active, and the diff above it spans every tab's staged values. */}
+      {/* T145 review F3, T576 — mounted at the end of the page, after every section card: AC1
+          calls for a TTS surface, and this keeps SettingsForm agnostic of which dedicated-API
+          surface a page wants (the timeZone injection precedent) rather than importing
+          PronunciationRulesControl directly. T577 — hidden while the search box is filtering. */}
+      {!isSearching && trailingContent}
+
       <Button type="submit" disabled={isPending} className="self-start">
         {isPending ? "Saving…" : "Save settings"}
       </Button>
@@ -1101,81 +709,19 @@ export function SettingsForm({
 }
 
 // ---------------------------------------------------------------------------
-// Area tab strip (gh-#144, .claude/skills/design-aesthetic)
-// ---------------------------------------------------------------------------
-
-interface SettingsAreaTabButtonProps {
-  tab: SettingsAreaTab;
-  isActive: boolean;
-  /** Any of this tab's keys staged ≠ last-saved — surfaces as the rust dot + sr-only text. */
-  isDirty: boolean;
-  /** Any of this tab's keys carrying an inline validation error — danger dot outranks the dirty rust. */
-  hasErrors: boolean;
-  onSelect: () => void;
-  onKeyDown: (e: KeyboardEvent<HTMLButtonElement>) => void;
-}
-
-/**
- * One preset button on the area strip — brass uppercase micro-label (the quiet-structure
- * treatment), with the active tab carried by a 2px rust underline riding the strip's own
- * `--line` rule, like a receiver's band selector. The unsaved-changes dot is rust (it is the
- * thing on this screen that matters); a validation error escalates it to `--danger`. Both
- * states also speak: sr-only copy joins the accessible name so the flag survives without
- * color vision.
- */
-function SettingsAreaTabButton({
-  tab,
-  isActive,
-  isDirty,
-  hasErrors,
-  onSelect,
-  onKeyDown,
-}: SettingsAreaTabButtonProps): ReactNode {
-  return (
-    <button
-      id={settingsTabButtonId(tab.id)}
-      type="button"
-      role="tab"
-      aria-selected={isActive}
-      aria-controls={settingsTabPanelId(tab.id)}
-      tabIndex={isActive ? 0 : -1}
-      onClick={onSelect}
-      onKeyDown={onKeyDown}
-      className={cn(
-        "-mb-[2px] inline-flex min-h-10 items-center border-b-2 px-3 text-[0.7rem] font-semibold uppercase tracking-[0.12em] transition-colors duration-[120ms] ease-out focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent",
-        isActive ? "border-accent text-accent" : "border-transparent text-accent-2 hover:text-ink"
-      )}
-    >
-      {tab.label}
-      {(isDirty || hasErrors) && (
-        <>
-          <span
-            aria-hidden="true"
-            data-testid={`settings-tab-flag-${tab.id}`}
-            className={cn(
-              "ml-1.5 inline-block h-1.5 w-1.5 rounded-[999px]",
-              hasErrors ? "bg-danger" : "bg-accent"
-            )}
-          />
-          <span className="sr-only">{hasErrors ? "(validation error)" : "(unsaved changes)"}</span>
-        </>
-      )}
-    </button>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Section / field presentation (SPEC F28.12, .claude/skills/design-aesthetic)
 // ---------------------------------------------------------------------------
 
 interface SectionCardProps {
+  /** Anchor id the sticky index's `href="#..."` link targets (SPEC F205.5 AC6). */
+  id: string;
   title: string;
   children: ReactNode;
 }
 
-function SectionCard({ title, children }: SectionCardProps): ReactNode {
+function SectionCard({ id, title, children }: SectionCardProps): ReactNode {
   return (
-    <section aria-label={title} className="rounded-[6px] border border-line bg-surface p-5">
+    <section id={id} aria-label={title} className="rounded-[6px] border border-line bg-surface p-5">
       <h2 className="font-display text-[1.1rem] text-ink">{title}</h2>
       <div className="mt-4 flex flex-col gap-5">{children}</div>
     </section>
@@ -1232,29 +778,32 @@ function SettingField({
 }: SettingFieldProps): ReactNode {
   const controlId = `setting-${setting.key}`;
   const RegisteredControl = SETTING_CONTROL_REGISTRY[setting.key];
-  const helpText = helpTextFor(setting.key);
   /**
-   * gh-#145 — help copy lives in the title's `?` flyover, not under the control. The panel keeps
-   * a stable id so the field's input can point `aria-describedby` at it whether or not the
-   * flyover is open (SettingHelpFlyover keeps the panel mounted, merely `hidden`).
+   * gh-#145, T576 — help copy lives in the title's `?` flyover, not under the control, and is
+   * carried directly on the DTO (`setting.help`, sourced server-side from `SettingCopy`/the resx)
+   * rather than a client-side lookup table. The panel keeps a stable id so the field's input can
+   * point `aria-describedby` at it whether or not the flyover is open (SettingHelpFlyover keeps
+   * the panel mounted, merely `hidden`) — but only when there is help worth describing: a blank
+   * `help` renders no flyover and no `aria-describedby` at all.
    */
   const helpId = `${controlId}-help`;
-  const describedBy = helpText !== undefined ? helpId : undefined;
+  const hasHelp = setting.help.trim() !== "";
+  const describedBy = hasHelp ? helpId : undefined;
 
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-1.5">
           <label htmlFor={controlId} className="text-[0.85rem] font-semibold text-ink">
-            {setting.key}
+            {setting.label}
             {setting.unit !== "" && (
               <span aria-label={`Unit: ${setting.unit}`} className="ml-1 font-normal text-mute">
                 ({setting.unit})
               </span>
             )}
           </label>
-          {helpText !== undefined && (
-            <SettingHelpFlyover settingKey={setting.key} helpId={helpId} helpText={helpText} />
+          {hasHelp && (
+            <SettingHelpFlyover settingKey={setting.key} helpId={helpId} helpText={setting.help} />
           )}
         </div>
         <div className="flex items-center gap-1.5">
@@ -1337,6 +886,8 @@ function SettingField({
           onChange={onTextChange}
           disabled={isPending}
           aria-describedby={describedBy}
+          min={setting.min ?? undefined}
+          max={setting.max ?? undefined}
           className="h-9 max-w-xs rounded-[6px] border border-line bg-surface px-2 text-[0.85rem] text-ink tabular-nums disabled:opacity-50"
         />
       )}

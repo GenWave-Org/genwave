@@ -18,6 +18,7 @@ import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "@/components/ui/toast";
 import { SettingsForm } from "../app/(authed)/settings/SettingsForm";
 import type { SettingDto } from "../app/(authed)/settings/SettingsForm";
+import { settingDto } from "./setting-fixture";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -37,7 +38,7 @@ const THEME_CHOICES = [
 ];
 
 function makeThemeSetting(overrides: Partial<SettingDto> = {}): SettingDto {
-  return {
+  return settingDto({
     key: "Station:Theme",
     value: "cats-whisker",
     source: "default",
@@ -45,8 +46,11 @@ function makeThemeSetting(overrides: Partial<SettingDto> = {}): SettingDto {
     kind: "choice",
     unit: "",
     choices: THEME_CHOICES,
+    // The flyover only renders when `help` is non-blank (T576) — this fixture carries its own
+    // explicit help copy so the "still shows the existing help text" spec below still holds.
+    help: "The station's active theme, by slug — must name one of the shipped themes.",
     ...overrides,
-  };
+  });
 }
 
 interface MockResponseSpec {
@@ -314,7 +318,7 @@ describe("Feature: SettingKind.Choice's dedicated Settings control", () => {
     ];
 
     function makeIconPackSetting(overrides: Partial<SettingDto> = {}): SettingDto {
-      return {
+      return settingDto({
         key: "Station:IconPack",
         value: "",
         source: "default",
@@ -323,7 +327,7 @@ describe("Feature: SettingKind.Choice's dedicated Settings control", () => {
         unit: "",
         choices: HOUSE_ICONS_ONLY_CHOICES,
         ...overrides,
-      };
+      });
     }
 
     it("a zero-packs station renders a working dropdown, never the 'no choices' alert", () => {
@@ -377,7 +381,7 @@ describe("Feature: SettingKind.Choice's dedicated Settings control", () => {
       renderWithProviders(
         <SettingsForm
           settings={[
-            { key: "Llm:Model", value: "gpt", source: "default", applyMode: "live", kind: "string", unit: "" },
+            settingDto({ key: "Llm:Model", value: "gpt", source: "default", applyMode: "live", kind: "string", unit: "" }),
           ]}
         />
       );
@@ -396,7 +400,7 @@ describe("Feature: SettingKind.Choice's dedicated Settings control", () => {
       renderWithProviders(
         <SettingsForm
           settings={[
-            {
+            settingDto({
               key: "Station:UnregisteredChoice",
               value: "a",
               source: "default",
@@ -407,7 +411,7 @@ describe("Feature: SettingKind.Choice's dedicated Settings control", () => {
                 { value: "a", label: "Option A" },
                 { value: "b", label: "Option B" },
               ],
-            },
+            }),
           ]}
         />
       );

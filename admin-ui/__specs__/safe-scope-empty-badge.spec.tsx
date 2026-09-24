@@ -21,6 +21,7 @@ import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "@/components/ui/toast";
 import { SettingsForm } from "../app/(authed)/settings/SettingsForm";
 import type { SettingDto } from "../app/(authed)/settings/SettingsForm";
+import { settingDto } from "./setting-fixture";
 import type { LibraryDto } from "../lib/library";
 
 // ---------------------------------------------------------------------------
@@ -30,7 +31,7 @@ import type { LibraryDto } from "../lib/library";
 const SAFE_SCOPE_KEY = "Station:SafeScope:LibraryIds";
 
 function makeSafeScopeSetting(override: Partial<SettingDto> = {}): SettingDto {
-  return {
+  return settingDto({
     key: SAFE_SCOPE_KEY,
     value: "[1]",
     source: "override",
@@ -38,7 +39,7 @@ function makeSafeScopeSetting(override: Partial<SettingDto> = {}): SettingDto {
     kind: "number-list",
     unit: "",
     ...override,
-  };
+  });
 }
 
 function makeLibraries(): LibraryDto[] {

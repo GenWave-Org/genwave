@@ -14,38 +14,57 @@ import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "@/components/ui/toast";
 import { SettingsForm } from "../app/(authed)/settings/SettingsForm";
 import type { SettingDto } from "../app/(authed)/settings/SettingsForm";
+import { settingDto } from "./setting-fixture";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeSettings(overrides: Partial<SettingDto>[] = []): SettingDto[] {
-  const defaults: SettingDto[] = [
-    {
-      key: "Loudness:TargetLufs",
-      value: "-16",
-      source: "default",
-      applyMode: "live",
-      kind: "number",
-      unit: "LUFS",
-    },
-    {
-      key: "GW_XFADE_MAX",
-      value: "8",
-      source: "override",
-      applyMode: "engine-restart",
-      kind: "number",
-      unit: "seconds",
-    },
-  ];
-  if (overrides.length > 0) {
-    return overrides.map((o, i) => ({ ...defaults[i % defaults.length]!, ...o }));
+/** Pre-descriptor base fields for the two settings this file cares about, one `settingDto()` call
+ * away from a full `SettingDto` — kept as raw fields, not already-built `SettingDto`s, so an
+ * override merges BEFORE `settingDto()` computes its `label: fields.key` default. Merging onto an
+ * already-built default (label already resolved to the OLD key) would need a hand-written label
+ * fallback for an override that changes `key`; merging onto the raw fields lets `settingDto()`'s
+ * own default do that job once, the same way every other spec's fixture already relies on it. */
+const DEFAULT_SETTING_FIELDS: Array<
+  Pick<SettingDto, "key" | "value" | "source" | "applyMode" | "kind" | "unit"> & Partial<SettingDto>
+> = [
+  {
+    key: "Loudness:TargetLufs",
+    value: "-16",
+    source: "default",
+    applyMode: "live",
+    kind: "number",
+    unit: "LUFS",
+  },
+  {
+    key: "GW_XFADE_MAX",
+    value: "8",
+    source: "override",
+    applyMode: "engine-restart",
+    kind: "number",
+    unit: "seconds",
+  },
+];
+
+/** Indexes DEFAULT_SETTING_FIELDS, wrapping around — arrange-time only, never an assertion. */
+function defaultFieldsAt(index: number): (typeof DEFAULT_SETTING_FIELDS)[number] {
+  const fields = DEFAULT_SETTING_FIELDS[index % DEFAULT_SETTING_FIELDS.length];
+  if (fields === undefined) {
+    throw new Error(`DEFAULT_SETTING_FIELDS has no entry for index ${index}`);
   }
-  return defaults;
+  return fields;
+}
+
+function makeSettings(overrides: Partial<SettingDto>[] = []): SettingDto[] {
+  if (overrides.length > 0) {
+    return overrides.map((o, i) => settingDto({ ...defaultFieldsAt(i), ...o }));
+  }
+  return DEFAULT_SETTING_FIELDS.map((fields) => settingDto(fields));
 }
 
 function makeBooleanSetting(override: Partial<SettingDto> = {}): SettingDto {
-  return {
+  return settingDto({
     key: "Station:Cadence:LeadInBeforeEachTrack",
     value: "true",
     source: "default",
@@ -53,7 +72,7 @@ function makeBooleanSetting(override: Partial<SettingDto> = {}): SettingDto {
     kind: "boolean",
     unit: "",
     ...override,
-  };
+  });
 }
 
 function makeFetchMock(
@@ -420,6 +439,85 @@ describe("Feature: Edit station settings", () => {
         // valid GW_XFADE_MAX change gets no error at all.
         expect(screen.getAllByRole("alert")).toHaveLength(1);
         expect(screen.getByRole("alert")).toHaveTextContent("Must be between -40 and 0");
+      });
+    });
+
+    it("moves focus to the first offending field, in DOM order, on a 400 (gh-#144, gh-#425)", async () => {
+      // Re-homed from the now-deleted settings-area-tabs.spec.tsx's "auto-switches to the first
+      // offending tab" scenario (gh-#144's tab strip retired, T576): with every section on one
+      // page now, there is no tab to switch to — a rejected field far above Save is otherwise
+      // silent, so the fix moves DOM focus there instead. Both changed keys are rejected here so
+      // the assertion actually exercises "first in DOM order", not merely "the only errored key" —
+      // Loudness:TargetLufs renders before GW_XFADE_MAX (the Loudness section precedes Playout).
+      // The 400 body deliberately lists GW_XFADE_MAX (the LATER field) first — proving the fix
+      // reads DOM order off the rendered settings, not insertion order off the error map (R2-4:
+      // with Loudness:TargetLufs first here too, the two orders would coincide and the assertion
+      // below would pass even if the implementation just took Object.keys(fieldErrors)[0]).
+      const validationProblem = {
+        errors: {
+          GW_XFADE_MAX: ["Must be a positive number of seconds"],
+          "Loudness:TargetLufs": ["Must be between -40 and 0"],
+        },
+        title: "One or more settings values are invalid.",
+        status: 400,
+      };
+      makeFetchMock(400, validationProblem);
+      const settings = makeSettings();
+      renderWithProviders(<SettingsForm settings={settings} />);
+
+      fireEvent.change(screen.getByLabelText(/Loudness:TargetLufs/), { target: { value: "50" } });
+      fireEvent.change(screen.getByLabelText(/GW_XFADE_MAX/), { target: { value: "-1" } });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /save settings/i }));
+        await Promise.resolve();
+      });
+
+      await waitFor(() => {
+        expect(document.activeElement).toBe(screen.getByLabelText(/Loudness:TargetLufs/));
+      });
+    });
+  });
+
+  describe("Scenario: the offending field is a registry control, not a plain input (R2-2)", () => {
+    // CorrectionsSettingControl (SETTING_CONTROL_REGISTRY) puts id={controlId} on a wrapper <div>
+    // rather than a native input/select — `.focus()` is a no-op on a div with no tabIndex, so this
+    // proves the gh-#144 focus fix reaches a registry control too, not just the kind-chain inputs
+    // the test above already covers.
+    beforeEach(async () => {
+      makeFetchMock(400, {
+        errors: { "Tts:Corrections": ["Rule 1's 'from' text is blank"] },
+        title: "One or more settings values are invalid.",
+        status: 400,
+      });
+      renderWithProviders(
+        <SettingsForm
+          settings={[
+            settingDto({
+              key: "Tts:Corrections",
+              value: JSON.stringify([{ from: "MacLeod", to: "Muh-cloud" }]),
+              source: "override",
+              applyMode: "live",
+              kind: "string",
+              unit: "",
+            }),
+          ]}
+        />
+      );
+
+      fireEvent.change(screen.getByLabelText("To text for rule 1"), {
+        target: { value: "Mick-loud" },
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /save settings/i }));
+        await Promise.resolve();
+      });
+    });
+
+    it("moves focus to the setting-Tts:Corrections control on a 400", async () => {
+      await waitFor(() => {
+        expect(document.activeElement).toBe(document.getElementById("setting-Tts:Corrections"));
       });
     });
   });

@@ -19,6 +19,7 @@ import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "@/components/ui/toast";
 import { SettingsForm } from "../app/(authed)/settings/SettingsForm";
 import type { SettingDto } from "../app/(authed)/settings/SettingsForm";
+import { settingDto } from "./setting-fixture";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -30,7 +31,7 @@ const SAVED_RULES = JSON.stringify([
 ]);
 
 function makeCorrectionsSetting(overrides: Partial<SettingDto> = {}): SettingDto {
-  return {
+  return settingDto({
     key: "Tts:Corrections",
     value: SAVED_RULES,
     source: "override",
@@ -38,7 +39,7 @@ function makeCorrectionsSetting(overrides: Partial<SettingDto> = {}): SettingDto
     kind: "string",
     unit: "",
     ...overrides,
-  };
+  });
 }
 
 interface MockResponseSpec {

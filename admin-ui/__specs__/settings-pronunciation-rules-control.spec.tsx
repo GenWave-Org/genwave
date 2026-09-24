@@ -965,7 +965,7 @@ describe("Feature: content-addressed PUT/DELETE encode URL-hostile pattern/word 
 // Feature: the add UI is never a <form> (T145 review round 3 — the nested-form browser defect)
 // ---------------------------------------------------------------------------
 //
-// This control is mounted inside SettingsForm's own page-wide <form> (via ttsTabExtra). A <form>
+// This control is mounted inside SettingsForm's own page-wide <form> (via trailingContent). A <form>
 // nested inside another <form> is invalid HTML: real browsers silently STRIP the inner <form>
 // element entirely, so an onSubmit handler on it never binds, and a type="submit" button inside
 // it instead submits the OUTER SettingsForm natively — observed live against the running stack as

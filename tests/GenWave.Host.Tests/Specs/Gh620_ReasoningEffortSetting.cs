@@ -3,8 +3,8 @@
 // BDD specification — xUnit. The setting facts follow Story250_AudiencePostureSetting's own
 // shape (seeded default, allowlist entry, validator guard); the wire fact drives the real
 // LlmWishParser against a scripted FakeHttpMessageHandler (Story225's idiom) — the one poster
-// that lives in GenWave.Host. settings-help-keys.ts parity is covered by Story151's existing
-// FeatureSettingsHelpKeysParity fact the moment the key joins the allowlist.
+// that lives in GenWave.Host. The setting's label/help copy is a SettingCopy/resx concern (SPEC
+// F205.4, PLAN T574/T576) — no client-side help-key mirror exists for this key to join anymore.
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;

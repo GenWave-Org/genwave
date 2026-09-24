@@ -153,8 +153,9 @@ public static class StationSettingsAllowlist
         // (GET /api/stations), and the playout push path, so a PUT here applies with no api
         // restart. Station:Name is the ONE exception to "live means no caveat": the Icecast
         // stream/directory name (icy-name, STATION_NAME env) only catches up on the next ENGINE
-        // restart — the admin UI badges this via FIELD_HELP_TEXT (SPEC F44.5), not a different
-        // apply-mode; the api-side effects (patter, /api/stations, this console) are genuinely live.
+        // restart — the admin UI badges this via the field's own help copy (SPEC F44.5, resolved
+        // server-side onto SettingDto.Help since STORY-478/PLAN T576), not a different apply-mode;
+        // the api-side effects (patter, /api/stations, this console) are genuinely live.
         new("Station:Name", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Station),
         // Station:Tagline (SPEC F207.1, STORY-474, PLAN T561) — the About page's subtitle. Blank is
         // valid (unlike Name's IsNonBlank guard); no Icecast round-trip at all, so it carries none of

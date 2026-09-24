@@ -120,13 +120,14 @@
     Operator-facing copy for every StationSettingsAllowlist.All key (SPEC F205.2, STORY-477,
     PLAN T573) — {Key}.Label / {Key}.Help for all 83 settings, Group.{id}.Label for every
     SettingGroup member, and Choice.{Key}.{value} for Llm:ReasoningEffort's five values. Ported
-    from admin-ui's FIELD_HELP_TEXT (T576 will delete that copy once the settings GET response
-    carries these instead — T574's job). Edits made while porting: dropped every "Accepted
-    range"/"Must be ..." sentence that only restated a Min/Max the AllowedSetting record already
-    carries (T574 serves that from the record itself — a second copy would drift); reworded the
-    handful of sentences whose only jargon was a raw colon-syntax setting key into plain words;
-    dropped a leftover internal spec citation, "(F108.1)", that had no place in operator-facing
-    copy. See T573's own build report for the itemized list.
+    from admin-ui's former FIELD_HELP_TEXT lookup table — the settings GET response now carries
+    this copy directly on the wire (T574), and admin-ui's own client-side copy was deleted in
+    T576. Edits made while porting: dropped every "Accepted range"/"Must be ..." sentence that
+    only restated a Min/Max the AllowedSetting record already carries (T574 serves that from the
+    record itself — a second copy would drift); reworded the handful of sentences whose only
+    jargon was a raw colon-syntax setting key into plain words; dropped a leftover internal spec
+    citation, "(F108.1)", that had no place in operator-facing copy. See T573's own build report
+    for the itemized list.
 
     SettingCopy.ChoiceLabel has no Choice.Station:Theme.* or Choice.Station:IconPack.* entries by
     design — both keys' choices are live catalog data (installed themes / icon packs), not a

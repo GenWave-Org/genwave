@@ -16,6 +16,7 @@ import type { PersonasClientProps } from "../app/(authed)/personas/PersonasClien
 import type { PersonaDto } from "../app/(authed)/personas/types";
 import { SettingsForm } from "../app/(authed)/settings/SettingsForm";
 import type { SettingDto } from "../app/(authed)/settings/SettingsForm";
+import { settingDto } from "./setting-fixture";
 
 // ---------------------------------------------------------------------------
 // Fixtures — three personas so grouping and the on-air badge are both exercised
@@ -136,7 +137,7 @@ function sectionFor(heading: "Scheduled" | "Bench"): HTMLElement {
 }
 
 function makeSetting(overrides: Partial<SettingDto> = {}): SettingDto {
-  return {
+  return settingDto({
     key: "Station:Name",
     value: "GenWave",
     source: "default",
@@ -144,7 +145,7 @@ function makeSetting(overrides: Partial<SettingDto> = {}): SettingDto {
     kind: "string",
     unit: "",
     ...overrides,
-  };
+  });
 }
 
 // ---------------------------------------------------------------------------
