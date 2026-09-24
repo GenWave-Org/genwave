@@ -214,6 +214,21 @@ public static class FeatureImagingKindAuthoredRows
         static void RunMigrationScript(DatabaseFixture db) =>
             db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "30-imaging-kind-migration.sh"));
 
+        /// <summary>
+        /// db/30's own CHECK only admits the original four kinds ('ad' arrived later, db/42) — since
+        /// <see cref="DatabaseFixture"/> is one Postgres shared by the WHOLE integration run
+        /// (<c>DatabaseCollection</c>'s own remarks), a test that drops the column and re-runs db/30
+        /// narrows <c>media_imaging_kind_check</c> for every later test too, not just itself. Re-run
+        /// db/42 (idempotent; its station-schema half is a no-op here, db/06 already created those
+        /// tables) immediately after db/30 to put the shared schema back to the fresh-init width
+        /// every other integration test in the collection assumes — the same widen db/01-library.sh's
+        /// own mirror already carries. Root cause of the nightly red on ReadyMusicCountTests
+        /// (run 35973669093): this restore was missing, so whichever of these two tests happened to
+        /// run before it left the CHECK narrowed for its 'ad'-kind authored insert.
+        /// </summary>
+        static void RestoreWidenedCheckConstraint(DatabaseFixture db) =>
+            db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "42-ads-migration.sh"));
+
         static async Task DropColumnAsync(DatabaseFixture db)
         {
             await using var conn = await db.DataSource.OpenConnectionAsync();
@@ -238,6 +253,7 @@ public static class FeatureImagingKindAuthoredRows
             var preExisting = await InsertScannedRowAsync(db, "/media/pre-existing.flac");
 
             RunMigrationScript(db);
+            RestoreWidenedCheckConstraint(db);
 
             Assert.Null(await ImagingKindOfAsync(db, preExisting));
         }
@@ -262,6 +278,7 @@ public static class FeatureImagingKindAuthoredRows
             await db.ResetAsync();
             await DropColumnAsync(db);
             RunMigrationScript(db);
+            RestoreWidenedCheckConstraint(db);
             IAuthoredCatalogWriter writer = Harness.Repo(db);
 
             var id = await writer.InsertAuthoredAsync(
