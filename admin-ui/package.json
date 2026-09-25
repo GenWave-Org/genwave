@@ -21,7 +21,7 @@
     "tailwind-merge": "^3.7.0"
   },
   "devDependencies": {
-    "@jest/globals": "^30.5.1",
+    "@jest/globals": "^30.5.2",
     "@tailwindcss/postcss": "^4.3.3",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
@@ -30,8 +30,8 @@
     "@types/react-dom": "^19.3.0",
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.3.5",
-    "jest": "^30.5.1",
-    "jest-environment-jsdom": "^30.5.1",
+    "jest": "^30.5.2",
+    "jest-environment-jsdom": "^30.5.2",
     "jest-environment-node": "^30.5.1",
     "postcss": "^8.5.28",
     "shadcn": "^4.21.0",
