@@ -139,7 +139,7 @@ public static class FeatureStationIdentityLive
 
         var settingsController = new SettingsController(
             root, store, new SettingValidator(root), NullLogger<SettingsController>.Instance,
-            new FakeIconPackStore(), TestSettingCopy.Real())
+            TestSettingCopy.Real(), TestSettingChoiceResolver.Default())
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
         };
@@ -224,7 +224,7 @@ public static class FeatureStationIdentityLive
         {
             Assert.True(StationSettingsAllowlist.ByKey.TryGetValue("Station:Voice", out var entry));
             Assert.Equal(SettingApplyMode.Live, entry.ApplyMode);
-            Assert.Equal(SettingKind.String, entry.Kind);
+            Assert.Equal(SettingKind.Choice, entry.Kind);
         }
     }
 

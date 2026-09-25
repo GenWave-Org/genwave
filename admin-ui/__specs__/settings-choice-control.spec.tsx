@@ -2,13 +2,20 @@
 // PLAN T175 — `SettingKind.Choice` gets a dedicated Settings control (SPEC F102.14, STORY-265).
 //
 // Runner: Jest (jsdom) + @testing-library/react, mirroring settings-audience-control.spec.tsx and
-// settings-semantic-controls.spec.tsx's house pattern (renderWithProviders,
+// settings-persona-control.spec.tsx's house pattern (renderWithProviders,
 // makeSequencedFetchMock) — SettingsForm calls useConfirm() unconditionally, so every render
 // needs a ConfirmDialogProvider ancestor.
 //
 // `Station:Theme` is the only shipped `kind: "choice"` setting today, so it doubles as the
 // coverage vehicle for `ChoiceSettingControl` — a generic control driven purely by
 // `setting.choices`, not a Theme-specific one (see that component's own remarks).
+//
+// STORY-479 (PLAN T581) deleted the now-superseded settings-semantic-controls.spec.tsx
+// (`Station:Voice`'s old dedicated fetch-fed dropdown, `VoiceSettingControl`). Its badge fact
+// (source/apply-mode badges render on an overridden control, F54.4) moved below, proved against
+// Theme; its changed-keys PUT (F54.4) and unregistered-key (F54.1) facts were already covered here. Its fetch-degradation scenario has no analogue here — no
+// free-text fallback exists any more (F205.7g) — and is superseded by
+// `__specs__/settings-live-choices.spec.tsx`'s `choicesStale`/`choicesFailed` coverage.
 
 import { describe, it, expect, beforeEach, afterEach, jest } from "@jest/globals";
 import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
@@ -133,8 +140,27 @@ describe("Feature: SettingKind.Choice's dedicated Settings control", () => {
     });
   });
 
+  describe("Scenario: source and apply-mode badges render on an overridden control like any other field (F54.4)", () => {
+    // Given: Station:Theme staged as an override that only applies after an engine restart
+    beforeEach(() => {
+      renderWithProviders(
+        <SettingsForm
+          settings={[makeThemeSetting({ source: "override", applyMode: "engine-restart" })]}
+        />
+      );
+    });
+
+    it("renders the [override] source badge", () => {
+      expect(screen.getByText(/\[override\]/)).toBeInTheDocument();
+    });
+
+    it('renders the "applies after engine restart" apply-mode badge', () => {
+      expect(screen.getByText(/applies after engine restart/)).toBeInTheDocument();
+    });
+  });
+
   describe("Scenario: a staged value the choices list doesn't carry", () => {
-    it("still renders it, marked distinctly from the closed set (VoiceSettingControl precedent)", () => {
+    it("still renders it, marked distinctly from the closed set", () => {
       renderWithProviders(
         <SettingsForm settings={[makeThemeSetting({ value: "retired-theme" })]} />
       );
@@ -182,7 +208,10 @@ describe("Feature: SettingKind.Choice's dedicated Settings control", () => {
       expect(select.options[0]).toHaveTextContent("Station default (Valve Glow)");
     });
 
-    it("falls back to a neutral label when the API marks no choice as default", () => {
+    // STORY-479 (SPEC F205.7e) — no choice flagged `isDefault` means the control can't name a
+    // default, so the placeholder falls all the way back to the generic "Choose…" text (the same
+    // one Llm:Model/Station:Voice, which never flag one, show).
+    it("falls back to the generic placeholder when the API marks no choice as default", () => {
       renderWithProviders(
         <SettingsForm
           settings={[
@@ -198,8 +227,7 @@ describe("Feature: SettingKind.Choice's dedicated Settings control", () => {
       );
 
       const select = screen.getByLabelText(/Station:Theme/) as HTMLSelectElement;
-      expect(select.options[0]).toHaveTextContent("Station default");
-      expect(select.options[0]).not.toHaveTextContent(/\(/);
+      expect(select.options[0]).toHaveTextContent("Choose…");
     });
   });
 

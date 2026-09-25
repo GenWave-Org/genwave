@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **124 seams across 7 projects.**
+> **128 seams across 7 projects.**
 
 ## GenWave.Ads (2 seams)
 
@@ -60,7 +60,7 @@
 | `GenWave.Core.Abstractions.IContextPatterFactSource` | `GenWave.Context.ContextPipeline` | Singleton | also registered: `GenWave.Core.Abstractions.NoOpContextPatterFactSource` (GenWave.Core) |
 | `GenWave.Core.Abstractions.IContextProvider` | `GenWave.Context.History.HistoryContextProvider` | Singleton | also registered: `GenWave.Context.Weather.WeatherContextProvider` (GenWave.Context) |
 
-## GenWave.Host (33 seams)
+## GenWave.Host (36 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -92,6 +92,9 @@
 | `GenWave.Core.Abstractions.IStationScopeProvider` | `GenWave.Host.Options.OptionsMonitorStationScopeProvider` | Singleton | — |
 | `GenWave.Host.Auth.IAnnounceTokenStore` | `GenWave.Host.Auth.AnnounceTokenStore` | Singleton | — |
 | `GenWave.Host.Catalog.ICatalogPersonaAvatarInstaller` | `GenWave.Host.Catalog.CatalogPersonaAvatarInstaller` | Singleton | — |
+| `GenWave.Host.Configuration.IChoiceCatalog` | `GenWave.Host.Configuration.ShowChoiceCatalog` | Singleton | — |
+| `GenWave.Host.Configuration.IChoiceProbe` | `GenWave.Host.Configuration.TtsVoiceChoiceProbe` | Singleton | also registered: `GenWave.Host.Configuration.LlmModelChoiceProbe` (GenWave.Host) |
+| `GenWave.Host.Configuration.ISettingChoiceResolver` | `GenWave.Host.Configuration.SettingChoiceResolver` | Singleton | — |
 | `GenWave.Host.Configuration.IStationSettingsStore` | `GenWave.Host.Configuration.StationSettingsStore` | Singleton | — |
 | `GenWave.Host.Images.IImageProcessRunner` | `GenWave.Host.Images.FfmpegImageProcessRunner` | Singleton | — |
 | `GenWave.Host.Playout.IAiringTokenResolver` | `GenWave.Host.Playout.AiringTokenRing` | Singleton | — |
@@ -183,12 +186,13 @@
 | `GenWave.Orchestration.IRandomSource` | `GenWave.Orchestration.SystemRandomSource` | Singleton | — |
 | `GenWave.Orchestration.IRequestFulfillmentSource` | `GenWave.Orchestration.RequestFulfillmentProvider` | Singleton | also registered: `GenWave.Orchestration.NoOpRequestFulfillmentSource` (GenWave.Orchestration) |
 
-## GenWave.Tts (17 seams)
+## GenWave.Tts (18 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
 | `GenWave.Core.Abstractions.IAnnouncementCopyWriter` | `GenWave.Tts.LlmCopyWriter` | Singleton | — |
 | `GenWave.Core.Abstractions.ICopyBoundsProvider` | `GenWave.Tts.OptionsMonitorCopyBoundsProvider` | Singleton | — |
+| `GenWave.Core.Abstractions.ILlmModelLister` | `GenWave.Tts.OpenAiModelLister` | Singleton | — |
 | `GenWave.Core.Abstractions.IPersonaPreviewWriter` | `GenWave.Tts.LlmCopyWriter` | Singleton | — |
 | `GenWave.Core.Abstractions.ISegmentCopyWriter` | `GenWave.Tts.DegradationGatedCopyWriter` | Singleton | wraps: `GenWave.Tts.LlmCopyWriter` (GenWave.Tts), `GenWave.Tts.TemplateCopyWriter` (GenWave.Tts) |
 | `GenWave.Core.Abstractions.ISpeakerSnapshotSource` | `GenWave.Tts.SpeakerSnapshotSource` | Singleton | — |

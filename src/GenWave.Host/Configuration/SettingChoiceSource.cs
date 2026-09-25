@@ -1,7 +1,7 @@
 namespace GenWave.Host.Configuration;
 
 /// <summary>
-/// Where an <see cref="AllowedSetting"/> of <see cref="SettingKind.Choice"/> sources its selectable
+/// Where an <see cref="AllowedSetting"/> of <see cref="SettingKind.Choice"/>/<see cref="SettingKind.MultiChoice"/> sources its selectable
 /// values from (SPEC F205.1, STORY-477, PLAN T572). A closed hierarchy — private base constructor,
 /// sealed record cases — mirroring <see cref="GenWave.Core.Domain.FontPackDeleteResult"/>'s own shape
 /// for the same exhaustive-switch guarantee.

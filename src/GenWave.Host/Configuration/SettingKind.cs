@@ -33,4 +33,16 @@ public enum SettingKind
     /// silently-unresolvable typo (SPEC F102.14, STORY-265).
     /// </summary>
     Choice,
+
+    /// <summary>
+    /// A closed set of allowed string values, zero or more of which may be selected at once (e.g.
+    /// show slugs a feature is scoped to) — rendered as a checkbox per value, never a free-text
+    /// input (SPEC F205.7, STORY-482, PLAN T585). The stored value is unchanged from before this
+    /// kind existed: a JSON array of the selected values (<c>Crosstalk:Shows</c>'s own pre-existing
+    /// slug-array shape) — <see cref="SettingValidator"/> keeps its per-key shape check rather than
+    /// gaining a generic one. Like <see cref="Choice"/>, a value outside the resolved set is never
+    /// itself rejected (SPEC F205.7a) — see <see cref="ISettingChoiceResolver"/>'s own remarks for
+    /// why.
+    /// </summary>
+    MultiChoice,
 }
