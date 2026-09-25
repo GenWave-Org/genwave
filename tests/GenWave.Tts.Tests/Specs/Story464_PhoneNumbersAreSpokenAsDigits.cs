@@ -39,6 +39,50 @@ public static class FeaturePhonenumbersarespokenasdigits
         }
     }
 
+    public sealed class ScenarioAParenthesizedExchangeNumber
+    {
+        // Given: GenWave.Core.PhoneShape's gh-#856 alternative — "(555) 0142" and its dash/dot
+        // siblings — all split into the SAME two digit groups ("555"/"0142") regardless of which
+        // separator sits between the closing paren and the final four digits, so every variant
+        // speaks identically to the plain "555-0142" form (AC3 above).
+
+        /// <summary>gh-#856 — space separator</summary>
+        [Fact]
+        public void SpeaksEachDigitWithSpaceSeparator()
+        {
+            var spoken = SpeechText.FlattenForSpeech("Call (555) 0142 today");
+
+            Assert.Equal("call five five five, zero one four two today", spoken);
+        }
+
+        /// <summary>gh-#856 — dash separator</summary>
+        [Fact]
+        public void SpeaksEachDigitWithDashSeparator()
+        {
+            var spoken = SpeechText.FlattenForSpeech("Call (555)-0142 today");
+
+            Assert.Equal("call five five five, zero one four two today", spoken);
+        }
+
+        /// <summary>gh-#856 — dot separator</summary>
+        [Fact]
+        public void SpeaksEachDigitWithDotSeparator()
+        {
+            var spoken = SpeechText.FlattenForSpeech("Call (555).0142 today");
+
+            Assert.Equal("call five five five, zero one four two today", spoken);
+        }
+
+        /// <summary>gh-#856 — no separator at all</summary>
+        [Fact]
+        public void SpeaksEachDigitWithNoSeparator()
+        {
+            var spoken = SpeechText.FlattenForSpeech("Call (555)0142 today");
+
+            Assert.Equal("call five five five, zero one four two today", spoken);
+        }
+    }
+
     public sealed class ScenarioADjPatterRender : IDisposable
     {
         readonly string cacheRoot = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());

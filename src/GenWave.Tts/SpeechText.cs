@@ -273,8 +273,8 @@ public static partial class SpeechText
     /// comma-separated: <c>555-0142</c> -&gt; <c>five five five, zero one four two</c>. Groups come
     /// from splitting <paramref name="matched"/> on its OWN separators, so a match keeps exactly
     /// the grouping its author wrote (<c>(812) 555-0199</c> groups 812 / 555 / 0199, matching
-    /// SPEC F197.1's own three-alternative shape); a bare digit run has no separators of its own
-    /// to split on (<see cref="PhoneShape.Regex"/>'s third alternative, <c>\b\d{7,}\b</c>), so
+    /// SPEC F197.1's own four-alternative shape); a bare digit run has no separators of its own
+    /// to split on (<see cref="PhoneShape.Regex"/>'s fourth alternative, <c>\b\d{7,}\b</c>), so
     /// <see cref="GroupBareDigitRun"/> invents a grouping for it instead.
     /// </summary>
     private static string SpokenPhoneNumber(string matched)
@@ -323,7 +323,7 @@ public static partial class SpeechText
     }
 
     /// <summary>
-    /// A bare 7+ digit run (<see cref="PhoneShape.Regex"/>'s third alternative — dialled with no
+    /// A bare 7+ digit run (<see cref="PhoneShape.Regex"/>'s fourth alternative — dialled with no
     /// punctuation at all, e.g. from a script that typed the whole number as one token) carries no
     /// author-chosen grouping to read back, so this invents one: groups of 3 digits from the left,
     /// with whatever 4 or fewer digits are left becoming the final group — groups of 3, then a
