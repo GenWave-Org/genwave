@@ -47,8 +47,22 @@ sealed class FakeShowStore : IShowStore
     /// <c>station.segment_schedule</c> FK to trigger it. Cleared after one use.</summary>
     public ShowWriteResult? NextDeleteResult { get; set; }
 
-    public Task<IReadOnlyList<Show>> GetAllAsync(CancellationToken ct) =>
-        Task.FromResult<IReadOnlyList<Show>>(byId.Values.OrderBy(s => s.Name, StringComparer.Ordinal).ToList());
+    /// <summary>Scripts the NEXT <see cref="GetAllAsync"/> call to throw this exception instead of
+    /// returning rows (SPEC F205.7d, STORY-482, PLAN T585 — <c>ShowChoiceCatalog</c>'s own read
+    /// failure, proven against a live outage this double stands in for). Cleared after one use, same
+    /// idiom as <see cref="NextCreateResult"/>.</summary>
+    public Exception? ThrowOnGetAll { get; set; }
+
+    public Task<IReadOnlyList<Show>> GetAllAsync(CancellationToken ct)
+    {
+        if (ThrowOnGetAll is { } toThrow)
+        {
+            ThrowOnGetAll = null;
+            throw toThrow;
+        }
+
+        return Task.FromResult<IReadOnlyList<Show>>(byId.Values.OrderBy(s => s.Name, StringComparer.Ordinal).ToList());
+    }
 
     public Task<Show?> GetByIdAsync(long id, CancellationToken ct) =>
         Task.FromResult(byId.GetValueOrDefault(id));

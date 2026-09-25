@@ -60,10 +60,24 @@ export interface SettingDto {
   value: string;
   source: "default" | "override";
   applyMode: "live" | "engine-restart" | "enrichment";
-  kind: "boolean" | "number" | "number-list" | "string" | "choice";
+  kind: "boolean" | "number" | "number-list" | "string" | "choice" | "multi-choice";
   unit: string;
-  /** The closed set of valid `(value, label)` pairs — present only when `kind` is `"choice"`. */
+  /** The closed set of valid `(value, label)` pairs — present for `choice` and `multi-choice`. */
   choices?: readonly SettingChoice[];
+  /**
+   * True when {@link choices} is a live source's last KNOWN-good list, not this request's own
+   * attempt (STORY-479, SPEC F205.7f) — the most recent live attempt failed, but an earlier one
+   * for the same endpoint (e.g. `Llm:Model`/`Station:Voice`) succeeded. Wire-cased `choicesStale`
+   * off the JSON body; `false` unless the server sets it.
+   */
+  choicesStale?: boolean;
+  /**
+   * True when a live source behind {@link choices} has no successful attempt to fall back on at
+   * all (STORY-479, SPEC F205.7f) — `choices` holds only the saved value, if any (the server
+   * appends it as `"<v> (not found)"` when the list doesn't otherwise carry it). Wire-cased
+   * `choicesFailed` off the JSON body; `false` unless the server sets it.
+   */
+  choicesFailed?: boolean;
   /**
    * Optimistic-concurrency token (gh-#486) — the key's currently stored version, `0` when unset.
    * Optional so every fixture/test double that predates gh-#486 keeps compiling unchanged; a caller
@@ -109,16 +123,20 @@ export interface SettingControlProps {
    * True when the staged `value` differs from the last-SAVED value (gh-#139) — computed by
    * SettingField with the exact string comparison the Save diff uses, so a control's "unsaved"
    * indicator can never contradict what Save settings will submit. Optional so controls that
-   * don't surface staging (Voice, Audience) ignore it without ceremony.
+   * don't surface staging (Choice, Audience) ignore it without ceremony.
    */
   isDirty?: boolean;
   /**
    * The closed set of valid `(value, label)` pairs, straight off {@link SettingDto.choices} —
-   * present only for a `kind === "choice"` setting (T175, SPEC F102.14). Optional so every
-   * existing registered control (Voice, Corrections, EngineByKind, Audience), none of which read
-   * it, is unaffected.
+   * present for a `choice` or `multi-choice` setting (T175, SPEC F102.14). Optional so every
+   * existing registered control (Corrections, EngineByKind, Audience), none of which read it, is
+   * unaffected.
    */
   choices?: readonly SettingChoice[];
+  /** Straight off {@link SettingDto.choicesStale} — see that field's own remarks (STORY-479). */
+  choicesStale?: boolean;
+  /** Straight off {@link SettingDto.choicesFailed} — see that field's own remarks (STORY-479). */
+  choicesFailed?: boolean;
 }
 
 /**

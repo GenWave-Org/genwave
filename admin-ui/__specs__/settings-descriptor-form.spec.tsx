@@ -17,6 +17,11 @@
 // `beforeAll` render would leave the second test in a scenario looking at an empty document) and
 // each `it` dropped to one `expect`. AC9 splits into one `it` per fact (label, help, min, max)
 // instead of one bundled `toEqual`.
+//
+// T587 wire-check regression: the kind-chain number fallback shipped without a `step` attribute, so
+// the browser default (step=1) made any fractional value (e.g. `Library:CueDetection:MinSilenceDurationSec`
+// = 0.5) fail native constraint validation and silently block the whole form's submit — see
+// "Scenario: a fractional Number value" below.
 
 import { describe, it, expect, beforeEach, afterEach, jest } from "@jest/globals";
 import { render, screen, fireEvent, act, waitFor, within } from "@testing-library/react";
@@ -153,6 +158,46 @@ describe("Feature: Settings page renders the descriptor", () => {
     it('AC3 — the number input has max="0"', () => {
       const input = screen.getByLabelText(new RegExp(SPONSOR_MUSIC_LABEL)) as HTMLInputElement;
       expect(input).toHaveAttribute("max", "0");
+    });
+  });
+
+  describe("Scenario: a fractional Number value", () => {
+    // Given: a Number DTO with min 0, max 60 and a fractional value (T587 wire-check regression —
+    // Library:CueDetection:MinSilenceDurationSec ships as 0.5, invalid under the browser's default
+    // step=1, which blocked the whole form's submit)
+    const FRACTIONAL_KEY = "Library:CueDetection:MinSilenceDurationSec";
+    const FRACTIONAL_LABEL = "Minimum silence duration";
+
+    beforeEach(() => {
+      renderWithProviders(
+        <SettingsForm
+          settings={[
+            settingDto({
+              key: FRACTIONAL_KEY,
+              value: "0.5",
+              source: "default",
+              applyMode: "live",
+              kind: "number",
+              unit: "s",
+              label: FRACTIONAL_LABEL,
+              min: 0,
+              max: 60,
+            }),
+          ]}
+        />
+      );
+    });
+
+    it('Fact 1 — the number input has step="any"', () => {
+      const input = screen.getByLabelText(new RegExp(FRACTIONAL_LABEL)) as HTMLInputElement;
+      expect(input).toHaveAttribute("step", "any");
+    });
+
+    it("Fact 2 — the form is valid (jsdom honours step validation, so this pins the regression)", () => {
+      // Not `document.querySelector('form')`: the real page renders the sign-out form first.
+      const input = screen.getByLabelText(new RegExp(FRACTIONAL_LABEL)) as HTMLInputElement;
+      const form = input.closest("form");
+      expect(form?.checkValidity()).toBe(true);
     });
   });
 

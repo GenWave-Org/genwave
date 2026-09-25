@@ -63,6 +63,15 @@ public sealed class SettingCopy
         return localized.ResourceNotFound ? null : localized.Value;
     }
 
+    /// <summary>The label for a saved value missing from a live/catalog-sourced choice list (SPEC
+    /// F205.7a, STORY-479, PLAN T580) — resx entry <c>Choice.NotFound</c>, a single KEY-AGNOSTIC
+    /// format string (falls back to <c>"{0} (not found)"</c>) applied to EVERY such value, distinct
+    /// from the per-key <c>Choice.{key}.{value}</c> entries <see cref="TryChoiceLabel"/> resolves —
+    /// the list a saved value is missing from is never itself part of the vocabulary a translator
+    /// enumerates ahead of time.</summary>
+    public string NotFoundLabel(string value) =>
+        string.Format(Resolve("Choice.NotFound", fallback: "{0} (not found)"), value);
+
     string Resolve(string name, string fallback)
     {
         var localized = localizer[name];

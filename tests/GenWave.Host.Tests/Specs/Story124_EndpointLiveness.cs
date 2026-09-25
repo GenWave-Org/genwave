@@ -25,31 +25,8 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureEndpointLiveness
 {
-    // ── In-memory fakes (mirrors Story100's/Story120's FakeSettingsStore) ─────────
-
-    sealed class FakeSettingsStore : IStationSettingsStore
-    {
-        readonly Dictionary<string, string> overrides = new(StringComparer.OrdinalIgnoreCase);
-
-        public int WriteCallCount { get; private set; }
-
-        public Task WriteAsync(string key, object value, CancellationToken cancellationToken = default)
-        {
-            if (!StationSettingsAllowlist.ByKey.ContainsKey(key))
-                throw new ArgumentException($"Key '{key}' is not allowlisted.", nameof(key));
-            overrides[key] = value?.ToString() ?? string.Empty;
-            WriteCallCount++;
-            return Task.CompletedTask;
-        }
-
-        public Task<IReadOnlyDictionary<string, string>> ReadAllAsync(
-            CancellationToken cancellationToken = default)
-        {
-            IReadOnlyDictionary<string, string> result =
-                new Dictionary<string, string>(overrides, StringComparer.OrdinalIgnoreCase);
-            return Task.FromResult(result);
-        }
-    }
+    // FakeSettingsStore moved to tests/GenWave.Host.Tests/Fakes/FakeSettingsStore.cs (T580 review
+    // Note 2) — was duplicated verbatim here and in Story479_LiveChoiceLists.cs.
 
     static IConfiguration BuildConfig(IEnumerable<KeyValuePair<string, string?>> values) =>
         new ConfigurationBuilder().AddInMemoryCollection(values).Build();
@@ -60,8 +37,8 @@ public static class FeatureEndpointLiveness
             store,
             new SettingValidator(config),
             NullLogger<SettingsController>.Instance,
-            new FakeIconPackStore(),
-            TestSettingCopy.Real())
+            TestSettingCopy.Real(),
+            TestSettingChoiceResolver.Default())
         {
             ControllerContext = new ControllerContext
             {
@@ -122,7 +99,7 @@ public static class FeatureEndpointLiveness
 
             Assert.True(
                 endpoint.ApplyMode == "live" && endpoint.Kind == "string" && endpoint.Value == "http://llm-gateway:9000" &&
-                model.ApplyMode == "live" && model.Kind == "string" && model.Value == "test-model" &&
+                model.ApplyMode == "live" && model.Kind == "choice" && model.Value == "test-model" &&
                 timeout.ApplyMode == "live" && timeout.Kind == "number" && timeout.Value == "10");
         }
     }

@@ -58,10 +58,10 @@ public sealed record AllowedSetting(
     double? Max = null)
 {
     /// <summary>
-    /// Where a <see cref="SettingKind.Choice"/> entry's selectable values come from (SPEC F205.1).
-    /// Defaults to <see cref="SettingChoiceSource.Static"/> — every entry today, since
-    /// <see cref="SettingChoiceSource.Catalog"/> and <see cref="SettingChoiceSource.Probe"/> are
-    /// declared but unused until SPEC F205.7 wires a consumer — so no call site needs to state it.
+    /// Where a <see cref="SettingKind.Choice"/>/<see cref="SettingKind.MultiChoice"/> entry's selectable
+    /// values come from (SPEC F205.1, F205.7). Defaults to <see cref="SettingChoiceSource.Static"/>, so
+    /// only the live-list entries (<see cref="SettingChoiceSource.Probe"/> for <c>Llm:Model</c>/<c>Station:Voice</c>,
+    /// <see cref="SettingChoiceSource.Catalog"/> for <c>Crosstalk:Shows</c>) state it.
     /// </summary>
     public SettingChoiceSource ChoiceSource { get; init; } = SettingChoiceSource.Static;
 }

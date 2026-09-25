@@ -148,9 +148,10 @@ describe("Feature: The settings page groups every tunable honestly", () => {
     // this fact still holds now that sections (not tabs) are what separates Station from Library.
     //
     // A dedicated fixture, not the file's shared makeSettings(): that one carries Station:Voice,
-    // whose registry-backed VoiceSettingControl fetches /api/voices on mount and would double-
-    // count against the single shared fetch mock below — this scenario is about the PUT, not
-    // about registry controls.
+    // whose registry-backed VoiceSettingControl used to fetch /api/voices on mount and would have
+    // double-counted against the single shared fetch mock below. STORY-479 (PLAN T581) deleted
+    // VoiceSettingControl, so that workaround is now moot, but this fixture stays separate anyway
+    // — this scenario is about the PUT, not about registry controls.
     function makeCrossSectionSettings(): SettingDto[] {
       return [
         settingDto({ key: "Station:Name", value: "GenWave", source: "default", applyMode: "live", kind: "string", unit: "" }),
