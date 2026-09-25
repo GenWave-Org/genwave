@@ -18,6 +18,7 @@ import { AudienceSettingControl } from "./AudienceSettingControl";
 import { ChoiceSettingControl } from "./ChoiceSettingControl";
 import { CorrectionsSettingControl } from "./CorrectionsSettingControl";
 import { EngineByKindSettingControl } from "./EngineByKindSettingControl";
+import { MultiChoiceSettingControl } from "./MultiChoiceSettingControl";
 import { PersonaSettingControl } from "./PersonaSettingControl";
 import { SafeScopeAvailabilityBadge } from "./SafeScopeAvailabilityBadge";
 import { SettingHelpFlyover } from "./SettingHelpFlyover";
@@ -792,7 +793,11 @@ function SettingField({
     <div className="flex flex-col gap-1.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-1.5">
-          <label htmlFor={controlId} className="text-[0.85rem] font-semibold text-ink">
+          {/* `id` here (beside the existing `htmlFor`) is MultiChoiceSettingControl's
+              `aria-labelledby` target — a checkbox group has no single input `htmlFor` can bind to
+              (SPEC F205.7g), so that control names itself off this label by id instead. Harmless
+              for every other kind, which keeps using `htmlFor` as before. */}
+          <label htmlFor={controlId} id={`${controlId}-label`} className="text-[0.85rem] font-semibold text-ink">
             {setting.label}
             {setting.unit !== "" && (
               <span aria-label={`Unit: ${setting.unit}`} className="ml-1 font-normal text-mute">
@@ -870,6 +875,17 @@ function SettingField({
         // through to the plain NUMBER input below — worse than T163's original stopgap fold into
         // the text branch, since a number input can't even hold a slug.
         <ChoiceSettingControl
+          controlId={controlId}
+          value={value}
+          onChange={onSemanticChange}
+          disabled={isPending}
+          isDirty={value !== savedValue}
+          choices={setting.choices}
+          choicesStale={setting.choicesStale}
+          choicesFailed={setting.choicesFailed}
+        />
+      ) : setting.kind === "multi-choice" ? (
+        <MultiChoiceSettingControl
           controlId={controlId}
           value={value}
           onChange={onSemanticChange}

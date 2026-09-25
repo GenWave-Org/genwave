@@ -60,9 +60,9 @@ export interface SettingDto {
   value: string;
   source: "default" | "override";
   applyMode: "live" | "engine-restart" | "enrichment";
-  kind: "boolean" | "number" | "number-list" | "string" | "choice";
+  kind: "boolean" | "number" | "number-list" | "string" | "choice" | "multi-choice";
   unit: string;
-  /** The closed set of valid `(value, label)` pairs — present only when `kind` is `"choice"`. */
+  /** The closed set of valid `(value, label)` pairs — present for `choice` and `multi-choice`. */
   choices?: readonly SettingChoice[];
   /**
    * True when {@link choices} is a live source's last KNOWN-good list, not this request's own
@@ -128,7 +128,7 @@ export interface SettingControlProps {
   isDirty?: boolean;
   /**
    * The closed set of valid `(value, label)` pairs, straight off {@link SettingDto.choices} —
-   * present only for a `kind === "choice"` setting (T175, SPEC F102.14). Optional so every
+   * present for a `choice` or `multi-choice` setting (T175, SPEC F102.14). Optional so every
    * existing registered control (Corrections, EngineByKind, Audience), none of which read it, is
    * unaffected.
    */
