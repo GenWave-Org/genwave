@@ -133,10 +133,16 @@ public sealed class FakeAdSpotJobStore : IAdSpotStore
     public Task<AdSpot?> StampBedIfNullAsync(long id, long bedMediaId, CancellationToken ct) =>
         throw new NotSupportedException("Not used by AdSpotJobService.");
 
-    public Task<bool> MarkReadyAsync(long id, long mediaId, CancellationToken ct) =>
+    public Task<bool> MarkReadyAsync(long id, long mediaId, int renderVersion, CancellationToken ct) =>
         throw new NotSupportedException("Not used by AdSpotJobService.");
 
     public Task<bool> MarkFailedAsync(long id, string failReason, CancellationToken ct) =>
+        throw new NotSupportedException("Not used by AdSpotJobService.");
+
+    public Task<AdSpot?> FindStaleReadyAsync(int currentVersion, IReadOnlyCollection<long> excludeIds, CancellationToken ct) =>
+        throw new NotSupportedException("Not used by AdSpotJobService.");
+
+    public Task<bool> SwapRenderedMediaAsync(long id, long oldMediaId, long newMediaId, int renderVersion, CancellationToken ct) =>
         throw new NotSupportedException("Not used by AdSpotJobService.");
 
     public Task<AdSpotPage> ListByStateAsync(AdState? state, long? sponsorId, int limit, int offset, CancellationToken ct) =>
@@ -168,5 +174,23 @@ public sealed class FakeAdSpotJobStore : IAdSpotStore
         throw new NotSupportedException("Not used by AdSpotJobService.");
 
     public Task<bool> ClearPreviewAsync(long id, CancellationToken ct) =>
+        throw new NotSupportedException("Not used by AdSpotJobService.");
+
+    public Task<IReadOnlyList<PendingAdSpotRetire>> ListPendingRetiresAsync(CancellationToken ct) =>
+        throw new NotSupportedException("Not used by AdSpotJobService.");
+
+    public Task<bool> ClearPendingRetireAsync(long id, long mediaId, CancellationToken ct) =>
+        throw new NotSupportedException("Not used by AdSpotJobService.");
+
+    public Task ClearReferencedPendingRetiresAsync(CancellationToken ct) =>
+        throw new NotSupportedException("Not used by AdSpotJobService.");
+
+    public Task<IReadOnlyList<PendingAdSpotConfirm>> ListPendingConfirmsAsync(CancellationToken ct) =>
+        throw new NotSupportedException("Not used by AdSpotJobService.");
+
+    public Task<bool> ClearPendingConfirmAsync(long id, long mediaId, CancellationToken ct) =>
+        throw new NotSupportedException("Not used by AdSpotJobService.");
+
+    public Task<bool> IsReadyOnMediaAsync(long id, long mediaId, CancellationToken ct) =>
         throw new NotSupportedException("Not used by AdSpotJobService.");
 }

@@ -1,4 +1,5 @@
 using Dapper;
+using Microsoft.Extensions.Logging;
 using Npgsql;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
@@ -23,8 +24,24 @@ namespace GenWave.MediaLibrary.Station;
 /// (<c>@state::station.ad_state</c>), with <see cref="AdStateTokens"/>/<see cref="AdSourceTokens"/>
 /// as the ONE map on the C# side.
 /// </para>
+///
+/// <para>
+/// <b><see cref="adminLookup"/>/<see cref="catalogWriter"/> (gh-#854) are the SAME
+/// <c>library_svc</c>-rooted seams <c>AdRenderService</c> already holds — never a second
+/// <see cref="NpgsqlDataSource"/> of this store's own into that schema.</b> Unlike
+/// <see cref="JinglePackRepository"/>'s own two raw <see cref="Lazy{T}"/> data sources,
+/// <see cref="SwapRenderedMediaAsync"/> reaches <c>library.media</c>/<c>library.media_rating</c> only
+/// through those two existing, role-appropriate ports — the SAME "read via <c>IAdminMediaLookup</c>,
+/// write via <c>IAuthoredCatalogWriter</c>" shape this project already uses everywhere else it needs
+/// to cross that boundary from a station-rooted class, never a fresh raw connection this repository
+/// would otherwise have to open and hold itself.
+/// </para>
 /// </summary>
-sealed class AdSpotRepository(Lazy<NpgsqlDataSource> dataSource) : IAdSpotStore
+sealed class AdSpotRepository(
+    Lazy<NpgsqlDataSource> dataSource,
+    IAdminMediaLookup adminLookup,
+    IAuthoredCatalogWriter catalogWriter,
+    ILogger<AdSpotRepository> logger) : IAdSpotStore
 {
     /// <summary>
     /// The full column list, shared verbatim by every <c>SELECT</c> (via <see cref="SelectColumns"/>)
@@ -37,7 +54,8 @@ sealed class AdSpotRepository(Lazy<NpgsqlDataSource> dataSource) : IAdSpotStore
         "id, sponsor_id, sponsor_name, title, brief, script, source::text as source, pack_slug, " +
         "spot_seconds, voice_plan::text as voice_plan, bed_media_id, state::text as state, fail_reason, " +
         "media_id, generation, created_at, state_changed_at, rendered_at, retired_at, xmin::text as version, " +
-        "preview_path, preview_at, preview_key, job_kind, job_started_at, job_error, job_failed_kind";
+        "preview_path, preview_at, preview_key, job_kind, job_started_at, job_error, job_failed_kind, " +
+        "render_version";
 
     static readonly string SelectColumns = $"select {Columns} from station.ad_spot";
 
@@ -348,20 +366,306 @@ sealed class AdSpotRepository(Lazy<NpgsqlDataSource> dataSource) : IAdSpotStore
     }
 
     /// <summary><see cref="IAdSpotStore.MarkReadyAsync"/> — <see cref="AdState.Rendering"/> to
-    /// <see cref="AdState.Ready"/>, stamping <paramref name="mediaId"/> and <c>rendered_at</c>. Total:
-    /// see this method's own interface remarks.</summary>
-    public async Task<bool> MarkReadyAsync(long id, long mediaId, CancellationToken ct)
+    /// <see cref="AdState.Ready"/>, stamping <paramref name="mediaId"/>,
+    /// <paramref name="renderVersion"/>, and <c>rendered_at</c>. Total: see this method's own interface
+    /// remarks.</summary>
+    public async Task<bool> MarkReadyAsync(long id, long mediaId, int renderVersion, CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
         var affected = await conn.ExecuteAsync(new CommandDefinition(
             """
             update station.ad_spot
-            set state = 'ready'::station.ad_state, media_id = @mediaId, rendered_at = now(),
-                state_changed_at = now()
+            set state = 'ready'::station.ad_state, media_id = @mediaId, render_version = @renderVersion,
+                rendered_at = now(), state_changed_at = now()
             where id = @id and state = 'rendering'::station.ad_state
+            """,
+            new { id, mediaId, renderVersion }, cancellationToken: ct));
+        return affected == 1;
+    }
+
+    /// <summary><see cref="IAdSpotStore.FindStaleReadyAsync"/> (gh-#854) — the oldest
+    /// <see cref="AdState.Ready"/> spot behind <paramref name="currentVersion"/>, excluding
+    /// <paramref name="excludeIds"/> (the <see cref="ListAiringExclusionsAsync"/> array-parameter
+    /// precedent). Never touches Rendering/Draft/etc — only a Ready spot is ever a re-render
+    /// candidate.</summary>
+    public async Task<AdSpot?> FindStaleReadyAsync(
+        int currentVersion, IReadOnlyCollection<long> excludeIds, CancellationToken ct)
+    {
+        var excluded = excludeIds.ToArray();
+
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var row = await conn.QuerySingleOrDefaultAsync<AdSpotRow>(new CommandDefinition(
+            $"""
+            {SelectColumns}
+            where state = 'ready'::station.ad_state
+              and render_version < @currentVersion
+              and not (id = any(@excluded))
+              and pending_retire_media_id is null
+              and pending_confirm_media_id is null
+            order by state_changed_at asc, id asc
+            limit 1
+            """,
+            new { currentVersion, excluded }, cancellationToken: ct));
+        return row is null ? null : ToAdSpot(row);
+    }
+
+    /// <summary><see cref="IAdSpotStore.SwapRenderedMediaAsync"/> (gh-#854) — see that interface
+    /// member's own remarks for the full contract. The guard runs in two layers: <see cref="adminLookup"/>
+    /// re-checks <paramref name="oldMediaId"/>'s eligible/never_play facts fresh, THEN the guarded
+    /// <c>UPDATE</c> re-checks <c>state = 'ready' AND media_id = @oldMediaId AND pending_retire_media_id
+    /// IS NULL</c> inside its own transaction — any guard failing declines, touching nothing. Never
+    /// claims into <c>rendering</c> — the spot stays <see cref="AdState.Ready"/>, airable,
+    /// throughout.</summary>
+    public async Task<bool> SwapRenderedMediaAsync(
+        long id, long oldMediaId, long newMediaId, int renderVersion, CancellationToken ct)
+    {
+        var oldMedia = await adminLookup.GetByIdWithLibraryAsync(oldMediaId, ct);
+        if (oldMedia is not { } found || !found.Row.Eligible || found.Row.NeverPlay)
+        {
+            logger.LogInformation(
+                "Ad spot {Id} media {OldMediaId} is missing, ineligible, or never_play; declining its guarded swap",
+                id, oldMediaId);
+            return false;
+        }
+
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+
+        // Every early return below relies on `await using var tx` to roll back on dispose — Npgsql
+        // only ever commits a transaction on an explicit CommitAsync, so leaving the scope any other
+        // way already rolls back (the SponsorRepository.UpdateAsync precedent).
+        var affected = await conn.ExecuteAsync(new CommandDefinition(
+            """
+            update station.ad_spot
+            set media_id = @newMediaId, render_version = @renderVersion, rendered_at = now(),
+                pending_retire_media_id = @oldMediaId, pending_confirm_media_id = @newMediaId
+            where id = @id and state = 'ready'::station.ad_state and media_id = @oldMediaId
+              and pending_retire_media_id is null
+            """,
+            new { id, oldMediaId, newMediaId, renderVersion }, transaction: tx, cancellationToken: ct));
+        if (affected != 1)
+            return false; // edited, retired, already re-rendered, or an earlier swap's own pending
+                           // retire marker is still waiting on its own old-media turn-off.
+
+        await tx.CommitAsync(ct);
+
+        // gh-#854 — from here the guarded UPDATE has committed, WITH pending_retire_media_id AND
+        // pending_confirm_media_id already stamped (to oldMediaId and newMediaId respectively) in that
+        // same statement (db/48): the fact "this row touched these two media ids and each still needs
+        // its own flip" is now durable, surviving a crash right here. Everything below crosses into
+        // library_svc's own role/connection (this store's own role has no grant into that schema — see
+        // this class's own remarks), so it can never share the transaction just committed above.
+        // Old-ineligible runs FIRST, new-eligible SECOND, deliberately: running new BEFORE old instead
+        // would, on an old-retire failure, leave old eligible with nothing pointing back at it — the
+        // exact unstoppable orphan pending_retire_media_id now closes. A failure confirming new
+        // eligible, by contrast, leaves pending_confirm_media_id set for AdSpotWorker's own confirm
+        // drain (a plain-text reference: GenWave.MediaLibrary never references GenWave.Ads) to retry on
+        // a later tick.
+        await RetireOldMediaBestEffortAsync(id, oldMediaId, newMediaId);
+        await ConfirmNewMediaEligibleBestEffortAsync(id, newMediaId);
+        return true;
+    }
+
+    /// <summary>Best-effort half of <see cref="SwapRenderedMediaAsync"/>'s post-commit bookkeeping —
+    /// never throws, never rolls back the swap that already committed. A failure here is never a
+    /// permanent orphan: the guarded UPDATE above already stamped <c>pending_retire_media_id</c>, so a throw or a
+    /// false result here simply leaves that marker set for <see cref="ListPendingRetiresAsync"/>'s own
+    /// drain to retry on a later tick — this method's own success path is only the FAST path, clearing
+    /// the marker in the same call rather than waiting for that drain. Always runs on
+    /// <see cref="CancellationToken.None"/> — a cancelled outer token must not abort bookkeeping for a
+    /// swap this same call already committed.</summary>
+    async Task RetireOldMediaBestEffortAsync(long id, long oldMediaId, long newMediaId)
+    {
+        try
+        {
+            if (!await catalogWriter.SetEligibleAsync(oldMediaId, eligible: false, CancellationToken.None))
+            {
+                // gh-#854 — SetEligibleAsync returns false only when no row matched:
+                // PurgeUnavailableAsync hard-deletes rows, and a row that no longer exists can't air
+                // regardless. False means done, not pending — clear the marker below rather than
+                // handing a permanently-false retry to a later drain.
+                logger.LogInformation(
+                    "Ad spot {Id} swapped to media {NewMediaId}; old media {OldMediaId} was already purged",
+                    id, newMediaId, oldMediaId);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "Ad spot {Id} swapped to media {NewMediaId} but retiring old media {OldMediaId} threw; left pending for a later drain",
+                id, newMediaId, oldMediaId);
+            return;
+        }
+
+        // gh-#854 — the flip landed, or the row was already gone (either way nothing further to
+        // retry): clear the marker now rather than making the next drain redo work that is already
+        // done. A throw above still leaves the marker set (caught, WARN, no rethrow, early return) —
+        // only a thrown exception leaves this pending.
+        try
+        {
+            await ClearPendingRetireAsync(id, oldMediaId, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "Ad spot {Id} retired old media {OldMediaId} but clearing its pending-retire marker threw; a later drain will retry the clear",
+                id, oldMediaId);
+        }
+    }
+
+    /// <summary>The other best-effort half; see <see cref="RetireOldMediaBestEffortAsync"/>'s own
+    /// remarks. Guarded by <see cref="IsReadyOnMediaAsync"/> (gh-#854) before ever attempting the
+    /// flip — an operator retiring the spot, or a second swap moving it on again, between the first
+    /// swap's own commit and this call must never revive a row the operator meant to pull. A failure
+    /// past that guard is self-healed by <c>AdSpotWorker</c>'s own confirm-marker drain (a plain-text
+    /// reference: GenWave.MediaLibrary never references GenWave.Ads), never compensated here.</summary>
+    async Task ConfirmNewMediaEligibleBestEffortAsync(long id, long newMediaId)
+    {
+        try
+        {
+            if (await IsReadyOnMediaAsync(id, newMediaId, CancellationToken.None)
+                && !await catalogWriter.SetEligibleAsync(newMediaId, eligible: true, CancellationToken.None))
+            {
+                // gh-#854 — SetEligibleAsync returns false only when no row matched (a purged new
+                // row): the spot then sits on missing media, as any purged ready spot does today.
+                // False means done, not pending — clear the marker below, but at WARN: unlike the
+                // old-media purge case, a purged NEW row leaves this spot unable to air at all.
+                logger.LogWarning(
+                    "Ad spot {Id} swapped to media {NewMediaId} but it was already purged before confirming eligible",
+                    id, newMediaId);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "Ad spot {Id} swapped to media {NewMediaId} but confirming it eligible threw; left pending for a later drain",
+                id, newMediaId);
+            return;
+        }
+
+        // gh-#854 — the flip landed, the guard declined (nothing left to confirm), or the row was
+        // already gone (either way nothing further to retry): clear the marker now. A throw above
+        // still leaves the marker set (caught, WARN, no rethrow, early return) — only a thrown
+        // exception leaves this pending.
+        try
+        {
+            await ClearPendingConfirmAsync(id, newMediaId, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "Ad spot {Id} confirmed media {NewMediaId} but clearing its pending-confirm marker threw; a later drain will retry the clear",
+                id, newMediaId);
+        }
+    }
+
+    /// <summary><see cref="IAdSpotStore.ClearReferencedPendingRetiresAsync"/> (gh-#854) — clears any
+    /// pending row whose old media id is now some OTHER spot's own CURRENT <c>media_id</c> (an operator
+    /// re-pointed a spot at it), in station SQL, never handed back to the caller to skip itself. The
+    /// caller runs this FIRST, every tick, before <see cref="ListPendingRetiresAsync"/>'s own read — two
+    /// statements, two round trips, never one CTE: this write must already have committed before that
+    /// read can see its effect.</summary>
+    public async Task ClearReferencedPendingRetiresAsync(CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        await conn.ExecuteAsync(new CommandDefinition(
+            """
+            update station.ad_spot as pending
+            set pending_retire_media_id = null
+            where pending.pending_retire_media_id is not null
+              and exists (
+                  select 1 from station.ad_spot as current
+                  where current.media_id = pending.pending_retire_media_id
+              )
+            """,
+            cancellationToken: ct));
+    }
+
+    /// <summary><see cref="IAdSpotStore.ListPendingRetiresAsync"/> (gh-#854) — a pure read; see that
+    /// interface member's own remarks for why the self-heal above is now a separate call.</summary>
+    public async Task<IReadOnlyList<PendingAdSpotRetire>> ListPendingRetiresAsync(CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var rows = await conn.QueryAsync<PendingAdSpotRetireRow>(new CommandDefinition(
+            """
+            select id, pending_retire_media_id
+            from station.ad_spot
+            where pending_retire_media_id is not null
+            order by state_changed_at asc, id asc
+            limit @limit
+            """,
+            new { limit = MaxUnpagedRows }, cancellationToken: ct));
+
+        return rows.Select(r => new PendingAdSpotRetire(r.Id, r.PendingRetireMediaId)).ToList();
+    }
+
+    /// <summary><see cref="IAdSpotStore.ClearPendingRetireAsync"/> (gh-#854) — guarded on BOTH
+    /// <paramref name="id"/> AND <paramref name="mediaId"/> still matching the stamped value, the SAME
+    /// "guarded WHERE, total" shape <see cref="MarkReadyAsync"/>/<see cref="MarkFailedAsync"/> already
+    /// give their own single-row writes: a row whose pending id no longer matches (already cleared, or
+    /// replaced by a newer swap) reports <see langword="false"/>, never throws.</summary>
+    public async Task<bool> ClearPendingRetireAsync(long id, long mediaId, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var affected = await conn.ExecuteAsync(new CommandDefinition(
+            """
+            update station.ad_spot
+            set pending_retire_media_id = null
+            where id = @id and pending_retire_media_id = @mediaId
             """,
             new { id, mediaId }, cancellationToken: ct));
         return affected == 1;
+    }
+
+    /// <summary><see cref="IAdSpotStore.ListPendingConfirmsAsync"/> (gh-#854) — a pure read;
+    /// <see cref="ListPendingRetiresAsync"/>'s own shape, one marker over. No self-heal write of its
+    /// own — the confirm marker's own guard (<see cref="IsReadyOnMediaAsync"/>) is checked by the
+    /// caller per row, not filtered out here.</summary>
+    public async Task<IReadOnlyList<PendingAdSpotConfirm>> ListPendingConfirmsAsync(CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var rows = await conn.QueryAsync<PendingAdSpotConfirmRow>(new CommandDefinition(
+            """
+            select id, pending_confirm_media_id
+            from station.ad_spot
+            where pending_confirm_media_id is not null
+            order by state_changed_at asc, id asc
+            limit @limit
+            """,
+            new { limit = MaxUnpagedRows }, cancellationToken: ct));
+
+        return rows.Select(r => new PendingAdSpotConfirm(r.Id, r.PendingConfirmMediaId)).ToList();
+    }
+
+    /// <summary><see cref="IAdSpotStore.ClearPendingConfirmAsync"/> (gh-#854) — <see cref="ClearPendingRetireAsync"/>'s
+    /// own guarded shape, one marker over.</summary>
+    public async Task<bool> ClearPendingConfirmAsync(long id, long mediaId, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var affected = await conn.ExecuteAsync(new CommandDefinition(
+            """
+            update station.ad_spot
+            set pending_confirm_media_id = null
+            where id = @id and pending_confirm_media_id = @mediaId
+            """,
+            new { id, mediaId }, cancellationToken: ct));
+        return affected == 1;
+    }
+
+    /// <summary><see cref="IAdSpotStore.IsReadyOnMediaAsync"/> (gh-#854) — the shared guard a confirm
+    /// marker's own flip must pass before it is ever attempted, from either call site (this store's
+    /// own inline post-commit confirm, or the worker's confirm-marker drain).</summary>
+    public async Task<bool> IsReadyOnMediaAsync(long id, long mediaId, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        return await conn.ExecuteScalarAsync<bool>(new CommandDefinition(
+            """
+            select exists(
+                select 1 from station.ad_spot
+                where id = @id and state = 'ready'::station.ad_state and media_id = @mediaId
+            )
+            """,
+            new { id, mediaId }, cancellationToken: ct));
     }
 
     /// <summary><see cref="IAdSpotStore.MarkFailedAsync"/> — <see cref="AdState.Rendering"/> to
@@ -710,7 +1014,7 @@ sealed class AdSpotRepository(Lazy<NpgsqlDataSource> dataSource) : IAdSpotStore
         row.PackSlug, row.SpotSeconds, row.VoicePlan, row.BedMediaId, ParseState(row.State), row.FailReason,
         row.MediaId, row.Generation, row.CreatedAt, row.StateChangedAt, row.RenderedAt, row.RetiredAt,
         row.Version, row.PreviewPath, row.PreviewAt, row.PreviewKey, row.JobKind, row.JobStartedAt,
-        row.JobError, row.JobFailedKind);
+        row.JobError, row.JobFailedKind, row.RenderVersion);
 
     /// <summary>A row read back from <c>station.ad_state</c> whose text does not round-trip through
     /// <see cref="AdStateTokens"/> is a data-integrity bug, not a caller error — the same throwing

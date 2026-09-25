@@ -71,6 +71,12 @@ namespace GenWave.Core.Domain;
 /// <paramref name="JobError"/>, cleared by every <c>StampJobAsync</c> claim. A trailing DEFAULTED
 /// param, the <see cref="PreviewPath"/> precedent, so pre-existing positional construction sites stay
 /// compiling.</param>
+/// <param name="RenderVersion">The render pipeline version stamped by the <see cref="MediaId"/> this
+/// row currently carries (gh-#854, db/48) — 0 for every pre-existing row. The ad worker re-renders a
+/// <see cref="AdState.Ready"/> spot in the background, one at a time, whenever this trails
+/// <c>AdRenderVersion.Current</c>; the OLD media keeps airing until the swap lands. A trailing
+/// DEFAULTED param, the <see cref="JobFailedKind"/> precedent, matching db/48's own column
+/// default.</param>
 public sealed record AdSpot(
     long Id,
     long SponsorId,
@@ -98,4 +104,5 @@ public sealed record AdSpot(
     string? JobKind = null,
     DateTime? JobStartedAt = null,
     string? JobError = null,
-    string? JobFailedKind = null);
+    string? JobFailedKind = null,
+    int RenderVersion = 0);

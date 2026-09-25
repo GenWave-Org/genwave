@@ -27,7 +27,8 @@ sealed class WavHeaderCastSegmentAuthor : ICastSegmentAuthor
         CastAssemblyRequest assemblyRequest,
         Func<CrosstalkAssemblyResult.Assembled, AuthoredMediaInsert> buildInsert,
         Func<long, CancellationToken, Task<bool>> confirmAsync,
-        CancellationToken ct) =>
+        CancellationToken ct,
+        bool flipEligibleOnConfirm = true) =>
         throw new NotSupportedException(
             "this fixture's ICastSegmentAuthor fake exists only for preview mode (PLAN T442) — AuthorAsync is never reached");
 
@@ -38,7 +39,8 @@ sealed class WavHeaderCastSegmentAuthor : ICastSegmentAuthor
         CrosstalkAssemblyResult.Assembled assembled,
         Func<CrosstalkAssemblyResult.Assembled, AuthoredMediaInsert> buildInsert,
         Func<long, CancellationToken, Task<bool>> confirmAsync,
-        CancellationToken ct) =>
+        CancellationToken ct,
+        bool flipEligibleOnConfirm = true) =>
         throw new NotSupportedException(
             "this fixture's ICastSegmentAuthor fake exists only for preview mode (PLAN T442) — LandAsync is never reached");
 

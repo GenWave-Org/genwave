@@ -16,7 +16,8 @@ public interface ICastSegmentAuthor
         CastAssemblyRequest assemblyRequest,
         Func<CrosstalkAssemblyResult.Assembled, AuthoredMediaInsert> buildInsert,
         Func<long, CancellationToken, Task<bool>> confirmAsync,
-        CancellationToken ct);
+        CancellationToken ct,
+        bool flipEligibleOnConfirm = true);
 
     /// <summary>
     /// Renders and returns the file; lands nothing — SPEC F174.4 preview mode (PLAN T442). Unlike
@@ -30,7 +31,8 @@ public interface ICastSegmentAuthor
         CrosstalkAssemblyResult.Assembled assembled,
         Func<CrosstalkAssemblyResult.Assembled, AuthoredMediaInsert> buildInsert,
         Func<long, CancellationToken, Task<bool>> confirmAsync,
-        CancellationToken ct);
+        CancellationToken ct,
+        bool flipEligibleOnConfirm = true);
 
     /// <summary>
     /// Loudness/cue/duration for an EXISTING file at <paramref name="path"/> (SPEC F174.5; STORY-425;

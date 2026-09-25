@@ -112,6 +112,14 @@ public sealed class AdSpotWorker(
     /// few seconds, never left to run the render's own full budget.</summary>
     static readonly TimeSpan RenderWatchdogInterval = TimeSpan.FromSeconds(3);
 
+    /// <summary>gh-#854 — spots whose stale re-render already failed once this process lifetime; never
+    /// retried until the next boot clears this set (a hot-loop guard, not a permanent skip).</summary>
+    readonly HashSet<long> staleReRenderSkip = [];
+
+    /// <summary>gh-#854 — true once the "backlog is empty" INFO line has fired, so a quiet backlog
+    /// doesn't log the same line again every tick.</summary>
+    bool staleBacklogAnnouncedEmpty;
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var tickInterval = TimeSpan.FromMinutes(adsOptions.CurrentValue.WorkerIntervalMinutes);
@@ -142,10 +150,22 @@ public sealed class AdSpotWorker(
             var settings = AdStockSettingsReader.Read(configuration);
             var liveSettings = AdLiveSettingsReader.Read(configuration);
 
+            // gh-#854 — drains db/48's own pending_retire_media_id/pending_confirm_media_id columns
+            // before anything else: cheap (usually empty), and together they are what makes a swap's own
+            // post-commit eligibility flips durable across a crash or a failed flip rather than an
+            // accepted, silent race.
+            await DrainPendingRetiresAsync(stoppingToken);
+            await DrainPendingConfirmsAsync(stoppingToken);
             await RepairReadyEligibilityAsync(stoppingToken);
             await RetireStaleAsync(settings.RefreshDays, stoppingToken);
             await RefillIfNeededAsync(settings, stoppingToken);
-            await RenderDueAsync(liveSettings, stoppingToken);
+            var approvedQueueEmpty = await RenderDueAsync(liveSettings, stoppingToken);
+
+            // gh-#854 — the background re-render pass only ever gets the leftover budget: new/approved
+            // work always comes first, and this only runs when RenderDueAsync found genuinely nothing
+            // approved left (never merely because the on-air gate or a cancelled render broke it early).
+            if (approvedQueueEmpty)
+                await ReRenderOneStaleAsync(liveSettings, stoppingToken);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
@@ -154,6 +174,91 @@ public sealed class AdSpotWorker(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Ad spot worker tick failed; continuing on the next tick");
+        }
+    }
+
+    /// <summary>
+    /// gh-#854's own durable-retry drain: every row <see cref="IAdSpotStore.ListPendingRetiresAsync"/>
+    /// returns already had its swap committed — the ONLY thing left to do for each is turn the old
+    /// media row ineligible and clear the marker, exactly what
+    /// <c>GenWave.MediaLibrary.Station.AdSpotRepository.SwapRenderedMediaAsync</c>'s own post-commit
+    /// half already attempted once and either never finished (a crash) or failed outright. Calls
+    /// <see cref="IAdSpotStore.ClearReferencedPendingRetiresAsync"/> FIRST, every tick — an operator who
+    /// re-pointed a spot at the pending old media clears it there, before this loop's own read, rather
+    /// than this loop ever re-flipping a row an operator meant to keep on. Bounded by that store call's
+    /// own ceiling (no separate cap kept here, the SAME posture
+    /// <see cref="RepairReadyEligibilityAsync"/>'s own remarks already take against
+    /// <c>ListByStateAsync</c>'s clamp) — a large backlog drains a bit more each tick rather than
+    /// blocking this one. gh-#854: <see cref="IAuthoredCatalogWriter.SetEligibleAsync"/> returning
+    /// <see langword="false"/> means the row was already purged — a row that no longer exists can't air
+    /// regardless, so that clears the marker exactly like a successful flip; only a THROWN flip stays
+    /// pending, retried the next tick, until it lands or an operator re-points the spot at the old media
+    /// itself (in which case the store's own guard clears the marker without ever calling here again).
+    /// </summary>
+    async Task DrainPendingRetiresAsync(CancellationToken ct)
+    {
+        await spotStore.ClearReferencedPendingRetiresAsync(ct);
+
+        var pending = await spotStore.ListPendingRetiresAsync(ct);
+        foreach (var retire in pending)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            try
+            {
+                if (!await catalogWriter.SetEligibleAsync(retire.OldMediaId, eligible: false, ct))
+                {
+                    logger.LogInformation(
+                        "Ad spot {Id} pending retire of media {OldMediaId} was already purged",
+                        retire.SpotId, retire.OldMediaId);
+                }
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                logger.LogWarning(ex,
+                    "Ad spot {Id} pending retire of media {OldMediaId} threw; leaving it pending for the next tick",
+                    retire.SpotId, retire.OldMediaId);
+                continue;
+            }
+
+            await spotStore.ClearPendingRetireAsync(retire.SpotId, retire.OldMediaId, ct);
+        }
+    }
+
+    /// <summary>gh-#854's own durable-retry drain, the confirm half — <see cref="DrainPendingRetiresAsync"/>'s
+    /// own shape, one marker over. Every row <see cref="IAdSpotStore.ListPendingConfirmsAsync"/> returns
+    /// already had its swap committed; guarded by <see cref="IAdSpotStore.IsReadyOnMediaAsync"/> before
+    /// ever attempting the flip (gh-#854) — an operator retiring the spot, or a later swap moving it
+    /// on again, between the original swap's own commit and this tick must never revive a row the
+    /// operator meant to pull. A guard that declines, or a flip that reports <see langword="false"/> (a
+    /// purged new row), clears the marker exactly like a successful flip; only a thrown flip leaves
+    /// it pending for the next tick.</summary>
+    async Task DrainPendingConfirmsAsync(CancellationToken ct)
+    {
+        var pending = await spotStore.ListPendingConfirmsAsync(ct);
+        foreach (var confirm in pending)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            try
+            {
+                if (await spotStore.IsReadyOnMediaAsync(confirm.SpotId, confirm.NewMediaId, ct)
+                    && !await catalogWriter.SetEligibleAsync(confirm.NewMediaId, eligible: true, ct))
+                {
+                    logger.LogWarning(
+                        "Ad spot {Id} pending confirm of media {NewMediaId} was already purged before confirming eligible",
+                        confirm.SpotId, confirm.NewMediaId);
+                }
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                logger.LogWarning(ex,
+                    "Ad spot {Id} pending confirm of media {NewMediaId} threw; leaving it pending for the next tick",
+                    confirm.SpotId, confirm.NewMediaId);
+                continue;
+            }
+
+            await spotStore.ClearPendingConfirmAsync(confirm.SpotId, confirm.NewMediaId, ct);
         }
     }
 
@@ -175,15 +280,18 @@ public sealed class AdSpotWorker(
     /// SAME tick, so the earliest this sweep can ever see a fresh one is the NEXT tick):
     /// inside that window, an ineligible row can only be the <c>MarkReadyAsync</c>-committed/
     /// <c>SetEligibleAsync(true)</c>-never-ran race (a cancellation landing exactly between the two,
-    /// inside <c>CastSegmentAuthor</c>) — a genuine orphan, safe to repair. OUTSIDE that window, an
-    /// ineligible Ready row is never this sweep's doing (the worker itself always flips true within
-    /// the window, and retire flips false only alongside its own <c>AdState.Retired</c> transition,
-    /// which this sweep never sees again since it only reads <see cref="AdState.Ready"/>) — it can
-    /// only be an operator's own hand, and this sweep leaves it alone outright, forever, no matter how
-    /// far past the window. <c>GenWave.Host.Configuration.StationSettingsAllowlist</c>'s own
-    /// <c>Station:Ads:*</c> remarks (GenWave.Ads must never reference that project directly, L10 —
-    /// plain text, not a <c>cref</c>, on purpose) carry the SAME framing for an operator reading the
-    /// settings surface.
+    /// inside <c>CastSegmentAuthor</c>) — a genuine orphan, safe to repair. This sweep is a distinct
+    /// self-heal path from gh-#854's own pending-marker drains above: it covers the confirm-committed,
+    /// no-marker-stamped shape a plain <c>MarkReadyAsync</c> leaves, never a swap's own
+    /// <c>pending_confirm_media_id</c> (that marker's own drain is <see cref="DrainPendingConfirmsAsync"/>
+    /// above). OUTSIDE that window, an ineligible Ready row is never this sweep's doing (the worker
+    /// itself always flips true within the window, and retire flips false only alongside its own
+    /// <c>AdState.Retired</c> transition, which this sweep never sees again since it only reads
+    /// <see cref="AdState.Ready"/>) — it can only be an operator's own hand, and this sweep leaves it
+    /// alone outright, forever, no matter how far past the window.
+    /// <c>GenWave.Host.Configuration.StationSettingsAllowlist</c>'s own <c>Station:Ads:*</c> remarks
+    /// (GenWave.Ads must never reference that project directly, L10 — plain text, not a <c>cref</c>, on
+    /// purpose) carry the SAME framing for an operator reading the settings surface.
     /// </para>
     ///
     /// <para>
@@ -402,16 +510,23 @@ public sealed class AdSpotWorker(
     /// tick was about to spend rendering.
     /// </para>
     /// </summary>
-    async Task RenderDueAsync(AdLiveSettings liveSettings, CancellationToken stoppingToken)
+    /// <returns><see langword="true"/> only when the approved queue was genuinely empty (gh-#854) — never
+    /// on an early break for the on-air gate, a cancelled render, a claim conflict, or
+    /// <see cref="MaxRendersPerTick"/>.</returns>
+    async Task<bool> RenderDueAsync(AdLiveSettings liveSettings, CancellationToken stoppingToken)
     {
         var rendered = 0;
+        var queueEmpty = false;
         for (var i = 0; i < MaxRendersPerTick; i++)
         {
             if (onAirRenderSignal.InFlight)
                 break;
 
             if (await spotStore.ClaimNextApprovedAsync(stoppingToken) is not { } claimed)
+            {
+                queueEmpty = true;
                 break;
+            }
 
             var outcome = await RenderClaimedAsync(claimed, liveSettings, stoppingToken);
             if (outcome is null or AdRenderOutcome.ClaimConflict)
@@ -424,6 +539,99 @@ public sealed class AdSpotWorker(
 
         if (rendered > 0)
             logger.LogInformation("Ad spot worker rendered {Count} approved spot(s) this tick", rendered);
+
+        return queueEmpty;
+    }
+
+    /// <summary>gh-#854 — the background re-render pass: at most ONE stale <see cref="AdState.Ready"/>
+    /// spot per tick, only once <see cref="RenderDueAsync"/> reports the approved queue is genuinely
+    /// empty. The spot never leaves <see cref="AdState.Ready"/> for this — the old media keeps airing
+    /// unless and until <see cref="IAdSpotStore.SwapRenderedMediaAsync"/> commits the swap itself,
+    /// atomically, inside <see cref="AdRenderService.RenderStaleAsync"/>; there is nothing left for
+    /// this method to reconcile once that call returns.</summary>
+    async Task ReRenderOneStaleAsync(AdLiveSettings liveSettings, CancellationToken stoppingToken)
+    {
+        if (onAirRenderSignal.InFlight)
+            return;
+
+        if (await spotStore.FindStaleReadyAsync(AdRenderVersion.Current, staleReRenderSkip, stoppingToken) is not { } spot)
+        {
+            if (!staleBacklogAnnouncedEmpty)
+            {
+                logger.LogInformation("Ad spot worker's stale re-render backlog is empty");
+                staleBacklogAnnouncedEmpty = true;
+            }
+            return;
+        }
+
+        staleBacklogAnnouncedEmpty = false;
+
+        if (spot.MediaId is not { } oldMediaId)
+        {
+            // Unreachable in practice — db/43's own CHECK enforces Ready implies media_id IS NOT NULL —
+            // but never `!`: skip defensively rather than crash the tick.
+            logger.LogWarning("Ad spot {Id} is Ready with no media id; skipping its stale re-render", spot.Id);
+            staleReRenderSkip.Add(spot.Id);
+            return;
+        }
+
+        // Cheap, non-authoritative upfront skip (gh-#854) — avoids a wasted render every boot for a
+        // spot whose old media is already gone, ineligible, or never_play.
+        // IAdSpotStore.SwapRenderedMediaAsync re-checks the SAME facts fresh, atomically, immediately
+        // before the swap itself; only a check made at that exact moment is honest against an operator
+        // disabling the row mid-render, so this upfront check is never the guard, purely a wasted-render
+        // avoidance.
+        if (await adminLookup.GetByIdWithLibraryAsync(oldMediaId, stoppingToken) is not { } oldMedia
+            || !oldMedia.Row.Eligible || oldMedia.Row.NeverPlay)
+        {
+            logger.LogWarning(
+                "Ad spot {Id} media {MediaId} no longer resolves, or is ineligible/never_play; skipping its stale re-render",
+                spot.Id, oldMediaId);
+            staleReRenderSkip.Add(spot.Id);
+            return;
+        }
+
+        using var budgetCts = new CancellationTokenSource(
+            TimeSpan.FromSeconds(adsOptions.CurrentValue.RenderBudgetSeconds), timeProvider);
+        using var renderCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, budgetCts.Token);
+        using var watchdogCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+
+        var breakWindowOpened = false;
+        var watchdog = WatchOnAirRenderAsync(renderCts, () => breakWindowOpened = true, watchdogCts.Token);
+
+        try
+        {
+            var outcome = await renderService.RenderStaleAsync(spot, oldMediaId, liveSettings, renderCts.Token);
+            if (outcome is AdStaleRenderOutcome.Swapped)
+                logger.LogInformation(
+                    "Ad spot {Id} stale re-render swapped off media {OldMediaId} (render_version {Version})",
+                    spot.Id, oldMediaId, AdRenderVersion.Current);
+            else
+                // AdRenderService.FailStaleAsync already logged the reason — nothing to add.
+                staleReRenderSkip.Add(spot.Id);
+        }
+        catch (OperationCanceledException) when (renderCts.IsCancellationRequested && !stoppingToken.IsCancellationRequested)
+        {
+            if (breakWindowOpened)
+                // A break-window yield stays retryable — the very next tick, no skip. Unlike
+                // RecoverFromCanceledRenderAsync's own approved-queue path, there is nothing to re-arm:
+                // this spot never left Ready.
+                logger.LogInformation("Ad spot {Id} stale re-render yielded to an on-air break window; retrying next tick", spot.Id);
+            else
+            {
+                // A genuine budget timeout joins the process-lifetime skip set (gh-#854): a single
+                // always-slow spot must never starve every stale spot behind it.
+                logger.LogWarning(
+                    "Ad spot {Id} stale re-render exceeded its {BudgetSeconds}s budget; skipping it for the rest of this process",
+                    spot.Id, adsOptions.CurrentValue.RenderBudgetSeconds);
+                staleReRenderSkip.Add(spot.Id);
+            }
+        }
+        finally
+        {
+            await watchdogCts.CancelAsync();
+            await watchdog;
+        }
     }
 
     /// <summary>

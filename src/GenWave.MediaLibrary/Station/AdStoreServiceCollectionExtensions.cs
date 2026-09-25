@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using GenWave.Core.Abstractions;
 using Npgsql;
 
@@ -32,10 +33,21 @@ public static class AdStoreServiceCollectionExtensions
     /// <see cref="AnnouncementServiceCollectionExtensions.AddAnnouncementStore"/>'s own remarks:
     /// merely resolving <see cref="IAdSpotStore"/> must never be enough to trigger a connection
     /// attempt against an empty/dev-mode connection string.
+    ///
+    /// <para>
+    /// <see cref="IAdminMediaLookup"/>/<see cref="IAuthoredCatalogWriter"/> (gh-#854) are resolved
+    /// lazily from <paramref name="services"/>' own container via the factory lambda below, not
+    /// built here — <see cref="MediaLibraryServiceCollectionExtensions.AddMediaLibrary"/> is what
+    /// actually registers them (both rooted in the SAME <c>MediaRepository</c>), and this
+    /// registration must work whichever order the two calls run in.
+    /// </para>
     /// </summary>
     public static IServiceCollection AddAdSpotStore(this IServiceCollection services, string connectionString) =>
-        services.AddSingleton<IAdSpotStore>(
-            _ => new AdSpotRepository(new Lazy<NpgsqlDataSource>(() => new NpgsqlDataSourceBuilder(connectionString).Build())));
+        services.AddSingleton<IAdSpotStore>(sp => new AdSpotRepository(
+            new Lazy<NpgsqlDataSource>(() => new NpgsqlDataSourceBuilder(connectionString).Build()),
+            sp.GetRequiredService<IAdminMediaLookup>(),
+            sp.GetRequiredService<IAuthoredCatalogWriter>(),
+            sp.GetRequiredService<ILogger<AdSpotRepository>>()));
 
     /// <summary>
     /// Registers <see cref="IAdBriefStore"/> the same lazy way <see cref="AddAdSpotStore"/> registers

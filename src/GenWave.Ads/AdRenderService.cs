@@ -71,7 +71,12 @@ public sealed class AdRenderService(
     {
         try
         {
-            return await RenderCoreAsync(spot, liveSettings, ct);
+            var (outcome, _) = await RenderCoreAsync(
+                spot, liveSettings,
+                confirmAsync: (mediaId, confirmCt) => spotStore.MarkReadyAsync(spot.Id, mediaId, AdRenderVersion.Current, confirmCt),
+                failAsync: (reason, failCt) => FailAsync(spot.Id, reason, failCt),
+                ct);
+            return outcome;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -84,27 +89,74 @@ public sealed class AdRenderService(
         }
     }
 
-    async Task<AdRenderOutcome> RenderCoreAsync(AdSpot spot, AdLiveSettings liveSettings, CancellationToken ct)
+    /// <summary>gh-#854 — re-renders <paramref name="spot"/> on its current cast/bed without ever
+    /// claiming it out of <see cref="AdState.Ready"/>: <paramref name="oldMediaId"/> stays airable for
+    /// the whole call, confirmed via <see cref="IAdSpotStore.SwapRenderedMediaAsync"/>, which re-checks
+    /// <paramref name="oldMediaId"/>'s eligible/never_play facts fresh, then runs the guarded swap
+    /// <c>UPDATE</c> in its own station transaction. A failure here never touches the spot's own row —
+    /// the caller decides what a stale re-render failure means for a spot that never left Ready.
+    /// <paramref name="oldMediaId"/>'s file/eligibility are left exactly as they were; no compensation,
+    /// no retry, no second pass.
+    /// </summary>
+    internal async Task<AdStaleRenderOutcome> RenderStaleAsync(
+        AdSpot spot, long oldMediaId, AdLiveSettings liveSettings, CancellationToken ct)
+    {
+        try
+        {
+            var (outcome, _) = await RenderCoreAsync(
+                spot, liveSettings,
+                confirmAsync: (renderedMediaId, confirmCt) =>
+                    spotStore.SwapRenderedMediaAsync(spot.Id, oldMediaId, renderedMediaId, AdRenderVersion.Current, confirmCt),
+                failAsync: (reason, failCt) => FailStaleAsync(spot.Id, reason, failCt),
+                ct,
+                // gh-#854 — SwapRenderedMediaAsync itself stamps both durable pending markers inside its
+                // own guarded transaction, then best-effort flips old-ineligible/new-eligible AFTER that
+                // commit (never inside it — this project has no grant into the library schema); a
+                // second, unguarded flip from the author's own confirm tail would race those best-effort
+                // flips rather than defer to them.
+                flipEligibleOnConfirm: false);
+            return outcome == AdRenderOutcome.Rendered
+                ? AdStaleRenderOutcome.Swapped.Instance
+                : AdStaleRenderOutcome.Failed.Instance;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Ad spot {Id} re-render failed unexpectedly", spot.Id);
+            return AdStaleRenderOutcome.Failed.Instance;
+        }
+    }
+
+    async Task<(AdRenderOutcome Outcome, long? MediaId)> RenderCoreAsync(
+        AdSpot spot, AdLiveSettings liveSettings,
+        Func<long, CancellationToken, Task<bool>> confirmAsync,
+        Func<string, CancellationToken, Task<AdRenderOutcome>> failAsync,
+        CancellationToken ct,
+        bool flipEligibleOnConfirm = true)
     {
         var outputDirectory = ResolveAdsRoot();
         var (request, failure) = await BuildAssemblyRequestAsync(spot, liveSettings, outputDirectory, ct);
         if (request is null)
-            return await FailAsync(spot.Id, failure ?? "render: assembly request build failed", ct);
+            return (await failAsync(failure ?? "render: assembly request build failed", ct), null);
 
         var libraryId = await ResolveLibraryIdAsync(ct);
         if (libraryId is null)
-            return await FailAsync(spot.Id, "render: the ads library does not exist yet", ct);
+            return (await failAsync("render: the ads library does not exist yet", ct), null);
 
         var result = await author.AuthorAsync(
             request,
             buildInsert: assembled => BuildInsert(libraryId.Value, request.Tags, assembled),
-            confirmAsync: (mediaId, confirmCt) => spotStore.MarkReadyAsync(spot.Id, mediaId, confirmCt),
-            ct);
+            confirmAsync: confirmAsync,
+            ct,
+            flipEligibleOnConfirm);
 
         if (!result.Succeeded)
-            return await FailAsync(spot.Id, $"render: {result.FailureReason} — {result.FailureDetail}", ct);
+            return (await failAsync($"render: {result.FailureReason} — {result.FailureDetail}", ct), null);
 
-        return AdRenderOutcome.Rendered;
+        return (AdRenderOutcome.Rendered, result.MediaId);
     }
 
     /// <summary>
@@ -216,7 +268,7 @@ public sealed class AdRenderService(
             var result = await author.LandAsync(
                 assembled,
                 buildInsert: a => BuildInsert(libraryId.Value, tags, a),
-                confirmAsync: (mediaId, confirmCt) => spotStore.MarkReadyAsync(spot.Id, mediaId, confirmCt),
+                confirmAsync: (mediaId, confirmCt) => spotStore.MarkReadyAsync(spot.Id, mediaId, AdRenderVersion.Current, confirmCt),
                 ct);
 
             return result.Succeeded
@@ -549,6 +601,15 @@ public sealed class AdRenderService(
     /// </summary>
     async Task<AdRenderOutcome> FailAsync(long spotId, string reason, CancellationToken ct) =>
         await TryMarkFailedAsync(spotId, reason, ct) ? AdRenderOutcome.Failed : AdRenderOutcome.ClaimConflict;
+
+    /// <summary>gh-#854 — a stale re-render failure never calls
+    /// <see cref="IAdSpotStore.MarkFailedAsync"/>: the spot never left <see cref="AdState.Ready"/>, so
+    /// that guard could only ever decline, logging a misleading WARN for a transition that was never real.</summary>
+    Task<AdRenderOutcome> FailStaleAsync(long spotId, string reason, CancellationToken ct)
+    {
+        logger.LogWarning("Ad spot {Id} stale re-render failed: {Reason}", spotId, LogSanitize.Strip(reason));
+        return Task.FromResult(AdRenderOutcome.Failed);
+    }
 
     /// <summary>
     /// The one MarkFailedAsync call site every failure path above funnels through — never throws

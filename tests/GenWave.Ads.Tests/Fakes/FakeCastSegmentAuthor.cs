@@ -52,6 +52,23 @@ public sealed class FakeCastSegmentAuthor : ICastSegmentAuthor
     /// <summary>What this fake returns from <see cref="AuthorAsync"/> — success by default.</summary>
     public CastSegmentAuthorResult Result { get; set; } = CastSegmentAuthorResult.Success(4200);
 
+    /// <summary>gh-#854 — when true, blocks right after <c>buildInsert</c> and before
+    /// <c>confirmAsync</c> is ever called, until <see cref="ReleaseBeforeConfirm"/> completes (or
+    /// <c>ct</c> cancels) — the window a spec needs to prove that a fact changing mid-render (the old
+    /// media going operator-disabled) is caught by <c>confirmAsync</c>'s own fresh re-check, never by
+    /// whatever was true when the render started.</summary>
+    public bool BlockBeforeConfirm { get; set; }
+
+    /// <summary>Completes the instant <see cref="AuthorAsync"/> reaches the block above, ONLY when
+    /// <see cref="BlockBeforeConfirm"/> is set — a spec awaits this to know the render has produced its
+    /// media and is about to confirm, before driving whatever change it means to prove
+    /// <c>confirmAsync</c> catches.</summary>
+    public TaskCompletionSource EnteredBeforeConfirm { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>A spec completes this to release <see cref="AuthorAsync"/> from its
+    /// <see cref="BlockBeforeConfirm"/> wait and let <c>confirmAsync</c> actually run.</summary>
+    public TaskCompletionSource ReleaseBeforeConfirm { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     /// <summary>The request <see cref="AssembleOnlyAsync"/> was most recently called with (PLAN T442
     /// preview mode) — a spec asserting <c>AdRenderService.RenderPreviewAsync</c>'s own build never
     /// reads <see cref="LastRequest"/> for this, since a preview render never calls
@@ -75,7 +92,8 @@ public sealed class FakeCastSegmentAuthor : ICastSegmentAuthor
         CastAssemblyRequest assemblyRequest,
         Func<CrosstalkAssemblyResult.Assembled, AuthoredMediaInsert> buildInsert,
         Func<long, CancellationToken, Task<bool>> confirmAsync,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool flipEligibleOnConfirm = true)
     {
         LastRequest = assemblyRequest;
 
@@ -107,8 +125,18 @@ public sealed class FakeCastSegmentAuthor : ICastSegmentAuthor
                 // The PRODUCTION buildInsert closure — never a test-local lookalike (T401 review F1).
                 CapturedInsert = buildInsert(assembled);
 
+                if (BlockBeforeConfirm)
+                {
+                    EnteredBeforeConfirm.TrySetResult();
+                    await ReleaseBeforeConfirm.Task.WaitAsync(ct);
+                }
+
                 // The PRODUCTION confirmAsync closure — genuinely invoked, not skipped, so a spec
                 // can prove it reaches the real IAdSpotStore.MarkReadyAsync (review F1, mutant 3).
+                // gh-#854: this fake never flips eligibility itself — confirmAsync IS
+                // AdSpotRepository.SwapRenderedMediaAsync (or IAdSpotStore.MarkReadyAsync for the
+                // first-render path), and either one now owns both flips atomically inside itself;
+                // flipEligibleOnConfirm is accepted only to match ICastSegmentAuthor's shape.
                 ConfirmResult = await confirmAsync(MediaIdToConfirm, ct);
             }
             finally
@@ -117,6 +145,13 @@ public sealed class FakeCastSegmentAuthor : ICastSegmentAuthor
                     File.Delete(path);
             }
         }
+
+        // gh-#854 — mirrors the real CastSegmentAuthor's own contract: a declined confirmAsync
+        // (invoked for real above, never a lookalike) is always a genuine failure, never whatever the
+        // caller preset Result to before the call. Result only governs the InvokeDelegates=false case
+        // (confirmAsync never reached at all) or a genuine success.
+        if (ConfirmResult == false)
+            return CastSegmentAuthorResult.Failure(CastSegmentFailureReason.ConfirmationFailed, "confirmation declined");
 
         return Result;
     }
@@ -152,7 +187,8 @@ public sealed class FakeCastSegmentAuthor : ICastSegmentAuthor
         CrosstalkAssemblyResult.Assembled assembled,
         Func<CrosstalkAssemblyResult.Assembled, AuthoredMediaInsert> buildInsert,
         Func<long, CancellationToken, Task<bool>> confirmAsync,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool flipEligibleOnConfirm = true)
     {
         LastLandAssembled = assembled;
 
