@@ -290,6 +290,47 @@ static class TestMedia
         return path;
     }
 
+    /// <summary>
+    /// A WAV whose samples ramp linearly from 0 up to <paramref name="peakAmplitude"/> over
+    /// <paramref name="durationSec"/> — the loudest instant sits at the very end, so a hard splice
+    /// back to the (silent) start of a repeat reads as a large, obvious step (gh-#855).
+    /// </summary>
+    public static string CreateLinearRamp(string dir, string fileName, double durationSec, double peakAmplitude = 0.8)
+    {
+        var path = Path.Combine(dir, fileName);
+        var dur = durationSec.ToString(CultureInfo.InvariantCulture);
+        var peak = peakAmplitude.ToString(CultureInfo.InvariantCulture);
+        var args = new List<string>
+        {
+            "-nostats", "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", $"aevalsrc={peak}*t/{dur}:d={dur}",
+            "-ar", "44100", "-ac", "2",
+            path
+        };
+        RunFfmpeg(args);
+        return path;
+    }
+
+    /// <summary>
+    /// White noise, seeded for reproducibility — decorrelated between any two time offsets of the same
+    /// stream, unlike a pure tone, so overlapping taps of it sum to a flat level under an equal-power
+    /// crossfade instead of phasing constructively or destructively at the join (gh-#855).
+    /// </summary>
+    public static string CreateNoise(string dir, string fileName, double durationSec, int seed = 855)
+    {
+        var path = Path.Combine(dir, fileName);
+        var dur = durationSec.ToString(CultureInfo.InvariantCulture);
+        var args = new List<string>
+        {
+            "-nostats", "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", $"anoisesrc=duration={dur}:color=white:seed={seed}",
+            "-ar", "44100", "-ac", "2",
+            path
+        };
+        RunFfmpeg(args);
+        return path;
+    }
+
     static void RunFfmpeg(IReadOnlyList<string> args)
     {
         var psi = new ProcessStartInfo("ffmpeg") { RedirectStandardError = true, UseShellExecute = false };
