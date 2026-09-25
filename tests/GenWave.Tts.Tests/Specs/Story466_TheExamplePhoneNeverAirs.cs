@@ -130,6 +130,40 @@ public static class FeatureTheexamplephoneneverairs
         public void ReplacesTheWholeRun() => Assert.Equal("ANNOUNCER: Call (406) 222-0100.", result);
     }
 
+    public sealed class ScenarioAParenthesizedExampleIsReplaced
+    {
+        // gh-#856: PhoneShapedRunPattern gained the same "(ddd) dddd" alternative as
+        // GenWave.Core.PhoneShape — a stray "(555) 0142" (the exchange itself parenthesized, no
+        // third digit group) must be caught and replaced too, not just its dashed sibling above.
+        const string Script = "ANNOUNCER: Call (555) 0142 today!";
+        const string SponsorPhone = "812-555-0199";
+
+        readonly string result;
+
+        public ScenarioAParenthesizedExampleIsReplaced() =>
+            result = AdScriptWriter.ApplyPhoneHygiene(Script, SponsorPhone);
+
+        /// <summary>AC3 — the sponsor phone replaces the whole parenthesized run</summary>
+        [Fact]
+        public void ReplacesTheWholeRun() => Assert.Equal("ANNOUNCER: Call 812-555-0199 today!", result);
+    }
+
+    public sealed class ScenarioAParenthesizedExampleWithADashSeparatorIsReplaced
+    {
+        // gh-#856: same run, dash separator.
+        const string Script = "ANNOUNCER: Call (555)-0142 today!";
+        const string SponsorPhone = "812-555-0199";
+
+        readonly string result;
+
+        public ScenarioAParenthesizedExampleWithADashSeparatorIsReplaced() =>
+            result = AdScriptWriter.ApplyPhoneHygiene(Script, SponsorPhone);
+
+        /// <summary>AC3 — the sponsor phone replaces the whole parenthesized run</summary>
+        [Fact]
+        public void ReplacesTheWholeRun() => Assert.Equal("ANNOUNCER: Call 812-555-0199 today!", result);
+    }
+
     // ---------------------------------------------------------------------
     // SAD PATH
     // ---------------------------------------------------------------------
@@ -149,6 +183,19 @@ public static class FeatureTheexamplephoneneverairs
         /// <summary>AC5 — no digits remain</summary>
         [Fact]
         public void LeavesNoDigits() => Assert.DoesNotContain(result, char.IsDigit);
+    }
+
+    public sealed class ScenarioAParenthesizedExampleWithNoSponsorPhone
+    {
+        // gh-#856: same AC5 drop, but the run is the parenthesized "(555) 0142" shape.
+        readonly string result;
+
+        public ScenarioAParenthesizedExampleWithNoSponsorPhone() =>
+            result = AdScriptWriter.ApplyPhoneHygiene("ANNOUNCER: Call (555) 0142 today!", sponsorPhone: null);
+
+        /// <summary>AC5 — the clause is dropped</summary>
+        [Fact]
+        public void DropsTheClause() => Assert.Equal("ANNOUNCER: Today!", result);
     }
 
     public sealed class ScenarioTheWholeLineIsThePhoneClause

@@ -667,7 +667,10 @@ public sealed partial class AdScriptWriter(
     // actually present (space-then-paren is non-word-to-non-word) — a leading \b there would make the
     // paren alternative unreachable, and every "(NNN) NNN-NNNN" run would match only its own trailing
     // "NNN-NNNN" tail.
-    [GeneratedRegex(@"(?:\(\d{3}\)\s?|\b\d{3}[-. ])?\b\d{3}[-. ]\d{4}\b")]
+    //
+    // gh-#856: a second alternative, "\(\d{3}\)[-. ]?\d{4}\b", covers "(555) 0142" — mirroring
+    // GenWave.Core.PhoneShape's own widening so hygiene catches what the validator's phone rule now refuses.
+    [GeneratedRegex(@"(?:\(\d{3}\)\s?|\b\d{3}[-. ])?\b\d{3}[-. ]\d{4}\b|\(\d{3}\)[-. ]?\d{4}\b")]
     private static partial Regex PhoneShapedRunPattern();
 
     [GeneratedRegex(@"\s+")]
