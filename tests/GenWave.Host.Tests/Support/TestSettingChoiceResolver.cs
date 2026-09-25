@@ -34,6 +34,7 @@ internal static class TestSettingChoiceResolver
         ThemeCatalog.LoadShipped(),
         TestSettingCopy.Real(),
         [],
+        [],
         new ProbedChoiceCache(TimeProvider.System, NullLogger<ProbedChoiceCache>.Instance),
         logger ?? NullLogger<SettingChoiceResolver>.Instance);
 }

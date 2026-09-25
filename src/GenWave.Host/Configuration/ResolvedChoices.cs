@@ -1,7 +1,7 @@
 namespace GenWave.Host.Configuration;
 
 /// <summary>
-/// One allowlisted <see cref="SettingKind.Choice"/> key's resolved, localized choice list for one
+/// One allowlisted <see cref="SettingKind.Choice"/>/<see cref="SettingKind.MultiChoice"/> key's resolved, localized choice list for one
 /// request (SPEC F205.7, STORY-479, PLAN T580) — <see cref="ISettingChoiceResolver.ResolveAsync"/>'s
 /// per-key result. <see cref="GenWave.Host.Api.SettingsController"/>'s <c>BuildDto</c> reads this
 /// straight onto <see cref="GenWave.Host.Api.SettingDto.Choices"/>/

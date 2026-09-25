@@ -407,6 +407,14 @@ builder.Services.AddSingleton(sp => new Lazy<ILlmModelLister>(sp.GetRequiredServ
 builder.Services.AddSingleton(sp => new Lazy<ITtsVoiceLister>(sp.GetRequiredService<ITtsVoiceLister>));
 builder.Services.AddSingleton<IChoiceProbe, LlmModelChoiceProbe>();
 builder.Services.AddSingleton<IChoiceProbe, TtsVoiceChoiceProbe>();
+
+// The one IChoiceCatalog this codebase ships (SPEC F205.7d, STORY-482, PLAN T585) — backs
+// Crosstalk:Shows' MultiChoice entry. IShowStore is registered unconditionally by
+// builder.AddGenWaveStationSettings() above (AddShowStore is not gated behind any connection-string
+// presence check), so this registration can never resolve to a missing dependency. Resolving it here
+// (ChoiceSourceBootCheck.Verify below does, once) is side-effect free the same way IShowStore itself
+// is — see ShowChoiceCatalog's own remarks.
+builder.Services.AddSingleton<IChoiceCatalog, ShowChoiceCatalog>();
 builder.Services.AddSingleton<ISettingChoiceResolver, SettingChoiceResolver>();
 
 builder.Services.AddControllers();
@@ -451,14 +459,14 @@ var app = builder.Build();
 // live GET/PUT /api/settings request the way SettingChoiceResolver's own runtime dispatch
 // defensively does for the exact same misconfiguration (see ChoiceSourceBootCheck's own remarks).
 // Deliberately reads the names back off the BUILT container (T580 review finding F3) rather than
-// a hardcoded probe-name list: a probe registration deleted in a refactor must fail this check,
-// not silently boot clean while every settings request it backed degrades to choicesFailed. Placed
-// right after builder.Build() — the earliest point an IChoiceProbe can actually be resolved; no
-// IChoiceCatalog exists yet, so knownCatalogNames is empty until one does.
+// a hardcoded probe-name list: a probe (or, since T585, catalog) registration deleted in a refactor
+// must fail this check, not silently boot clean while every settings request it backed degrades to
+// choicesFailed. Placed right after builder.Build() — the earliest point an IChoiceProbe/IChoiceCatalog
+// can actually be resolved.
 ChoiceSourceBootCheck.Verify(
     StationSettingsAllowlist.All,
     knownProbeNames: app.Services.GetServices<IChoiceProbe>().Select(p => p.Name).ToList(),
-    knownCatalogNames: []);
+    knownCatalogNames: app.Services.GetServices<IChoiceCatalog>().Select(c => c.Kind).ToList());
 
 // Fail-closed admin gate (SPEC F60.4/STORY-164): loudly warn if the admin plane is locked down.
 app.WarnIfAdminPasswordMissing();

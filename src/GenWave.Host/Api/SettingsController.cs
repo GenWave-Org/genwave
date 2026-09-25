@@ -310,14 +310,19 @@ public sealed class SettingsController(
     /// <summary>
     /// Maps <see cref="SettingKind"/> to the wire string the admin UI dispatches its input
     /// control on. Shared by GET and PUT so the two response shapes can never drift apart.
+    /// Exhaustive: an unmatched <see cref="SettingKind"/> throws rather than silently reading as
+    /// <c>"number"</c> (PLAN T585 — a future kind added here without a wire mapping is a bug to
+    /// catch at the first request, not a value the admin UI silently misrenders).
     /// </summary>
     static string KindWireValue(SettingKind kind) => kind switch
     {
         SettingKind.Boolean => "boolean",
+        SettingKind.Number => "number",
         SettingKind.NumberList => "number-list",
         SettingKind.String => "string",
         SettingKind.Choice => "choice",
-        _ => "number",
+        SettingKind.MultiChoice => "multi-choice",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown SettingKind"),
     };
 
     /// <summary>

@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **127 seams across 7 projects.**
+> **128 seams across 7 projects.**
 
 ## GenWave.Ads (2 seams)
 
@@ -60,7 +60,7 @@
 | `GenWave.Core.Abstractions.IContextPatterFactSource` | `GenWave.Context.ContextPipeline` | Singleton | also registered: `GenWave.Core.Abstractions.NoOpContextPatterFactSource` (GenWave.Core) |
 | `GenWave.Core.Abstractions.IContextProvider` | `GenWave.Context.History.HistoryContextProvider` | Singleton | also registered: `GenWave.Context.Weather.WeatherContextProvider` (GenWave.Context) |
 
-## GenWave.Host (35 seams)
+## GenWave.Host (36 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -92,6 +92,7 @@
 | `GenWave.Core.Abstractions.IStationScopeProvider` | `GenWave.Host.Options.OptionsMonitorStationScopeProvider` | Singleton | — |
 | `GenWave.Host.Auth.IAnnounceTokenStore` | `GenWave.Host.Auth.AnnounceTokenStore` | Singleton | — |
 | `GenWave.Host.Catalog.ICatalogPersonaAvatarInstaller` | `GenWave.Host.Catalog.CatalogPersonaAvatarInstaller` | Singleton | — |
+| `GenWave.Host.Configuration.IChoiceCatalog` | `GenWave.Host.Configuration.ShowChoiceCatalog` | Singleton | — |
 | `GenWave.Host.Configuration.IChoiceProbe` | `GenWave.Host.Configuration.TtsVoiceChoiceProbe` | Singleton | also registered: `GenWave.Host.Configuration.LlmModelChoiceProbe` (GenWave.Host) |
 | `GenWave.Host.Configuration.ISettingChoiceResolver` | `GenWave.Host.Configuration.SettingChoiceResolver` | Singleton | — |
 | `GenWave.Host.Configuration.IStationSettingsStore` | `GenWave.Host.Configuration.StationSettingsStore` | Singleton | — |

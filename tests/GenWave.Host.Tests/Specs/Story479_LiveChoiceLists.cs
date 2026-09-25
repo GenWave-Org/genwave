@@ -142,6 +142,7 @@ public static class FeatureLiveModelAndVoiceLists
         ThemeCatalog.LoadShipped(),
         TestSettingCopy.Real(),
         probes,
+        [],
         new ProbedChoiceCache(new FakeTimeProvider(), NullLogger<ProbedChoiceCache>.Instance),
         NullLogger<SettingChoiceResolver>.Instance);
 

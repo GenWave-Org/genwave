@@ -1,7 +1,7 @@
 namespace GenWave.Host.Configuration;
 
 /// <summary>
-/// Resolves every allowlisted <see cref="SettingKind.Choice"/> entry's presented choice list for
+/// Resolves every allowlisted <see cref="SettingKind.Choice"/>/<see cref="SettingKind.MultiChoice"/> entry's presented choice list for
 /// ONE request (SPEC F205.7, STORY-479, PLAN T580) — the seam <see cref="GenWave.Host.Api.SettingsController"/>'s
 /// <c>Get</c>/<c>Put</c> each call exactly once, replacing the controller's own former
 /// <c>ChoicesFor</c>/<c>LocalizedChoicesFor</c> pair. Implementations own the
@@ -20,7 +20,7 @@ namespace GenWave.Host.Configuration;
 public interface ISettingChoiceResolver
 {
     /// <summary>
-    /// Resolves the <see cref="SettingKind.Choice"/> allowlist entries whose <see cref="AllowedSetting.Key"/>
+    /// Resolves the <see cref="SettingKind.Choice"/>/<see cref="SettingKind.MultiChoice"/> allowlist entries whose <see cref="AllowedSetting.Key"/>
     /// is present in <paramref name="currentValues"/> (case-insensitive, matching
     /// <see cref="StationSettingsAllowlist.ByKey"/>) — not every such entry on the allowlist (T580
     /// review finding F4): GET passes every stored/default value, so every choice-kind entry

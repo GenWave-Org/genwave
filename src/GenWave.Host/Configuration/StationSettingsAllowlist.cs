@@ -534,7 +534,16 @@ public static class StationSettingsAllowlist
         // casting/eligibility check with no api restart. EveryNthAiring defaults to 1 (every eligible
         // airing carries banter) — the counting itself is a LATER task's own concern (PLAN T287's
         // vend gate).
-        new("Crosstalk:Shows", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Announcements),
+        //
+        // MultiChoice, sourced from the "shows" catalog (SPEC F205.7, STORY-482, PLAN T585) — a
+        // checkbox per show, never a hand-typed JSON array, so the slug-vs-name mistake T175 warns
+        // about is no longer possible to make from the admin UI. The stored/validated shape is
+        // unchanged: still the slug array SettingValidator.IsValidCrosstalkShowsArray already checks
+        // (SPEC F205.7a — no migration).
+        new("Crosstalk:Shows", SettingApplyMode.Live, SettingKind.MultiChoice, "", SettingGroup.Announcements)
+        {
+            ChoiceSource = new SettingChoiceSource.Catalog(ShowChoiceCatalog.CatalogKind),
+        },
         new("Crosstalk:EveryNthAiring", SettingApplyMode.Live, SettingKind.Number, "airings", SettingGroup.Announcements, Min: 1, Max: 100),
 
         // The ads seam's five Live knobs (SPEC F158.3, F159.3, F159.4, F163.1, STORY-388/389/391,

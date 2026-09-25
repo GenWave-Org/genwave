@@ -674,7 +674,7 @@
     <value>Shows with two-host banter (crosstalk)</value>
   </data>
   <data name="Crosstalk:Shows.Help" xml:space="preserve">
-    <value>A JSON array of show slugs allowed to carry two-voice banter — a show's stable URL-safe identity, not its display name (e.g. "morning-drive" for a show named "Morning Drive"), e.g. ["morning-drive"]. Empty (the default) turns the feature off entirely — no station's sound changes on upgrade until a show is named here.</value>
+    <value>The shows allowed to carry two-voice banter. None ticked (the default) turns the feature off — no station's sound changes on upgrade until a show is ticked here.</value>
   </data>
   <data name="Crosstalk:EveryNthAiring.Label" xml:space="preserve">
     <value>Two-host banter frequency</value>
