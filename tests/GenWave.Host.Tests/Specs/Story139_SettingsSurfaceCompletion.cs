@@ -89,8 +89,7 @@ public static class FeatureSettingsSurfaceCompletion
             store,
             new SettingValidator(config),
             NullLogger<SettingsController>.Instance,
-            new FakeIconPackStore(),
-            TestSettingCopy.Real())
+            TestSettingCopy.Real(), TestSettingChoiceResolver.Default())
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
         };

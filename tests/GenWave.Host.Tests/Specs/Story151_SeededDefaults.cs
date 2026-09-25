@@ -94,7 +94,7 @@ public static class FeatureSeededDefaults
     }
 
     static SettingsController BuildController(IConfiguration config, IStationSettingsStore store) =>
-        new(config, store, new SettingValidator(config), NullLogger<SettingsController>.Instance, new FakeIconPackStore(), TestSettingCopy.Real())
+        new(config, store, new SettingValidator(config), NullLogger<SettingsController>.Instance, TestSettingCopy.Real(), TestSettingChoiceResolver.Default())
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
         };

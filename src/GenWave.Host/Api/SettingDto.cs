@@ -65,6 +65,20 @@ namespace GenWave.Host.Api;
 ///   echoes this back as that update's <see cref="SettingUpdateRequest.ExpectedVersion"/>; omitting
 ///   it keeps the pre-gh-#486 unconditional last-write-wins behavior.
 /// </param>
+/// <param name="ChoicesStale">
+///   True when <paramref name="Choices"/> is a live source's (<see cref="Configuration.SettingChoiceSource.Probe"/>/
+///   <see cref="Configuration.SettingChoiceSource.Catalog"/>) last KNOWN-good list, not this
+///   request's own attempt (SPEC F205.7c, STORY-479, PLAN T580) — the most recent live attempt
+///   failed, but an earlier one for the same endpoint succeeded. Always <see langword="false"/> for
+///   a <see cref="Configuration.SettingChoiceSource.Static"/> entry or a non-<c>"choice"</c> kind.
+/// </param>
+/// <param name="ChoicesFailed">
+///   True when <paramref name="Choices"/> came back empty (aside from any appended saved value)
+///   because a live source has no successful attempt to fall back on at all (SPEC F205.7c,
+///   STORY-479, PLAN T580) — a down/unconfigured backend, or one just repointed to a different
+///   endpoint. Always <see langword="false"/> for a <see cref="Configuration.SettingChoiceSource.Static"/>
+///   entry or a non-<c>"choice"</c> kind.
+/// </param>
 public sealed record SettingDto(
     string Key,
     string Value,
@@ -78,4 +92,6 @@ public sealed record SettingDto(
     double? Min = null,
     double? Max = null,
     IReadOnlyList<SettingChoice>? Choices = null,
-    long Version = 0);
+    long Version = 0,
+    bool ChoicesStale = false,
+    bool ChoicesFailed = false);
