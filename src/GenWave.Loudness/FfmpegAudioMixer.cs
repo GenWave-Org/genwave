@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using Microsoft.Extensions.Logging;
@@ -9,9 +10,9 @@ namespace GenWave.Loudness;
 /// <summary>
 /// Renders the final safe-segment artifact in exactly one ffmpeg invocation (SPEC F27.2 / F27.4 /
 /// F27.5): voice-only is re-muxed with embedded RIFF INFO tags; with a bed, the bed is cue-trimmed,
-/// looped or trimmed to cover the voice plus lead-in/tail-out pad, attenuated relative to the voice,
-/// and mixed in after the voice's lead-in delay. One invocation in every path keeps audio rendering
-/// in exactly one place.
+/// crossfade-looped or trimmed to cover the voice plus lead-in/tail-out pad, attenuated relative to
+/// the voice, and mixed in after the voice's lead-in delay. One invocation in every path keeps audio
+/// rendering in exactly one place.
 ///
 /// Tag embedding is two-step (SPEC F27.2): ffmpeg's <c>-metadata</c> writes the RIFF INFO artist/title
 /// chunks that generic tools (ffprobe et al.) read, but ffmpeg's wav muxer has no way to write a chunk
@@ -30,9 +31,13 @@ public sealed class FfmpegAudioMixer(ILoudnessAnalyzer loudnessAnalyzer, ILogger
 {
     readonly ILogger<FfmpegAudioMixer> logger = logger ?? NullLogger<FfmpegAudioMixer>.Instance;
 
-    // The bed branch is resampled to this rate before looping so the aloop buffer size (computed in
-    // samples) is deterministic regardless of the bed file's native sample rate.
+    // The bed branch is resampled to this rate before crossfade-looping so the timing is deterministic
+    // regardless of the bed file's native sample rate.
     const int BedProcessingSampleRate = 44100;
+
+    // gh-#855 — the crossfade at each loop-repeat join; shrunk for short clips (BuildBedFilterGraph)
+    // so it never exceeds a single copy's own length.
+    const double BedLoopCrossfadeSeconds = 0.5;
 
     // SPEC F196.3 — the bed's gain (relative to the voice/target, before mixing) is clamped to this
     // range; a clamp always logs WARN with the computed (pre-clamp) value.
@@ -75,8 +80,8 @@ public sealed class FfmpegAudioMixer(ILoudnessAnalyzer loudnessAnalyzer, ILogger
     }
 
     /// <summary>
-    /// Mixes the cue-trimmed, looped/trimmed, ducked bed under the voice (delayed by the lead-in pad)
-    /// in a single filter_complex pass.
+    /// Mixes the cue-trimmed, crossfade-looped/trimmed, ducked bed under the voice (delayed by the
+    /// lead-in pad) in a single filter_complex pass.
     /// </summary>
     async Task RunWithBedAsync(AudioMixRequest request, BedSpec bed, CancellationToken ct)
     {
@@ -99,13 +104,9 @@ public sealed class FfmpegAudioMixer(ILoudnessAnalyzer loudnessAnalyzer, ILogger
                 $"Bed cue points for '{bed.Path}' produce a non-positive segment " +
                 $"({cueInSec}s to {cueOutSec}s).");
 
-        // Buffer just enough samples to hold the cue-trimmed bed segment: a short bed loops over
-        // this whole buffer; a long bed never reaches the buffer's end before the final atrim cuts it.
-        var loopBufferSamples = (long)Math.Round(
-            bedSegmentDurationSec * BedProcessingSampleRate, MidpointRounding.AwayFromZero);
         var delayMs = (long)Math.Round(request.BedPadSeconds * 1000.0, MidpointRounding.AwayFromZero);
 
-        var filter = BuildBedFilterGraph(request, bedGainDb, cueInSec, cueOutSec, totalDurationSec, loopBufferSamples, delayMs);
+        var filter = BuildBedFilterGraph(request, bedGainDb, cueInSec, cueOutSec, totalDurationSec, delayMs);
 
         var args = new List<string>
         {
@@ -123,16 +124,7 @@ public sealed class FfmpegAudioMixer(ILoudnessAnalyzer loudnessAnalyzer, ILogger
         await FfmpegProcess.RunFfmpegAsync(args, ct);
     }
 
-    /// <summary>
-    /// SPEC F168.3 (cue-trim), F168.4 (fade); STORY-403; PLAN T416 review F1(b) — the bed's own filter_complex graph
-    /// (cue-trim, loop-to-cover, duck, fade, delay-and-mix), extracted out of <see cref="RunWithBedAsync"/>
-    /// as a pure, internal, static function for the SAME reason <see cref="BuildFadeSuffix"/> already is
-    /// (this method's own remarks): unit-testable without a real ffmpeg binary via this project's
-    /// <c>InternalsVisibleTo</c> grant (csproj remarks). Before this extraction, the tail-fade's own
-    /// deploy-path wiring here — the <see cref="BuildFadeSuffix"/> call embedded inline below — had no
-    /// fact pinning it to this call site at all; a mutant deleting that call stayed green because only
-    /// the pure helper itself, never this graph, was ever asserted against.
-    /// </summary>
+    /// <summary>Measures the bed file's own integrated loudness for the duck calculation.</summary>
     async Task<double?> MeasureBedLufsAsync(string bedPath, CancellationToken ct)
     {
         var measured = await loudnessAnalyzer.AnalyzeAsync(bedPath, ct);
@@ -190,17 +182,73 @@ public sealed class FfmpegAudioMixer(ILoudnessAnalyzer loudnessAnalyzer, ILogger
         return appliedDb;
     }
 
+    /// <summary>
+    /// SPEC F168.3/.4; gh-#855 — pure filter_complex graph: cue-trim, crossfade-loop to cover
+    /// <paramref name="totalDurationSec"/> (no hard splice), duck, fade, delay-and-mix. Static/pure
+    /// (like <see cref="BuildFadeSuffix"/>) so <c>InternalsVisibleTo</c> specs pin the emitted string
+    /// without a real ffmpeg binary.
+    /// </summary>
     internal static string BuildBedFilterGraph(
         AudioMixRequest request, double bedGainDb, double cueInSec, double cueOutSec, double totalDurationSec,
-        long loopBufferSamples, long delayMs) =>
-        $"[1:a]atrim=start={Fmt(cueInSec)}:end={Fmt(cueOutSec)},asetpts=PTS-STARTPTS," +
-        $"aformat=sample_rates={BedProcessingSampleRate}:channel_layouts=stereo," +
-        $"aloop=loop=-1:size={loopBufferSamples}," +
-        $"atrim=start=0:end={Fmt(totalDurationSec)},asetpts=PTS-STARTPTS," +
-        $"volume={Fmt(bedGainDb)}dB{BuildFadeSuffix(totalDurationSec, request.BedFadeSeconds)}[bed];" +
-        $"[0:a]aformat=sample_rates={BedProcessingSampleRate}:channel_layouts=stereo," +
-        $"adelay=delays={delayMs}:all=1[voice];" +
-        "[bed][voice]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[out]";
+        long delayMs)
+    {
+        var segmentSec = cueOutSec - cueInSec;
+        // gh-#855 — crossfade shrinks for a clip too short to hold a full BedLoopCrossfadeSeconds
+        // join, so no fade window ever exceeds a single copy's own length.
+        var crossfadeSec = Math.Min(BedLoopCrossfadeSeconds, segmentSec / 4.0);
+        var copies = segmentSec >= totalDurationSec
+            ? 1
+            : (int)Math.Ceiling((totalDurationSec - crossfadeSec) / (segmentSec - crossfadeSec));
+
+        var cueTrim =
+            $"[1:a]atrim=start={Fmt(cueInSec)}:end={Fmt(cueOutSec)},asetpts=PTS-STARTPTS," +
+            $"aformat=sample_rates={BedProcessingSampleRate}:channel_layouts=stereo[cue];";
+        var loopChain = copies == 1 ? "" : BuildCrossfadeLoopChain(copies, segmentSec, crossfadeSec);
+        var loopedLabel = copies == 1 ? "cue" : "looped";
+
+        return
+            cueTrim + loopChain +
+            $"[{loopedLabel}]atrim=start=0:end={Fmt(totalDurationSec)},asetpts=PTS-STARTPTS," +
+            $"volume={Fmt(bedGainDb)}dB{BuildFadeSuffix(totalDurationSec, request.BedFadeSeconds)}[bed];" +
+            $"[0:a]aformat=sample_rates={BedProcessingSampleRate}:channel_layouts=stereo," +
+            $"adelay=delays={delayMs}:all=1[voice];" +
+            "[bed][voice]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[out]";
+    }
+
+    /// <summary>
+    /// gh-#855 — overlaps <paramref name="copies"/> taps of <c>[cue]</c> by <paramref name="crossfadeSec"/>
+    /// via equal-power <c>afade</c> in/out + <c>adelay</c> + <c>amix</c> (normalize=0, so the overlap
+    /// stays full-scale, not halved) — not <c>acrossfade</c>: it corrupts length over <c>asplit</c> taps
+    /// on ffmpeg 7.1. Only called when <paramref name="copies"/> &gt; 1.
+    /// </summary>
+    static string BuildCrossfadeLoopChain(int copies, double copySec, double crossfadeSec)
+    {
+        var stepSec = copySec - crossfadeSec;
+        var taps = string.Concat(Enumerable.Range(0, copies).Select(i => $"[s{i}]"));
+        var chain = new StringBuilder($"[cue]asplit={copies}{taps};");
+
+        var mixLabels = new List<string>(copies);
+        for (var i = 0; i < copies; i++)
+        {
+            var fades = new List<string>();
+            if (i > 0)
+                fades.Add($"afade=t=in:st=0:d={Fmt(crossfadeSec)}:curve=qsin");
+            if (i < copies - 1)
+                fades.Add($"afade=t=out:st={Fmt(stepSec)}:d={Fmt(crossfadeSec)}:curve=qsin");
+
+            var delayMs = (long)Math.Round(i * stepSec * 1000.0, MidpointRounding.AwayFromZero);
+            if (delayMs > 0)
+                fades.Add($"adelay=delays={delayMs}:all=1");
+
+            var label = $"c{i}";
+            mixLabels.Add(label);
+            chain.Append($"[s{i}]{string.Join(',', fades)}[{label}];");
+        }
+
+        chain.Append(string.Concat(mixLabels.Select(l => $"[{l}]")));
+        chain.Append($"amix=inputs={copies}:duration=longest:dropout_transition=0:normalize=0[looped];");
+        return chain.ToString();
+    }
 
     /// <summary>
     /// SPEC F168.4; STORY-403; PLAN T416 — the bed's own trailing <c>afade=t=out</c> filter suffix,

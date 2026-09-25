@@ -33,7 +33,7 @@ public static class FeatureBedlevelismatchedthenducked
             var gain = FfmpegAudioMixer.ResolveBedGainDb(DuckDb, TargetLufs, Voice, bedLufs: -22.0);
             filterGraph = FfmpegAudioMixer.BuildBedFilterGraph(
                 FilterGraphRequest(bedFadeSeconds: 0.5), bedGainDb: gain, cueInSec: 0.0, cueOutSec: 10.0,
-                totalDurationSec: 10.0, loopBufferSamples: 441000, delayMs: 0);
+                totalDurationSec: 10.0, delayMs: 0);
         }
 
         /// <summary>AC1 — volume=-6dB</summary>
@@ -59,7 +59,7 @@ public static class FeatureBedlevelismatchedthenducked
             var gain = FfmpegAudioMixer.ResolveBedGainDb(DuckDb, TargetLufs, Voice, bedLufs: -10.0);
             filterGraph = FfmpegAudioMixer.BuildBedFilterGraph(
                 FilterGraphRequest(), bedGainDb: gain, cueInSec: 0.0, cueOutSec: 10.0, totalDurationSec: 10.0,
-                loopBufferSamples: 441000, delayMs: 0);
+                delayMs: 0);
         }
 
         /// <summary>AC2 — volume=-18dB</summary>
@@ -84,7 +84,7 @@ public static class FeatureBedlevelismatchedthenducked
             var gain = FfmpegAudioMixer.ResolveBedGainDb(DuckDb, TargetLufs, offTargetVoice, bedLufs: -22.0);
             filterGraph = FfmpegAudioMixer.BuildBedFilterGraph(
                 FilterGraphRequest(), bedGainDb: gain, cueInSec: 0.0, cueOutSec: 10.0, totalDurationSec: 10.0,
-                loopBufferSamples: 441000, delayMs: 0);
+                delayMs: 0);
         }
 
         [Fact]
@@ -111,7 +111,7 @@ public static class FeatureBedlevelismatchedthenducked
             var gain = mixer.ResolveAndLogBedGainDb(bed, DuckDb, TargetLufs, Voice, bedLufs: null);
             filterGraph = FfmpegAudioMixer.BuildBedFilterGraph(
                 FilterGraphRequest(), bedGainDb: gain, cueInSec: 0.0, cueOutSec: 10.0, totalDurationSec: 10.0,
-                loopBufferSamples: 441000, delayMs: 0);
+                delayMs: 0);
         }
 
         /// <summary>AC5 — volume=-12dB</summary>
@@ -140,7 +140,7 @@ public static class FeatureBedlevelismatchedthenducked
             var gain = mixer.ResolveAndLogBedGainDb(bed, DuckDb, TargetLufs, Voice, bedLufs: -70.0);
             filterGraph = FfmpegAudioMixer.BuildBedFilterGraph(
                 FilterGraphRequest(), bedGainDb: gain, cueInSec: 0.0, cueOutSec: 10.0, totalDurationSec: 10.0,
-                loopBufferSamples: 441000, delayMs: 0);
+                delayMs: 0);
         }
 
         /// <summary>AC7 — clamped to +12dB</summary>

@@ -350,7 +350,7 @@ public static class FeatureAdRenderAssembly
             var graph = FfmpegAudioMixer.BuildBedFilterGraph(
                 new AudioMixRequest("voice.wav", null, new AudioTags("station", "spot"), BedDuckDb: -12.0,
                     BedPadSeconds: 0.0, OutputPath: "out.wav", BedFadeSeconds: 0.5),
-                bedGainDb: -12.0, cueInSec: 0.0, cueOutSec: 10.0, totalDurationSec: 10.0, loopBufferSamples: 441000, delayMs: 0);
+                bedGainDb: -12.0, cueInSec: 0.0, cueOutSec: 10.0, totalDurationSec: 10.0, delayMs: 0);
 
             Assert.Contains("afade=t=out:st=9.5:d=0.5", graph, StringComparison.Ordinal);
         }
@@ -361,7 +361,7 @@ public static class FeatureAdRenderAssembly
             var graph = FfmpegAudioMixer.BuildBedFilterGraph(
                 new AudioMixRequest("voice.wav", null, new AudioTags("station", "spot"), BedDuckDb: -12.0,
                     BedPadSeconds: 0.0, OutputPath: "out.wav", BedFadeSeconds: 0.0),
-                bedGainDb: -12.0, cueInSec: 0.0, cueOutSec: 10.0, totalDurationSec: 10.0, loopBufferSamples: 441000, delayMs: 0);
+                bedGainDb: -12.0, cueInSec: 0.0, cueOutSec: 10.0, totalDurationSec: 10.0, delayMs: 0);
 
             Assert.DoesNotContain("afade", graph, StringComparison.Ordinal);
         }
