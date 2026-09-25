@@ -906,6 +906,9 @@ function SettingField({
           aria-describedby={describedBy}
           min={setting.min ?? undefined}
           max={setting.max ?? undefined}
+          // Server owns range; doubles such as 0.5 s must not trip native step validation and
+          // silently block the whole form's submit.
+          step="any"
           className="h-9 max-w-xs rounded-[6px] border border-line bg-surface px-2 text-[0.85rem] text-ink tabular-nums disabled:opacity-50"
         />
       )}
