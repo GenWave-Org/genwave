@@ -358,7 +358,7 @@
     <value>AI writer model</value>
   </data>
   <data name="Llm:Model.Help" xml:space="preserve">
-    <value>The model name requested from the LLM endpoint — free text, meaningful only when that endpoint is set.</value>
+    <value>The model the AI writer uses, picked from the list the LLM endpoint serves. Used only when that endpoint is set.</value>
   </data>
   <data name="Llm:TimeoutSeconds.Label" xml:space="preserve">
     <value>AI writer time limit</value>
@@ -516,6 +516,11 @@
   </data>
   <data name="Choice.Llm:ReasoningEffort.omit" xml:space="preserve">
     <value>Omit — send no reasoning field (for a backend that rejects it)</value>
+  </data>
+
+  <!-- ── Live choice lists (SPEC F205.7, STORY-479) ───────────────────────────────────────── -->
+  <data name="Choice.NotFound" xml:space="preserve">
+    <value>{0} (not found)</value>
   </data>
 
   <!-- ── Persona Catalog ──────────────────────────────────────────────────────────────────── -->

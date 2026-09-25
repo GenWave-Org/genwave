@@ -513,9 +513,12 @@ public static class FeatureIconPacksSwapTheChrome
         static async Task<SettingDto> GetStationIconPackSetting(FakeIconPackStore iconPackStore)
         {
             var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>()).Build();
+            // Builds its own resolver over the caller's iconPackStore (SettingsController no longer
+            // owns an iconPackStore parameter/fallback — PLAN T580 review finding F2).
+            var resolver = TestSettingChoiceResolver.Default(iconPackStore: iconPackStore);
             var controller = new SettingsController(
                 config, new FakeSettingsStore(), new SettingValidator(config), NullLogger<SettingsController>.Instance,
-                iconPackStore: iconPackStore, settingCopy: TestSettingCopy.Real())
+                settingCopy: TestSettingCopy.Real(), choiceResolver: resolver)
             {
                 ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
             };
@@ -582,15 +585,23 @@ public static class FeatureIconPacksSwapTheChrome
         [Fact]
         public async Task ADeadIconPackStoreDegradesToHouseIconsOnlyChoicesWithTheWarnLogged()
         {
-            // Review finding F4(c) — the SettingsController degrade catch: a store that cannot be
-            // reached must still answer a WORKING settings page (post-F1, "house icons only" is a
-            // working dropdown, not the red alert an empty list would render) rather than 500ing the
-            // whole GET /api/settings response, and the failure is loud server-side.
+            // Review finding F4(c) — the SettingChoiceResolver degrade catch (moved off
+            // SettingsController by PLAN T580, SPEC F205.7): a store that cannot be reached must
+            // still answer a WORKING settings page (post-F1, "house icons only" is a working
+            // dropdown, not the red alert an empty list would render) rather than 500ing the whole
+            // GET /api/settings response, and the failure is loud server-side. The warning is now
+            // logged through the resolver's own logger, not the controller's — so this fact passes a
+            // CapturingLogger (with the same ThrowingIconPackStore) to TestSettingChoiceResolver.Default
+            // in place of its NullLogger, and asserts on that.
             var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>()).Build();
-            var capturingLogger = new CapturingLogger<SettingsController>();
+            var iconPackStore = new ThrowingIconPackStore();
+            var resolverLogger = new CapturingLogger<SettingChoiceResolver>();
+            var resolver = TestSettingChoiceResolver.Default(iconPackStore: iconPackStore, logger: resolverLogger);
             var controller = new SettingsController(
-                config, new FakeSettingsStore(), new SettingValidator(config), capturingLogger,
-                iconPackStore: new ThrowingIconPackStore(), settingCopy: TestSettingCopy.Real())
+                config, new FakeSettingsStore(), new SettingValidator(config),
+                NullLogger<SettingsController>.Instance,
+                settingCopy: TestSettingCopy.Real(),
+                choiceResolver: resolver)
             {
                 ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
             };
@@ -601,7 +612,7 @@ public static class FeatureIconPacksSwapTheChrome
 
             var expected = new[] { new SettingChoice("", "House icons", IsDefault: true) };
             Assert.Equal(expected, iconPack.Choices);
-            Assert.Contains(capturingLogger.Warnings, w => w.Contains("unavailable", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(resolverLogger.Warnings, w => w.Contains("unavailable", StringComparison.OrdinalIgnoreCase));
         }
     }
 
@@ -959,7 +970,7 @@ file sealed class CapturingLogger<T> : ILogger<T>
 /// <summary>An <see cref="IIconPackStore"/> double whose every member throws — simulates "the icon-pack
 /// store is unreachable" (SPEC F130.4, PLAN T303 review finding F4) so
 /// <see cref="FeatureIconPacksSwapTheChrome.ScenarioStationIconPackIsAnAllowlistedLiveSettingFedByInstalledPacks"/>'s
-/// own degrade fact can prove <c>SettingsController.IconPackChoicesAsync</c> degrades to house-icons-
+/// own degrade fact can prove <c>SettingChoiceResolver.IconPackChoicesAsync</c> degrades to house-icons-
 /// only choices rather than 500ing the whole GET /api/settings response — mirrors
 /// <c>Story271_OwnerThemeStorage.cs</c>'s own <c>ThrowingThemeStore</c> idiom.</summary>
 file sealed class ThrowingIconPackStore : IIconPackStore

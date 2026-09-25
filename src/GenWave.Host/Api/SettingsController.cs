@@ -2,9 +2,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
-using GenWave.Core.Abstractions;
 using GenWave.Host.Configuration;
-using GenWave.Host.Theming;
 
 namespace GenWave.Host.Api;
 
@@ -30,25 +28,19 @@ public sealed class SettingsController(
     IStationSettingsStore store,
     SettingValidator validator,
     ILogger<SettingsController> logger,
-    IIconPackStore iconPackStore,
     // Resolves each SettingDto's label/help/group/choice copy for the request's culture (SPEC
-    // F205.3). Required, like iconPackStore: a missing registration fails at activation instead
-    // of silently serving label = key.
+    // F205.3). Required: a missing registration fails at activation instead of silently serving
+    // label = key.
     SettingCopy settingCopy,
-    ThemeCatalog? injectedThemeCatalog = null) : ControllerBase
+    // Resolves every choice-kind key's live choice list (SPEC F205.7, STORY-479, PLAN T580).
+    // Required (T580 review finding F2): a dropped DI registration must fail at activation, never
+    // silently degrade every choice-kind key to ResolvedChoices.Failed forever with nothing logged
+    // — the same fail-closed posture as settingCopy immediately above. Program.cs registers the
+    // real SettingChoiceResolver together with every IChoiceProbe/ThemeCatalog/IIconPackStore it
+    // needs; unit tests pass GenWave.Host.Tests.Support.TestSettingChoiceResolver.Default() (a real
+    // resolver with zero registered probes) instead of relying on a controller-owned fallback.
+    ISettingChoiceResolver choiceResolver) : ControllerBase
 {
-    /// <summary>
-    /// <c>Station:Theme</c>'s choices widen to the DI-registered <see cref="ThemeCatalog"/>'s
-    /// current shipped ∪ owner set (SPEC F103.7, STORY-271, PLAN T183) — every production instance
-    /// gets the real singleton automatically (registered in <c>Program.cs</c>; DI resolves it by
-    /// type regardless of constructor-parameter ordering). The trailing optional
-    /// <c>injectedThemeCatalog</c> parameter/fallback exists ONLY so the many existing
-    /// <c>new SettingsController(...)</c> unit tests exercising every OTHER allowlisted key keep
-    /// compiling and passing unchanged, falling back to <see cref="ThemeCatalog.LoadShipped"/> —
-    /// the exact shipped-only set this controller reported for <c>Station:Theme</c> before T183.
-    /// </summary>
-    readonly ThemeCatalog themeCatalog = injectedThemeCatalog ?? ThemeCatalog.LoadShipped();
-
     /// <summary>
     /// GET /api/settings — returns one <see cref="SettingDto"/> per allowlisted key.
     ///
@@ -63,16 +55,15 @@ public sealed class SettingsController(
     {
         var overrideKeys = await store.ReadAllAsync(ct);
         var versions = await store.ReadVersionsAsync(ct);
-        var iconPackChoices = await IconPackChoicesAsync(ct);
+        var currentValues = StationSettingsAllowlist.All.ToDictionary(
+            a => a.Key, RawValue, StringComparer.OrdinalIgnoreCase);
+        var resolvedChoices = await choiceResolver.ResolveAsync(currentValues, ct);
 
         var items = StationSettingsAllowlist.All.Select(allowed =>
         {
-            var rawValue = allowed.Kind == SettingKind.NumberList
-                ? GetNumberListJson(configuration, allowed.Key)
-                : configuration[allowed.Key] ?? string.Empty;
             var source  = overrideKeys.ContainsKey(allowed.Key) ? "override" : "default";
             var version = versions.GetValueOrDefault(allowed.Key, 0);
-            return BuildDto(allowed, rawValue, source, version, iconPackChoices);
+            return BuildDto(allowed, currentValues[allowed.Key], source, version, resolvedChoices);
         }).ToList();
 
         return Ok(items);
@@ -216,16 +207,18 @@ public sealed class SettingsController(
         // Build the response so the caller knows the applyMode and kind/unit for each written key.
         var overrideKeys = await store.ReadAllAsync(ct);
         var versions = await store.ReadVersionsAsync(ct);
-        var iconPackChoices = await IconPackChoicesAsync(ct);
+        var currentValues = updates.ToDictionary(
+            u => u.Key,
+            u => RawValueAfterWrite(StationSettingsAllowlist.ByKey[u.Key], u.Value),
+            StringComparer.OrdinalIgnoreCase);
+        var resolvedChoices = await choiceResolver.ResolveAsync(currentValues, ct);
+
         var result = updates.Select(u =>
         {
-            var allowed  = StationSettingsAllowlist.ByKey[u.Key];
-            var rawValue = allowed.Kind == SettingKind.NumberList
-                ? (GetNumberListJson(configuration, u.Key) is { Length: > 0 } json ? json : u.Value ?? string.Empty)
-                : configuration[u.Key] ?? u.Value;
+            var allowed = StationSettingsAllowlist.ByKey[u.Key];
             var source  = overrideKeys.ContainsKey(u.Key) ? "override" : "default";
             var version = versions.GetValueOrDefault(u.Key, 0);
-            return BuildDto(allowed, rawValue, source, version, iconPackChoices);
+            return BuildDto(allowed, currentValues[u.Key], source, version, resolvedChoices);
         }).ToList();
 
         return Ok(result);
@@ -244,8 +237,10 @@ public sealed class SettingsController(
     /// </summary>
     SettingDto BuildDto(
         AllowedSetting allowed, string rawValue, string source, long version,
-        IReadOnlyList<SettingChoice> iconPackChoices) =>
-        new(
+        IReadOnlyDictionary<string, ResolvedChoices> resolvedChoices)
+    {
+        var resolved = resolvedChoices.GetValueOrDefault(allowed.Key);
+        return new(
             allowed.Key,
             rawValue,
             source,
@@ -257,84 +252,34 @@ public sealed class SettingsController(
             new SettingGroupDto(settingCopy.GroupId(allowed.Group), settingCopy.GroupLabel(allowed.Group)),
             allowed.Min,
             allowed.Max,
-            LocalizedChoicesFor(allowed, iconPackChoices),
-            version);
-
-    /// <summary>
-    /// <see cref="ChoicesFor"/>'s raw choice list, with each choice's label resolved for the
-    /// request culture (SPEC F205.3, PLAN T574) — the resx <c>Choice.{key}.{value}</c> entry when
-    /// one exists (e.g. every <c>Llm:ReasoningEffort</c> value), otherwise the choice's OWN label
-    /// unchanged (<c>Station:Theme</c>/<c>Station:IconPack</c>'s catalog-sourced display names,
-    /// which the resx deliberately never enumerates — see <see cref="SettingCopy.TryChoiceLabel"/>'s
-    /// own remarks for why <see cref="SettingCopy.ChoiceLabel"/>'s plain value fallback would
-    /// silently clobber those instead).
-    /// </summary>
-    IReadOnlyList<SettingChoice>? LocalizedChoicesFor(AllowedSetting allowed, IReadOnlyList<SettingChoice> iconPackChoices) =>
-        ChoicesFor(allowed, iconPackChoices)?
-            .Select(choice => choice with { Label = settingCopy.TryChoiceLabel(allowed.Key, choice.Value) ?? choice.Label })
-            .ToList();
-
-    /// <summary>
-    /// Choices to present for one allowlisted entry, THIS request — <c>Station:Theme</c> widens to
-    /// <see cref="themeCatalog"/>'s current shipped ∪ owner set (SPEC F103.7, STORY-271, PLAN T183)
-    /// and <c>Station:IconPack</c> widens to <paramref name="iconPackChoices"/>, every currently
-    /// installed pack (SPEC F130.4, STORY-337, PLAN T303 — the SECOND branch this comment's own prior
-    /// YAGNI note anticipated: "a second one is free to earn its own branch… when it exists"), rather
-    /// than the static snapshot baked into <see cref="AllowedSetting.Choices"/> at this process's
-    /// first touch of <see cref="StationSettingsAllowlist"/>. Every other allowlisted key's choices
-    /// pass through unchanged.
-    /// </summary>
-    IReadOnlyList<SettingChoice>? ChoicesFor(AllowedSetting allowed, IReadOnlyList<SettingChoice> iconPackChoices) =>
-        allowed.Key switch
-        {
-            "Station:Theme" => StationSettingsAllowlist.ThemeChoices(themeCatalog),
-            "Station:IconPack" => iconPackChoices,
-            _ => allowed.Choices,
-        };
-
-    /// <summary>
-    /// Fetches <see cref="iconPackStore"/>'s current installed-pack SLUG set ONCE per request (SPEC
-    /// F130.4, PLAN T303 review finding F2 — <see cref="IIconPackStore.GetAllSlugsAsync"/>, never the
-    /// full-row <see cref="IIconPackStore.GetAllAsync"/>: the settings hot path needs nothing past the
-    /// slug) and shapes it via <see cref="StationSettingsAllowlist.IconPackChoices"/> —
-    /// <see cref="Get"/>/<see cref="Put"/> each call this exactly once, before building their own
-    /// per-key <see cref="SettingDto"/> list, rather than a per-entry re-fetch inside
-    /// <see cref="ChoicesFor"/> (which runs once per ALLOWLISTED KEY, not once per request).
-    ///
-    /// <para>
-    /// <see cref="iconPackStore"/> ITSELF IS REQUIRED (review finding F5 — no nullable/optional
-    /// fallback: <c>Program.cs</c>'s own <c>StationSettingsHostingExtensions.AddIconPackStore</c> call
-    /// registers the real, Postgres-backed <see cref="IIconPackStore"/> singleton unconditionally, so a
-    /// genuinely missing registration surfaces as a DI resolution failure the moment ASP.NET Core
-    /// activates this controller for its first request, same as every other constructor dependency
-    /// here). This method's own try/catch instead handles a REACHABLE-but-failing store — a transient
-    /// <c>station.icon_pack</c> outage — by degrading <c>Station:IconPack</c>'s own choices to
-    /// house-icons-only rather than letting the whole settings page 500 (
-    /// <see cref="StationSettingsAllowlist.IconPackChoices"/>'s own house-icons-first choice, see that
-    /// method's own remarks, is what makes this a WORKING admin-ui dropdown on the degrade path rather
-    /// than the admin-ui <c>ChoiceSettingControl</c>'s own "no choices available" alert; mirrors
-    /// <see cref="ThemeCatalog.ReloadOwnerThemesAsync"/>'s own "an unreachable store degrades,
-    /// WARN-logged" offline-floor posture, applied here per-request instead of once at boot since
-    /// <see cref="IIconPackStore"/> carries no in-memory warm cache of its own — SPEC F130's own "ships
-    /// dark, thin repository" shape, unlike <see cref="ThemeCatalog"/>). Every OTHER allowlisted key
-    /// must still read/write normally even on a transient <c>station.icon_pack</c> outage — an operator
-    /// fixing an unrelated setting has no business being blocked by one unavailable pack listing;
-    /// <c>Station:IconPack</c>'s own choices are simply narrowed to house icons alone that request,
-    /// exactly the same shape a fresh station with zero packs installed already renders.
-    /// </para>
-    /// </summary>
-    async Task<IReadOnlyList<SettingChoice>> IconPackChoicesAsync(CancellationToken ct)
-    {
-        try
-        {
-            return StationSettingsAllowlist.IconPackChoices(await iconPackStore.GetAllSlugsAsync(ct));
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            logger.LogWarning(ex, "Icon pack listing unavailable for Station:IconPack's own choices — degrading to house icons only");
-            return StationSettingsAllowlist.IconPackChoices([]);
-        }
+            resolved?.Choices,
+            version,
+            resolved?.Stale ?? false,
+            resolved?.Failed ?? false);
     }
+
+    /// <summary>
+    /// The key's current effective value, straight off <see cref="configuration"/> — the same shape
+    /// <see cref="Get"/> has always reported, now also reused to build the <c>currentValues</c> map
+    /// <see cref="choiceResolver"/> needs to decide whether a saved choice value has fallen off its
+    /// live source's list (SPEC F205.7a, STORY-479, PLAN T580).
+    /// </summary>
+    string RawValue(AllowedSetting allowed) =>
+        allowed.Kind == SettingKind.NumberList
+            ? GetNumberListJson(configuration, allowed.Key)
+            : configuration[allowed.Key] ?? string.Empty;
+
+    /// <summary>
+    /// <see cref="RawValue"/>'s PUT-time sibling: <c>store.WriteAsync</c> raises the reload token
+    /// asynchronously, so <see cref="configuration"/> is not guaranteed to already reflect a write
+    /// this same request just made — <paramref name="proposedValue"/> (the value just accepted by
+    /// <see cref="Put"/>'s own validation) is the fallback instead of <see cref="RawValue"/>'s empty
+    /// string, so the response always echoes back what was actually written.
+    /// </summary>
+    string RawValueAfterWrite(AllowedSetting allowed, string proposedValue) =>
+        allowed.Kind == SettingKind.NumberList
+            ? (GetNumberListJson(configuration, allowed.Key) is { Length: > 0 } json ? json : proposedValue)
+            : configuration[allowed.Key] ?? proposedValue;
 
     /// <summary>
     /// The 409 body for a version-guard conflict (gh-#486) — <see cref="SettingsProblemTypes.VersionConflict"/>

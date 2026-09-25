@@ -319,6 +319,13 @@ public static class TtsServiceCollectionExtensions
         // every keystroke.
         services.AddHttpClient<KokoroVoiceLister>();
 
+        // Live LLM-model listing (SPEC F205.7, STORY-479, PLAN T580) — the LLM-side sibling of
+        // KokoroVoiceLister immediately above: same Llm:Endpoint the completions call itself uses,
+        // no separate config key. The Host's LlmModelChoiceProbe (GenWave.Host, through
+        // ProbedChoiceCache) is the only caller — this registration alone makes no HTTP call.
+        services.AddHttpClient<OpenAiModelLister>();
+        services.AddSingleton<ILlmModelLister>(sp => sp.GetRequiredService<OpenAiModelLister>());
+
         // Fallback-chain hop renderers (SPEC F70.1, STORY-190, gh-#147) — one per engine kind,
         // exposed under IFallbackProfileRenderer for FallbackTtsSynthesizer's by-kind lookup (the
         // same AddHttpClient-then-AddSingleton shape as the probes above). Same no-BaseAddress

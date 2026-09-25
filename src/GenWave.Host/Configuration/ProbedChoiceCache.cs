@@ -95,7 +95,12 @@ internal sealed class ProbedChoiceCache(TimeProvider timeProvider, ILogger<Probe
         IReadOnlyList<SettingChoice>? freshChoices = null;
         try
         {
-            freshChoices = await probe.FetchAsync(linkedCts.Token).ConfigureAwait(false);
+            // .WaitAsync(linkedCts.Token) on top of the token we already pass in: a probe that
+            // ignores its own cancellation token (a bug in a THIRD-PARTY IChoiceProbe this cache has
+            // no control over) must still return control to the caller at the 2 s/caller-cancel
+            // boundary — otherwise it would hold this probe's single-flight gate open indefinitely,
+            // starving every other caller of THIS probe, not just the misbehaving fetch itself.
+            freshChoices = await probe.FetchAsync(linkedCts.Token).WaitAsync(linkedCts.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

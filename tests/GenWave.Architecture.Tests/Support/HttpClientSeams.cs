@@ -104,6 +104,9 @@ internal static class HttpClientSeams
         // one, but the type ITSELF still directly asks IHttpClientFactory for a working client, so it
         // is its own designated seam, exactly like CrosstalkScriptWriter is.
         "GenWave.Tts.AdScriptWriter",
+        // PLAN T580 (SPEC F205.7, STORY-479) — the LLM model-list probe's own typed-client egress
+        // point (GET {Llm:Endpoint}/v1/models), same shape as LlmCopyWriter immediately above.
+        "GenWave.Tts.OpenAiModelLister",
         "GenWave.Tts.TtsServiceCollectionExtensions",
 
         // MediaLibrary enrichment (Ollama mood/explicit, MusicBrainz year lookup).

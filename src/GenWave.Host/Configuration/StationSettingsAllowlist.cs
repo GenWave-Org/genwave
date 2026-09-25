@@ -161,7 +161,16 @@ public static class StationSettingsAllowlist
         // valid (unlike Name's IsNonBlank guard); no Icecast round-trip at all, so it carries none of
         // Station:Name's restart caveat.
         new("Station:Tagline", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Station),
-        new("Station:Voice", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Voice),
+        // Live voice roster (SPEC F205.7, STORY-479, PLAN T580) — the FIRST SettingKind.Choice entry
+        // sourced from a Probe rather than a static/catalog list: SettingsController's choice
+        // resolver lists the configured Tts:Endpoint's own voice ids (TtsVoiceChoiceProbe, through
+        // ProbedChoiceCache), never a frozen table here. SettingValidator keeps its existing
+        // IsNonBlank guard unchanged (F205.7a) — a saved voice missing from the live list is shown,
+        // appended, never rejected as invalid.
+        new("Station:Voice", SettingApplyMode.Live, SettingKind.Choice, "", SettingGroup.Voice, [])
+        {
+            ChoiceSource = new SettingChoiceSource.Probe(TtsVoiceChoiceProbe.ProbeName),
+        },
 
         new("Station:Cadence:LeadInBeforeEachTrack", SettingApplyMode.Live, SettingKind.Boolean, "", SettingGroup.Announcements),
         new("Station:Cadence:BackAnnounceAfterEachTrack", SettingApplyMode.Live, SettingKind.Boolean, "", SettingGroup.Announcements),
@@ -278,7 +287,15 @@ public static class StationSettingsAllowlist
         // health-based Kokoro/Piper routing, unchanged.
         new("Tts:EngineByKind", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Voice),
         new("Llm:Endpoint", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Voice),
-        new("Llm:Model", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Voice),
+        // Live model roster (SPEC F205.7, STORY-479, PLAN T580) — Station:Voice's LLM-side sibling
+        // immediately above: SettingsController's choice resolver lists the configured Llm:Endpoint's
+        // own model ids (LlmModelChoiceProbe, through ProbedChoiceCache) instead of a frozen table.
+        // SettingValidator keeps AlwaysValid unchanged (F205.7a) — a saved model missing from the
+        // live list is shown, appended, never rejected as invalid.
+        new("Llm:Model", SettingApplyMode.Live, SettingKind.Choice, "", SettingGroup.Voice, [])
+        {
+            ChoiceSource = new SettingChoiceSource.Probe(LlmModelChoiceProbe.ProbeName),
+        },
         new("Llm:TimeoutSeconds", SettingApplyMode.Live, SettingKind.Number, "seconds", SettingGroup.Voice, Min: 1, Max: 300),
 
         // F44.2 allowlist completion (closes gitea-#197) — six more boot-frozen consumers migrate to a
