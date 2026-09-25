@@ -253,7 +253,7 @@ public static class FeatureThemeSelectionAndPersistence
                 .Build();
             var controller = new SettingsController(
                 config, new FakeSettingsStore(), new SettingValidator(config), NullLogger<SettingsController>.Instance,
-                new FakeIconPackStore(), TestSettingCopy.Real())
+                TestSettingCopy.Real(), TestSettingChoiceResolver.Default())
             {
                 ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
             };
@@ -383,7 +383,7 @@ public static class FeatureThemeSelectionAndPersistence
             //         winning" — the Station:SpectatorMode gotcha class DEPLOYMENT.md documents.
             var controller = new SettingsController(
                 config, new FakeSettingsStoreWithThemeOverride(), new SettingValidator(config), NullLogger<SettingsController>.Instance,
-                new FakeIconPackStore(), TestSettingCopy.Real())
+                TestSettingCopy.Real(), TestSettingChoiceResolver.Default())
             {
                 ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
             };

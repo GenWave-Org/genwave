@@ -358,7 +358,7 @@
     <value>AI writer model</value>
   </data>
   <data name="Llm:Model.Help" xml:space="preserve">
-    <value>The model name requested from the LLM endpoint — free text, meaningful only when that endpoint is set.</value>
+    <value>The model the AI writer uses, picked from the list the LLM endpoint serves. Used only when that endpoint is set.</value>
   </data>
   <data name="Llm:TimeoutSeconds.Label" xml:space="preserve">
     <value>AI writer time limit</value>
@@ -518,6 +518,11 @@
     <value>Omit — send no reasoning field (for a backend that rejects it)</value>
   </data>
 
+  <!-- ── Live choice lists (SPEC F205.7, STORY-479) ───────────────────────────────────────── -->
+  <data name="Choice.NotFound" xml:space="preserve">
+    <value>{0} (not found)</value>
+  </data>
+
   <!-- ── Persona Catalog ──────────────────────────────────────────────────────────────────── -->
   <data name="Community:CatalogIndexUrl.Label" xml:space="preserve">
     <value>Persona catalog URL</value>
@@ -669,7 +674,7 @@
     <value>Shows with two-host banter (crosstalk)</value>
   </data>
   <data name="Crosstalk:Shows.Help" xml:space="preserve">
-    <value>A JSON array of show slugs allowed to carry two-voice banter — a show's stable URL-safe identity, not its display name (e.g. "morning-drive" for a show named "Morning Drive"), e.g. ["morning-drive"]. Empty (the default) turns the feature off entirely — no station's sound changes on upgrade until a show is named here.</value>
+    <value>The shows allowed to carry two-voice banter. None ticked (the default) turns the feature off — no station's sound changes on upgrade until a show is ticked here.</value>
   </data>
   <data name="Crosstalk:EveryNthAiring.Label" xml:space="preserve">
     <value>Two-host banter frequency</value>

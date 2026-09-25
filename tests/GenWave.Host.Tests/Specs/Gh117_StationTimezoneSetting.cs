@@ -205,7 +205,7 @@ public static class FeatureStationTimezoneSetting
 
         var settingsController = new SettingsController(
             root, store, new SettingValidator(root), NullLogger<SettingsController>.Instance,
-            new FakeIconPackStore(), TestSettingCopy.Real())
+            TestSettingCopy.Real(), TestSettingChoiceResolver.Default())
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
         };

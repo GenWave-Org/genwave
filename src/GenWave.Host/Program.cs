@@ -389,6 +389,34 @@ builder.Services.AddSingleton<AttributionProjector>();
 builder.Services.AddLocalization();
 builder.Services.AddSingleton<SettingCopy>();
 
+// Live choice lists (SPEC F205.7, STORY-479, PLAN T579/T580): Llm:Model/Station:Voice resolve
+// through these rather than a frozen AllowedSetting.Choices list. Needs ILlmModelLister/
+// ITtsVoiceLister (.AddGenWaveTts(cfg), above) and IIconPackStore/ThemeCatalog
+// (builder.AddGenWaveStationSettings()/the ThemeCatalog singleton, both above) — SettingChoiceResolver's
+// own constructor dependencies.
+builder.Services.AddSingleton<ProbedChoiceCache>();
+
+// Lazy<T> wrappers (T580 review — Story125's own no-active-polling invariant): merely resolving
+// LlmModelChoiceProbe/TtsVoiceChoiceProbe — which ChoiceSourceBootCheck.Verify below does, once,
+// right after builder.Build() — must never be enough to build ILlmModelLister/ITtsVoiceLister's
+// own typed HttpClient (IHttpClientFactory.CreateClient), the same "resolving the seam is not the
+// same as using it" discipline VoicePackServiceCollectionExtensions' Lazy<NpgsqlDataSource> already
+// applies to a DB connection. FetchAsync (only ever called from ProbedChoiceCache on an actual
+// settings request) is what forces .Value.
+builder.Services.AddSingleton(sp => new Lazy<ILlmModelLister>(sp.GetRequiredService<ILlmModelLister>));
+builder.Services.AddSingleton(sp => new Lazy<ITtsVoiceLister>(sp.GetRequiredService<ITtsVoiceLister>));
+builder.Services.AddSingleton<IChoiceProbe, LlmModelChoiceProbe>();
+builder.Services.AddSingleton<IChoiceProbe, TtsVoiceChoiceProbe>();
+
+// The one IChoiceCatalog this codebase ships (SPEC F205.7d, STORY-482, PLAN T585) — backs
+// Crosstalk:Shows' MultiChoice entry. IShowStore is registered unconditionally by
+// builder.AddGenWaveStationSettings() above (AddShowStore is not gated behind any connection-string
+// presence check), so this registration can never resolve to a missing dependency. Resolving it here
+// (ChoiceSourceBootCheck.Verify below does, once) is side-effect free the same way IShowStore itself
+// is — see ShowChoiceCatalog's own remarks.
+builder.Services.AddSingleton<IChoiceCatalog, ShowChoiceCatalog>();
+builder.Services.AddSingleton<ISettingChoiceResolver, SettingChoiceResolver>();
+
 builder.Services.AddControllers();
 
 // Liveness endpoint for the compose healthcheck. No checks registered = 200 Healthy when up.
@@ -425,6 +453,20 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 });
 
 var app = builder.Build();
+
+// Composition-time guard (SPEC F205.7, PLAN T580): an allowlist entry naming a probe/catalog
+// nothing above actually registered is a deploy-time bug — fail BOOT loudly rather than degrade a
+// live GET/PUT /api/settings request the way SettingChoiceResolver's own runtime dispatch
+// defensively does for the exact same misconfiguration (see ChoiceSourceBootCheck's own remarks).
+// Deliberately reads the names back off the BUILT container (T580 review finding F3) rather than
+// a hardcoded probe-name list: a probe (or, since T585, catalog) registration deleted in a refactor
+// must fail this check, not silently boot clean while every settings request it backed degrades to
+// choicesFailed. Placed right after builder.Build() — the earliest point an IChoiceProbe/IChoiceCatalog
+// can actually be resolved.
+ChoiceSourceBootCheck.Verify(
+    StationSettingsAllowlist.All,
+    knownProbeNames: app.Services.GetServices<IChoiceProbe>().Select(p => p.Name).ToList(),
+    knownCatalogNames: app.Services.GetServices<IChoiceCatalog>().Select(c => c.Kind).ToList());
 
 // Fail-closed admin gate (SPEC F60.4/STORY-164): loudly warn if the admin plane is locked down.
 app.WarnIfAdminPasswordMissing();

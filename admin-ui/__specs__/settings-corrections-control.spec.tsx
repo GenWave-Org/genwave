@@ -8,7 +8,7 @@
 // every successful PUT); the staging scenarios pin gh-#139's unmistakable-dirty UX.
 //
 // Runner: Jest (jsdom) + @testing-library/react. Drives SettingsForm via a mocked fetch —
-// mirrors settings-semantic-controls.spec.tsx in style (renderWithProviders,
+// mirrors settings-choice-control.spec.tsx in style (renderWithProviders,
 // makeSequencedFetchMock).
 
 import { describe, it, expect, beforeEach, afterEach, jest } from "@jest/globals";

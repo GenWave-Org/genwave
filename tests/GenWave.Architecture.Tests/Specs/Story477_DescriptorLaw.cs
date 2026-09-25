@@ -78,6 +78,11 @@ public static class FeatureDescriptorlaw
                     expectedNames.Add($"Group.{group.ToString().ToLowerInvariant()}.Label");
                 foreach (var (key, value) in LabelledChoiceValues(keys))
                     expectedNames.Add($"Choice.{key}.{value}");
+                // Key-agnostic (SPEC F205.7c, STORY-479, PLAN T580): SettingCopy.NotFoundLabel formats
+                // ANY choice-kind key's saved-but-missing value through this one entry, never a
+                // per-key "Choice.{key}.NotFound" name — so it never fits the {Key}.{value} shape the
+                // loop just above enumerates.
+                expectedNames.Add("Choice.NotFound");
 
                 OrphanResxEntries = resx.Keys
                     .Where(name => !expectedNames.Contains(name))

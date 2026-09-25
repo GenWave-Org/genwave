@@ -16,9 +16,10 @@ function isVoiceIdList(raw: unknown): raw is string[] {
  * voice-listing path"). `VoiceControl` calls this to feed its own dropdown; the persona
  * import-warning derivation (`usePersonaVoiceWarning`) calls it again to learn the engine's live
  * list for comparison. Each call mounts an independent fetch — no cross-component cache — so two
- * mounts on the same page cost one extra GET. That is the same tradeoff `VoiceSettingControl`
- * already accepts elsewhere in this codebase (documented there as "a sibling, not a reuse")
- * rather than coupling the dropdown's render lifecycle to the warning check's.
+ * mounts on the same page cost one extra GET, a deliberate tradeoff rather than coupling the
+ * dropdown's render lifecycle to the warning check's. `Station:Voice`'s own settings-page control
+ * no longer calls this (STORY-479 retired it in favor of the live `choices` list `GET
+ * /api/settings` itself now carries) — `VoiceControl` and `usePersonaVoiceWarning` remain.
  */
 export function useVoiceList(): VoiceListState {
   const [status, setStatus] = useState<VoiceListState>({ kind: "loading" });

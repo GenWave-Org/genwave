@@ -18,6 +18,7 @@ import { AudienceSettingControl } from "./AudienceSettingControl";
 import { ChoiceSettingControl } from "./ChoiceSettingControl";
 import { CorrectionsSettingControl } from "./CorrectionsSettingControl";
 import { EngineByKindSettingControl } from "./EngineByKindSettingControl";
+import { MultiChoiceSettingControl } from "./MultiChoiceSettingControl";
 import { PersonaSettingControl } from "./PersonaSettingControl";
 import { SafeScopeAvailabilityBadge } from "./SafeScopeAvailabilityBadge";
 import { SettingHelpFlyover } from "./SettingHelpFlyover";
@@ -28,7 +29,6 @@ import {
   type SettingControlProps,
   type SettingDto,
 } from "./settings-types";
-import { VoiceSettingControl } from "./VoiceSettingControl";
 
 export type { SettingDto } from "./settings-types";
 
@@ -112,7 +112,6 @@ const EMPTY_LIST_POLICIES: Record<string, EmptyListPolicy> = {
  * the same changed-keys PUT batch as every kind-based branch (F54.4).
  */
 const SETTING_CONTROL_REGISTRY: Record<string, ComponentType<SettingControlProps>> = {
-  "Station:Voice": VoiceSettingControl,
   "Tts:Corrections": CorrectionsSettingControl,
   "Tts:EngineByKind": EngineByKindSettingControl,
   "Station:Audience": AudienceSettingControl,
@@ -794,7 +793,11 @@ function SettingField({
     <div className="flex flex-col gap-1.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-1.5">
-          <label htmlFor={controlId} className="text-[0.85rem] font-semibold text-ink">
+          {/* `id` here (beside the existing `htmlFor`) is MultiChoiceSettingControl's
+              `aria-labelledby` target — a checkbox group has no single input `htmlFor` can bind to
+              (SPEC F205.7g), so that control names itself off this label by id instead. Harmless
+              for every other kind, which keeps using `htmlFor` as before. */}
+          <label htmlFor={controlId} id={`${controlId}-label`} className="text-[0.85rem] font-semibold text-ink">
             {setting.label}
             {setting.unit !== "" && (
               <span aria-label={`Unit: ${setting.unit}`} className="ml-1 font-normal text-mute">
@@ -820,6 +823,8 @@ function SettingField({
           disabled={isPending}
           isDirty={value !== savedValue}
           choices={setting.choices}
+          choicesStale={setting.choicesStale}
+          choicesFailed={setting.choicesFailed}
         />
       ) : setting.kind === "boolean" ? (
         <span className="flex min-h-10 items-center self-start">
@@ -876,6 +881,19 @@ function SettingField({
           disabled={isPending}
           isDirty={value !== savedValue}
           choices={setting.choices}
+          choicesStale={setting.choicesStale}
+          choicesFailed={setting.choicesFailed}
+        />
+      ) : setting.kind === "multi-choice" ? (
+        <MultiChoiceSettingControl
+          controlId={controlId}
+          value={value}
+          onChange={onSemanticChange}
+          disabled={isPending}
+          isDirty={value !== savedValue}
+          choices={setting.choices}
+          choicesStale={setting.choicesStale}
+          choicesFailed={setting.choicesFailed}
         />
       ) : (
         <input
@@ -888,6 +906,9 @@ function SettingField({
           aria-describedby={describedBy}
           min={setting.min ?? undefined}
           max={setting.max ?? undefined}
+          // Server owns range; doubles such as 0.5 s must not trip native step validation and
+          // silently block the whole form's submit.
+          step="any"
           className="h-9 max-w-xs rounded-[6px] border border-line bg-surface px-2 text-[0.85rem] text-ink tabular-nums disabled:opacity-50"
         />
       )}

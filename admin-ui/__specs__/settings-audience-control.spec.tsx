@@ -1,7 +1,7 @@
 // @jest-environment jsdom
 // STORY-250 — `Station:Audience` gets a dedicated control on Settings (Epic F95, PLAN T116).
 //
-// Runner: Jest (jsdom) + @testing-library/react, mirroring settings-semantic-controls.spec.tsx's
+// Runner: Jest (jsdom) + @testing-library/react, mirroring settings-choice-control.spec.tsx's
 // house pattern (renderWithProviders, makeSequencedFetchMock) — SettingsForm calls useConfirm()
 // unconditionally, so every render needs a ConfirmDialogProvider ancestor.
 
