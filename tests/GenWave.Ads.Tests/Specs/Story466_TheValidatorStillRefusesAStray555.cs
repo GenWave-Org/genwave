@@ -48,4 +48,26 @@ public static class FeatureTheValidatorStillRefusesAStray555
             Assert.Contains("sponsor's own number", refused.Violation.Reason);
         }
     }
+
+    public sealed class ScenarioAParenthesizedStrayNumberAfterHygiene
+    {
+        // gh-#856: the SAME tightened-skip check (SPEC F199.3), but the stray run is shaped
+        // "(ddd) dddd" instead of "ddd-dddd" — PhoneShapeCheck.FindViolation reads every match
+        // GenWave.Core.PhoneShape.Regex reports, so a differing digit run refuses regardless of
+        // which of its alternatives matched it.
+        const string Script =
+            "ANNOUNCER: Cravin's Diner has a deal so good it's almost illegal.\n" +
+            "ANNOUNCER: Call (555) 0199 today.";
+
+        readonly AdScriptValidationResult result =
+            AdScriptValidator.Validate(Script, Request, new FakePatterDurationEstimator());
+
+        /// <summary>gh-#856 — a paren-shaped stray number, differing from the sponsor's own, still fails</summary>
+        [Fact]
+        public void StillFailsTheValidator()
+        {
+            var refused = Assert.IsType<AdScriptValidationResult.Refused>(result);
+            Assert.Equal(AdScriptRuleIds.PhoneShape, refused.Violation.RuleId);
+        }
+    }
 }

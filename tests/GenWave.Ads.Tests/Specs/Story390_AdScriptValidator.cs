@@ -169,6 +169,56 @@ public static class FeatureAdScriptValidator
 
             Assert.IsType<AdScriptValidationResult.Accepted>(result);
         }
+
+        [Fact]
+        public void AParenthesizedExchangeWithout555Refuses()
+        {
+            // gh-#856: GenWave.Core.PhoneShape's "(ddd) dddd" alternative — a parenthesized exchange
+            // with none of its digits equal to "555" — is just as phone-shaped as the dashed form
+            // above, and refuses for the exact same reason.
+            var result = Validate("ANNOUNCER: Give us a call at (812) 0199 today.\nANNOUNCER: We can't wait to hear from you.");
+
+            var refused = Assert.IsType<AdScriptValidationResult.Refused>(result);
+            Assert.Equal(AdScriptRuleIds.PhoneShape, refused.Violation.RuleId);
+        }
+
+        [Fact]
+        public void AParenthesizedExchangeThatIs555Passes()
+        {
+            var result = Validate("ANNOUNCER: Give us a call at (555) 0134 today.\nANNOUNCER: We can't wait to hear from you.");
+
+            Assert.IsType<AdScriptValidationResult.Accepted>(result);
+        }
+
+        [Fact]
+        public void AParenthesizedExchangeWithADashSeparatorWithout555Refuses()
+        {
+            // gh-#856: same shape, dash separator between the paren and the last four digits.
+            var result = Validate("ANNOUNCER: Give us a call at (812)-0199 today.\nANNOUNCER: We can't wait to hear from you.");
+
+            var refused = Assert.IsType<AdScriptValidationResult.Refused>(result);
+            Assert.Equal(AdScriptRuleIds.PhoneShape, refused.Violation.RuleId);
+        }
+
+        [Fact]
+        public void AParenthesizedExchangeWithADotSeparatorWithout555Refuses()
+        {
+            // gh-#856: same shape, dot separator.
+            var result = Validate("ANNOUNCER: Give us a call at (812).0199 today.\nANNOUNCER: We can't wait to hear from you.");
+
+            var refused = Assert.IsType<AdScriptValidationResult.Refused>(result);
+            Assert.Equal(AdScriptRuleIds.PhoneShape, refused.Violation.RuleId);
+        }
+
+        [Fact]
+        public void AParenthesizedExchangeWithNoSeparatorWithout555Refuses()
+        {
+            // gh-#856: same shape, no separator at all.
+            var result = Validate("ANNOUNCER: Give us a call at (812)0199 today.\nANNOUNCER: We can't wait to hear from you.");
+
+            var refused = Assert.IsType<AdScriptValidationResult.Refused>(result);
+            Assert.Equal(AdScriptRuleIds.PhoneShape, refused.Violation.RuleId);
+        }
     }
 
     public sealed class ScenarioAudiencePostureRefuses
@@ -463,6 +513,16 @@ public static class FeatureAdScriptValidator
             // PLAN T399 review N8: each line is checked independently — joining "123." and "4567"
             // with a space would form a phone-shaped "123 4567", but neither line alone does.
             var result = Validate("ANNOUNCER: Item number 123.\nVOICE1: Yours for only 4567 points.");
+
+            Assert.IsType<AdScriptValidationResult.Accepted>(result);
+        }
+
+        [Fact]
+        public void AParenthesizedYearFollowedByFourDigitsDoesNotTripThePhoneRule()
+        {
+            // gh-#856 regression guard: "(2026)" is a parenthesized FOUR-digit year, never the new
+            // "(ddd) dddd" alternative's own required THREE-digit exchange, so it never opens on it.
+            var result = Validate("ANNOUNCER: Save the date, (2026) 1234 will be huge.\nANNOUNCER: Call 555-0100 today.");
 
             Assert.IsType<AdScriptValidationResult.Accepted>(result);
         }
