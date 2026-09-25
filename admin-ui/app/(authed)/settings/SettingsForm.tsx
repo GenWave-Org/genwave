@@ -28,7 +28,6 @@ import {
   type SettingControlProps,
   type SettingDto,
 } from "./settings-types";
-import { VoiceSettingControl } from "./VoiceSettingControl";
 
 export type { SettingDto } from "./settings-types";
 
@@ -112,7 +111,6 @@ const EMPTY_LIST_POLICIES: Record<string, EmptyListPolicy> = {
  * the same changed-keys PUT batch as every kind-based branch (F54.4).
  */
 const SETTING_CONTROL_REGISTRY: Record<string, ComponentType<SettingControlProps>> = {
-  "Station:Voice": VoiceSettingControl,
   "Tts:Corrections": CorrectionsSettingControl,
   "Tts:EngineByKind": EngineByKindSettingControl,
   "Station:Audience": AudienceSettingControl,
@@ -820,6 +818,8 @@ function SettingField({
           disabled={isPending}
           isDirty={value !== savedValue}
           choices={setting.choices}
+          choicesStale={setting.choicesStale}
+          choicesFailed={setting.choicesFailed}
         />
       ) : setting.kind === "boolean" ? (
         <span className="flex min-h-10 items-center self-start">
@@ -876,6 +876,8 @@ function SettingField({
           disabled={isPending}
           isDirty={value !== savedValue}
           choices={setting.choices}
+          choicesStale={setting.choicesStale}
+          choicesFailed={setting.choicesFailed}
         />
       ) : (
         <input

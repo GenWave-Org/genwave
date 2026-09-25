@@ -4,7 +4,7 @@ import type { ChangeEvent, ReactNode } from "react";
 import type { SettingControlProps } from "./settings-types";
 
 /** Matches SettingField's shipped single-line control styling (text/number inputs, the
- * `VoiceSettingControl`/`AudienceSettingControl` precedent). */
+ * `AudienceSettingControl` precedent). */
 const CONTROL_CLASSES =
   "h-9 w-full max-w-md rounded-[6px] border border-line bg-surface px-2 text-[0.85rem] text-ink disabled:opacity-50";
 
@@ -36,15 +36,14 @@ const CONTROL_CLASSES =
  * is presentation only and is never itself a valid staged value.
  *
  * A staged `value` outside `choices` (e.g. a slug a since-removed theme or icon pack used to own)
- * still renders, marked "(current)" — the `VoiceSettingControl` off-list precedent — rather than
- * snapping the visible selection to whatever option happens to sort first while the actual staged
- * value (and thus the Save diff) is untouched underneath. It has no label to show (it isn't in
- * the API's `choices` list), so it falls back to the raw value, same as before T175. STORY-337
- * AC6 (review finding F1) names this exact shape for `Station:IconPack`'s own fail-open uninstall
- * — "the setting shows its dangling value with an inline notice, and nothing errors" — so this
- * branch is now paired with an inline `<p>` notice (mirrors `VoiceSettingControl`'s own fetch-
- * failure notice idiom), generic across every Choice-kind setting rather than icon-pack-specific
- * copy: kind-level shape, same as every other fact this component's own remarks already treat as
+ * still renders, marked "(current)" — rather than snapping the visible selection to whatever
+ * option happens to sort first while the actual staged value (and thus the Save diff) is
+ * untouched underneath. It has no label to show (it isn't in the API's `choices` list), so it
+ * falls back to the raw value, same as before T175. STORY-337 AC6 (review finding F1) names this
+ * exact shape for `Station:IconPack`'s own fail-open uninstall — "the setting shows its dangling
+ * value with an inline notice, and nothing errors" — so this branch is paired with an inline
+ * `<p>` notice, generic across every Choice-kind setting rather than icon-pack-specific copy:
+ * kind-level shape, same as every other fact this component's own remarks already treat as
  * generic (`isDefault`, the "no choices" alert).
  *
  * A staged `value` of `""` — `Station:Theme` ships unseeded by design (T163: the precedence chain
@@ -56,7 +55,9 @@ const CONTROL_CLASSES =
  * above: an operator cannot tell "unset, using the shipped default" from "explicitly pinned", and
  * selecting the option that already *looks* selected silently stages a change — the exact AC8 trap
  * (a saved row shadowing the env/shipped default forever) triggered by a click that looks like a
- * no-op.
+ * no-op. STORY-479 (SPEC F205.7e) also disables the SYNTHESIZED placeholder, so the AC8 trap
+ * can't fire by mistake — a real `""` choice a setting's own `choices` carries (`Station:IconPack`'s
+ * house icons, below) is a different thing and stays pickable.
  *
  * The synthesized `""` option is gated on `!choices.some((c) => c.value === "")` (STORY-337 review
  * finding F1) — `Station:Theme` never has a real `""` row in its `choices` (T163's shipped-default
@@ -76,9 +77,15 @@ const CONTROL_CLASSES =
  * option would have left standing — `ThemeCatalog.All`'s embedded-resource load order does not
  * guarantee the shipped default sorts first, so as themes are added a first-option guess could
  * silently name the WRONG theme. `IsDefault` is set by an explicit slug match server-side, not by
- * list position, so this stays correct regardless of catalog order or count. Falls back to a
- * neutral "Station default" (no parenthetical) when no choice is flagged — true today only for a
- * hypothetical second Choice-kind setting with no such semantics, never for `Station:Theme`.
+ * list position, so this stays correct regardless of catalog order or count. Falls back to the
+ * neutral "Choose…" placeholder (STORY-479, SPEC F205.7e) when no choice is flagged — `Llm:Model`
+ * and `Station:Voice` today, neither of which resolves an empty value to any one default.
+ *
+ * `choicesStale`/`choicesFailed` (STORY-479, SPEC F205.7f/g) read straight off the same-named
+ * `SettingDto` fields — see {@link SettingControlProps.choicesStale}/`.choicesFailed`.
+ * `choicesFailed` forces the select `disabled` and skips the "no choices available" alert even
+ * when `choices` is empty — a failed probe with nothing cached is still `choicesFailed`, not the
+ * wiring-bug state that alert exists for.
  */
 export function ChoiceSettingControl({
   controlId,
@@ -86,8 +93,13 @@ export function ChoiceSettingControl({
   onChange,
   disabled,
   choices,
+  choicesStale,
+  choicesFailed,
 }: SettingControlProps): ReactNode {
-  if (choices === undefined || choices.length === 0) {
+  const failed = choicesFailed === true;
+  const stale = choicesStale === true;
+
+  if ((choices === undefined || choices.length === 0) && !failed) {
     return (
       <p role="alert" className="text-[0.85rem] text-danger">
         No choices available for this setting — the settings API returned none.
@@ -95,25 +107,36 @@ export function ChoiceSettingControl({
     );
   }
 
-  const currentIsOffList = value !== "" && !choices.some((choice) => choice.value === value);
-  const isUnset = value === "" && !choices.some((choice) => choice.value === "");
-  const defaultChoice = choices.find((choice) => choice.isDefault === true);
-  const unsetLabel =
-    defaultChoice !== undefined ? `Station default (${defaultChoice.label})` : "Station default";
+  const availableChoices = choices ?? [];
+  const currentIsOffList = value !== "" && !availableChoices.some((choice) => choice.value === value);
+  const isUnset = value === "" && !availableChoices.some((choice) => choice.value === "");
+  const defaultChoice = availableChoices.find((choice) => choice.isDefault === true);
+  const unsetLabel = defaultChoice !== undefined ? `Station default (${defaultChoice.label})` : "Choose…";
   const offListNoticeId = `${controlId}-off-list-notice`;
+  const staleNoticeId = `${controlId}-stale-notice`;
+  const failedNoticeId = `${controlId}-failed-notice`;
+  const describedByIds = [
+    currentIsOffList ? offListNoticeId : null,
+    stale ? staleNoticeId : null,
+    failed ? failedNoticeId : null,
+  ].filter((id): id is string => id !== null);
 
   const select = (
     <select
       id={controlId}
       value={value}
       onChange={(e: ChangeEvent<HTMLSelectElement>) => onChange(e.currentTarget.value)}
-      disabled={disabled}
-      aria-describedby={currentIsOffList ? offListNoticeId : undefined}
+      disabled={disabled || failed}
+      aria-describedby={describedByIds.length > 0 ? describedByIds.join(" ") : undefined}
       className={CONTROL_CLASSES}
     >
-      {isUnset && <option value="">{unsetLabel}</option>}
+      {isUnset && (
+        <option value="" disabled>
+          {unsetLabel}
+        </option>
+      )}
       {currentIsOffList && <option value={value}>{`${value} (current)`}</option>}
-      {choices.map((choice) => (
+      {availableChoices.map((choice) => (
         <option key={choice.value} value={choice.value}>
           {choice.label}
         </option>
@@ -121,20 +144,33 @@ export function ChoiceSettingControl({
     </select>
   );
 
-  if (!currentIsOffList) return select;
+  if (!currentIsOffList && !stale && !failed) return select;
 
-  // STORY-337 AC6 (review finding F1): the dangling value is already visible in the select itself
-  // (the synthesized "(current)" option above) — this inline notice is the missing second half of
-  // AC6's own contract, naming the state in plain language rather than leaving "(current)" as the
-  // operator's only clue that something no longer resolves. Generic copy, not icon-pack-specific —
-  // this component carries no per-key knowledge of what an off-list value MEANS for any one setting.
   return (
     <div className="flex flex-col gap-1.5">
       {select}
-      <p id={offListNoticeId} className="text-[0.78rem] text-mute">
-        This value isn&apos;t one of the choices offered in this list — whatever it named may have
-        been removed. Nothing is broken; pick a different option to replace it.
-      </p>
+      {currentIsOffList && (
+        // STORY-337 AC6 (review finding F1): the dangling value is already visible in the select
+        // itself (the synthesized "(current)" option above) — this inline notice is the missing
+        // second half of AC6's own contract, naming the state in plain language rather than
+        // leaving "(current)" as the operator's only clue that something no longer resolves.
+        // Generic copy, not icon-pack-specific — this component carries no per-key knowledge of
+        // what an off-list value MEANS for any one setting.
+        <p id={offListNoticeId} className="text-[0.78rem] text-mute">
+          This value isn&apos;t one of the choices offered in this list — whatever it named may
+          have been removed. Nothing is broken; pick a different option to replace it.
+        </p>
+      )}
+      {stale && (
+        <p id={staleNoticeId} className="text-[0.78rem] text-mute">
+          This list may be out of date.
+        </p>
+      )}
+      {failed && (
+        <p id={failedNoticeId} className="text-[0.78rem] text-mute">
+          Couldn&apos;t load the list.
+        </p>
+      )}
     </div>
   );
 }
