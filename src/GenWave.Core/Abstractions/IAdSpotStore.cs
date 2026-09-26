@@ -172,7 +172,8 @@ public interface IAdSpotStore
     /// opens a cross-schema transaction with the <c>library.media</c> insert that must already have
     /// happened. Total: a row not currently <see cref="AdState.Rendering"/> (already handled by a
     /// different call, or never claimed) leaves the guarded <c>WHERE</c> matching nothing — reports
-    /// <see langword="false"/>, never throws.
+    /// <see langword="false"/>, never throws. Clears the gh-#865 auto re-render note: an
+    /// operator-driven render supersedes it.
     /// </summary>
     Task<bool> MarkReadyAsync(long id, long mediaId, int renderVersion, CancellationToken ct);
 
@@ -234,8 +235,12 @@ public interface IAdSpotStore
     /// cancellation BEFORE this call is even reached is the one case that stays exactly as before: it
     /// leaves behind only a still-ineligible <paramref name="newMediaId"/> row — inert, accepted;
     /// <c>AdRenderService.RenderStaleAsync</c>'s own remarks cover that case.
+    /// The same UPDATE stamps <c>auto_rerendered_at = now()</c> and
+    /// <c>auto_rerendered_on_version = </c><paramref name="appVersion"/> (gh-#865, db/49) — the ad
+    /// page's "Re-rendered automatically on vX" note; <see cref="MarkReadyAsync"/> clears both.
     /// </summary>
-    Task<bool> SwapRenderedMediaAsync(long id, long oldMediaId, long newMediaId, int renderVersion, CancellationToken ct);
+    Task<bool> SwapRenderedMediaAsync(
+        long id, long oldMediaId, long newMediaId, int renderVersion, string appVersion, CancellationToken ct);
 
     /// <summary>
     /// Every row still waiting on its own durable old-media turn-off (gh-#854, db/48's

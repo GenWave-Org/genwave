@@ -670,6 +670,12 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	  -- pending_retire_media_id already takes toward the old row.
 	  -- Column-definition text below is pinned byte-identical against db/48 (gh-#618 lesson).
 	  pending_confirm_media_id bigint null,
+	  -- auto_rerendered_at / auto_rerendered_on_version (gh-#865): db/49's own ADD COLUMN mirrors.
+	  -- Stamped by the stale pass's guarded swap (the time and the release it ran on), cleared by every
+	  -- operator-driven MarkReady — the ad page and booth log read them as "Re-rendered automatically".
+	  -- Column-definition text below is pinned byte-identical against db/49 (gh-#618 lesson).
+	  auto_rerendered_at timestamptz null,
+	  auto_rerendered_on_version text null,
 	  -- Both CHECKs mirror db/43-ad-spot-invariants-migration.sh's own ALTER TABLE pair (PLAN T398,
 	  -- SPEC F159.2's "ready requires media_id" / "fail_reason iff failed" invariants) — inline here
 	  -- since a fresh install never sees db/43 (only 01+06 run via docker-entrypoint-initdb.d).

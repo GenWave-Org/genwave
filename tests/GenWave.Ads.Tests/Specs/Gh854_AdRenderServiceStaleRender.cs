@@ -77,7 +77,7 @@ public static class Gh854FeatureAdRenderServiceStaleReRender
         public Task InitializeAsync()
         {
             built.Author.MediaIdToConfirm = 999;
-            return built.Service.RenderStaleAsync(MakeSpot(id: 20, mediaId: 500), oldMediaId: 500, LiveSettings(), CancellationToken.None);
+            return built.Service.RenderStaleAsync(MakeSpot(id: 20, mediaId: 500), oldMediaId: 500, LiveSettings(), "v9.9.9", CancellationToken.None);
         }
 
         public Task DisposeAsync() => Task.CompletedTask;
@@ -108,7 +108,7 @@ public static class Gh854FeatureAdRenderServiceStaleReRender
             built.Author.InvokeDelegates = false;
             built.Author.Result = CastSegmentAuthorResult.Failure(CastSegmentFailureReason.ConfirmationFailed, "confirmation declined");
 
-            outcome = await built.Service.RenderStaleAsync(MakeSpot(id: 22, mediaId: 502), oldMediaId: 502, LiveSettings(), CancellationToken.None);
+            outcome = await built.Service.RenderStaleAsync(MakeSpot(id: 22, mediaId: 502), oldMediaId: 502, LiveSettings(), "v9.9.9", CancellationToken.None);
         }
 
         public Task DisposeAsync() => Task.CompletedTask;

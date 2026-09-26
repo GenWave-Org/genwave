@@ -77,6 +77,10 @@ namespace GenWave.Core.Domain;
 /// <c>AdRenderVersion.Current</c>; the OLD media keeps airing until the swap lands. A trailing
 /// DEFAULTED param, the <see cref="JobFailedKind"/> precedent, matching db/48's own column
 /// default.</param>
+/// <param name="AutoRerenderedAt">When the stale pass last swapped this spot's take (gh-#865, db/49),
+/// or <see langword="null"/> — cleared by every operator-driven render, which supersedes the note.</param>
+/// <param name="AutoRerenderedOnVersion">The GenWave release that swap ran on (e.g. <c>v5.13.1</c>),
+/// set together with <see cref="AutoRerenderedAt"/>.</param>
 public sealed record AdSpot(
     long Id,
     long SponsorId,
@@ -105,4 +109,6 @@ public sealed record AdSpot(
     DateTime? JobStartedAt = null,
     string? JobError = null,
     string? JobFailedKind = null,
-    int RenderVersion = 0);
+    int RenderVersion = 0,
+    DateTime? AutoRerenderedAt = null,
+    string? AutoRerenderedOnVersion = null);

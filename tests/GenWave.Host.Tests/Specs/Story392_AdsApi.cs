@@ -394,6 +394,12 @@ public sealed class AdsApiArc : IAsyncLifetime
     public int DraftListTotal { get; private set; }
     public IReadOnlyList<string> DraftListStates { get; private set; } = [];
 
+    /// <summary>gh-#865 — the wire half of the automatic re-render note (Gh865_AdAutoRerenderWire.cs).</summary>
+    public const string AutoRerenderVersion = "v5.13.1";
+    public static readonly DateTime AutoRerenderAt = new(2026, 9, 26, 14, 30, 0, DateTimeKind.Utc);
+    public JsonElement? MarkedSpotAutoRerender { get; private set; }
+    public JsonElement? UnmarkedSpotAutoRerender { get; private set; }
+
     public async Task InitializeAsync()
     {
         // A LOCAL, not a field — Story392AdsDatabase is file-local (CS9051), the identical reason
@@ -682,6 +688,26 @@ public sealed class AdsApiArc : IAsyncLifetime
         DraftListItemCount = items.Count;
         DraftListTotal = listBody.RootElement.GetProperty("total").GetInt32();
         DraftListStates = items.Select(item => item.GetProperty("state").GetString() ?? "").ToList();
+
+        // ── gh-#865: two ready spots, one stamped by the background swap (raw SQL — only the worker,
+        // absent here, ever writes these columns), read back over GET /api/ads/{id}. ──
+        var (markedId, _) = await AdsWireFixtures.InsertReadySpotAsync(
+            database.StationConnectionString, brand: "Rerender Marked Brand", mediaId: 999_998);
+        await AdsWireFixtures.StampAutoRerenderAsync(
+            database.StationConnectionString, markedId, AutoRerenderVersion, AutoRerenderAt);
+        var (unmarkedId, _) = await AdsWireFixtures.InsertReadySpotAsync(
+            database.StationConnectionString, brand: "Rerender Unmarked Brand", mediaId: 999_997);
+        MarkedSpotAutoRerender = await ReadAutoRerenderAsync(client, markedId);
+        UnmarkedSpotAutoRerender = await ReadAutoRerenderAsync(client, unmarkedId);
+    }
+
+    static async Task<JsonElement?> ReadAutoRerenderAsync(HttpClient client, long id)
+    {
+        var response = await client.GetAsync($"/api/ads/{id}");
+        if (response.StatusCode != HttpStatusCode.OK)
+            throw new InvalidOperationException($"arrange: GET /api/ads/{id} unexpectedly returned {response.StatusCode}");
+        var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+        return body.RootElement.TryGetProperty("autoRerender", out var value) ? value.Clone() : null;
     }
 
     /// <summary>T436 re-target: every /api/ads create body now needs a REAL sponsorId (SPEC F171.7) —
@@ -855,5 +881,20 @@ public static class AdsWireFixtures
         await using var reader = await cmd.ExecuteReaderAsync();
         await reader.ReadAsync();
         return (reader.GetInt64(0), reader.GetString(1));
+    }
+
+    public static async Task StampAutoRerenderAsync(
+        string stationConnectionString, long id, string onVersion, DateTime at)
+    {
+        await using var conn = new NpgsqlConnection(stationConnectionString);
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "update station.ad_spot set auto_rerendered_at = @at, auto_rerendered_on_version = @onVersion where id = @id";
+        cmd.Parameters.AddWithValue("id", id);
+        cmd.Parameters.AddWithValue("onVersion", onVersion);
+        cmd.Parameters.AddWithValue("at", at);
+        if (await cmd.ExecuteNonQueryAsync() != 1)
+            throw new InvalidOperationException($"arrange: stamping ad spot {id} touched no row");
     }
 }

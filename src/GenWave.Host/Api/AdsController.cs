@@ -1051,7 +1051,13 @@ public sealed class AdsController(
         DeserializeVoicePlan(spot.VoicePlan), spot.BedMediaId, AdStateTokens.ToToken(spot.State), spot.FailReason,
         spot.MediaId, spot.CreatedAt, spot.StateChangedAt, spot.RenderedAt, spot.RetiredAt, spot.Version,
         ToJobDto(spot), ToPreviewDto(spot, sponsor, liveSettings), RenderWindowFor(spot),
-        AdScriptParseNotes.For(spot.Script));
+        AdScriptParseNotes.For(spot.Script), ToAutoRerenderDto(spot));
+
+    /// <summary>gh-#865 — <see langword="null"/> unless the stale pass swapped this spot's take.</summary>
+    static AdSpotAutoRerenderDto? ToAutoRerenderDto(AdSpot spot) =>
+        spot is { AutoRerenderedAt: { } at, AutoRerenderedOnVersion: { } onVersion }
+            ? new AdSpotAutoRerenderDto(onVersion, at)
+            : null;
 
     /// <summary>The configured worker interval for an approved spot, else <see langword="null"/>
     /// (STORY-433; PLAN T457; gh-#745).</summary>

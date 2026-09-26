@@ -300,7 +300,7 @@ public static class Gh854FeatureAPendingMarkerExcludesASecondStalePass
             // otherwise select it again for a second swap.
             harness.CatalogWriter.ThrowOnSetEligible.Add(500);
             var swapped = await harness.Store.SwapRenderedMediaAsync(
-                1, oldMediaId: 500, newMediaId: 4200, renderVersion: 0, CancellationToken.None);
+                1, oldMediaId: 500, newMediaId: 4200, renderVersion: 0, appVersion: "v9.9.9", CancellationToken.None);
             if (!swapped)
                 throw new InvalidOperationException("arrange: the swap did not land");
         }

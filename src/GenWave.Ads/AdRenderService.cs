@@ -96,17 +96,19 @@ public sealed class AdRenderService(
     /// <c>UPDATE</c> in its own station transaction. A failure here never touches the spot's own row —
     /// the caller decides what a stale re-render failure means for a spot that never left Ready.
     /// <paramref name="oldMediaId"/>'s file/eligibility are left exactly as they were; no compensation,
-    /// no retry, no second pass.
+    /// no retry, no second pass. <paramref name="appVersion"/> rides the swap as the spot's gh-#865
+    /// "Re-rendered automatically on vX" stamp.
     /// </summary>
     internal async Task<AdStaleRenderOutcome> RenderStaleAsync(
-        AdSpot spot, long oldMediaId, AdLiveSettings liveSettings, CancellationToken ct)
+        AdSpot spot, long oldMediaId, AdLiveSettings liveSettings, string appVersion, CancellationToken ct)
     {
         try
         {
             var (outcome, _) = await RenderCoreAsync(
                 spot, liveSettings,
                 confirmAsync: (renderedMediaId, confirmCt) =>
-                    spotStore.SwapRenderedMediaAsync(spot.Id, oldMediaId, renderedMediaId, AdRenderVersion.Current, confirmCt),
+                    spotStore.SwapRenderedMediaAsync(
+                        spot.Id, oldMediaId, renderedMediaId, AdRenderVersion.Current, appVersion, confirmCt),
                 failAsync: (reason, failCt) => FailStaleAsync(spot.Id, reason, failCt),
                 ct,
                 // gh-#854 — SwapRenderedMediaAsync itself stamps both durable pending markers inside its

@@ -154,7 +154,7 @@ public static class Gh854FeatureAdSpotRenderVersionStore
             catalogWriter.ThrowMediaIds.Add(oldMediaId);
             var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var id = await Harness.SeedReadySpotAsync(repo, sponsorId, mediaId: oldMediaId, renderVersion: 0);
-            await repo.SwapRenderedMediaAsync(id, oldMediaId, newMediaId, renderVersion: 0, CancellationToken.None);
+            await repo.SwapRenderedMediaAsync(id, oldMediaId, newMediaId, renderVersion: 0, appVersion: "v9.9.9", CancellationToken.None);
 
             // When the worker looks for the next stale candidate...
             found = await repo.FindStaleReadyAsync(CurrentVersion, excludeIds: [], CancellationToken.None);
@@ -228,7 +228,7 @@ public static class Gh854FeatureAdSpotRenderVersionStore
 
             // When the re-render's own confirmAsync closure swaps it in, oldMediaId still matching...
             swapped = await repo.SwapRenderedMediaAsync(
-                id, oldMediaId, newMediaId, renderVersion: CurrentVersion, CancellationToken.None);
+                id, oldMediaId, newMediaId, renderVersion: CurrentVersion, appVersion: "v9.9.9", CancellationToken.None);
             spot = await repo.GetByIdAsync(id, CancellationToken.None);
         }
 
@@ -276,7 +276,7 @@ public static class Gh854FeatureAdSpotRenderVersionStore
             // When a swap is attempted against the WRONG old media id (a second, stale confirm racing
             // in after some other write already moved the row on)...
             swapped = await repo.SwapRenderedMediaAsync(
-                id, oldMediaId: 999_999, newMediaId: 600, renderVersion: CurrentVersion, CancellationToken.None);
+                id, oldMediaId: 999_999, newMediaId: 600, renderVersion: CurrentVersion, appVersion: "v9.9.9", CancellationToken.None);
             spot = await repo.GetByIdAsync(id, CancellationToken.None);
         }
 
@@ -320,7 +320,7 @@ public static class Gh854FeatureAdSpotRenderVersionStore
 
             // When the re-render's own confirmAsync closure lands anyway...
             swapped = await repo.SwapRenderedMediaAsync(
-                id, oldMediaId, newMediaId, renderVersion: CurrentVersion, CancellationToken.None);
+                id, oldMediaId, newMediaId, renderVersion: CurrentVersion, appVersion: "v9.9.9", CancellationToken.None);
             spot = await repo.GetByIdAsync(id, CancellationToken.None);
         }
 
@@ -366,7 +366,7 @@ public static class Gh854FeatureAdSpotRenderVersionStore
             var id = await Harness.SeedReadySpotAsync(repo, sponsorId, mediaId: oldMediaId, renderVersion: 0);
 
             swapped = await repo.SwapRenderedMediaAsync(
-                id, oldMediaId, newMediaId, renderVersion: CurrentVersion, CancellationToken.None);
+                id, oldMediaId, newMediaId, renderVersion: CurrentVersion, appVersion: "v9.9.9", CancellationToken.None);
         }
 
         public Task DisposeAsync() => Task.CompletedTask;
@@ -412,7 +412,7 @@ public static class Gh854FeatureAdSpotRenderVersionStore
             // When the re-render's own confirmAsync closure lands afterward, oldMediaId still
             // matching...
             swapped = await repo.SwapRenderedMediaAsync(
-                id, oldMediaId, newMediaId, renderVersion: CurrentVersion, CancellationToken.None);
+                id, oldMediaId, newMediaId, renderVersion: CurrentVersion, appVersion: "v9.9.9", CancellationToken.None);
             spot = await repo.GetByIdAsync(id, CancellationToken.None);
         }
 
@@ -460,14 +460,14 @@ public static class Gh854FeatureAdSpotRenderVersionStore
             var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             var id = await Harness.SeedReadySpotAsync(repo, sponsorId, mediaId: oldMediaId, renderVersion: 0);
             var firstSwapped = await repo.SwapRenderedMediaAsync(
-                id, oldMediaId, firstNewMediaId, renderVersion: CurrentVersion, CancellationToken.None);
+                id, oldMediaId, firstNewMediaId, renderVersion: CurrentVersion, appVersion: "v9.9.9", CancellationToken.None);
             if (!firstSwapped)
                 throw new InvalidOperationException("arrange: the first swap did not land");
 
             // When a second swap targets the spot's own CURRENT media id (the first swap's own new
             // media, still Ready) while that first marker is still outstanding...
             secondSwapped = await repo.SwapRenderedMediaAsync(
-                id, firstNewMediaId, secondNewMediaId, renderVersion: CurrentVersion, CancellationToken.None);
+                id, firstNewMediaId, secondNewMediaId, renderVersion: CurrentVersion, appVersion: "v9.9.9", CancellationToken.None);
             spot = await repo.GetByIdAsync(id, CancellationToken.None);
         }
 

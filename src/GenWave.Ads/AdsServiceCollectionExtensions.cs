@@ -89,6 +89,8 @@ public static class AdsServiceCollectionExtensions
         // Host-side wiring call. Every dependency either resolves within GenWave.Ads itself or through
         // a Core seam a Host-side registration (elsewhere in Program.cs) satisfies — see
         // IOnAirRenderSignal's own remarks for the one that closes the Host-layering gap.
+        // gh-#865 — the release stamp the stale pass writes onto a swapped spot.
+        services.AddSingleton(AdAppVersion.FromEntryAssembly());
         services.AddHostedService<AdSpotWorker>();
         services.AddHostedService<AdSpotLifecycleGuardianService>();
 

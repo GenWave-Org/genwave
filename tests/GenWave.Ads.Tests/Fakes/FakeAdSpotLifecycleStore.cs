@@ -260,6 +260,7 @@ public sealed class FakeAdSpotLifecycleStore(
         {
             State = AdState.Ready, MediaId = mediaId, RenderedAt = DateTime.UtcNow,
             StateChangedAt = DateTime.UtcNow, Version = NextVersion(), RenderVersion = renderVersion,
+            AutoRerenderedAt = null, AutoRerenderedOnVersion = null,
         }));
     }
 
@@ -298,7 +299,7 @@ public sealed class FakeAdSpotLifecycleStore(
     /// <see cref="catalogWriter"/> (when wired) then runs old-then-new, independently best-effort — see
     /// <see cref="RetireOldMediaBestEffortAsync"/>/<see cref="ConfirmNewMediaEligibleBestEffortAsync"/>
     /// for each one's own clear-on-false, leave-set-on-throw posture.</summary>
-    public async Task<bool> SwapRenderedMediaAsync(long id, long oldMediaId, long newMediaId, int renderVersion, CancellationToken ct)
+    public async Task<bool> SwapRenderedMediaAsync(long id, long oldMediaId, long newMediaId, int renderVersion, string appVersion, CancellationToken ct)
     {
         if (adminLookup is not null)
         {
@@ -316,6 +317,7 @@ public sealed class FakeAdSpotLifecycleStore(
         spots[index] = spots[index] with
         {
             MediaId = newMediaId, RenderVersion = renderVersion, RenderedAt = DateTime.UtcNow,
+            AutoRerenderedAt = DateTime.UtcNow, AutoRerenderedOnVersion = appVersion,
             Version = NextVersion(),
         };
         pendingRetireBySpot[id] = oldMediaId;
