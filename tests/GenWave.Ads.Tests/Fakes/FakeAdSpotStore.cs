@@ -49,7 +49,7 @@ public sealed class FakeAdSpotStore : IAdSpotStore
         return Task.FromResult(MarkFailedResult);
     }
 
-    public Task<bool> SwapRenderedMediaAsync(long id, long oldMediaId, long newMediaId, int renderVersion, CancellationToken ct)
+    public Task<bool> SwapRenderedMediaAsync(long id, long oldMediaId, long newMediaId, int renderVersion, string appVersion, CancellationToken ct)
     {
         SwapRenderedMediaCalls++;
         LastSwapSpotId = id;

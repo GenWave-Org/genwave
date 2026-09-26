@@ -100,7 +100,7 @@ public sealed class FakeAiringExclusionsStore : IAdSpotStore
     public Task<AdSpot?> FindStaleReadyAsync(int currentVersion, IReadOnlyCollection<long> excludeIds, CancellationToken ct) =>
         throw new NotSupportedException("Not used by LibraryAdSpotSource.");
 
-    public Task<bool> SwapRenderedMediaAsync(long id, long oldMediaId, long newMediaId, int renderVersion, CancellationToken ct) =>
+    public Task<bool> SwapRenderedMediaAsync(long id, long oldMediaId, long newMediaId, int renderVersion, string appVersion, CancellationToken ct) =>
         throw new NotSupportedException("Not used by LibraryAdSpotSource.");
 
     public Task<AdSpotPage> ListByStateAsync(AdState? state, long? sponsorId, int limit, int offset, CancellationToken ct) =>

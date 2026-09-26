@@ -42,4 +42,6 @@ sealed class AdSpotRow
     public string? JobError { get; set; }
     public string? JobFailedKind { get; set; }
     public int RenderVersion { get; set; }
+    public DateTime? AutoRerenderedAt { get; set; }
+    public string? AutoRerenderedOnVersion { get; set; }
 }

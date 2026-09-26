@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/chip";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { toast } from "@/components/ui/toast";
+import { formatDateStamp } from "@/lib/format-clock";
 import {
   AD_SOURCE_LABELS,
   approveAdSpot,
@@ -28,6 +29,9 @@ interface AdSpotRowProps {
    * the PROP as conditionally passed, which it never is; the gating lives in the render, not the
    * prop). */
   onEdit: () => void;
+  /** Test-only injection point for the re-render note's `formatDateStamp` call; production omits
+   * this and gets the browser's local zone — the same PersonasClient/StatusTiles idiom (gh-#865). */
+  timeZone?: string;
 }
 
 /**
@@ -74,7 +78,7 @@ function CastChips({ spot }: { spot: AdSpotDto }): ReactNode {
  * rendered a broken player that looked functional and silently failed, so T404 shipped an honest
  * notice instead and split the byte route out as T404b.)
  */
-export function AdSpotRow({ spot, onChanged, onEdit }: AdSpotRowProps): ReactNode {
+export function AdSpotRow({ spot, onChanged, onEdit, timeZone }: AdSpotRowProps): ReactNode {
   const confirm = useConfirm();
   const [pending, setPending] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -150,6 +154,11 @@ export function AdSpotRow({ spot, onChanged, onEdit }: AdSpotRowProps): ReactNod
         <p className="truncate text-[0.8rem] text-mute">
           {spot.sponsorName} · {spot.spotSeconds}s
         </p>
+        {spot.state === "ready" && spot.autoRerender && (
+          <p className="mt-1 text-[0.78rem] text-mute">
+            Re-rendered automatically on {spot.autoRerender.onVersion} · {formatDateStamp(spot.autoRerender.at, { timeZone })}
+          </p>
+        )}
         {spot.state === "failed" && spot.failReason !== null && (
           <p className="mt-1 text-[0.78rem] text-danger">Failed: {spot.failReason}</p>
         )}

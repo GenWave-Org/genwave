@@ -29,6 +29,8 @@ namespace GenWave.Host.Api;
 /// PLAN T551) is one entry per distinct unknown speaker tag <see cref="Script"/> carried
 /// (<c>"unknown-tag:{TAG}"</c>, <c>GenWave.Ads.AdScriptParseNotes.For</c>'s own re-parse) — empty, never
 /// a validator failure, when every tag was already known or <see cref="Script"/> is null/unparseable.
+/// <see cref="AutoRerender"/> (gh-#865) is <see langword="null"/> unless the stale pass swapped this
+/// spot's take — see <see cref="AdSpotAutoRerenderDto"/>.
 /// </summary>
 public sealed record AdSpotDto(
     long Id,
@@ -54,4 +56,5 @@ public sealed record AdSpotDto(
     AdSpotJobDto? Job,
     AdSpotPreviewDto? Preview,
     int? RenderWithinMinutes,
-    IReadOnlyList<string> ParseNotes);
+    IReadOnlyList<string> ParseNotes,
+    AdSpotAutoRerenderDto? AutoRerender);

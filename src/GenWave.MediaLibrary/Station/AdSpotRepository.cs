@@ -55,7 +55,7 @@ sealed class AdSpotRepository(
         "spot_seconds, voice_plan::text as voice_plan, bed_media_id, state::text as state, fail_reason, " +
         "media_id, generation, created_at, state_changed_at, rendered_at, retired_at, xmin::text as version, " +
         "preview_path, preview_at, preview_key, job_kind, job_started_at, job_error, job_failed_kind, " +
-        "render_version";
+        "render_version, auto_rerendered_at, auto_rerendered_on_version";
 
     static readonly string SelectColumns = $"select {Columns} from station.ad_spot";
 
@@ -376,7 +376,8 @@ sealed class AdSpotRepository(
             """
             update station.ad_spot
             set state = 'ready'::station.ad_state, media_id = @mediaId, render_version = @renderVersion,
-                rendered_at = now(), state_changed_at = now()
+                rendered_at = now(), state_changed_at = now(),
+                auto_rerendered_at = null, auto_rerendered_on_version = null
             where id = @id and state = 'rendering'::station.ad_state
             """,
             new { id, mediaId, renderVersion }, cancellationToken: ct));
@@ -417,7 +418,7 @@ sealed class AdSpotRepository(
     /// claims into <c>rendering</c> — the spot stays <see cref="AdState.Ready"/>, airable,
     /// throughout.</summary>
     public async Task<bool> SwapRenderedMediaAsync(
-        long id, long oldMediaId, long newMediaId, int renderVersion, CancellationToken ct)
+        long id, long oldMediaId, long newMediaId, int renderVersion, string appVersion, CancellationToken ct)
     {
         var oldMedia = await adminLookup.GetByIdWithLibraryAsync(oldMediaId, ct);
         if (oldMedia is not { } found || !found.Row.Eligible || found.Row.NeverPlay)
@@ -438,11 +439,12 @@ sealed class AdSpotRepository(
             """
             update station.ad_spot
             set media_id = @newMediaId, render_version = @renderVersion, rendered_at = now(),
-                pending_retire_media_id = @oldMediaId, pending_confirm_media_id = @newMediaId
+                pending_retire_media_id = @oldMediaId, pending_confirm_media_id = @newMediaId,
+                auto_rerendered_at = now(), auto_rerendered_on_version = @appVersion
             where id = @id and state = 'ready'::station.ad_state and media_id = @oldMediaId
               and pending_retire_media_id is null
             """,
-            new { id, oldMediaId, newMediaId, renderVersion }, transaction: tx, cancellationToken: ct));
+            new { id, oldMediaId, newMediaId, renderVersion, appVersion }, transaction: tx, cancellationToken: ct));
         if (affected != 1)
             return false; // edited, retired, already re-rendered, or an earlier swap's own pending
                            // retire marker is still waiting on its own old-media turn-off.
@@ -1014,7 +1016,7 @@ sealed class AdSpotRepository(
         row.PackSlug, row.SpotSeconds, row.VoicePlan, row.BedMediaId, ParseState(row.State), row.FailReason,
         row.MediaId, row.Generation, row.CreatedAt, row.StateChangedAt, row.RenderedAt, row.RetiredAt,
         row.Version, row.PreviewPath, row.PreviewAt, row.PreviewKey, row.JobKind, row.JobStartedAt,
-        row.JobError, row.JobFailedKind, row.RenderVersion);
+        row.JobError, row.JobFailedKind, row.RenderVersion, row.AutoRerenderedAt, row.AutoRerenderedOnVersion);
 
     /// <summary>A row read back from <c>station.ad_state</c> whose text does not round-trip through
     /// <see cref="AdStateTokens"/> is a data-integrity bug, not a caller error — the same throwing

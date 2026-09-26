@@ -67,7 +67,7 @@ public static class Gh854FeaturePendingRetireDrain
 
             // When the re-render's own confirmAsync closure lands anyway...
             swapped = await repo.SwapRenderedMediaAsync(
-                id, oldMediaId, newMediaId, renderVersion: CurrentVersion, CancellationToken.None);
+                id, oldMediaId, newMediaId, renderVersion: CurrentVersion, appVersion: "v9.9.9", CancellationToken.None);
         }
 
         public Task DisposeAsync() => Task.CompletedTask;
@@ -114,7 +114,7 @@ public static class Gh854FeaturePendingRetireDrain
             var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             id = await Harness.SeedReadySpotAsync(repo, sponsorId, mediaId: oldMediaId, renderVersion: 0);
             await repo.SwapRenderedMediaAsync(
-                id, oldMediaId, newMediaId, renderVersion: CurrentVersion, CancellationToken.None);
+                id, oldMediaId, newMediaId, renderVersion: CurrentVersion, appVersion: "v9.9.9", CancellationToken.None);
 
             // When a stale retry names the WRONG old media id (some other spot's own pending retire,
             // misrouted) it must never clear this row's marker...
@@ -174,9 +174,9 @@ public static class Gh854FeaturePendingRetireDrain
             firstId = await Harness.SeedReadySpotAsync(repo, sponsorId, mediaId: firstOldMediaId, renderVersion: 0);
             secondId = await Harness.SeedReadySpotAsync(repo, sponsorId, mediaId: secondOldMediaId, renderVersion: 0);
             await repo.SwapRenderedMediaAsync(
-                firstId, firstOldMediaId, firstNewMediaId, CurrentVersion, CancellationToken.None);
+                firstId, firstOldMediaId, firstNewMediaId, CurrentVersion, "v9.9.9", CancellationToken.None);
             await repo.SwapRenderedMediaAsync(
-                secondId, secondOldMediaId, secondNewMediaId, CurrentVersion, CancellationToken.None);
+                secondId, secondOldMediaId, secondNewMediaId, CurrentVersion, "v9.9.9", CancellationToken.None);
 
             // When the drain lists pending retires, then clears just the first...
             listedBeforeClear = await repo.ListPendingRetiresAsync(CancellationToken.None);
@@ -229,7 +229,7 @@ public static class Gh854FeaturePendingRetireDrain
             var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             id = await Harness.SeedReadySpotAsync(repo, sponsorId, mediaId: oldMediaId, renderVersion: 0);
             await repo.SwapRenderedMediaAsync(
-                id, oldMediaId, newMediaId, renderVersion: CurrentVersion, CancellationToken.None);
+                id, oldMediaId, newMediaId, renderVersion: CurrentVersion, appVersion: "v9.9.9", CancellationToken.None);
 
             // ...and an operator re-points a SECOND, unrelated spot at that very old media id before
             // any retry ever lands...
@@ -319,7 +319,7 @@ public static class Gh854FeaturePendingConfirmDrain
             id = await Harness.SeedReadySpotAsync(repo, sponsorId, mediaId: oldMediaId, renderVersion: 0);
 
             swapped = await repo.SwapRenderedMediaAsync(
-                id, oldMediaId, newMediaId, renderVersion: CurrentVersion, CancellationToken.None);
+                id, oldMediaId, newMediaId, renderVersion: CurrentVersion, appVersion: "v9.9.9", CancellationToken.None);
         }
 
         public Task DisposeAsync() => Task.CompletedTask;
@@ -365,7 +365,7 @@ public static class Gh854FeaturePendingConfirmDrain
             var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             id = await Harness.SeedReadySpotAsync(repo, sponsorId, mediaId: oldMediaId, renderVersion: 0);
             await repo.SwapRenderedMediaAsync(
-                id, oldMediaId, newMediaId, renderVersion: CurrentVersion, CancellationToken.None);
+                id, oldMediaId, newMediaId, renderVersion: CurrentVersion, appVersion: "v9.9.9", CancellationToken.None);
 
             // When a stale retry names the WRONG new media id, it must never clear this row's marker...
             clearedWrong = await repo.ClearPendingConfirmAsync(id, mediaId: 999_999, CancellationToken.None);
@@ -424,9 +424,9 @@ public static class Gh854FeaturePendingConfirmDrain
             firstId = await Harness.SeedReadySpotAsync(repo, sponsorId, mediaId: firstOldMediaId, renderVersion: 0);
             secondId = await Harness.SeedReadySpotAsync(repo, sponsorId, mediaId: secondOldMediaId, renderVersion: 0);
             await repo.SwapRenderedMediaAsync(
-                firstId, firstOldMediaId, firstNewMediaId, CurrentVersion, CancellationToken.None);
+                firstId, firstOldMediaId, firstNewMediaId, CurrentVersion, "v9.9.9", CancellationToken.None);
             await repo.SwapRenderedMediaAsync(
-                secondId, secondOldMediaId, secondNewMediaId, CurrentVersion, CancellationToken.None);
+                secondId, secondOldMediaId, secondNewMediaId, CurrentVersion, "v9.9.9", CancellationToken.None);
 
             // When the drain lists pending confirms, then clears just the first...
             listedBeforeClear = await repo.ListPendingConfirmsAsync(CancellationToken.None);
@@ -476,7 +476,7 @@ public static class Gh854FeaturePendingConfirmDrain
             var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
             id = await Harness.SeedReadySpotAsync(repo, sponsorId, mediaId: oldMediaId, renderVersion: 0);
             await repo.SwapRenderedMediaAsync(
-                id, oldMediaId, newMediaId, renderVersion: CurrentVersion, CancellationToken.None);
+                id, oldMediaId, newMediaId, renderVersion: CurrentVersion, appVersion: "v9.9.9", CancellationToken.None);
         }
 
         public Task DisposeAsync() => Task.CompletedTask;

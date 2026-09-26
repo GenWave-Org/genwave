@@ -81,6 +81,8 @@ public sealed class AdSpotWorker(
     IAdminMediaLookup adminLookup,
     AdSpotStamper stamper,
     IOnAirRenderSignal onAirRenderSignal,
+    IBoothLogAppender boothLog,
+    AdAppVersion appVersion,
     IOptionsMonitor<AdsOptions> adsOptions,
     IOptionsMonitor<LlmOptions> llmOptions,
     IConfiguration configuration,
@@ -543,6 +545,26 @@ public sealed class AdSpotWorker(
         return queueEmpty;
     }
 
+    /// <summary>gh-#865 — one booth-log line per landed swap, so a changed take always has a visible
+    /// reason. Best-effort: the swap already committed, so a booth-log failure is only a dropped line,
+    /// never a failed tick.</summary>
+    async Task NarrateAutoRerenderAsync(AdSpot spot, CancellationToken ct)
+    {
+        var summary = $"Ad \"{LogSanitize.Strip(spot.Title)}\" for {LogSanitize.Strip(spot.SponsorName)} " +
+                      $"was re-rendered automatically on {appVersion.Value}. The new take replaces the old one.";
+        try
+        {
+            await boothLog.AppendAsync(new BoothLogAppendRequest(AutoRerenderBoothKind, summary, PersonaId: null), ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "Booth log write failed for ad spot {Id}'s re-render line; entry dropped", spot.Id);
+        }
+    }
+
+    /// <summary>The booth-log kind <see cref="NarrateAutoRerenderAsync"/> writes (gh-#865).</summary>
+    internal const string AutoRerenderBoothKind = "ad-rerendered";
+
     /// <summary>gh-#854 — the background re-render pass: at most ONE stale <see cref="AdState.Ready"/>
     /// spot per tick, only once <see cref="RenderDueAsync"/> reports the approved queue is genuinely
     /// empty. The spot never leaves <see cref="AdState.Ready"/> for this — the old media keeps airing
@@ -601,11 +623,15 @@ public sealed class AdSpotWorker(
 
         try
         {
-            var outcome = await renderService.RenderStaleAsync(spot, oldMediaId, liveSettings, renderCts.Token);
+            var outcome = await renderService.RenderStaleAsync(
+                spot, oldMediaId, liveSettings, appVersion.Value, renderCts.Token);
             if (outcome is AdStaleRenderOutcome.Swapped)
+            {
                 logger.LogInformation(
                     "Ad spot {Id} stale re-render swapped off media {OldMediaId} (render_version {Version})",
                     spot.Id, oldMediaId, AdRenderVersion.Current);
+                await NarrateAutoRerenderAsync(spot, stoppingToken);
+            }
             else
                 // AdRenderService.FailStaleAsync already logged the reason — nothing to add.
                 staleReRenderSkip.Add(spot.Id);

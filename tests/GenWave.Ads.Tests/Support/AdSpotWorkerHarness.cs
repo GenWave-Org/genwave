@@ -50,7 +50,8 @@ internal static class AdSpotWorkerHarness
         FakeAdminMediaLookup AdminLookup,
         FakeAdBedPool BedPool,
         FakeHttpMessageHandler LlmHandler,
-        long AdsLibraryId);
+        long AdsLibraryId,
+        FakeBoothLogAppender BoothLog);
 
     /// <summary>A minimal, well-formed <c>library.media</c> row for the repair sweep's own recency/
     /// eligibility facts (PLAN T402 review F2) — every field this project's own reads actually
@@ -72,6 +73,9 @@ internal static class AdSpotWorkerHarness
                 JsonSerializer.Serialize(new { choices = new[] { new { message = new { content } } } }),
                 Encoding.UTF8, "application/json"),
         }));
+
+    /// <summary>The release stamp every harness-built worker writes onto a swapped spot (gh-#865).</summary>
+    public static readonly AdAppVersion HarnessAppVersion = new("v9.9.9");
 
     /// <param name="now">The worker/guardian's own shared clock — advanced with
     /// <see cref="FakeTimeProvider.Advance(TimeSpan)"/> to drive a watchdog/sweep forward without a
@@ -168,9 +172,10 @@ internal static class AdSpotWorkerHarness
             new SingleHandlerHttpClientFactory(handler), llmOptions, recorder, new FakeDegradationModeReader(),
             new NoOpLogger<AdScriptWriter>(), timeProvider);
 
+        var boothLog = new FakeBoothLogAppender();
         var worker = new AdSpotWorker(
             store, briefs, sponsors, scriptWriter, renderService, durationEstimator, audiencePosture, catalogWriter,
-            adminLookup, stamper, gate, adsOptions, llmOptions, configuration,
+            adminLookup, stamper, gate, boothLog, HarnessAppVersion, adsOptions, llmOptions, configuration,
             timeProvider, workerLogger ?? new NoOpLogger<AdSpotWorker>());
 
         var guardian = new AdSpotLifecycleGuardianService(
@@ -178,6 +183,6 @@ internal static class AdSpotWorkerHarness
 
         return new Harness(
             worker, guardian, store, briefs, sponsors, gate, author, timeProvider, adsOptions, catalogWriter,
-            adminLookup, bedPool, handler, adsLibraryId);
+            adminLookup, bedPool, handler, adsLibraryId, boothLog);
     }
 }

@@ -139,6 +139,15 @@ export interface AdSpotDto {
   job: AdSpotJobDto | null;
   preview: AdSpotPreviewDto | null;
   renderWithinMinutes: number | null;
+  /** gh-#865 — set only when the ad worker re-rendered this spot on its own after a release changed
+   * how ads are rendered; `null` otherwise. Optional so older fixtures stay valid. */
+  autoRerender?: AdSpotAutoRerenderDto | null;
+}
+
+/** `AdSpotDto.autoRerender`'s wire shape (gh-#865): the release the re-render ran on, and when. */
+export interface AdSpotAutoRerenderDto {
+  onVersion: string;
+  at: string;
 }
 
 /** `GET /api/ads`'s own `{ items, total }` envelope (`AdsController.List`, the
