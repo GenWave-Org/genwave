@@ -1131,15 +1131,9 @@ public sealed class AdsController(
     /// never both" contract holds without leaning on <c>!</c> anywhere.
     ///
     /// <para>
-    /// <b>Carry-forward (T403 review finding 9) RESOLVED for Ads and Sponsors, still open for Media.</b>
-    /// This method and <see cref="SponsorsController.ResolveIfMatch"/> both now call
-    /// <see cref="WeakETag.TryParseVersion"/> — the single shared strip/validate implementation T403's
-    /// own review finding 9 called for. <c>MediaController.Patch</c> is the one surface NOT migrated:
-    /// its own <c>StripETagWrapper</c> still returns a raw, unvalidated token straight through to
-    /// <c>@expectedVersion::xid</c>, so a malformed <c>If-Match</c> against <c>PATCH /api/media/{id}</c>
-    /// still produces a raw <see cref="Npgsql.PostgresException"/> (SqlState 22P02) rather than a clean
-    /// 400 — see <see cref="WeakETag"/>'s own remarks for why that migration is a behaviour change left
-    /// outside this task.
+    /// <b>Carry-forward (T403 review finding 9) RESOLVED.</b> This method,
+    /// <see cref="SponsorsController.ResolveIfMatch"/> and <c>MediaController.Patch</c> (gh-#669) all
+    /// call <see cref="WeakETag.TryParseVersion"/> — the single shared strip/validate implementation.
     /// </para>
     /// </summary>
     (string ExpectedVersion, IActionResult? Error) ResolveIfMatch()

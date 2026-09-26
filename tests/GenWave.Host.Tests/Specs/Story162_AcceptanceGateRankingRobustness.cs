@@ -157,7 +157,7 @@ public static class FeatureAcceptanceGateRankingRobustness
         // voice-seed's own comment notes it is not redundant with Docker's empty-volume
         // auto-populate (api mounts the volume first under launch.sh's staged startup, and
         // api's image has no `/voices` path to auto-populate from).
-        const string ComposeYamlSha256  = "f2a84f5f201a516f55a0ee640bbba0122778953dbc0fd8771121ed6edd355f89";
+        const string ComposeYamlSha256  = "f00cda8db515a99be83944b2478ed7c46e0b24c5a970e6a006dfc10115846a79";
 
         [Fact]
         public void EngineScriptByteMatchesMain()

@@ -485,7 +485,7 @@ public sealed class MediaController(
         OutOfScopeWarning.ApplyIfOutOfScope(Response, libraryId, scopeProvider.Current);
 
         // Weak ETag from the row's xmin — allows the client to supply If-Match on PATCH.
-        Response.Headers.ETag = FormatWeakETag(row.Version);
+        Response.Headers.ETag = WeakETag.Format(row.Version);
 
         return Ok(row);
     }
@@ -497,7 +497,8 @@ public sealed class MediaController(
     /// Security contract:
     ///   • Requires cookie auth (covered by deny-by-default policy when Admin:Password is set).
     ///   • Requires <c>Content-Type: application/json</c> — rejects other types with 415 (CSRF guard).
-    ///   • Requires <c>If-Match</c> header containing the weak ETag returned by GET — 428 if absent.
+    ///   • Requires <c>If-Match</c> header containing the weak ETag returned by GET — 428 if absent,
+    ///     400 if malformed (validated by <see cref="WeakETag.TryParseVersion"/>, gh-#669).
     ///   • <c>If-Match</c> value mismatch → 409 Conflict (another write occurred).
     ///   • Any existing row is reachable regardless of station scope (SPEC F43.2, closes gitea-#203) —
     ///     the source-row scope check is repealed; see the response shape note below.
@@ -540,8 +541,17 @@ public sealed class MediaController(
                 });
         }
 
-        // Strip the weak ETag wrapper (W/"<xmin>") to get the raw xmin token.
-        var expectedVersion = StripETagWrapper(ifMatch);
+        // Validate the token BEFORE it reaches the ::xid cast (gh-#669): a malformed If-Match is a
+        // 400, never a Postgres 22P02 surfacing as a 500.
+        if (!WeakETag.TryParseVersion(ifMatch, out var expectedVersion))
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Title  = "Malformed If-Match.",
+                Detail = "If-Match must be the ETag from GET /api/media/{id}, e.g. W/\"12345\".",
+            });
+        }
 
         var scope   = scopeProvider.Current;
         var outcome = await adminWrite.UpdateReturningVersionAsync(
@@ -591,7 +601,7 @@ public sealed class MediaController(
         // defense-in-depth only — a successful write must never be left without a fresh ETag to
         // report, but it also must never fabricate one.
         if (newVersion is not null)
-            Response.Headers.ETag = FormatWeakETag(newVersion);
+            Response.Headers.ETag = WeakETag.Format(newVersion);
 
         if (patch.LibraryId.HasValue)
         {
@@ -723,27 +733,4 @@ public sealed class MediaController(
         "ogg"  => "audio/ogg",
         _      => "application/octet-stream",
     };
-
-    /// <summary>
-    /// Strips the weak ETag wrapper so the raw xmin token can be passed to the repository.
-    /// Accepts <c>W/"&lt;token&gt;"</c> (RFC 7232 weak) or plain <c>"&lt;token&gt;"</c>.
-    /// Returns the input unchanged if neither wrapper is present (graceful: the UPDATE will
-    /// just fail the xmin cast and produce a Conflict / NotFound, never a crash).
-    /// </summary>
-    static string StripETagWrapper(string etag)
-    {
-        var tag = etag.Trim();
-        if (tag.StartsWith("W/\"", StringComparison.Ordinal) && tag.EndsWith('"'))
-            return tag[3..^1];
-        if (tag.StartsWith('"') && tag.EndsWith('"'))
-            return tag[1..^1];
-        return tag;
-    }
-
-    /// <summary>
-    /// Formats a row's <c>xmin</c> version token as a weak ETag (<c>W/"&lt;version&gt;"</c> per
-    /// RFC 7232 §2.3) — the single place this string is built, shared by <see cref="GetById"/> and
-    /// <see cref="Patch"/> so the two never drift (STORY-103).
-    /// </summary>
-    static string FormatWeakETag(string version) => $"W/\"{version}\"";
 }

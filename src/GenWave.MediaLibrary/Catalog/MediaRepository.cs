@@ -133,9 +133,8 @@ sealed class MediaRepository(
         // every OTHER pool-predicate query that DOES call it (T232 added a fourth:
         // GetRandomReadyByImagingKindAsync; PLAN T395 review finding-1 added a fifth,
         // GetRandomReadyAdSpotAsync — an ad read has no dead-air excuse, null being its own
-        // always-legal answer, so F95.6 stays absolute there too). This method and its own
-        // /media/random sibling immediately below are now the only TWO callers that skip it — see
-        // that sibling's own remarks for why ITS skip is not a new exemption, merely an unchanged one.
+        // always-legal answer, so F95.6 stays absolute there too). This method is the only caller
+        // that skips it; its /media/random sibling immediately below applies it since gh-#668.
         //
         // SPEC F158.4, PLAN T395 — this predicate ALSO deliberately never gains "and imaging_kind is
         // null": this is the ONE method behind /internal/safe-track, and the F4.4 never-silence floor
@@ -169,14 +168,11 @@ sealed class MediaRepository(
     /// design (STORY-387 AC4) — the two endpoints cannot share one predicate any more once only one of
     /// them may see the fence.
     /// <para>
-    /// <b>Posture parity, PLAN T395 review finding-1 (RULED)</b>: no <see cref="ExplicitPredicate"/>
-    /// term here, DELIBERATELY IDENTICAL to pre-T395 <c>/media/random</c> — before this task,
-    /// <c>/media/random</c> and <c>/internal/safe-track</c> shared <see cref="GetRandomReadyAsync"/>
-    /// as literally the same call, and that method has never applied <see cref="ExplicitPredicate"/>
-    /// (see its own remarks). F158.4's own scope is the imaging fence alone; this split must not
-    /// silently WIDEN or NARROW <c>/media/random</c>'s audience-posture behavior as a side effect —
-    /// it stays exactly what it always was: unfiltered by posture. Widening it for real is SPEC F95.4
-    /// territory, a separate task this one does not touch.
+    /// <b>Posture-filtered (SPEC F95.4, gh-#668).</b> <see cref="ExplicitPredicate"/> ANDs in: a row
+    /// flagged explicit is never vended under an <see cref="AudiencePosture.Everyone"/> posture. T395
+    /// had deliberately kept the pre-split unfiltered behavior; that gap dated to the predicate's birth
+    /// and is closed here. Unlike <see cref="GetRandomReadyAsync"/> this is not the never-silence floor,
+    /// so there is no dead-air trade to make.
     /// </para>
     /// <para>
     /// Default-implemented (not abstract) on <see cref="Abstractions.IMediaCatalog"/> so this addition
@@ -194,13 +190,14 @@ sealed class MediaRepository(
         if (scope.IsEmpty) return null;
 
         var exclude = ParseIds(excludeIds);
+        var explicitPredicate = ExplicitPredicate();
 
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         var row = await conn.QuerySingleOrDefaultAsync<MediaRow>(new CommandDefinition(
             $"""
             {SelectColumns} m
             left join library.media_rating r on r.media_id = m.id
-            where {PlayablePredicate}
+            where {PlayablePredicate} {explicitPredicate}
               and m.id <> all(@exclude) and m.library_id = any(@libraryIds)
             order by random() limit 1
             """,
@@ -431,7 +428,7 @@ sealed class MediaRepository(
     /// <see cref="GetEnvelopeCandidatePoolAsync"/>,
     /// <see cref="GetRandomReadyByImagingKindAsync(LibraryScope,ImagingKind,CancellationToken)"/> and
     /// its <see cref="GetRandomReadyByImagingKindAsync(LibraryScope,ImagingKind,long?,CancellationToken)"/>
-    /// show-scoped sibling):
+    /// show-scoped sibling, and <see cref="GetRandomPlayableAsync"/> since gh-#668):
     /// empty (no constraint) on <see cref="AudiencePosture.Mature"/>, or
     /// <c>and not coalesce(m.explicit, false)</c> on <see cref="AudiencePosture.Everyone"/> — mirrors
     /// <see cref="GetEnvelopeCandidateAsync"/>'s own "omitted entirely, not merely always-true"
