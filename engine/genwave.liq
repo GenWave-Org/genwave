@@ -113,18 +113,98 @@ def gw_transition(a, b) =
 end
 main = cross(duration=xfade_max, gw_transition, q)
 
+# --- Safe-track resolver (gh-#791, gh-#771). The safe branch must outlive the api: when the
+#     api is down the queue drains AND /internal/safe-track is gone, which is exactly when the
+#     safe branch is needed. So every good answer is remembered (up to gw_safe_cache_max
+#     distinct URIs, newest first) and replayed round-robin while the api is unreachable,
+#     answering an error, or stalled. curl is bounded (--connect-timeout 2 --max-time 5) so a
+#     hung api can't wedge the resolver; -f turns an HTTP error into a non-zero exit.
+#     A 204 (exit 0, no body) is a real answer — the operator emptied the safe scope or nothing
+#     is eligible — so it CLEARS the memory and returns "" (mksafe, F4.4), never a stale track.
+#     The command is a ref so the spec harness can swap in fakes; the block between the markers
+#     is sliced out and run in real Liquidsoap by Gh791_SafeResolverSurvivesApiOutage. ---
+gw_safe_track_cmd = ref("curl -sf --connect-timeout 2 --max-time 5 http://api:8080/internal/safe-track")
+# >>> gw-safe-resolver
+gw_safe_cache_max = 16
+gw_safe_cache = ref([])
+gw_safe_next = ref(0)
+
+# One fetch: (curl exit code, first line of the body). A non-"exit" status (killed, spawn
+# failure) reads as code -1.
+def gw_safe_fetch() =
+  r = process.run(gw_safe_track_cmd())
+  code = if r.status == "exit" then r.status.code else (-1) end
+  (code, string.trim(list.hd(default="", string.split(separator="\n", r.stdout))))
+end
+
+def gw_safe_remember(uri) =
+  if not list.mem(uri, gw_safe_cache()) then
+    gw_safe_cache := list.prefix(gw_safe_cache_max, uri :: gw_safe_cache())
+  end
+end
+
+def gw_safe_replay(why) =
+  cached = gw_safe_cache()
+  n = list.length(cached)
+  if n == 0 then
+    log.important(label="safe_lib", "safe-track #{why}; nothing remembered yet, falling to silence")
+    ""
+  else
+    i = gw_safe_next() mod n
+    gw_safe_next := i + 1
+    log.important(label="safe_lib", "safe-track #{why}; replaying remembered safe track #{i + 1} of #{n}")
+    list.nth(cached, i)
+  end
+end
+
+def gw_safe_resolve() =
+  let (code, uri) = gw_safe_fetch()
+  if code == 0 and uri != "" then
+    gw_safe_remember(uri)
+    uri
+  elsif code == 0 then
+    gw_safe_cache := []
+    log.important(label="safe_lib", "safe-track empty (204); safe scope has nothing eligible, forgetting remembered tracks")
+    ""
+  elsif code == 28 then
+    gw_safe_replay("timed out (curl 28)")
+  elsif code == 6 or code == 7 then
+    gw_safe_replay("unreachable (curl #{code})")
+  elsif code == 22 then
+    gw_safe_replay("answered an HTTP error (curl 22)")
+  else
+    gw_safe_replay("failed (curl #{code})")
+  end
+end
+
+# Warm the memory in the background so an outage has variety to replay, not just the one
+# track that happened to be prefetched: every 30 s until full (or for the first 10 min, for a
+# safe scope smaller than the memory), then every 5 min to follow scope edits. Silent on
+# failure — the resolver logs outages when they matter.
+gw_safe_warms = ref(0)
+def gw_safe_warm() =
+  gw_safe_warms := gw_safe_warms() + 1
+  let (code, uri) = gw_safe_fetch()
+  if code == 0 and uri != "" then gw_safe_remember(uri) end
+  if code == 0 and uri == "" then gw_safe_cache := [] end
+  if list.length(gw_safe_cache()) < gw_safe_cache_max and gw_safe_warms() < 20 then 30. else 300. end
+end
+# <<< gw-safe-resolver
+thread.run.recurrent(delay=10., gw_safe_warm)
+
 # --- Dead-air backstop: a curated library scope served by GET /internal/safe-track (F21).
 #     request.dynamic fetches an annotated URI on every call — same loudness, cue, and energy
-#     annotations as main-rotation pushes. Empty response (204 / no body) produces default=""
-#     → request.create("") fails → mksafe engages (F4.4). track_sensitive=false cuts to it the
-#     instant the queue drains, and back the instant real content returns.
+#     annotations as main-rotation pushes, resolved by gw_safe_resolve below. A 204 (safe scope
+#     empty, nothing eligible) produces "" → request.create("") fails → mksafe engages (F4.4).
+#     track_sensitive=false cuts to it the instant the queue drains, and back the instant real
+#     content returns.
 #     prefetch=1 caps safe_lib at one pre-resolved request — the STORY-061 spike's "adopt ≤1"
 #     verdict (F22.1, MEMORY.md 2026-07-02) — so a scope/eligibility edit is reflected within
 #     at most one stale prefetched track (F22.4), never more.
 #     retry_delay=5. backs off the resolver while the api is unreachable (startup window,
 #     `api` restart) instead of spinning at the 0.1s default, which is what caused the
 #     "possible request leak" RID churn (F22.3). ---
-safe = request.dynamic(id="safe_lib", prefetch=1, retry_delay=5., { request.create(list.hd(default="", process.read.lines("curl -s http://api:8080/internal/safe-track"))) })
+safe = request.dynamic(id="safe_lib", prefetch=1, retry_delay=5., { request.create(gw_safe_resolve()) })
 
 # --- Per-track level matching on the safe branch (F37.1, gitea-#200). Mirrors the main queue's amplify
 #     above verbatim — safe plays were airing un-level-matched despite carrying a real stamped gain,
@@ -144,10 +224,9 @@ safe = amplify(1., override="replay_gain", safe)
 #     instant main is ready, exactly like it preempts any other safe track; no new readiness
 #     edge case for cutback latency.
 #     Rejected: delay(gap, safe) — the more "native"-looking operator (make the source unready
-#     between tracks; let mksafe fill the silence). Two reasons against: (1) mksafe's own
-#     comment below promises silence there is "the only path... and it requires an ops error"
-#     — routing the deliberate gap through mksafe's leaf makes that false on every ordinary
-#     drain, not just failures; (2) the spike could not confirm on `--check` alone whether the
+#     between tracks; let mksafe fill the silence). Two reasons against: (1) mksafe below is the
+#     failure leaf — routing the deliberate gap through it would make every ordinary drain
+#     look like a failure; (2) the spike could not confirm on `--check` alone whether the
 #     underlying request.dynamic's prefetch=1 queue keeps resolving while delay holds its
 #     wrapper deliberately unready — an assumption append needs not make.
 #     GW_SAFE_GAP_SECONDS=0 disables the gap outright: `safe` passes through unwrapped, the
@@ -161,8 +240,9 @@ safe =
   end
 genwave = fallback(track_sensitive=false, [main, safe])
 
-# --- Final guard: if even the safe file is missing/corrupt, emit silence rather than crash.
-#     The only path to silence in the whole system, and it requires an ops error. ---
+# --- Final guard: silence rather than a crash when the safe branch has nothing to give — the
+#     safe scope is empty (204), or the api has been unreachable since boot so the resolver has
+#     nothing remembered to replay (gh-#791), or every remembered file is gone. ---
 genwave = mksafe(genwave)
 
 # --- Export our stamped custom fields + on_air onto the output metadata (PRD §0).
