@@ -653,6 +653,23 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	  -- is nulled the instant a job settles (success OR failure), so on a failed job it can no
 	  -- longer say which step blew up — job_failed_kind is the one column that still can.
 	  job_failed_kind  text        CHECK (job_failed_kind IS NULL OR job_failed_kind IN ('write', 'preview')),
+	  -- render_version (gh-#854): db/48's own ADD COLUMN mirror. Stamped on every MarkReady; the worker
+	  -- re-renders any 'ready' spot whose version is behind AdRenderVersion.Current, in the background.
+	  -- Column-definition text below is pinned byte-identical against db/48 (gh-#618 lesson).
+	  render_version int not null default 0,
+	  -- pending_retire_media_id (gh-#854): db/48's own second ADD COLUMN mirror. Stamped in the SAME
+	  -- guarded UPDATE that lands a stale re-render's swap, naming the old media the swap just
+	  -- displaced; cleared only once that media is actually turned off ineligible. Durable across a
+	  -- crash or a failed flip — AdSpotWorker drains this every tick until it is empty.
+	  -- Column-definition text below is pinned byte-identical against db/48 (gh-#618 lesson).
+	  pending_retire_media_id bigint null,
+	  -- pending_confirm_media_id (gh-#854): db/48's own third ADD COLUMN mirror. Stamped in the SAME
+	  -- guarded UPDATE that lands a stale re-render's swap, naming the new media the swap just landed;
+	  -- cleared only once that media is actually confirmed eligible. Durable across a crash or a failed
+	  -- flip — AdSpotWorker drains this every tick until it is empty, the same posture
+	  -- pending_retire_media_id already takes toward the old row.
+	  -- Column-definition text below is pinned byte-identical against db/48 (gh-#618 lesson).
+	  pending_confirm_media_id bigint null,
 	  -- Both CHECKs mirror db/43-ad-spot-invariants-migration.sh's own ALTER TABLE pair (PLAN T398,
 	  -- SPEC F159.2's "ready requires media_id" / "fail_reason iff failed" invariants) — inline here
 	  -- since a fresh install never sees db/43 (only 01+06 run via docker-entrypoint-initdb.d).

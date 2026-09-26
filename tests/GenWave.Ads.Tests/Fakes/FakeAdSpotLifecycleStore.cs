@@ -1,3 +1,4 @@
+using GenWave.Ads;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 
@@ -13,11 +14,38 @@ namespace GenWave.Ads.Tests.Fakes;
 /// <see cref="AdSpot.Version"/> string is enough to mirror every transition
 /// <see cref="GenWave.MediaLibrary.Station.AdSpotRepository"/> enforces in SQL, in plain C#.
 /// </summary>
-public sealed class FakeAdSpotLifecycleStore : IAdSpotStore
+/// <param name="adminLookup">gh-#854 — optional; when set, <see cref="SwapRenderedMediaAsync"/> mirrors
+/// <see cref="GenWave.MediaLibrary.Station.AdSpotRepository"/>'s own guard-read of
+/// <paramref name="adminLookup"/>'s underlying facts BEFORE the state-guarded swap, declining rather
+/// than swapping when the row is missing, ineligible, or never_play. <see langword="null"/> by
+/// default — every pre-existing spec that never wires this keeps its own prior behavior unchanged.</param>
+/// <param name="catalogWriter">gh-#854 — optional; when set, a swap that passes both guards stamps
+/// both pending markers in the SAME call that lands the swap, then attempts both eligibility flips
+/// through it, old-then-new (see that method's own remarks for why that order matters). Each flip is
+/// independent and best-effort: a thrown or declined flip leaves its own marker in place for
+/// <see cref="ListPendingRetiresAsync"/>/<see cref="ListPendingConfirmsAsync"/>'s own later drain to
+/// retry, rather than rolling back the swap itself or the other flip.</param>
+public sealed class FakeAdSpotLifecycleStore(
+    IAdminMediaLookup? adminLookup = null, IAuthoredCatalogWriter? catalogWriter = null) : IAdSpotStore
 {
     readonly List<AdSpot> spots = [];
     long nextId = 1;
     int nextXmin = 1;
+
+    /// <summary>gh-#854 — the in-memory mirror of db/48's own <c>pending_retire_media_id</c> column:
+    /// spot id → the old media id its own last swap displaced, still waiting on its own eventual
+    /// turn-off. Populated by <see cref="SwapRenderedMediaAsync"/> in the SAME call that lands the
+    /// swap, and drained by <see cref="ListPendingRetiresAsync"/>/<see cref="ClearPendingRetireAsync"/>
+    /// exactly like <see cref="GenWave.Ads.AdSpotWorker"/>'s own tick does against the real store.
+    /// </summary>
+    readonly Dictionary<long, long> pendingRetireBySpot = [];
+
+    /// <summary>gh-#854 — the in-memory mirror of db/48's own <c>pending_confirm_media_id</c> column:
+    /// spot id → the new media id its own last swap landed, still waiting on its own eventual
+    /// turn-on. Populated by <see cref="SwapRenderedMediaAsync"/> in the SAME call that lands the
+    /// swap, and drained by <see cref="ListPendingConfirmsAsync"/>/<see cref="ClearPendingConfirmAsync"/>
+    /// — <see cref="pendingRetireBySpot"/>'s own shape, one marker over.</summary>
+    readonly Dictionary<long, long> pendingConfirmBySpot = [];
 
     public IReadOnlyList<AdSpot> Spots => spots;
 
@@ -80,14 +108,16 @@ public sealed class FakeAdSpotLifecycleStore : IAdSpotStore
         long id, AdState state, AdSource source = AdSource.Llm, long? mediaId = null,
         DateTime? stateChangedAt = null, string? failReason = null, string? packSlug = null,
         long sponsorId = 1, string sponsorName = "Acme",
-        string script = "ANNOUNCER: Come on down.\nVOICE1: Prices you won't believe.")
+        string script = "ANNOUNCER: Come on down.\nVOICE1: Prices you won't believe.",
+        int renderVersion = AdRenderVersion.Current)
     {
         var stamp = stateChangedAt ?? DateTime.UtcNow;
         return AddExisting(new AdSpot(
             id, sponsorId, sponsorName, $"{sponsorName} spot", Brief: null, script, source, packSlug,
             SpotSeconds: 30, VoicePlan: null, BedMediaId: null, state, failReason, mediaId, Generation: 1,
             CreatedAt: stamp, StateChangedAt: stamp, RenderedAt: state == AdState.Ready ? stamp : null,
-            RetiredAt: state == AdState.Retired ? stamp : null, Version: NextVersion()));
+            RetiredAt: state == AdState.Retired ? stamp : null, Version: NextVersion(),
+            RenderVersion: renderVersion));
     }
 
     public Task<AdSpot> CreateAsync(NewAdSpot spot, CancellationToken ct)
@@ -154,6 +184,14 @@ public sealed class FakeAdSpotLifecycleStore : IAdSpotStore
         return Task.FromResult(new AdSpotTransitionOutcome(AdSpotWriteResult.Updated, updated));
     }
 
+    /// <summary>gh-#854 — fires exactly once per call that finds the approved queue empty
+    /// (<c>candidate is null</c>) — lets a spec flip <see cref="FakeOnAirRenderSignal.InFlight"/> at
+    /// precisely the moment <see cref="AdSpotWorker.RenderDueAsync"/> would hand off to the stale
+    /// re-render pass, so a spec proving that pass re-checks the gate for itself actually fails if that
+    /// check were ever deleted, rather than passing for the unrelated reason the queue was already
+    /// empty when the tick began.</summary>
+    public Action? OnApprovedQueueObservedEmpty { get; set; }
+
     public Task<AdSpot?> ClaimNextApprovedAsync(CancellationToken ct)
     {
         ClaimCallCount++;
@@ -162,7 +200,10 @@ public sealed class FakeAdSpotLifecycleStore : IAdSpotStore
             .OrderBy(s => s.StateChangedAt).ThenBy(s => s.Id)
             .FirstOrDefault();
         if (candidate is null)
+        {
+            OnApprovedQueueObservedEmpty?.Invoke();
             return Task.FromResult<AdSpot?>(null);
+        }
 
         var updated = Replace(candidate.Id, s => s with
         {
@@ -212,15 +253,222 @@ public sealed class FakeAdSpotLifecycleStore : IAdSpotStore
         return Task.FromResult<AdSpot?>(updated);
     }
 
-    public Task<bool> MarkReadyAsync(long id, long mediaId, CancellationToken ct)
+    public Task<bool> MarkReadyAsync(long id, long mediaId, int renderVersion, CancellationToken ct)
     {
         MarkReadyCallCount++;
         return Task.FromResult(TryTotalTransition(id, AdState.Rendering, s => s with
         {
             State = AdState.Ready, MediaId = mediaId, RenderedAt = DateTime.UtcNow,
-            StateChangedAt = DateTime.UtcNow, Version = NextVersion(),
+            StateChangedAt = DateTime.UtcNow, Version = NextVersion(), RenderVersion = renderVersion,
         }));
     }
+
+    public int FindStaleReadyCallCount { get; private set; }
+    public int SwapRenderedMediaCallCount { get; private set; }
+
+    /// <summary>Mirrors <see cref="GenWave.MediaLibrary.Station.AdSpotRepository.FindStaleReadyAsync"/>
+    /// in plain C# (gh-#854): the oldest <see cref="AdState.Ready"/> row whose <see cref="AdSpot.RenderVersion"/>
+    /// trails <paramref name="currentVersion"/> and whose id is not in <paramref name="excludeIds"/>. A
+    /// spot already carrying either pending marker is excluded too — it has already been swapped once
+    /// and is still waiting on its own eligibility drain, not a fresh candidate for a second swap.</summary>
+    public Task<AdSpot?> FindStaleReadyAsync(int currentVersion, IReadOnlyCollection<long> excludeIds, CancellationToken ct)
+    {
+        FindStaleReadyCallCount++;
+        var candidate = spots
+            .Where(s => s.State == AdState.Ready && s.RenderVersion < currentVersion && !excludeIds.Contains(s.Id)
+                && !pendingRetireBySpot.ContainsKey(s.Id) && !pendingConfirmBySpot.ContainsKey(s.Id))
+            .OrderBy(s => s.StateChangedAt).ThenBy(s => s.Id)
+            .FirstOrDefault();
+        return Task.FromResult(candidate);
+    }
+
+    /// <summary>Mirrors <see cref="GenWave.MediaLibrary.Station.AdSpotRepository.SwapRenderedMediaAsync"/>
+    /// in plain C# (gh-#854): the <see cref="adminLookup"/> guard runs FIRST (when wired) — missing,
+    /// ineligible, or never_play declines before <see cref="SwapRenderedMediaCallCount"/> ever
+    /// increments, so a spec asserting "no swap was attempted" against a disabled old row still passes.
+    /// Only once that guard clears does the state-guarded swap itself run, guarded on <see cref="AdState.Ready"/>,
+    /// the row's current <see cref="AdSpot.MediaId"/> matching <paramref name="oldMediaId"/>, AND no
+    /// pending retire marker already stamped on it (an earlier swap's own old-media turn-off still
+    /// outstanding) — a spot edited, retired, already re-rendered, or already mid-swap out from under
+    /// the caller leaves this a no-op, reporting <see langword="false"/>. <c>state_changed_at</c>
+    /// is deliberately never touched here (nor by the real repository) — that clock is a separate,
+    /// product-level decision. gh-#854: the swap stamps BOTH <see cref="pendingRetireBySpot"/> and
+    /// <see cref="pendingConfirmBySpot"/> in the SAME call that lands it, mirroring the real repository's
+    /// own durable stamp landing inside the guarded UPDATE itself. Each flip through
+    /// <see cref="catalogWriter"/> (when wired) then runs old-then-new, independently best-effort — see
+    /// <see cref="RetireOldMediaBestEffortAsync"/>/<see cref="ConfirmNewMediaEligibleBestEffortAsync"/>
+    /// for each one's own clear-on-false, leave-set-on-throw posture.</summary>
+    public async Task<bool> SwapRenderedMediaAsync(long id, long oldMediaId, long newMediaId, int renderVersion, CancellationToken ct)
+    {
+        if (adminLookup is not null)
+        {
+            var oldMedia = await adminLookup.GetByIdWithLibraryAsync(oldMediaId, ct);
+            if (oldMedia is not { } found || !found.Row.Eligible || found.Row.NeverPlay)
+                return false;
+        }
+
+        SwapRenderedMediaCallCount++;
+        var index = spots.FindIndex(s => s.Id == id);
+        if (index < 0 || spots[index].State != AdState.Ready || spots[index].MediaId != oldMediaId
+            || pendingRetireBySpot.ContainsKey(id))
+            return false;
+
+        spots[index] = spots[index] with
+        {
+            MediaId = newMediaId, RenderVersion = renderVersion, RenderedAt = DateTime.UtcNow,
+            Version = NextVersion(),
+        };
+        pendingRetireBySpot[id] = oldMediaId;
+        pendingConfirmBySpot[id] = newMediaId;
+
+        if (catalogWriter is not null)
+        {
+            await RetireOldMediaBestEffortAsync(catalogWriter, id, oldMediaId);
+            await ConfirmNewMediaEligibleBestEffortAsync(catalogWriter, id, newMediaId);
+        }
+
+        return true;
+    }
+
+    /// <summary>gh-#854 — mirrors <see cref="GenWave.MediaLibrary.Station.AdSpotRepository"/>'s own
+    /// post-commit old-media turn-off exactly: <see cref="IAuthoredCatalogWriter.SetEligibleAsync"/>
+    /// returning <see langword="false"/> means the row was already purged (a row that no longer exists
+    /// can't air regardless) — that clears <paramref name="id"/> out of <see cref="pendingRetireBySpot"/>
+    /// in the SAME call exactly as a successful flip does. Only a THROWN flip leaves the stamp in place,
+    /// never rethrown, for <see cref="ListPendingRetiresAsync"/>'s own later drain to retry — the real
+    /// repository's own posture, so <see cref="SwapRenderedMediaAsync"/>'s own caller never sees the
+    /// exception either. Always runs on <see cref="CancellationToken.None"/>, matching the real store.</summary>
+    async Task RetireOldMediaBestEffortAsync(IAuthoredCatalogWriter writer, long id, long oldMediaId)
+    {
+        try
+        {
+            await writer.SetEligibleAsync(oldMediaId, eligible: false, CancellationToken.None);
+        }
+        catch
+        {
+            // Leave pendingRetireBySpot set — ListPendingRetiresAsync's own later drain retries it.
+            return;
+        }
+
+        pendingRetireBySpot.Remove(id);
+    }
+
+    /// <summary>gh-#854 — the confirm half; <see cref="RetireOldMediaBestEffortAsync"/>'s own remarks,
+    /// one marker over. Guarded by <see cref="IsReadyOnMediaAsync"/> before ever attempting the flip — an
+    /// operator retiring the spot, or a second swap moving it on again, between the swap's own commit
+    /// and this call must never revive a row the operator meant to pull. A guard-false, a flip that
+    /// lands, or a flip that reports <see langword="false"/> (a purged new row) all clear
+    /// <see cref="pendingConfirmBySpot"/> in the SAME call; only a thrown exception leaves it set for
+    /// <see cref="ListPendingConfirmsAsync"/>'s own later drain. Always runs on
+    /// <see cref="CancellationToken.None"/>, matching the real store.</summary>
+    async Task ConfirmNewMediaEligibleBestEffortAsync(IAuthoredCatalogWriter writer, long id, long newMediaId)
+    {
+        try
+        {
+            if (await IsReadyOnMediaAsync(id, newMediaId, CancellationToken.None))
+                await writer.SetEligibleAsync(newMediaId, eligible: true, CancellationToken.None);
+        }
+        catch
+        {
+            // Leave pendingConfirmBySpot set — ListPendingConfirmsAsync's own later drain retries it.
+            return;
+        }
+
+        pendingConfirmBySpot.Remove(id);
+    }
+
+    /// <summary>Mirrors <see cref="GenWave.MediaLibrary.Station.AdSpotRepository.ClearReferencedPendingRetiresAsync"/>
+    /// in plain C# (gh-#854): clears any pending row whose old media id is now some OTHER spot's own
+    /// CURRENT <see cref="AdSpot.MediaId"/> (an operator re-pointed a spot at it), without ever handing
+    /// it back to the caller to skip itself. The caller runs this FIRST, every tick, before
+    /// <see cref="ListPendingRetiresAsync"/>'s own read.</summary>
+    public Task ClearReferencedPendingRetiresAsync(CancellationToken ct)
+    {
+        var currentlyReferenced = new HashSet<long>();
+        foreach (var spot in spots)
+        {
+            if (spot.MediaId is long mediaId)
+                currentlyReferenced.Add(mediaId);
+        }
+
+        foreach (var spotId in pendingRetireBySpot.Keys.ToList())
+        {
+            if (currentlyReferenced.Contains(pendingRetireBySpot[spotId]))
+                pendingRetireBySpot.Remove(spotId);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Mirrors <see cref="GenWave.MediaLibrary.Station.AdSpotRepository.ListPendingRetiresAsync"/>
+    /// in plain C# (gh-#854): a pure read — see <see cref="ClearReferencedPendingRetiresAsync"/> for the
+    /// self-heal the real store now runs as its own separate call — ordered the same way the real
+    /// store's own query is (oldest state change first, then id).</summary>
+    public Task<IReadOnlyList<PendingAdSpotRetire>> ListPendingRetiresAsync(CancellationToken ct)
+    {
+        IReadOnlyList<PendingAdSpotRetire> pending = pendingRetireBySpot
+            .OrderBy(kvp => StateChangedAtOf(kvp.Key)).ThenBy(kvp => kvp.Key)
+            .Select(kvp => new PendingAdSpotRetire(kvp.Key, kvp.Value))
+            .ToList();
+        return Task.FromResult(pending);
+    }
+
+    /// <summary>Mirrors <see cref="GenWave.MediaLibrary.Station.AdSpotRepository.ClearPendingRetireAsync"/>
+    /// in plain C# (gh-#854): guarded on BOTH <paramref name="id"/> AND <paramref name="mediaId"/> still
+    /// matching the stamped value — total, reports <see langword="false"/> rather than throwing when it
+    /// no longer matches.</summary>
+    public Task<bool> ClearPendingRetireAsync(long id, long mediaId, CancellationToken ct)
+    {
+        if (pendingRetireBySpot.TryGetValue(id, out var stamped) && stamped == mediaId)
+        {
+            pendingRetireBySpot.Remove(id);
+            return Task.FromResult(true);
+        }
+        return Task.FromResult(false);
+    }
+
+    /// <summary>Mirrors <see cref="GenWave.MediaLibrary.Station.AdSpotRepository.ListPendingConfirmsAsync"/>
+    /// in plain C# (gh-#854): <see cref="ListPendingRetiresAsync"/>'s own shape, one marker over — a pure
+    /// read, no self-heal of its own (the confirm marker's own guard, <see cref="IsReadyOnMediaAsync"/>,
+    /// is checked by the caller per row, not filtered out here) — same ordering, oldest state change
+    /// first, then id.</summary>
+    public Task<IReadOnlyList<PendingAdSpotConfirm>> ListPendingConfirmsAsync(CancellationToken ct)
+    {
+        IReadOnlyList<PendingAdSpotConfirm> pending = pendingConfirmBySpot
+            .OrderBy(kvp => StateChangedAtOf(kvp.Key)).ThenBy(kvp => kvp.Key)
+            .Select(kvp => new PendingAdSpotConfirm(kvp.Key, kvp.Value))
+            .ToList();
+        return Task.FromResult(pending);
+    }
+
+    /// <summary>Mirrors <see cref="GenWave.MediaLibrary.Station.AdSpotRepository.ClearPendingConfirmAsync"/>
+    /// in plain C# (gh-#854): <see cref="ClearPendingRetireAsync"/>'s own guarded shape, one marker
+    /// over.</summary>
+    public Task<bool> ClearPendingConfirmAsync(long id, long mediaId, CancellationToken ct)
+    {
+        if (pendingConfirmBySpot.TryGetValue(id, out var stamped) && stamped == mediaId)
+        {
+            pendingConfirmBySpot.Remove(id);
+            return Task.FromResult(true);
+        }
+        return Task.FromResult(false);
+    }
+
+    /// <summary>Mirrors <see cref="GenWave.MediaLibrary.Station.AdSpotRepository.IsReadyOnMediaAsync"/> in
+    /// plain C# (gh-#854): the shared guard a confirm marker's own flip must pass before it is ever
+    /// attempted, from either call site (this fake's own inline post-commit confirm, or a worker spec's
+    /// own confirm-marker drain).</summary>
+    public Task<bool> IsReadyOnMediaAsync(long id, long mediaId, CancellationToken ct)
+    {
+        var spot = spots.FirstOrDefault(s => s.Id == id);
+        return Task.FromResult(spot is not null && spot.State == AdState.Ready && spot.MediaId == mediaId);
+    }
+
+    /// <summary>The <see cref="AdSpot.StateChangedAt"/> of <paramref name="id"/>, or the latest possible
+    /// instant when the row is somehow gone — ordering support for
+    /// <see cref="ListPendingRetiresAsync"/>/<see cref="ListPendingConfirmsAsync"/>, mirroring the real
+    /// store's own <c>order by state_changed_at asc, id asc</c>.</summary>
+    DateTime StateChangedAtOf(long id) => spots.FirstOrDefault(s => s.Id == id)?.StateChangedAt ?? DateTime.MaxValue;
 
     public Task<bool> MarkFailedAsync(long id, string failReason, CancellationToken ct)
     {

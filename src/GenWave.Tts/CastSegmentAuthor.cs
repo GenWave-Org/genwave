@@ -84,11 +84,20 @@ public sealed class CastSegmentAuthor(
     /// <see langword="true"/> confirms the caller's own bookkeeping is consistent and the row should
     /// become eligible; <see langword="false"/> (or a thrown exception) leaves it ineligible forever.
     /// </param>
+    /// <param name="flipEligibleOnConfirm">
+    /// gh-#854 — <see langword="false"/> for a stale re-render's own confirmAsync closure
+    /// (<c>AdRenderService.RenderStaleAsync</c>), whose <c>IAdSpotStore.SwapRenderedMediaAsync</c>
+    /// already stamps a durable pending-confirm marker for the new row inside its own guarded
+    /// transaction and best-effort flips it eligible after that commit — a second, unguarded flip from
+    /// this method would race that best-effort flip rather than defer to it. Every OTHER caller keeps
+    /// the default <see langword="true"/>: the normal first-render path is unchanged.
+    /// </param>
     public async Task<CastSegmentAuthorResult> AuthorAsync(
         CastAssemblyRequest assemblyRequest,
         Func<CrosstalkAssemblyResult.Assembled, AuthoredMediaInsert> buildInsert,
         Func<long, CancellationToken, Task<bool>> confirmAsync,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool flipEligibleOnConfirm = true)
     {
         CrosstalkAssemblyResult assembled;
         try
@@ -108,7 +117,8 @@ public sealed class CastSegmentAuthor(
         if (assembled is CrosstalkAssemblyResult.Discarded discarded)
             return CastSegmentAuthorResult.Failure(CastSegmentFailureReason.Discarded, discarded.Reason);
 
-        return await LandAsync((CrosstalkAssemblyResult.Assembled)assembled, buildInsert, confirmAsync, ct);
+        return await LandAsync(
+            (CrosstalkAssemblyResult.Assembled)assembled, buildInsert, confirmAsync, ct, flipEligibleOnConfirm);
     }
 
     /// <summary>
@@ -134,11 +144,13 @@ public sealed class CastSegmentAuthor(
     /// <see langword="true"/> confirms the caller's own bookkeeping is consistent and the row should
     /// become eligible; <see langword="false"/> (or a thrown exception) leaves it ineligible forever.
     /// </param>
+    /// <param name="flipEligibleOnConfirm">See <see cref="AuthorAsync"/>'s own remarks (gh-#854).</param>
     public async Task<CastSegmentAuthorResult> LandAsync(
         CrosstalkAssemblyResult.Assembled assembled,
         Func<CrosstalkAssemblyResult.Assembled, AuthoredMediaInsert> buildInsert,
         Func<long, CancellationToken, Task<bool>> confirmAsync,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool flipEligibleOnConfirm = true)
     {
         // T401 review F3: buildInsert lives INSIDE this try (folded together with the insert
         // itself) — a throw from a caller's own buildInsert closure gets the identical cleanup an
@@ -189,13 +201,31 @@ public sealed class CastSegmentAuthor(
 
         if (!confirmed)
         {
-            logger.LogError(
-                "Cast segment {MediaId} inserted but its confirmation reported failure — the row stays ineligible, never airable",
-                mediaId);
+            if (flipEligibleOnConfirm)
+            {
+                logger.LogError(
+                    "Cast segment {MediaId} inserted but its confirmation reported failure — the row stays ineligible, never airable",
+                    mediaId);
+            }
+            else
+            {
+                // gh-#854 — on the stale re-render path, a declined confirmAsync (IAdSpotStore.
+                // SwapRenderedMediaAsync itself) is an expected race — the spot was edited, retired, or
+                // already re-rendered out from under this call between the claim and the swap attempt.
+                // The row stays ineligible, never airable, same as the normal path; only the log level
+                // differs.
+                logger.LogInformation(
+                    "Cast segment {MediaId} inserted but its stale re-render confirmation declined — the row stays ineligible, never airable",
+                    mediaId);
+            }
             return CastSegmentAuthorResult.Failure(CastSegmentFailureReason.ConfirmationFailed, "confirmation declined");
         }
 
-        if (!await catalogWriter.SetEligibleAsync(mediaId, eligible: true, ct))
+        // gh-#854 — flipEligibleOnConfirm=false means confirmAsync's own call (the guarded swap,
+        // IAdSpotStore.SwapRenderedMediaAsync) already stamped a durable pending-confirm marker and
+        // best-effort flips it eligible after its own commit; a second, unguarded flip here would race
+        // that best-effort flip rather than defer to it.
+        if (flipEligibleOnConfirm && !await catalogWriter.SetEligibleAsync(mediaId, eligible: true, ct))
         {
             // The confirmation itself succeeded (the caller's own bookkeeping is consistent), but the
             // eligibility flip found no matching row — a genuinely bizarre race, never expected in

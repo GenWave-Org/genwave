@@ -253,7 +253,7 @@ public static class FeatureAdSpotLifecycleStore
             await Task.Delay(TimeSpan.FromMilliseconds(20));
 
             // When the render completes...
-            var ok = await repo.MarkReadyAsync(claimed.Id, mediaId: 4242, CancellationToken.None);
+            var ok = await repo.MarkReadyAsync(claimed.Id, mediaId: 4242, renderVersion: 1, CancellationToken.None);
 
             // Then it moved to Ready and state_changed_at moved forward.
             Assert.True(ok);
@@ -316,7 +316,7 @@ public static class FeatureAdSpotLifecycleStore
             var repo = Harness.AdSpotRepo(db);
             await repo.CreateAsync(Draft(sponsorId) with { InitialState = AdState.Approved }, CancellationToken.None);
             var claimed = (await repo.ClaimNextApprovedAsync(CancellationToken.None))!;
-            await repo.MarkReadyAsync(claimed.Id, mediaId: 99, CancellationToken.None);
+            await repo.MarkReadyAsync(claimed.Id, mediaId: 99, renderVersion: 1, CancellationToken.None);
             var ready = (await repo.ListByStateAsync(AdState.Ready, null, 10, 0, CancellationToken.None)).Items.Single();
             await Task.Delay(TimeSpan.FromMilliseconds(20));
 
@@ -414,7 +414,7 @@ public static class FeatureAdSpotLifecycleStore
             var claimed = (await repo.ClaimNextApprovedAsync(CancellationToken.None))!;
 
             // When it is marked ready with a media id...
-            await repo.MarkReadyAsync(claimed.Id, mediaId: 777, CancellationToken.None);
+            await repo.MarkReadyAsync(claimed.Id, mediaId: 777, renderVersion: 1, CancellationToken.None);
 
             // Then the row carries that exact media id — MarkReadyAsync's own `long mediaId`
             // parameter (never nullable) makes the illegal "ready with no media_id" call impossible
@@ -433,7 +433,7 @@ public static class FeatureAdSpotLifecycleStore
             var spot = await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
 
             // When the render seam is called against it anyway (a stale/duplicate signal)...
-            var ok = await repo.MarkReadyAsync(spot.Id, mediaId: 1, CancellationToken.None);
+            var ok = await repo.MarkReadyAsync(spot.Id, mediaId: 1, renderVersion: 1, CancellationToken.None);
 
             // Then it is refused — total, never throws — and the row is left exactly as it was.
             Assert.False(ok);
@@ -901,7 +901,7 @@ public static class FeatureAdSpotLifecycleStore
 
             await repo.CreateAsync(Draft(sponsorId) with { InitialState = AdState.Approved }, CancellationToken.None);
             var claimedForReady = (await repo.ClaimNextApprovedAsync(CancellationToken.None))!;
-            await repo.MarkReadyAsync(claimedForReady.Id, mediaId: 1, CancellationToken.None);
+            await repo.MarkReadyAsync(claimedForReady.Id, mediaId: 1, renderVersion: 1, CancellationToken.None);
 
             await repo.CreateAsync(Draft(sponsorId) with { InitialState = AdState.Approved }, CancellationToken.None);
             var claimedForFailure = (await repo.ClaimNextApprovedAsync(CancellationToken.None))!;
@@ -1120,7 +1120,7 @@ public static class FeatureAdSpotLifecycleStore
                 { InitialState = AdState.Approved },
                 CancellationToken.None);
             var claimed = (await repo.ClaimNextApprovedAsync(CancellationToken.None))!;
-            await repo.MarkReadyAsync(claimed.Id, mediaId: 1, CancellationToken.None);
+            await repo.MarkReadyAsync(claimed.Id, mediaId: 1, renderVersion: 1, CancellationToken.None);
             return claimed.Id;
         }
 
@@ -1354,7 +1354,7 @@ public static class FeatureAdSpotLifecycleStore
             var repo = Harness.AdSpotRepo(db);
             await repo.CreateAsync(Draft(sponsorId) with { InitialState = AdState.Approved }, CancellationToken.None);
             var claimed = (await repo.ClaimNextApprovedAsync(CancellationToken.None))!;
-            await repo.MarkReadyAsync(claimed.Id, mediaId: 1, CancellationToken.None);
+            await repo.MarkReadyAsync(claimed.Id, mediaId: 1, renderVersion: 1, CancellationToken.None);
             var ready = (await repo.ListByStateAsync(AdState.Ready, null, 10, 0, CancellationToken.None)).Items.Single();
 
             // When an edit is attempted against it...

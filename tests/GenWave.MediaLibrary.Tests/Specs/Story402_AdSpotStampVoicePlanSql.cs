@@ -175,7 +175,7 @@ public static class FeatureAdSpotStampVoicePlanSql
             var repo = Harness.AdSpotRepo(db);
             await repo.CreateAsync(Draft(sponsorId), CancellationToken.None);
             var claimed = (await repo.ClaimNextApprovedAsync(CancellationToken.None))!;
-            var promoted = await repo.MarkReadyAsync(claimed.Id, mediaId: 4242, CancellationToken.None);
+            var promoted = await repo.MarkReadyAsync(claimed.Id, mediaId: 4242, renderVersion: 1, CancellationToken.None);
             Assert.True(promoted, "arrange: MarkReadyAsync unexpectedly refused the row");
 
             // When a stamp is attempted against it directly...

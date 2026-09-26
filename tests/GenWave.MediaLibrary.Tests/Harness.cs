@@ -38,9 +38,37 @@ static class Harness
 
     /// <summary>Builds an <see cref="AdSpotRepository"/> over the fixture's own station_svc data
     /// source (SPEC F159.1, F159.2; STORY-389; PLAN T398) — mirrors <see cref="AnnouncementRepo"/>'s
-    /// own factory shape one station-schema store over.</summary>
-    public static AdSpotRepository AdSpotRepo(DatabaseFixture f) =>
-        new(new Lazy<NpgsqlDataSource>(() => f.StationDataSource));
+    /// own factory shape one station-schema store over.
+    ///
+    /// <para>
+    /// gh-#854 widened the constructor with <see cref="IAdminMediaLookup"/>/<see cref="IAuthoredCatalogWriter"/>
+    /// seams into <c>library_svc</c> — wired here to a REAL <see cref="Repo"/> (the SAME production
+    /// shape <c>AddAdSpotStore</c> uses, resolving both interfaces from one shared
+    /// <see cref="MediaRepository"/> instance), never a fake, so a spec calling
+    /// <see cref="AdSpotRepository.SwapRenderedMediaAsync"/> exercises the guard against genuine
+    /// <c>library.media</c> rows.
+    /// </para>
+    /// </summary>
+    public static AdSpotRepository AdSpotRepo(DatabaseFixture f)
+    {
+        var mediaRepo = Repo(f);
+        return new(
+            new Lazy<NpgsqlDataSource>(() => f.StationDataSource), mediaRepo, mediaRepo,
+            NullLogger<AdSpotRepository>.Instance);
+    }
+
+    /// <summary>Widens <see cref="AdSpotRepo"/> with an explicit <paramref name="catalogWriter"/>
+    /// (gh-#854) — <see cref="IAdminMediaLookup"/> still resolves through a REAL <see cref="Repo"/>, so
+    /// <see cref="AdSpotRepository.SwapRenderedMediaAsync"/>'s own upfront guard reads genuine
+    /// <c>library.media</c> facts; only the post-commit best-effort flip goes through the caller's own
+    /// <paramref name="catalogWriter"/>. Lets a spec force that flip to fail or throw while the swap's
+    /// own guarded UPDATE (and its <c>pending_retire_media_id</c> stamp) still runs for real —
+    /// impossible through <see cref="AdSpotRepo"/> alone, since its own <see cref="IAdminMediaLookup"/>
+    /// and <see cref="IAuthoredCatalogWriter"/> share one <see cref="MediaRepository"/> instance.</summary>
+    public static AdSpotRepository AdSpotRepoWithCatalogWriter(DatabaseFixture f, IAuthoredCatalogWriter catalogWriter) =>
+        new(
+            new Lazy<NpgsqlDataSource>(() => f.StationDataSource), Repo(f), catalogWriter,
+            NullLogger<AdSpotRepository>.Instance);
 
     /// <summary>Builds an <see cref="AdBriefRepository"/> over the fixture's own station_svc data
     /// source (SPEC F159.1, F162.2; STORY-389; PLAN T398) — mirrors <see cref="AnnouncementRepo"/>'s
@@ -77,7 +105,8 @@ static class Harness
     /// never picks up a DIFFERENT sponsor's still-Approved row (only one Approved row exists at a time,
     /// this cycle's own). PLAN T440 ruling: shared by every <see cref="AdSpotRepository"/> spec that
     /// needs one ready spot on the shelf, rather than each spec file keeping its own copy.</summary>
-    public static async Task<long> SeedReadySpotAsync(AdSpotRepository repo, long sponsorId, long mediaId)
+    public static async Task<long> SeedReadySpotAsync(
+        AdSpotRepository repo, long sponsorId, long mediaId, int renderVersion = 1)
     {
         await repo.CreateAsync(
             new NewAdSpot(sponsorId, "Ready spot", Brief: "A cozy hardware shop", Script: null, AdSource.Llm,
@@ -86,7 +115,7 @@ static class Harness
             CancellationToken.None);
         var claimed = await repo.ClaimNextApprovedAsync(CancellationToken.None);
         Assert.NotNull(claimed);
-        await repo.MarkReadyAsync(claimed.Id, mediaId, CancellationToken.None);
+        await repo.MarkReadyAsync(claimed.Id, mediaId, renderVersion, CancellationToken.None);
         return claimed.Id;
     }
 

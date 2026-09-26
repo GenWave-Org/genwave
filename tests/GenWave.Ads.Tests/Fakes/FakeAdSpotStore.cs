@@ -15,6 +15,7 @@ public sealed class FakeAdSpotStore : IAdSpotStore
     public int MarkReadyCalls { get; private set; }
     public long? LastMarkReadySpotId { get; private set; }
     public long? LastMarkReadyMediaId { get; private set; }
+    public int? LastMarkReadyRenderVersion { get; private set; }
     public bool MarkReadyResult { get; set; } = true;
 
     public int MarkFailedCalls { get; private set; }
@@ -22,11 +23,21 @@ public sealed class FakeAdSpotStore : IAdSpotStore
     public string? LastMarkFailedReason { get; private set; }
     public bool MarkFailedResult { get; set; } = true;
 
-    public Task<bool> MarkReadyAsync(long id, long mediaId, CancellationToken ct)
+    /// <summary>gh-#854 — <see cref="AdRenderService.RenderStaleAsync"/>'s own confirm call, the SAME
+    /// "record + return a settable result" shape <see cref="MarkReadyAsync"/> already keeps above.</summary>
+    public int SwapRenderedMediaCalls { get; private set; }
+    public long? LastSwapSpotId { get; private set; }
+    public long? LastSwapOldMediaId { get; private set; }
+    public long? LastSwapNewMediaId { get; private set; }
+    public int? LastSwapRenderVersion { get; private set; }
+    public bool SwapRenderedMediaResult { get; set; } = true;
+
+    public Task<bool> MarkReadyAsync(long id, long mediaId, int renderVersion, CancellationToken ct)
     {
         MarkReadyCalls++;
         LastMarkReadySpotId = id;
         LastMarkReadyMediaId = mediaId;
+        LastMarkReadyRenderVersion = renderVersion;
         return Task.FromResult(MarkReadyResult);
     }
 
@@ -36,6 +47,16 @@ public sealed class FakeAdSpotStore : IAdSpotStore
         LastMarkFailedSpotId = id;
         LastMarkFailedReason = failReason;
         return Task.FromResult(MarkFailedResult);
+    }
+
+    public Task<bool> SwapRenderedMediaAsync(long id, long oldMediaId, long newMediaId, int renderVersion, CancellationToken ct)
+    {
+        SwapRenderedMediaCalls++;
+        LastSwapSpotId = id;
+        LastSwapOldMediaId = oldMediaId;
+        LastSwapNewMediaId = newMediaId;
+        LastSwapRenderVersion = renderVersion;
+        return Task.FromResult(SwapRenderedMediaResult);
     }
 
     public Task<AdSpot> CreateAsync(NewAdSpot spot, CancellationToken ct) =>
@@ -74,6 +95,9 @@ public sealed class FakeAdSpotStore : IAdSpotStore
     public Task<IReadOnlyList<AdSpot>> ListReadyOlderThanAsync(TimeSpan age, CancellationToken ct) =>
         throw new NotSupportedException("Not used by AdRenderService.");
 
+    public Task<AdSpot?> FindStaleReadyAsync(int currentVersion, IReadOnlyCollection<long> excludeIds, CancellationToken ct) =>
+        throw new NotSupportedException("Not used by AdRenderService.");
+
     public Task<IReadOnlyList<long>> FindRenderingPastGraceAsync(TimeSpan grace, DateTimeOffset now, CancellationToken ct) =>
         throw new NotSupportedException("Not used by AdRenderService.");
 
@@ -100,5 +124,23 @@ public sealed class FakeAdSpotStore : IAdSpotStore
         throw new NotSupportedException("Not used by AdRenderService.");
 
     public Task<bool> ClearPreviewAsync(long id, CancellationToken ct) =>
+        throw new NotSupportedException("Not used by AdRenderService.");
+
+    public Task<IReadOnlyList<PendingAdSpotRetire>> ListPendingRetiresAsync(CancellationToken ct) =>
+        throw new NotSupportedException("Not used by AdRenderService.");
+
+    public Task<bool> ClearPendingRetireAsync(long id, long mediaId, CancellationToken ct) =>
+        throw new NotSupportedException("Not used by AdRenderService.");
+
+    public Task ClearReferencedPendingRetiresAsync(CancellationToken ct) =>
+        throw new NotSupportedException("Not used by AdRenderService.");
+
+    public Task<IReadOnlyList<PendingAdSpotConfirm>> ListPendingConfirmsAsync(CancellationToken ct) =>
+        throw new NotSupportedException("Not used by AdRenderService.");
+
+    public Task<bool> ClearPendingConfirmAsync(long id, long mediaId, CancellationToken ct) =>
+        throw new NotSupportedException("Not used by AdRenderService.");
+
+    public Task<bool> IsReadyOnMediaAsync(long id, long mediaId, CancellationToken ct) =>
         throw new NotSupportedException("Not used by AdRenderService.");
 }

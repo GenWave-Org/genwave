@@ -30,7 +30,7 @@ namespace GenWave.Core.Abstractions;
 /// </para>
 ///
 /// <para>
-/// <b>No cross-schema transaction (the db/22 role boundary, SPEC F159.1's own as-built rider).</b>
+/// <b>No cross-schema SQL transaction (the db/22 role boundary, SPEC F159.1's own as-built rider).</b>
 /// <see cref="MarkReadyAsync"/> only ever writes <c>station.ad_spot</c> — it never touches
 /// <c>library.media</c> itself, because <c>station_svc</c> (this store's own role) has no grant into
 /// the <c>library</c> schema, the same boundary that already forced <c>media_id</c>/
@@ -42,6 +42,18 @@ namespace GenWave.Core.Abstractions;
 /// <c>long mediaId</c> parameter (never nullable) is this store's half of the "ready requires
 /// media_id" invariant (SPEC F159.2) — the C# signature makes the illegal call impossible to even
 /// write, alongside db/43's own <c>CHECK</c> backstop.
+///
+/// <b><see cref="SwapRenderedMediaAsync"/> reads across that same boundary, but still never writes
+/// across it (gh-#854).</b> Its own implementation resolves the old media row's current
+/// eligible/never_play facts through <c>IAdminMediaLookup</c> — a <c>library_svc</c>-rooted read seam,
+/// the SAME one <c>AdRenderService.ResolveBedAsync</c> already holds — from INSIDE the method that
+/// also runs the guarded <c>station.ad_spot</c> UPDATE; the two never share one SQL transaction (still
+/// two separate connections, two separate roles), but both run before this method reports its own
+/// result. The eligibility WRITES this
+/// method makes once the swap's own UPDATE commits still cross through <c>IAuthoredCatalogWriter</c>
+/// exactly like every other <c>library.media</c> write in this project — the
+/// <c>JinglePackRepository</c> precedent (a station-first-with-compensation write sequence spanning
+/// two roles' connections inside one C# method) is the shape this method mirrors, not a novel one.
 /// </para>
 /// </summary>
 public interface IAdSpotStore
@@ -155,13 +167,14 @@ public interface IAdSpotStore
 
     /// <summary>
     /// <see cref="AdState.Rendering"/> to <see cref="AdState.Ready"/> (SPEC F159.2), stamping
-    /// <paramref name="mediaId"/> and <c>rendered_at</c> — PLAN T401's own render-success seam. See
-    /// this interface's own remarks for why this never opens a cross-schema transaction with the
-    /// <c>library.media</c> insert that must already have happened. Total: a row not currently
-    /// <see cref="AdState.Rendering"/> (already handled by a different call, or never claimed) leaves
-    /// the guarded <c>WHERE</c> matching nothing — reports <see langword="false"/>, never throws.
+    /// <paramref name="mediaId"/>, <paramref name="renderVersion"/> (gh-#854), and <c>rendered_at</c>
+    /// — PLAN T401's own render-success seam. See this interface's own remarks for why this never
+    /// opens a cross-schema transaction with the <c>library.media</c> insert that must already have
+    /// happened. Total: a row not currently <see cref="AdState.Rendering"/> (already handled by a
+    /// different call, or never claimed) leaves the guarded <c>WHERE</c> matching nothing — reports
+    /// <see langword="false"/>, never throws.
     /// </summary>
-    Task<bool> MarkReadyAsync(long id, long mediaId, CancellationToken ct);
+    Task<bool> MarkReadyAsync(long id, long mediaId, int renderVersion, CancellationToken ct);
 
     /// <summary>
     /// <see cref="AdState.Rendering"/> to <see cref="AdState.Failed"/> (SPEC F159.2), stamping
@@ -171,6 +184,123 @@ public interface IAdSpotStore
     /// mirrors <see cref="MarkReadyAsync"/>'s own posture exactly.
     /// </summary>
     Task<bool> MarkFailedAsync(long id, string failReason, CancellationToken ct);
+
+    /// <summary>
+    /// The oldest <see cref="AdState.Ready"/> spot whose <see cref="AdSpot.RenderVersion"/> trails
+    /// <paramref name="currentVersion"/> (gh-#854) — the background re-render backlog's own read,
+    /// oldest <c>state_changed_at</c> first. <paramref name="excludeIds"/> withholds spots the worker
+    /// already gave up on this process lifetime (a render failure never retries in the same run) — the
+    /// <see cref="ListAiringExclusionsAsync"/> array-parameter precedent, one seam over. Returns
+    /// <see langword="null"/> when the backlog is empty, never an error.
+    /// </summary>
+    Task<AdSpot?> FindStaleReadyAsync(int currentVersion, IReadOnlyCollection<long> excludeIds, CancellationToken ct);
+
+    /// <summary>
+    /// Atomically swaps a re-rendered spot onto <paramref name="newMediaId"/>; retires
+    /// <paramref name="oldMediaId"/> after commit (gh-#854). <see cref="AdState.Ready"/> never leaves
+    /// <see cref="AdState.Ready"/> for this, and <c>state_changed_at</c> is deliberately left
+    /// untouched — a product decision: swapping in a fresher render must never reset the
+    /// refresh-retire clock <see cref="ListReadyOlderThanAsync"/> reads off that same column. Declines
+    /// — reporting <see langword="false"/>, never throwing, touching neither row — when ANY guard
+    /// fails:
+    /// <list type="bullet">
+    /// <item><paramref name="oldMediaId"/> no longer resolves, or is already ineligible, or is
+    /// never_play — re-checked fresh, immediately before the swap, so only a genuine race with an
+    /// operator's own hand (never a stale upfront read) can ever cause this; <c>AdSpotWorker</c> (a
+    /// plain-text reference: GenWave.Core never references GenWave.Ads, L10) also runs a cheap,
+    /// non-authoritative version of this same check upfront, purely to skip a wasted render, never as
+    /// the guard itself, or</item>
+    /// <item>the <c>station.ad_spot</c> row is no longer <c>state = 'ready' AND media_id = </c>
+    /// <paramref name="oldMediaId"/> — a spot edited, retired, or already re-rendered out from under
+    /// this attempt, or</item>
+    /// <item>the row already carries a <c>pending_retire_media_id</c> from an EARLIER swap still
+    /// waiting on its own old-media turn-off — a second swap landing before that first marker clears
+    /// must never overwrite it, which would orphan the first swap's own old row with nothing left
+    /// pointing back at it.</item>
+    /// </list>
+    /// Only when every guard holds does the implementation commit: the guarded <c>station.ad_spot</c>
+    /// UPDATE stamps <c>pending_retire_media_id = oldMediaId</c> AND
+    /// <c>pending_confirm_media_id = newMediaId</c> in the SAME statement (gh-#854, db/48) — two
+    /// durable markers, one per row this swap touches, landing together with the swap itself. Both
+    /// markers' own eventual best-effort flips (old media turned off, new media confirmed eligible) run
+    /// AFTER this UPDATE commits, never inside its own transaction — <paramref name="oldMediaId"/>'s
+    /// turn-off runs first, then <paramref name="newMediaId"/>'s confirm, deliberately in that order (a
+    /// failure confirming new eligible leaves nothing airing from a media id nothing yet points at; the
+    /// reverse order would risk the opposite). Either flip usually lands in the SAME call, immediately
+    /// after commit, but a crash or a failure leaves its own marker durably pending rather than lost —
+    /// <see cref="ListPendingRetiresAsync"/>/<see cref="ListPendingConfirmsAsync"/>'s own remarks cover
+    /// the guaranteed invariant: every media row a swap ever touches converges eventually, even across
+    /// a crash, never silently accepted as a permanent orphan or a permanent ineligible new row. A
+    /// cancellation BEFORE this call is even reached is the one case that stays exactly as before: it
+    /// leaves behind only a still-ineligible <paramref name="newMediaId"/> row — inert, accepted;
+    /// <c>AdRenderService.RenderStaleAsync</c>'s own remarks cover that case.
+    /// </summary>
+    Task<bool> SwapRenderedMediaAsync(long id, long oldMediaId, long newMediaId, int renderVersion, CancellationToken ct);
+
+    /// <summary>
+    /// Every row still waiting on its own durable old-media turn-off (gh-#854, db/48's
+    /// <c>pending_retire_media_id</c>) — <c>AdSpotWorker</c>'s own drain (a plain-text reference:
+    /// GenWave.Core never references GenWave.Ads, L10) reads this at the top of every tick, cheap and
+    /// unconditional, so a swap's post-commit flip that crashed or failed mid-flight is never left for
+    /// anything but a later tick to finish. A pure read — the "never turn off a media id some
+    /// ad_spot STILL points at" self-heal is a SEPARATE write, <see cref="ClearReferencedPendingRetiresAsync"/>,
+    /// which the caller runs first, every tick, before this read: this method itself never mutates
+    /// anything. Bounded, the same <c>MaxUnpagedRows</c> ceiling every other unpaged read in the
+    /// implementation already shares.
+    /// </summary>
+    Task<IReadOnlyList<PendingAdSpotRetire>> ListPendingRetiresAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Clears one row's own <c>pending_retire_media_id</c> once its old media is actually turned off
+    /// (gh-#854) — guarded on BOTH <paramref name="id"/> AND <paramref name="mediaId"/> still matching
+    /// the stamped value: a second swap landing on the SAME spot between a caller's own
+    /// <see cref="ListPendingRetiresAsync"/> read and this call stamps a NEWER pending id, and this
+    /// clear must never blow that away. Total: reports <see langword="false"/>, never throws, when the
+    /// row's own pending id no longer matches (already cleared, or replaced by a newer swap) — the
+    /// caller simply leaves it for a later drain.
+    /// </summary>
+    Task<bool> ClearPendingRetireAsync(long id, long mediaId, CancellationToken ct);
+
+    /// <summary>
+    /// Self-heals every pending retire marker whose old media id is now some OTHER spot's own CURRENT
+    /// <see cref="AdSpot.MediaId"/> (an operator re-pointed a spot at it) — clears the marker in place,
+    /// without ever attempting the flip a caller would otherwise have to skip itself (gh-#854). A
+    /// write with no return value worth reporting. The caller (<c>AdSpotWorker</c>'s own
+    /// drain) runs this FIRST, every tick, before <see cref="ListPendingRetiresAsync"/>.
+    /// </summary>
+    Task ClearReferencedPendingRetiresAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Every row still waiting on its own durable new-media eligibility confirm (gh-#854, db/48's
+    /// <c>pending_confirm_media_id</c>) — <see cref="ListPendingRetiresAsync"/>'s own shape, one marker
+    /// over. A pure read; nothing here self-heals by re-pointing, since a confirm marker's own guard is
+    /// narrower still — see <see cref="IsReadyOnMediaAsync"/>, which the caller (the confirm drain)
+    /// checks per row before ever attempting the flip, rather than this method filtering rows out
+    /// itself. Bounded, the same <c>MaxUnpagedRows</c> ceiling every other unpaged read in the
+    /// implementation already shares.
+    /// </summary>
+    Task<IReadOnlyList<PendingAdSpotConfirm>> ListPendingConfirmsAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Clears one row's own <c>pending_confirm_media_id</c> once its new media is actually confirmed
+    /// eligible (gh-#854) — <see cref="ClearPendingRetireAsync"/>'s own guarded shape, one marker over:
+    /// guarded on BOTH <paramref name="id"/> AND <paramref name="mediaId"/> still matching the stamped
+    /// value, total, reports <see langword="false"/> rather than throwing when the row's own pending id
+    /// no longer matches.
+    /// </summary>
+    Task<bool> ClearPendingConfirmAsync(long id, long mediaId, CancellationToken ct);
+
+    /// <summary>
+    /// Whether <paramref name="id"/> is currently <see cref="AdState.Ready"/> AND its own
+    /// <see cref="AdSpot.MediaId"/> still equals <paramref name="mediaId"/> — the guard a confirm
+    /// marker's own flip must pass before it is ever attempted (gh-#854): an operator retiring the spot
+    /// between the swap's own commit and this flip must never revive a row the operator meant to pull,
+    /// and a second swap already moving the row on to a THIRD media id must never confirm a media id
+    /// the spot no longer even names. Shared by <see cref="SwapRenderedMediaAsync"/>'s own inline
+    /// post-commit confirm attempt and the worker's later confirm-marker drain — the SAME check, run
+    /// from two different call sites, never duplicated.
+    /// </summary>
+    Task<bool> IsReadyOnMediaAsync(long id, long mediaId, CancellationToken ct);
 
     /// <summary>
     /// State-scoped paged listing with an exact total (the T385 kind-scoped paging precedent, PLAN

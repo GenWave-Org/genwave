@@ -104,7 +104,13 @@ internal static class AdSpotWorkerHarness
         ILogger<AdSpotWorker>? workerLogger = null, ILogger<AdSpotStamper>? stamperLogger = null)
     {
         var timeProvider = new FakeTimeProvider(now);
-        var store = new FakeAdSpotLifecycleStore();
+        var adminLookup = new FakeAdminMediaLookup();
+        var catalogWriter = new FakeAuthoredCatalogWriter();
+        // gh-#854: store mirrors the REAL AdSpotRepository's own guarded swap — reading adminLookup's
+        // facts before a swap, and flipping catalogWriter's eligibility (old-then-new, best-effort)
+        // after one commits — so a stale re-render spec can observe the exact same all-or-nothing shape
+        // the production transaction gives it.
+        var store = new FakeAdSpotLifecycleStore(adminLookup, catalogWriter);
         var briefs = new FakeAdBriefStore();
         var sponsors = new FakeSponsorStore(id => briefs.SponsorIdsByBrand
             .Where(pair => pair.Value == id)
@@ -121,11 +127,9 @@ internal static class AdSpotWorkerHarness
         store.ExcludePausedSponsors(sponsors.IsPaused);
         var gate = new FakeOnAirRenderSignal();
         var author = new FakeCastSegmentAuthor();
-        var adminLookup = new FakeAdminMediaLookup();
         var libraries = new FakeAdsLibraryStore();
         var adsLibraryId = libraries.AddExisting("ads");
         var bedPool = new FakeAdBedPool();
-        var catalogWriter = new FakeAuthoredCatalogWriter();
         var stationIdentity = new FakeStationIdentityProvider(new StationIdentity("station-1", StationName, StationVoice));
         var audiencePosture = new FakeAudiencePostureProvider();
         var durationEstimator = new FakePatterDurationEstimator();
