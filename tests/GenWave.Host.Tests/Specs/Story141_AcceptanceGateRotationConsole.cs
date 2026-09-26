@@ -117,7 +117,7 @@ public static class FeatureAcceptanceGateRotationConsole
         // comments refreshed in compose.yaml + engine/genwave.liq (prose only, zero functional
         // bytes — the FROM bump itself lives in engine/Dockerfile, outside both pinned files).
         // Another intentional edit from a later epic, not a regression of the zero-diff promise.
-        const string EngineScriptSha256 = "36bc56cb9909ed94b475528ab1bb3a2f3d7f7332a5652b5c7e30189955d1358d";
+        const string EngineScriptSha256 = "bbe4a4aadde0f32a5cc96a0dfa3a9e7506945d5d45a3e89ea1ee63fc4a49e803";
         // ComposeYamlSha256 re-pinned 2026-07-30 (gh-#276): kokoro mem_limit 3g->4g + comment
         // refresh — ops-only edit, no service/wire/volume change. Another intentional edit from
         // a later epic, not a regression of this epic's zero-diff promise.
