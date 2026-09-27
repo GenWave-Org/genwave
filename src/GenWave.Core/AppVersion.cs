@@ -6,12 +6,12 @@ namespace GenWave.Core;
 
 /// <summary>
 /// The one <see cref="IAppVersion"/> implementation and the one parser of a build stamp (SPEC F211.1/
-/// F211.2, STORY-483, PLAN T588). <see cref="FromEntryAssembly"/> is the provider the F211.1
+/// F211.2, STORY-483, PLAN T588). <see cref="FromAssembly"/> is the provider the F211.1
 /// one-reader law makes the only reader of <see cref="AssemblyInformationalVersionAttribute"/> —
-/// the composition root (<c>Program.cs</c>) calls it once and registers the result as a singleton.
-/// That law is not yet enforced: PLAN T589 deletes <c>HostVersion</c> and <c>AdAppVersion</c>, and
-/// PLAN T590 moves <c>EtiquetteUserAgent</c> and <c>CatalogHttpFetcher</c> onto <see cref="IAppVersion"/>
-/// from DI and adds the architecture law.
+/// the composition root (<c>Program.cs</c>) calls it once, against the Host assembly, and registers
+/// the result as a singleton. That law is not yet enforced: PLAN T589 deleted <c>HostVersion</c> and
+/// <c>AdAppVersion</c>; PLAN T590 moves <c>EtiquetteUserAgent</c> and <c>CatalogHttpFetcher</c> onto
+/// <see cref="IAppVersion"/> from DI and adds the architecture law.
 ///
 /// Parse rule: trim, then split on the FIRST <c>+</c>. The left part, minus one leading <c>v</c>/<c>V</c>
 /// (never doubled — SPEC F211.2), must be a SemVer 2.0 core with an optional prerelease segment
@@ -44,12 +44,14 @@ public sealed partial class AppVersion : IAppVersion
     public string Build { get; }
 
     /// <summary>
-    /// Reads the entry assembly's build stamp and parses it — call ONCE, at the composition root.
+    /// Reads <paramref name="assembly"/>'s build stamp and parses it — call ONCE, at the composition
+    /// root, against the Host assembly (<c>typeof(Program).Assembly</c>), never
+    /// <see cref="Assembly.GetEntryAssembly"/>: under <c>WebApplicationFactory</c> the entry assembly
+    /// is the test host process, not GenWave.Host, so that overload would silently stamp every
+    /// in-process test's version off VSTest's own build instead of the shipped one.
     /// </summary>
-    public static AppVersion FromEntryAssembly() => From(
-        Assembly.GetEntryAssembly()?
-            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
-            .InformationalVersion);
+    public static AppVersion FromAssembly(Assembly assembly) => From(
+        assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion);
 
     /// <summary>The pure parser — exposed directly so it can be exercised without an assembly stamp.</summary>
     public static AppVersion From(string? informationalVersion)

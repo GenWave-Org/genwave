@@ -78,10 +78,12 @@ if (!shippedThemeCanary.TryGetBySlug(ThemeCatalog.ShippedDefaultSlug, out _))
 // GET /api/status's startedAt (SPEC F28.6) reflects true process start.
 builder.Services.AddSingleton(new ProcessStartTime(DateTimeOffset.UtcNow));
 
-// The one GenWave release identity (SPEC F211.1, STORY-483, PLAN T588) — read from the entry
-// assembly's build stamp exactly once, here, and shared as a singleton. No other type may read
-// AssemblyInformationalVersionAttribute (architecture law, PLAN T590).
-builder.Services.AddSingleton<IAppVersion>(AppVersion.FromEntryAssembly());
+// The one GenWave release identity (SPEC F211.1, STORY-483, PLAN T588) — read from THIS Host
+// assembly's build stamp exactly once, here, and shared as a singleton. Deliberately
+// typeof(Program).Assembly, never Assembly.GetEntryAssembly(): under WebApplicationFactory the entry
+// assembly is the test host process, not GenWave.Host (see AppVersion.FromAssembly's own remarks). No
+// other type may read AssemblyInformationalVersionAttribute (architecture law, PLAN T590).
+builder.Services.AddSingleton<IAppVersion>(AppVersion.FromAssembly(typeof(Program).Assembly));
 
 // Station settings overlay + store + persona store (ConnectionStrings:Station). Mutates
 // builder.Configuration (appends the live overlay source), so it runs before anything binds options.

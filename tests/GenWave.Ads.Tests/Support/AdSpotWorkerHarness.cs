@@ -7,6 +7,8 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using GenWave.Ads.Tests.Fakes;
+using GenWave.Core;
+using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Tts;
 using Microsoft.Extensions.Configuration;
@@ -74,8 +76,10 @@ internal static class AdSpotWorkerHarness
                 Encoding.UTF8, "application/json"),
         }));
 
-    /// <summary>The release stamp every harness-built worker writes onto a swapped spot (gh-#865).</summary>
-    public static readonly AdAppVersion HarnessAppVersion = new("v9.9.9");
+    /// <summary>The release stamp every harness-built worker writes onto a swapped spot (gh-#865),
+    /// unless a scenario passes its own <c>appVersion</c> to <see cref="Build"/> (STORY-483,
+    /// PLAN T589).</summary>
+    public static readonly IAppVersion HarnessAppVersion = AppVersion.From("9.9.9");
 
     /// <param name="now">The worker/guardian's own shared clock — advanced with
     /// <see cref="FakeTimeProvider.Advance(TimeSpan)"/> to drive a watchdog/sweep forward without a
@@ -102,10 +106,14 @@ internal static class AdSpotWorkerHarness
     /// here instead — that logging moved to <see cref="AdSpotStamper"/> when PLAN T442 hoisted the
     /// stamping pair out of this worker, so it no longer reaches <paramref name="workerLogger"/>.
     /// </param>
+    /// <param name="appVersion">Defaults to <see cref="HarnessAppVersion"/> — a scenario proving the
+    /// re-render marker's own display-form spelling (STORY-483, PLAN T589) passes its own
+    /// <see cref="AppVersion.From(string?)"/> build instead.</param>
     public static Harness Build(
         DateTimeOffset now, IReadOnlyDictionary<string, string?>? stationSettings = null,
         int renderBudgetSeconds = 300, double durationToleranceRatio = 0.4, FakeHttpMessageHandler? llmHandler = null,
-        ILogger<AdSpotWorker>? workerLogger = null, ILogger<AdSpotStamper>? stamperLogger = null)
+        ILogger<AdSpotWorker>? workerLogger = null, ILogger<AdSpotStamper>? stamperLogger = null,
+        IAppVersion? appVersion = null)
     {
         var timeProvider = new FakeTimeProvider(now);
         var adminLookup = new FakeAdminMediaLookup();
@@ -175,7 +183,7 @@ internal static class AdSpotWorkerHarness
         var boothLog = new FakeBoothLogAppender();
         var worker = new AdSpotWorker(
             store, briefs, sponsors, scriptWriter, renderService, durationEstimator, audiencePosture, catalogWriter,
-            adminLookup, stamper, gate, boothLog, HarnessAppVersion, adsOptions, llmOptions, configuration,
+            adminLookup, stamper, gate, boothLog, appVersion ?? HarnessAppVersion, adsOptions, llmOptions, configuration,
             timeProvider, workerLogger ?? new NoOpLogger<AdSpotWorker>());
 
         var guardian = new AdSpotLifecycleGuardianService(

@@ -8,8 +8,8 @@ namespace GenWave.Host.Api;
 /// </summary>
 /// <param name="StationName">The operator-configured station name (<c>Station:Name</c>), read live.</param>
 /// <param name="Version">
-/// The build-stamped <see cref="System.Reflection.AssemblyInformationalVersionAttribute"/> on the
-/// Host assembly (SPEC F65.1) — fixed for the process lifetime, never re-read per request.
+/// The one release identity's display form (<see cref="GenWave.Core.Abstractions.IAppVersion.Display"/>,
+/// SPEC F65.1, F211.1/F211.2), e.g. <c>"v5.13.2"</c> — fixed for the process lifetime.
 /// </param>
 /// <param name="License">The project's license identifier. Always <c>AGPL-3.0-or-later</c>.</param>
 /// <param name="ProjectUrl">The canonical public repository URL.</param>

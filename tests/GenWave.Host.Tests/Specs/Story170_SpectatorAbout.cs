@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using GenWave.Core;
 using GenWave.Core.Abstractions;
 using GenWave.Tts;
 
@@ -65,14 +66,6 @@ public static class FeatureSpectatorAbout
         }
 
         [Fact]
-        public async Task VersionReportsTheStampedInformationalVersion()
-        {
-            await using var factory = new SpectatorAboutWebFactory("https://demo.example/stream");
-            var body = await FetchAboutAsync(factory);
-            Assert.False(string.IsNullOrWhiteSpace(body.GetProperty("version").GetString()));
-        }
-
-        [Fact]
         public async Task LicenseIsAgpl()
         {
             await using var factory = new SpectatorAboutWebFactory("https://demo.example/stream");
@@ -98,6 +91,38 @@ public static class FeatureSpectatorAbout
 
         [Fact(Skip = OperatorGated)]
         public Task StreamUrlUpdatesLiveViaSettingsPut() => Task.CompletedTask;
+    }
+
+    /// <summary>SPEC F211.2, PLAN T589 — version matches the Host assembly's own build stamp,
+    /// independently re-derived by this fact's own oracle (<see cref="AppVersion.FromAssembly"/>
+    /// against <c>typeof(Program).Assembly</c>) rather than read back off the SAME DI singleton
+    /// the controller itself resolves — a same-instance comparison there would only prove the
+    /// controller passes DI's value through unchanged, never that DI holds the right one. Arranged
+    /// once (mirrors Story483_OneVersion.cs's own <c>ScenarioSpectatorAboutShowsTheDisplayForm</c>) —
+    /// both facts below read the same fetch.</summary>
+    public sealed class ScenarioTheVersionReadsLikeARelease : IAsyncLifetime
+    {
+        // Given: GET /spectator/api/about, once
+
+        string expected = "";
+        string version = "";
+
+        public async Task InitializeAsync()
+        {
+            await using var factory = new SpectatorAboutWebFactory("https://demo.example/stream");
+            expected = AppVersion.FromAssembly(typeof(Program).Assembly).Display;
+            var body = await FetchAboutAsync(factory);
+            version = body.GetProperty("version").GetString() ?? "";
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void VersionReportsTheHostDisplayVersion() => Assert.Equal(expected, version);
+
+        /// <summary>SPEC F211.2 — the served version reads like a release tag: "v" + a SemVer core.</summary>
+        [Fact]
+        public void VersionReadsLikeARelease() => Assert.Matches(@"^v[0-9]+\.[0-9]+\.[0-9]+", version);
     }
 
     // ── SAD PATH ──────────────────────────────────────────────────────────

@@ -2,7 +2,7 @@ namespace GenWave.Core.Abstractions;
 
 /// <summary>
 /// The one GenWave release identity for this running process (SPEC F211.1, STORY-483, PLAN T588) —
-/// built ONCE at the composition root from the entry assembly's build-stamped
+/// built ONCE at the composition root from the Host assembly's build-stamped
 /// <c>AssemblyInformationalVersionAttribute</c> and registered as a DI singleton. Every surface that
 /// needs a version string (About, spectator About, the ad worker's re-render marker, outbound
 /// User-Agent headers) injects this instead of reflecting on its own assembly — one provider, one

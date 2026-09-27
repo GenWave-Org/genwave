@@ -5,6 +5,7 @@
 namespace GenWave.Ads.Tests.Specs;
 
 using GenWave.Ads.Tests.Support;
+using GenWave.Core;
 using GenWave.Core.Domain;
 
 public static class Gh865FeatureAnAutomaticReRenderIsNarrated
@@ -36,7 +37,7 @@ public static class Gh865FeatureAnAutomaticReRenderIsNarrated
 
         [Fact]
         public void TheSpotRecordsTheReleaseItRanOn()
-            => Assert.Equal(AdSpotWorkerHarness.HarnessAppVersion.Value, Spot.AutoRerenderedOnVersion);
+            => Assert.Equal(AdSpotWorkerHarness.HarnessAppVersion.Display, Spot.AutoRerenderedOnVersion);
 
         [Fact]
         public void TheSpotRecordsWhenItRan()
@@ -103,6 +104,9 @@ public static class Gh865FeatureAppVersionReadsLikeARelease
 {
     public sealed class ScenarioTheStampIsNormalised
     {
+        // AppVersion.From is GenWave.Core's own one parser (STORY-483, PLAN T588/T589) — this table
+        // only proves the worker's re-render marker rides ITS Display form; the parser's own full
+        // rule set is Story483_AppVersionParse.cs's (GenWave.Core.Tests) concern.
         [Theory]
         [InlineData("v5.13.1", "v5.13.1")]
         [InlineData("5.13.1", "v5.13.1")]
@@ -112,7 +116,7 @@ public static class Gh865FeatureAppVersionReadsLikeARelease
         [InlineData("", "unknown")]
         [InlineData(null, "unknown")]
         public void TheStampReadsLikeATag(string? informational, string expected)
-            => Assert.Equal(expected, AdAppVersion.From(informational).Value);
+            => Assert.Equal(expected, AppVersion.From(informational).Display);
     }
 }
 
