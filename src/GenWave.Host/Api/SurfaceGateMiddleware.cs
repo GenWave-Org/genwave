@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.Routing.Template;
 using Microsoft.Extensions.Options;
 using GenWave.Host.Options;
 
@@ -21,41 +23,25 @@ public sealed class SurfaceGateMiddleware(
     RequestDelegate next,
     IOptionsMonitor<AdminOptions> adminOptions,
     IOptionsMonitor<StationOptions> stationOptions,
-    IOptionsMonitor<SpectatorOptions> spectatorOptions)
+    IOptionsMonitor<SpectatorOptions> spectatorOptions,
+    EndpointDataSource endpoints)
 {
     public async Task InvokeAsync(HttpContext context)
     {
         var endpoint = context.GetEndpoint();
 
-        if (endpoint?.Metadata.GetMetadata<AdminSurfaceAttribute>() is not null
-            && !adminOptions.CurrentValue.Enabled)
+        if (endpoint is RouteEndpoint && IsGatedOff(endpoint.Metadata))
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             return;
         }
 
-        if (endpoint?.Metadata.GetMetadata<SpectatorSurfaceAttribute>() is not null
-            && !stationOptions.CurrentValue.SpectatorMode)
-        {
-            context.Response.StatusCode = StatusCodes.Status404NotFound;
-            return;
-        }
-
-        // Listener-request kill switch (SPEC F87.2, STORY-224, PLAN T87): independent of
-        // Station:SpectatorMode above — see RequestsSurfaceAttribute's own remarks for why this
-        // runs here (before the rate limiter) rather than as an in-action check.
-        if (endpoint?.Metadata.GetMetadata<RequestsSurfaceAttribute>() is not null
-            && !stationOptions.CurrentValue.Requests.Enabled)
-        {
-            context.Response.StatusCode = StatusCodes.Status404NotFound;
-            return;
-        }
-
-        // Taste-thumb kill switch (SPEC F150.2, STORY-369, PLAN T366): the same independent,
-        // before-the-limiter shape as RequestsSurfaceAttribute immediately above — see
-        // ThumbsSurfaceAttribute's own remarks.
-        if (endpoint?.Metadata.GetMetadata<ThumbsSurfaceAttribute>() is not null
-            && !stationOptions.CurrentValue.Thumbs.Enabled)
+        // gh-#635: routing's synthesized rejections (405 method-not-allowed, 415) are not
+        // RouteEndpoints and carry none of the matched routes' metadata, so the checks above never
+        // saw them — a 405 + Allow header leaked that a disabled surface's path exists. Judge the
+        // rejection by the routes whose pattern matches the path: all gated off → 404, like the
+        // routes themselves.
+        if (endpoint is not null and not RouteEndpoint && AllCandidatesGatedOff(context.Request.Path))
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             return;
@@ -95,5 +81,49 @@ public sealed class SurfaceGateMiddleware(
         }
 
         await next(context);
+    }
+
+    /// <summary>True when any surface tag on <paramref name="metadata"/> names a surface that is
+    /// switched off right now.</summary>
+    bool IsGatedOff(EndpointMetadataCollection metadata)
+    {
+        if (metadata.GetMetadata<AdminSurfaceAttribute>() is not null && !adminOptions.CurrentValue.Enabled)
+            return true;
+
+        if (metadata.GetMetadata<SpectatorSurfaceAttribute>() is not null && !stationOptions.CurrentValue.SpectatorMode)
+            return true;
+
+        // Listener-request kill switch (SPEC F87.2, STORY-224, PLAN T87): independent of
+        // Station:SpectatorMode above — see RequestsSurfaceAttribute's own remarks for why this
+        // runs here (before the rate limiter) rather than as an in-action check.
+        if (metadata.GetMetadata<RequestsSurfaceAttribute>() is not null && !stationOptions.CurrentValue.Requests.Enabled)
+            return true;
+
+        // Taste-thumb kill switch (SPEC F150.2, STORY-369, PLAN T366): the same independent,
+        // before-the-limiter shape as RequestsSurfaceAttribute immediately above — see
+        // ThumbsSurfaceAttribute's own remarks.
+        return metadata.GetMetadata<ThumbsSurfaceAttribute>() is not null && !stationOptions.CurrentValue.Thumbs.Enabled;
+    }
+
+    /// <summary>
+    /// True when at least one mapped route's pattern matches <paramref name="path"/> and every such
+    /// route is gated off. Rejection path only (a 405/415 is rare), so the matchers are built per call.
+    /// Inline constraints are ignored — a looser match can only add candidates, and one open
+    /// candidate keeps the framework's own answer.
+    /// </summary>
+    bool AllCandidatesGatedOff(PathString path)
+    {
+        var any = false;
+        foreach (var route in endpoints.Endpoints.OfType<RouteEndpoint>())
+        {
+            var matcher = new TemplateMatcher(new RouteTemplate(route.RoutePattern), new RouteValueDictionary());
+            if (!matcher.TryMatch(path, new RouteValueDictionary()))
+                continue;
+
+            if (!IsGatedOff(route.Metadata))
+                return false;
+            any = true;
+        }
+        return any;
     }
 }

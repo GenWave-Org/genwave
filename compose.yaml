@@ -156,7 +156,8 @@ services:
       # with its search_path pinned to the `library` schema.
       ConnectionStrings__Library: "Host=db;Database=genwave;Username=library_svc;Password=${LIBRARY_DB_PASSWORD:?};Search Path=library"
       ConnectionStrings__Station: "Host=db;Database=genwave;Username=station_svc;Password=${STATION_DB_PASSWORD:?};Search Path=station"
-      # Single admin password for the Admin UI login. Empty = open API (local-dev convenience).
+      # Single admin password for the Admin UI login. Empty = admin locked (fail-closed, F60.4):
+      # login always refuses, so every admin endpoint is denied; the api logs a boot warning.
       Admin__Password: "${ADMIN_PASSWORD:-}"
       # Public listener (SPEC F64.1/F64.2, STORY-172): the app never force-binds a port — Kestrel
       # binds whatever ASPNETCORE_URLS lists, so :8081 is added alongside the existing :8080.

@@ -11,14 +11,8 @@ namespace GenWave.Host.Api;
 /// not a copy of this seam (T434 round-2 review finding F3).
 ///
 /// <para>
-/// <b><c>MediaController</c> is deliberately NOT wired to this type.</b> Its own
-/// <c>StripETagWrapper</c> still returns a raw, UNVALIDATED token straight through to
-/// <c>@expectedVersion::xid</c> — a malformed <c>If-Match</c> against <c>PATCH /api/media/{id}</c> today
-/// produces a raw <see cref="Npgsql.PostgresException"/> (SqlState 22P02) rather than a clean 400.
-/// Routing <c>MediaController</c> through <see cref="TryParseVersion"/> would CHANGE that observable
-/// behaviour (a real bug fix, but a behaviour change) — outside this task's scope, so it stays the one
-/// remaining copy, carried forward rather than fixed here (see <c>AdsController.ResolveIfMatch</c>'s own
-/// remarks for the original filing of that carry-forward).
+/// <c>MediaController.Patch</c> validates through <see cref="TryParseVersion"/> too (gh-#669): a
+/// malformed <c>If-Match</c> is a 400, never a Postgres 22P02 from the <c>::xid</c> cast.
 /// </para>
 /// </summary>
 internal static class WeakETag

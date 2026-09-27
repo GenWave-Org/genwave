@@ -148,6 +148,31 @@ file static class PatchHarness
 public static class FeaturePatchReturnsFreshEtag
 {
     // ---------------------------------------------------------------------
+    // gh-#669 — a malformed If-Match is a 400 before any SQL, never a 22P02 500
+    // ---------------------------------------------------------------------
+
+    public sealed class ScenarioMalformedIfMatchNeverReachesTheStore
+    {
+        [Theory]
+        [InlineData("W/\"abc\"")]
+        [InlineData("\"-1\"")]
+        [InlineData("W/\"99999999999\"")]
+        [InlineData("*")]
+        public async Task AMalformedTokenIsA400AndTheWriteNeverRuns(string ifMatch)
+        {
+            var write = new RecordingVersionWrite { Outcome = new MediaUpdateOutcome(MediaWriteResult.Updated, "42") };
+            var (controller, _) = PatchHarness.Build(write, ifMatch: ifMatch);
+            var patch = new MediaPatch("New Title", null, null, null, null, null, LibraryId: null);
+
+            var result = await controller.Patch(99L, patch, CancellationToken.None);
+
+            var bad = Assert.IsType<BadRequestObjectResult>(result);
+            Assert.Equal("Malformed If-Match.", Assert.IsType<ProblemDetails>(bad.Value).Title);
+            Assert.Empty(write.CallLog);
+        }
+    }
+
+    // ---------------------------------------------------------------------
     // HAPPY PATH
     // ---------------------------------------------------------------------
 
