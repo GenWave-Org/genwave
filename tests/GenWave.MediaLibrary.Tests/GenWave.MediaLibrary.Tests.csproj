@@ -33,6 +33,15 @@
          linked compile item rather than a ProjectReference — there is no Host.Tests→MediaLibrary.Tests
          reference, and one file shared by two assemblies is cheaper than a cross-test-project edge. -->
     <Compile Include="..\GenWave.Host.Tests\Support\TestNetwork.cs" Link="Support\TestNetwork.cs" />
+    <!-- STORY-484, PLAN T591: Story484_SchemaJournal.cs drives the real ./migrate.sh (Support's
+         Gh332/gh-#776 sanitized-process idiom), same cross-assembly-link reasoning as TestNetwork.cs
+         above — no Host.Tests→MediaLibrary.Tests reference exists or is warranted for three files. -->
+    <Compile Include="..\GenWave.Host.Tests\Support\ScriptProcess.cs" Link="Support\ScriptProcess.cs" />
+    <Compile Include="..\GenWave.Host.Tests\Support\RepoRootLocator.cs" Link="Support\RepoRootLocator.cs" />
+    <Compile Include="..\GenWave.Host.Tests\Support\TempDir.cs" Link="Support\TempDir.cs" />
+    <!-- T591 review F5: MigrateShDatabase's own compose/port plumbing, shared rather than a third copy
+         of what DatabaseFixture.cs and EphemeralStationDatabase.cs each already carry. -->
+    <Compile Include="..\GenWave.Host.Tests\Support\ComposeProcess.cs" Link="Support\ComposeProcess.cs" />
   </ItemGroup>
 
 </Project>
