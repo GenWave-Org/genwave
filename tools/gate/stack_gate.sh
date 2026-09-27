@@ -14,11 +14,11 @@
 #   --chaos          fault injection around the capture leg's own recording (SPEC F178.8; requires
 #                     --capture): api-down (T496, amended 2026-09-16 gh-#791/T498) — `compose
 #                     stop api`, sleep GATE_OUTAGE_SECS, `compose start api`, then poll for a
-#                     non-safe track_id within GATE_RECOVERY_SECS; silence events during the
-#                     outage are tolerated up to GATE_OUTAGE_SILENCE_MAX_SECS of TOTAL silence
-#                     (summed across every event, no cap on the event count — a real nightly run
-#                     saw two), else the gate leg fails "api-down silence" (not the capture leg's
-#                     own "silence" — see run_capture_leg's post-measure attribution).
+#                     non-safe track_id within GATE_RECOVERY_SECS; ANY silence event during the
+#                     outage fails the gate leg "api-down silence" (not the capture leg's own
+#                     "silence" — see run_capture_leg's post-measure attribution). Zero silence
+#                     holds because F210's api-free safe resolver keeps the engine playing and
+#                     compose.gate.yaml pins GW_SAFE_GAP_SECONDS=0 (SPEC F178.8(a), gh-#791).
 #                     Engine-reconnect (T497) — AFTER the capture leg finishes, only when
 #                     api-down passed — `compose restart engine`, wait for the container healthy,
 #                     then poll for a non-safe track_id within GATE_RECONNECT_SECS, else
@@ -49,11 +49,10 @@
 # api-down chaos scenario (SPEC F178.8(a)) inside run_capture_leg's own recording (see
 # run_api_down_scenario). PLAN T497 added the engine-reconnect chaos scenario (SPEC F178.8(b)),
 # run right after run_capture_leg finishes rather than inside it (see run_engine_reconnect_scenario).
-# PLAN T498 amended F178.8(a) (gh-#791) from "zero silence events" to a bound on TOTAL silence
-# seconds, no cap on the event count (a real nightly run against v5.8.3 saw two events, 7.1s +
-# 24.4s, during one outage): measure_audio.sh's own SILENCE_MAX_SECS knob, passed
-# SILENCE_MAX_SECS=GATE_OUTAGE_SILENCE_MAX_SECS only for the capture leg's own measure call when
-# --chaos is given (see run_capture_leg). PLAN T503 (gh-#777) moved the upgrade leg's call site
+# PLAN T498 briefly bounded TOTAL outage silence (GATE_OUTAGE_SILENCE_MAX_SECS); F210 (gh-#791,
+# PR #869) made the safe lane survive the outage, so F178.8(a) is back to zero silence events and
+# the knob is retired: every capture-leg measure call passes an empty SILENCE_MAX_SECS, with or
+# without --chaos (see run_capture_leg). PLAN T503 (gh-#777) moved the upgrade leg's call site
 # to run LAST and added teardown_project — see the call site at the bottom of this file.
 #
 # Usage: tools/gate/stack_gate.sh --tag <vX.Y.Z> [--fresh] [--capture] [--chaos] [--upgrade]
@@ -83,9 +82,6 @@
 # non-safe track_id to reappear after `compose start api`; GATE_RECONNECT_SECS (default 60, must
 # be a positive integer) the wall-clock budget --chaos's engine-reconnect scenario allows for a
 # non-safe track_id to reappear after `compose restart engine` (health wait included);
-# GATE_OUTAGE_SILENCE_MAX_SECS (default the effective GATE_OUTAGE_SECS, must be a positive
-# integer) the TOTAL silence seconds, summed across every event, --chaos's api-down outage window
-# tolerates before the leg fails "api-down silence" (SPEC F178.8(a), amended 2026-09-16 gh-#791);
 # TOL_LU,
 # SILENCE_FLOOR, SILENCE_SECS — measure_audio.sh's own tolerance knobs, passed through untouched
 # (see tools/gate/measure_audio.sh).
@@ -313,9 +309,6 @@ fi
 if [ -n "${GATE_RECONNECT_SECS:-}" ] && ! [[ "$GATE_RECONNECT_SECS" =~ ^[1-9][0-9]*$ ]]; then
   usage_error "GATE_RECONNECT_SECS must be a positive integer: $GATE_RECONNECT_SECS"
 fi
-if [ -n "${GATE_OUTAGE_SILENCE_MAX_SECS:-}" ] && ! [[ "$GATE_OUTAGE_SILENCE_MAX_SECS" =~ ^[1-9][0-9]*$ ]]; then
-  usage_error "GATE_OUTAGE_SILENCE_MAX_SECS must be a positive integer: $GATE_OUTAGE_SILENCE_MAX_SECS"
-fi
 
 # ---------------------------------------------------------------------------------------------
 # Prerequisite probe — binaries on THIS host; docker compose's v2-ness is checked per leg, inside
@@ -366,16 +359,23 @@ gate_api_base() {
   printf '%s' "${base%/}"
 }
 
-# Exactly five `image:` lines, one per repo-built service, nothing else under them — matches
-# compose.pinned.yaml's naming (api's image is bare `genwave`; the other four are `genwave-<svc>`).
+# Five `image:` lines, one per repo-built service — matches compose.pinned.yaml's naming (api's
+# image is bare `genwave`; the other four are `genwave-<svc>`) — plus GW_SAFE_GAP_SECONDS=0 on api
+# and engine (SPEC F178.8(a), gh-#791): the engine's entrypoint takes the api's /internal/engine-
+# config value over its own env, so both carry it; a 7 s inter-safe-track gap would otherwise read
+# as silence during the chaos outage.
 write_compose_gate_overlay() {
   local scratch="$1" tag="$2"
   cat > "$scratch/compose.gate.yaml" <<EOF
 services:
   api:
     image: ghcr.io/genwave-org/genwave:home-${tag}
+    environment:
+      GW_SAFE_GAP_SECONDS: "0"
   engine:
     image: ghcr.io/genwave-org/genwave-engine:home-${tag}
+    environment:
+      GW_SAFE_GAP_SECONDS: "0"
   icecast:
     image: ghcr.io/genwave-org/genwave-icecast:home-${tag}
   admin_ui:
@@ -1018,20 +1018,12 @@ run_capture_leg() {
 
   # Measure (F178.5/F178.8(a)): silencedetect + ebur128, both always on measure_audio.sh's own
   # stdout line — parsed here regardless of its exit code, so a failing measurement still lands
-  # in the report. With --chaos, the outage's own bound (T498, SPEC F178.8(a), amended 2026-09-16
-  # gh-#791) travels in as an env prefix on this ONE call, never `export`ed: TOTAL silence seconds
-  # across the outage, summed across every event with no cap on the event count, tolerated up to
-  # GATE_OUTAGE_SILENCE_MAX_SECS (default the effective GATE_OUTAGE_SECS) — measure_audio.sh's own
-  # silence_ok= reading is the single source of truth for whether that bound held, read below
-  # rather than re-derived from silence_events/silence_total_secs here. The non-chaos --capture leg
-  # always passes an empty bound, pinning it to "zero silence tolerated" regardless of the runner's
-  # ambient env — measure_audio.sh treats an empty SILENCE_MAX_SECS as that rule already.
+  # in the report. SILENCE_MAX_SECS is passed EMPTY on this one call, with or without --chaos,
+  # pinning "zero silence tolerated" regardless of the runner's ambient env (SPEC F178.8(a):
+  # gh-#791's F210 safe resolver retired the T498 outage bound) — measure_audio.sh's own
+  # silence_ok= reading is the single source of truth, read below rather than re-derived.
   local measure_out measure_status=0
-  local outage_silence_bound=""
-  if [ "$DO_CHAOS" = 1 ]; then
-    outage_silence_bound="${GATE_OUTAGE_SILENCE_MAX_SECS:-${GATE_OUTAGE_SECS:-90}}"
-  fi
-  measure_out="$(SILENCE_MAX_SECS="$outage_silence_bound" \
+  measure_out="$(SILENCE_MAX_SECS="" \
       "$root/tools/gate/measure_audio.sh" "$scratch/capture.wav" \
       --target "$target")" || measure_status=$?
   CAPTURE_SILENCE_EVENTS="$(printf '%s\n' "$measure_out" | sed -n 's/.*silence_events=\([0-9]*\).*/\1/p')"
@@ -1043,17 +1035,15 @@ run_capture_leg() {
     1)
       if [ -n "$CAPTURE_SILENCE_OK" ] && [ "$CAPTURE_SILENCE_OK" = "0" ]; then
         # Silence decided first, before loudness — and, with --chaos, attributed to the chaos
-        # leg's "api-down silence" rather than the capture leg's own "silence" (SPEC F178.8(a),
-        # amended 2026-09-16 gh-#791: TOTAL silence seconds across the outage, summed across
-        # every event, tolerated up to GATE_OUTAGE_SILENCE_MAX_SECS with no cap on the event
-        # count), overriding the recovery-only verdict set above. The capture leg itself stays
+        # leg's "api-down silence" rather than the capture leg's own "silence" (SPEC F178.8(a):
+        # zero silence events across the outage), overriding the recovery-only verdict set above. The capture leg itself stays
         # whatever it already was (untouched here) so its own booth_log/measure verdicts below
         # are still reached. measure_audio.sh's exit 1 covers silence OR loudness, so under
         # --chaos a silence that breaches the bound skips the loudness verdict: the capture leg
         # can read passed with out-of-tolerance loudness while chaos carries the red (the
         # integrated value still lands in the report, and the gate still exits 1). Without
-        # --chaos, measure_audio.sh's own default (SILENCE_MAX_SECS unset) makes silence_ok=0
-        # exactly when silence_events>0, so this keeps today's non-chaos behaviour bit-for-bit.
+        # --chaos, measure_audio.sh's own default (SILENCE_MAX_SECS empty) makes silence_ok=0
+        # exactly when silence_events>0.
         if [ "$CHAOS_API_DOWN_RAN" = 1 ]; then
           LEG_STATUS[chaos]="failed"; LEG_DETAIL[chaos]="api-down silence"
         else

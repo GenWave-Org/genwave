@@ -7,14 +7,11 @@
 // recovery is measured, not assumed; the fake station's /stream decides whether a capture has a
 // silence event.
 //
-// PLAN T498 (amended 2026-09-16, gh-#791) bounds F178.8(a) from "zero silence events" to a bound
-// on TOTAL silence seconds summed across every event, with no cap on the event count (a real
-// nightly run against v5.8.3 saw two events, 7.1s + 24.4s, during one outage — a per-event cap
-// would still have failed that real case) — AC2/AC2b below. The bound only ever reaches the
-// api-down window's own capture (run_capture_leg's measure call); the engine-reconnect scenario's
-// own post-restart capture is unaffected and stays zero-tolerance, so AC2b's passing scenario
-// gives that second capture a CLEAN stream via GATE_STUB_STREAM_AFTER_RESTART — the same knob
-// ScenarioADirtyPostRestartCaptureFails uses, with the clean/gapped roles reversed.
+// PLAN T498 briefly bounded F178.8(a) to TOTAL outage silence (GATE_OUTAGE_SILENCE_MAX_SECS);
+// F210's api-free safe resolver (gh-#791, PR #869) put it back to zero silence events and retired
+// the knob — AC2/AC2b below. AC2b sets the retired knob anyway to prove a stale runner env can't
+// loosen the bar, and gives the post-restart capture a CLEAN stream via
+// GATE_STUB_STREAM_AFTER_RESTART so the one gap is the api-down window's alone.
 //
 // RED at plan time: tools/gate/stack_gate.sh does not exist.
 
@@ -74,21 +71,17 @@ public static class FeatureTheStreamSurvivesAnApiOutageAndAnEngineRestart
     // SAD PATH — the api-down scenario
     // ---------------------------------------------------------------------
 
-    // AC2 — silence beyond the bound still fails. GATE_OUTAGE_SILENCE_MAX_SECS is set explicitly
-    // (rather than relying on the harness's own GATE_OUTAGE_SECS=1 default) so this scenario's
-    // intent — a 3-second gap breaching a 1-second bound — survives a future change to that
-    // default.
-    public sealed class ScenarioSilenceBeyondTheBoundFails : IDisposable
+    // AC2 — any silence during the outage fails (SPEC F178.8(a): zero silence events).
+    public sealed class ScenarioAnyOutageSilenceFails : IDisposable
     {
         readonly FakeStation station = new() { StreamWav = MakeWav(-14, seconds: 6, withGap: true) };
         readonly Run run;
 
-        public ScenarioSilenceBeyondTheBoundFails() =>
+        public ScenarioAnyOutageSilenceFails() =>
             run = Chaos(station, new Dictionary<string, string>
             {
                 ["GATE_STUB_ONAIR_AFTER"] = "0",
                 ["CAPTURE_SECS"] = "8",
-                ["GATE_OUTAGE_SILENCE_MAX_SECS"] = "1",
             });
 
         public void Dispose() => station.Dispose();
@@ -101,19 +94,17 @@ public static class FeatureTheStreamSurvivesAnApiOutageAndAnEngineRestart
     }
 
     // ---------------------------------------------------------------------
-    // HAPPY PATH — AC2b: bounded silence is tolerated and reported
+    // AC2b — the retired T498 knob no longer loosens the bar, and the failure is still reported
     // ---------------------------------------------------------------------
 
-    // The api-down window's own capture carries the one gap; the post-restart capture
-    // (engine-reconnect's own scenario, unaffected by T498's bound — see the file header) gets a
-    // clean stream via GATE_STUB_STREAM_AFTER_RESTART so its own zero-tolerance silence check
-    // still passes, isolating this scenario's assertions to the api-down facts alone.
-    public sealed class ScenarioBoundedSilencePasses : IDisposable
+    // The api-down window's own capture carries the one gap; the post-restart capture gets a clean
+    // stream via GATE_STUB_STREAM_AFTER_RESTART, isolating the red to the api-down facts alone.
+    public sealed class ScenarioAStaleOutageBoundIsIgnored : IDisposable
     {
         readonly FakeStation station = new() { StreamWav = MakeWav(-14, seconds: 6, withGap: true) };
         readonly Run run;
 
-        public ScenarioBoundedSilencePasses()
+        public ScenarioAStaleOutageBoundIsIgnored()
         {
             var clean = MakeWav(-14, seconds: 6);
             run = Chaos(station, new Dictionary<string, string>
@@ -128,7 +119,10 @@ public static class FeatureTheStreamSurvivesAnApiOutageAndAnEngineRestart
         public void Dispose() => station.Dispose();
 
         [Fact]
-        public void ExitIsZero() => Assert.Equal(0, run.ExitCode);
+        public void ExitIsOne() => Assert.Equal(1, run.ExitCode);
+
+        [Fact]
+        public void ApiDownSilenceIsTheFirstFailingAssertion() => Assert.Equal("api-down silence", run.FirstFailure);
 
         [Fact]
         public void TheEventCountIsPrinted() => Assert.Contains("api-down silence events: 1", run.ReportMd, StringComparison.Ordinal);
