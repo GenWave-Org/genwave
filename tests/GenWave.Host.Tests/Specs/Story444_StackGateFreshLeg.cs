@@ -62,6 +62,14 @@ public static class FeatureTheStackGateRunsAFreshInstallInAScratch
             Assert.DoesNotContain(new[] { "api:", "engine:", "icecast:", "admin_ui:", "piper:" },
                 s => !run.Overlay.Contains(s, StringComparison.Ordinal));
 
+        [Theory]
+        [InlineData("api")]
+        [InlineData("engine")]
+        public void TheOverlayZeroesTheSafeGap(string service) =>
+            // SPEC F178.8(a) (gh-#791): the engine takes the api's engine-config value over its own
+            // env, so both carry GW_SAFE_GAP_SECONDS=0 — a 7 s safe gap would read as chaos silence.
+            Assert.Matches(@"(?m)^  " + service + @":\n(?:    .*\n)*?      GW_SAFE_GAP_SECONDS: ""0""$", run.Overlay);
+
         [Fact]
         public void TheFileSetIsBasePiperOnlyGate() =>
             Assert.Contains(run.Calls, c => c.Contains("files=compose.yaml:compose.piper-only.yaml:compose.gate.yaml", StringComparison.Ordinal));
