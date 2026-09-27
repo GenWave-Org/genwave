@@ -11,9 +11,10 @@ namespace GenWave.Host.Seeding;
 /// One-shot idempotent safe-loop boot seed (SPEC F27.6, STORY-080). Fresh boot: create library
 /// <c>"safe"</c> if absent, render a voice-only segment from <c>Station:Safe:SeedMessage</c> into it
 /// through <see cref="ISafeSegmentAuthor"/> — the identical all-or-nothing pipeline
-/// <c>POST /api/safe-segments</c> (STORY-079) already ships — then, iff no operator
+/// <c>POST /api/safe-segments</c> (STORY-079) already ships. As soon as the library exists — before
+/// the render, so a failed render never leaves the appsettings default in force (gh-#645) — iff no
 /// <c>Station:SafeScope:LibraryIds</c> value exists in the settings store, point the SafeScope
-/// overlay at the seeded library. The marker is written only when every step above succeeded.
+/// overlay at it. The marker is written only when every step above succeeded.
 ///
 /// Any failure degrades to a WARN and <see cref="SafeLoopSeedOutcome.Failed"/> — it never throws out
 /// of <see cref="SeedAsync"/> (except <see cref="OperationCanceledException"/> from a genuine host
@@ -57,6 +58,11 @@ public sealed class SafeLoopSeeder(
 
             var library = await EnsureSafeLibraryAsync(ct);
 
+            // The scope needs only the library id, never the render's outcome: pointing it here, before
+            // the render, keeps a failed first-boot render (TTS unreachable) from leaving the
+            // appsettings default [1] — the whole music library — as the safe scope (gh-#645).
+            await WriteSafeScopeOverlayIfAbsentAsync(library.Id, ct);
+
             // A library found with content already in it means a prior attempt rendered the row but
             // failed before the overlay/marker step (or an operator populated it) — reuse it rather
             // than rendering a second "Please Stand By" row (F27.6: retries must not duplicate).
@@ -84,7 +90,6 @@ public sealed class SafeLoopSeeder(
                     library.Id, result.MediaId);
             }
 
-            await WriteSafeScopeOverlayIfAbsentAsync(library.Id, ct);
             await markerStore.MarkCompletedAsync(ct);
 
             return SafeLoopSeedOutcome.Seeded;
@@ -169,8 +174,10 @@ public sealed class SafeLoopSeeder(
     /// <c>IOptionsMonitor</c> value, which always shows the appsettings default of <c>[1]</c>, F21.8).
     /// An operator row present with an EMPTY array still counts as "exists" (a deliberate F25 choice)
     /// and is left untouched.
+    /// A retry after a failed render finds this seeder's own earlier row and leaves it alone — it
+    /// already names the same library.
     /// The read-then-write here is not atomic (an operator's own PUT could race between the two), but
-    /// that window only exists on the one first successful boot before the marker is set — an
+    /// that window only exists on boots before the marker is set — an
     /// acceptable, vanishingly narrow risk for a fresh-deploy convenience, not a steady-state hazard.
     /// </summary>
     async Task WriteSafeScopeOverlayIfAbsentAsync(long libraryId, CancellationToken ct)
@@ -179,7 +186,7 @@ public sealed class SafeLoopSeeder(
         if (overrides.ContainsKey(SafeScopeKey))
         {
             logger.LogInformation(
-                "Boot seed: operator SafeScope override already present — leaving it untouched (F27.6)");
+                "Boot seed: SafeScope override already present — leaving it untouched (F27.6)");
             return;
         }
 

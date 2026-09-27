@@ -362,6 +362,26 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	  EXCLUDE USING gist (day_of_week WITH =, int4range(start_minute, end_minute) WITH &&)
 	);
 
+	-- Per-date specials (SPEC F120.1, STORY-317): fresh-init mirror of db/36-schedule-special-
+	-- migration.sh's own CREATE, statement for statement (gh-#618 — an init-scripts-only boot lacked the
+	-- table). Same column shapes and minute CHECKs as station.segment_schedule just above; the EXCLUDE
+	-- is per-date (on_date WITH =), not weekly. See db/36 for the in-place upgrade path.
+	create table if not exists station.schedule_special (
+	  id           serial      primary key,
+	  on_date      date        not null,
+	  start_minute int         not null check (start_minute % 30 = 0 and start_minute between 0 and 1410),
+	  end_minute   int         not null check (end_minute   % 30 = 0 and end_minute   between 30 and 1440),
+	  persona_id   int         references station.persona (id) on delete restrict,
+	  show_id      int         references station.show (id) on delete restrict,
+	  genres       text[],
+	  energy_min   double precision,
+	  energy_max   double precision,
+	  created_at   timestamptz not null default now(),
+	  updated_at   timestamptz not null default now(),
+	  check (end_minute > start_minute),
+	  exclude using gist (on_date with =, int4range(start_minute, end_minute) with &&)
+	);
+
 	-- Owner-imported themes (SPEC F103.7, F103.8; STORY-271, PLAN T181): the Community Catalog v2
 	-- theme kind's storage. definition holds the byte-stable ThemeManifest (GenWave.Host.Theming) —
 	-- no runtime-only fields, no cached CSS — the same byte-stable-manifest discipline

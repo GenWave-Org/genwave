@@ -248,8 +248,19 @@ preflight_docker_published_ports() {
 }
 
 # preflight_port_is_docker_owned <port> <docker-ps-ports-blob>
+# Docker collapses adjacent published ports into a range ("0.0.0.0:8080-8081->8080-8081/tcp"),
+# so each host-side spec is read as lo[-hi] and the port matched by range membership — a plain
+# ":<port>->" grep never sees 8080 there, and 8081 never follows a colon at all (gh-#631).
 preflight_port_is_docker_owned() {
-  printf '%s' "$2" | grep -qE "[:]${1}->"
+  local port="$1" spec lo hi
+  while IFS= read -r spec; do
+    spec="${spec#:}"
+    spec="${spec%->}"
+    lo="${spec%-*}"
+    hi="${spec#*-}"
+    [ "$port" -ge "$lo" ] && [ "$port" -le "$hi" ] && return 0
+  done < <(printf '%s' "$2" | grep -oE ':[0-9]+(-[0-9]+)?->')
+  return 1
 }
 
 preflight_ports() {

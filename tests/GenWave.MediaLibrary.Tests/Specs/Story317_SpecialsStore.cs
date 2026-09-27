@@ -292,16 +292,9 @@ public static class FeatureSpecialsStore
     }
 
     // ---------------------------------------------------------------------
-    // MIGRATION CONVERGENCE (SPEC F120.1/F120.5, PLAN T258 gate) — the db/35 precedent, adapted: db/36
-    // ships with NO db/01/db/06 mirror at all (unlike db/35, which widens a table db/06 already
-    // creates), so there is no second DDL copy to prove agreement against. The honest mechanism instead
-    // (see db/36's own header): migrate.sh applies EVERY db/*-migration.sh, this one included, on every
-    // launch.sh run — fresh volume or existing one — because only db/01/db/06 are mounted as Postgres's
-    // own docker-entrypoint-initdb.d scripts. A fresh install and an upgrading install therefore reach
-    // station.schedule_special through the exact same single code path; "converge" here means "there is
-    // only ever one DDL statement to run," proven by (a) the fresh-init snapshot carrying no trace of
-    // this table at all, and (b) the migration script itself being safe to (re-)run against that
-    // snapshot and producing the shape SPEC F120.1 promises.
+    // MIGRATION CONVERGENCE (SPEC F120.1, PLAN T258 gate; gh-#618) — the db/40 precedent: db/06 carries
+    // a fresh-init mirror of db/36's CREATE, so an init-scripts-only boot (this fixture, a fresh compose
+    // start before migrate.sh) has the table, and db/36 stays the idempotent in-place upgrade path.
     // ---------------------------------------------------------------------
 
     [Collection(DatabaseCollection.Name)]
@@ -309,13 +302,16 @@ public static class FeatureSpecialsStore
     public sealed class ScenarioMigrationConvergence(DatabaseFixture db)
     {
         [Fact]
-        public void TheFreshInitSnapshotCarriesNoTraceOfScheduleSpecial()
+        public void TheFreshInitSnapshotCarriesScheduleSpecial()
         {
             // DatabaseFixture.InitialSchema is captured once, immediately after Postgres finishes
             // running ONLY db/01 + db/06 (db-compose.yaml's own docker-entrypoint-initdb.d mount) and
-            // before any spec class — this one included — ever runs db/36. SPEC F120.5's "ships ONLY
-            // with this slice" promise turns red here the instant anyone adds a db/06 mirror.
-            Assert.DoesNotContain(db.InitialSchema.Keys, key => key.Table == "schedule_special");
+            // before any spec class ever runs db/36 — a dropped db/06 mirror turns this red (gh-#618).
+            var found = db.InitialSchema.TryGetValue(("station", "schedule_special", "on_date"), out var column);
+
+            Assert.True(found, "station.schedule_special.on_date missing from the fresh-init schema snapshot");
+            Assert.Equal("date", column.DataType);
+            Assert.Equal("NO", column.IsNullable);
         }
 
         [Fact]
