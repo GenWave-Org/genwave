@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **128 seams across 7 projects.**
+> **129 seams across 8 projects.**
 
 ## GenWave.Ads (2 seams)
 
@@ -59,6 +59,12 @@
 |---|---|---|---|
 | `GenWave.Core.Abstractions.IContextPatterFactSource` | `GenWave.Context.ContextPipeline` | Singleton | also registered: `GenWave.Core.Abstractions.NoOpContextPatterFactSource` (GenWave.Core) |
 | `GenWave.Core.Abstractions.IContextProvider` | `GenWave.Context.History.HistoryContextProvider` | Singleton | also registered: `GenWave.Context.Weather.WeatherContextProvider` (GenWave.Context) |
+
+## GenWave.Core (1 seam)
+
+| Port | Adapter | Lifetime | Notes |
+|---|---|---|---|
+| `GenWave.Core.Abstractions.IAppVersion` | `GenWave.Core.AppVersion` | Singleton | — |
 
 ## GenWave.Host (36 seams)
 
