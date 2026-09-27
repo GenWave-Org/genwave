@@ -1,23 +1,10 @@
 #!/bin/bash
-# 36-schedule-special-migration.sh — creates station.schedule_special. NO db/01/db/06 mirror, by
-# design (SPEC F120.1, F120.5; STORY-317; PLAN T258): this is the epic's one ruled-droppable slice,
-# and "drop the slice = drop this one file" only holds if nothing else — least of all db/06's own
-# fresh-init CREATE — carries a second copy of this table's DDL to go stale/diverge/need reverting.
-#
-# THE HONEST FRESH-INSTALL MECHANISM: db-compose.yaml / compose.yaml mount ONLY db/01-library.sh and
-# db/06-station-settings-migration.sh as Postgres `docker-entrypoint-initdb.d` scripts — those two
-# alone run automatically on a brand-new pgdata volume. Every other db/NN-*-migration.sh, this one
-# included, reaches a database (fresh volume or an existing one upgrading through a release) the exact
-# same way: launch.sh always calls `./migrate.sh --keep-going` immediately after the db service comes
-# up and reports healthy, unconditionally, whether the volume was just created or not — see migrate.sh
-# itself ("apply the idempotent db/*-migration.sh scripts to a RUNNING db service") and launch.sh's own
-# remark just above that call ("applying them on every launch is safe and keeps the schema converged").
-# A fresh install therefore gets station.schedule_special the identical way an upgraded install does:
-# ONE script, ONE code path, run by the SAME runner either way — there is no db/06 mirror to keep in
-# sync in the first place, so "fresh init" and "in-place upgrade" cannot diverge the way an ADD COLUMN
-# migration (db/35's own precedent) has to guard against. The nearest existing precedent for a table
-# that ships with zero db/01/db/06 mirror is db/34-cue-remeasure-migration.sh's own
-# library.one_time_fix ledger table — same mechanism, different table.
+# 36-schedule-special-migration.sh — creates station.schedule_special (SPEC F120.1, STORY-317; PLAN
+# T258). The in-place upgrade path; db/06-station-settings-migration.sh carries the fresh-init mirror,
+# statement for statement (gh-#618). This script originally shipped unmirrored as the dayparting epic's
+# ruled-droppable slice; the slice shipped, so it follows the house mirror rule like every other
+# station-schema table — an init-scripts-only boot (the test fixture, a fresh compose start before
+# migrate.sh) otherwise lacks the table. Keep the two CREATEs identical.
 #
 # F91 mirrored (per F120.1): on_date replaces day_of_week (a specific calendar date instead of a
 # weekday number — "shadow the grid for its span," not "repeat every week"); start_minute/end_minute

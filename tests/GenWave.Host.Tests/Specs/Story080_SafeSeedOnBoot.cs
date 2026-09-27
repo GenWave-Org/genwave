@@ -436,9 +436,9 @@ public static class FeatureSafeSeedOnBootInProcess
     public sealed class ScenarioSeedFailureDegradesNeverBlocksBoot
     {
         [Fact]
-        public async Task ASynthesisFailureReturnsFailedWithoutThrowingOrWritingAnything()
+        public async Task ASynthesisFailureReturnsFailedWithoutThrowingOrWritingTheMarker()
         {
-            var (seeder, marker, _, author, settings) = SafeLoopSeederFactory.Build();
+            var (seeder, marker, _, author, _) = SafeLoopSeederFactory.Build();
             author.Result = SafeSegmentAuthorResult.Failure(
                 SafeSegmentFailureReason.SynthesisFailed, "Kokoro unreachable");
 
@@ -446,6 +446,35 @@ public static class FeatureSafeSeedOnBootInProcess
 
             Assert.Equal(SafeLoopSeedOutcome.Failed, outcome);
             Assert.Equal(0, marker.MarkCompletedCallCount);
+        }
+
+        // gh-#645: the scope needs the library id, not the render — a failed first-boot render must
+        // not leave the appsettings default [1] (the whole music library) as the safe scope.
+        [Fact]
+        public async Task ASynthesisFailureStillPointsTheSafeScopeAtTheSafeLibrary()
+        {
+            var (seeder, _, libraries, author, settings) = SafeLoopSeederFactory.Build();
+            author.Result = SafeSegmentAuthorResult.Failure(
+                SafeSegmentFailureReason.SynthesisFailed, "Kokoro unreachable");
+
+            await seeder.SeedAsync(CancellationToken.None);
+
+            var write = Assert.Single(settings.WriteCalls);
+            Assert.Equal("Station:SafeScope:LibraryIds", write.Key);
+            var libraryId = (await libraries.GetAllWithMediaCountAsync(CancellationToken.None)).Single().Id;
+            Assert.Equal([libraryId], Assert.IsType<long[]>(write.Value));
+        }
+
+        [Fact]
+        public async Task ASynthesisFailureStillLeavesAnOperatorSafeScopeUntouched()
+        {
+            var (seeder, _, _, author, settings) = SafeLoopSeederFactory.Build();
+            settings.SeedOperatorRow("Station:SafeScope:LibraryIds", "[7]");
+            author.Result = SafeSegmentAuthorResult.Failure(
+                SafeSegmentFailureReason.SynthesisFailed, "Kokoro unreachable");
+
+            await seeder.SeedAsync(CancellationToken.None);
+
             Assert.Empty(settings.WriteCalls);
         }
 

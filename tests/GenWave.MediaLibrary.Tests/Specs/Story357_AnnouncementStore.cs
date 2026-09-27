@@ -816,9 +816,8 @@ public static class FeatureAnnouncementStoreLifecycle
         {
             // DatabaseFixture.InitialSchema is captured once, immediately after Postgres finishes
             // running ONLY db/01 + db/06 (db-compose.yaml's own docker-entrypoint-initdb.d mount) and
-            // before any spec class — this one included — ever runs db/40. Unlike
-            // station.schedule_special (F120.5, deliberately NO db/06 mirror), station.announcement
-            // DOES ship one (db/40's own header) — the Story305 mirror-assert shape: a dropped mirror
+            // before any spec class — this one included — ever runs db/40. station.announcement ships a
+            // db/06 mirror (db/40's own header) — the Story305 mirror-assert shape: a dropped mirror
             // turns this fact red, since nothing here ever runs db/40 itself.
             var found = db.InitialSchema.TryGetValue(("station", "announcement", "state"), out var column);
 
