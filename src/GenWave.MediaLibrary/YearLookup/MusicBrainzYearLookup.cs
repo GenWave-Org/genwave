@@ -40,27 +40,27 @@ using GenWave.MediaLibrary.Options;
 ///
 /// MusicBrainz etiquette (SPEC F76.1): every request awaits <see cref="MusicBrainzRateLimiter"/> —
 /// a shared, process-wide gate, not a delay hand-rolled by whichever caller happens to drive this
-/// class today — immediately before it is sent, and carries a descriptive <see cref="UserAgent"/>
+/// class today — immediately before it is sent, and carries a descriptive <see cref="userAgent"/>
 /// identifying GenWave and a contact URL, built by the shared
 /// <see cref="GenWave.Core.Http.EtiquetteUserAgent"/> helper (F7 fix, T228 review — this class's own
 /// construction used to be a hand-copied twin of <c>HistoryContextProvider</c>'s; see that helper's
-/// own remarks) from this assembly's build-stamped <c>AssemblyInformationalVersionAttribute</c> (SPEC
-/// F65.1) rather than a hardcoded literal.
+/// own remarks) from the injected <see cref="IAppVersion"/>'s display form (SPEC F211.1, STORY-483,
+/// PLAN T590) rather than reflecting on this assembly's own build stamp.
 /// </summary>
 public sealed class MusicBrainzYearLookup(
-    HttpClient http, IOptionsMonitor<YearLookupOptions> optionsMonitor, MusicBrainzRateLimiter rateLimiter)
+    HttpClient http,
+    IOptionsMonitor<YearLookupOptions> optionsMonitor,
+    MusicBrainzRateLimiter rateLimiter,
+    IAppVersion appVersion)
     : IYearLookup, IYearLookupDiagnostics
 {
-    /// <summary>The project's public repository — the "contact URL" half of the etiquette User-Agent.</summary>
-    const string ProjectUrl = "https://github.com/GenWave-Org/genwave";
-
     /// <summary>
-    /// "GenWave/&lt;version&gt; (+repo)" (SPEC F76.1), byte-identical to the pre-F7 construction —
-    /// see <see cref="GenWave.Core.Http.EtiquetteUserAgent"/>'s own remarks for how the version
-    /// segment is derived and why this assembly's own <see cref="System.Reflection.Assembly"/> is
-    /// passed explicitly rather than resolved inside the shared helper.
+    /// "GenWave/&lt;version&gt; (+repo)" (SPEC F76.1) — see
+    /// <see cref="GenWave.Core.Http.EtiquetteUserAgent"/>'s own remarks for how the version and
+    /// project-URL segments are derived. An instance field, not <see langword="static"/>: the version
+    /// comes from the injected <see cref="IAppVersion"/>, not a reflected assembly stamp (PLAN T590).
     /// </summary>
-    static readonly string UserAgent = EtiquetteUserAgent.Build(typeof(MusicBrainzYearLookup).Assembly, ProjectUrl);
+    readonly string userAgent = EtiquetteUserAgent.Build(appVersion);
 
     /// <summary>
     /// Response-buffer ceiling for this typed client (review finding — mirrors
@@ -95,7 +95,7 @@ public sealed class MusicBrainzYearLookup(
             using var request = new HttpRequestMessage(HttpMethod.Get, BuildRequestUri(cfg.Endpoint, artist, title, album));
             // Set per-request, not on the shared HttpClient (F48.1) — keeps this seam testable
             // against a captured HttpRequestMessage rather than a client-wide default header.
-            request.Headers.UserAgent.ParseAdd(UserAgent);
+            request.Headers.UserAgent.ParseAdd(userAgent);
 
             var response = await http.SendAsync(request, timeoutCts.Token);
             response.EnsureSuccessStatusCode();   // throws HttpRequestException on non-2xx

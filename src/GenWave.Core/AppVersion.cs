@@ -9,9 +9,10 @@ namespace GenWave.Core;
 /// F211.2, STORY-483, PLAN T588). <see cref="FromAssembly"/> is the provider the F211.1
 /// one-reader law makes the only reader of <see cref="AssemblyInformationalVersionAttribute"/> —
 /// the composition root (<c>Program.cs</c>) calls it once, against the Host assembly, and registers
-/// the result as a singleton. That law is not yet enforced: PLAN T589 deleted <c>HostVersion</c> and
-/// <c>AdAppVersion</c>; PLAN T590 moves <c>EtiquetteUserAgent</c> and <c>CatalogHttpFetcher</c> onto
-/// <see cref="IAppVersion"/> from DI and adds the architecture law.
+/// the result as a singleton. The one-reader law is enforced by the architecture test
+/// <c>Story483_OneVersionLaw.OnlyTheProviderReads</c> (GenWave.Architecture.Tests), which fails if
+/// any production type other than this one references <see cref="AssemblyInformationalVersionAttribute"/>
+/// or <see cref="System.Diagnostics.FileVersionInfo"/> directly.
 ///
 /// Parse rule: trim, then split on the FIRST <c>+</c>. The left part, minus one leading <c>v</c>/<c>V</c>
 /// (never doubled — SPEC F211.2), must be a SemVer 2.0 core with an optional prerelease segment

@@ -27,6 +27,8 @@ using Microsoft.Extensions.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
+using GenWave.Core;
+using GenWave.Core.Abstractions;
 using GenWave.Host.Api;
 using GenWave.Host.Catalog;
 using GenWave.Host.Configuration;
@@ -586,6 +588,10 @@ public static class FeatureCatalogProxyGuardedDoor
         public const string IndexUrl = "https://catalog.test/repo/index.json";
         const string Directory = "https://catalog.test/repo/";
 
+        // Fixed test IAppVersion (STORY-483, PLAN T590) — CatalogHttpFetcher now builds its UA from an
+        // injected IAppVersion.Display, never a reflected assembly stamp.
+        public static readonly IAppVersion TestAppVersion = AppVersion.From("5.13.2+abc1234");
+
         // Grounded in genwave-catalog/tools/testdata/green/valid-dj (schema-valid card+meta pair).
         public static string ValidDjCard => """
             {
@@ -666,10 +672,10 @@ public static class FeatureCatalogProxyGuardedDoor
 
         public static CatalogProxyService BuildService(HttpMessageHandler handler, TimeProvider timeProvider, string indexUrl = IndexUrl) =>
             new(
-                new SingleHandlerHttpClientFactory(handler),
                 new CommunityCatalogAccessor(new FakeOptionsMonitor<CommunityOptions>(new CommunityOptions { CatalogIndexUrl = indexUrl })),
                 timeProvider,
-                NullLogger<CatalogProxyService>.Instance);
+                NullLogger<CatalogProxyService>.Instance,
+                new CatalogHttpFetcher(TestAppVersion, new SingleHandlerHttpClientFactory(handler)));
     }
 
     /// <summary>
@@ -745,10 +751,10 @@ public static class FeatureCatalogProxyGuardedDoor
                 {
                     services.RemoveAll<CatalogProxyService>();
                     services.AddSingleton(sp => new CatalogProxyService(
-                        sp.GetRequiredService<IHttpClientFactory>(),
                         sp.GetRequiredService<CommunityCatalogAccessor>(),
                         timeProvider,
-                        sp.GetRequiredService<ILogger<CatalogProxyService>>()));
+                        sp.GetRequiredService<ILogger<CatalogProxyService>>(),
+                        sp.GetRequiredService<CatalogHttpFetcher>()));
                 }
             });
         }
@@ -1087,8 +1093,8 @@ public static class FeatureCatalogProxyGuardedDoor
                 new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(oversizeBody, Encoding.UTF8, "application/json") }));
             var factory = new SingleHandlerHttpClientFactory(handler);
 
-            var outcome = await CatalogHttpFetcher.FetchAsync(
-                factory, new Uri(CatalogFixtures.IndexUrl), CatalogProxyService.MaxIndexBytes, CancellationToken.None);
+            var outcome = await new CatalogHttpFetcher(CatalogFixtures.TestAppVersion, factory).FetchAsync(
+                new Uri(CatalogFixtures.IndexUrl), CatalogProxyService.MaxIndexBytes, CancellationToken.None);
 
             Assert.IsType<CatalogFetchOutcome.Oversize>(outcome);
         }

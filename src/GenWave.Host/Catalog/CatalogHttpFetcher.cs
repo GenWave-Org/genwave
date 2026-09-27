@@ -1,6 +1,7 @@
 namespace GenWave.Host.Catalog;
 
-using System.Reflection;
+using GenWave.Core.Abstractions;
+using GenWave.Core.Http;
 
 /// <summary>
 /// Shared HTTP fetch + bounded-read mechanics for <see cref="CatalogProxyService"/>'s two upstream
@@ -13,23 +14,29 @@ using System.Reflection;
 /// or "is this a trustworthy shelf" (index validation), both of which need context this class
 /// deliberately doesn't carry.
 /// </summary>
-internal static class CatalogHttpFetcher
+// Public (not internal): CatalogProxyService's own public primary constructor takes this type as a
+// parameter, and several public API controllers (FontPackController, AdPackController, etc.) take
+// CatalogProxyService — a less-accessible parameter type on a public constructor is a compile error
+// (CS0051). FetchAsync itself stays internal below: CatalogFetchOutcome is internal, so the method
+// that returns it must not be more accessible than that (CS0050) — GenWave.Host.Tests still reaches
+// it via InternalsVisibleTo, the same as every other internal Catalog seam.
+public sealed class CatalogHttpFetcher(IAppVersion appVersion, IHttpClientFactory httpClientFactory)
 {
     /// <summary>
-    /// "GenWave/&lt;version&gt; (+repo)" — the same shape as <c>MusicBrainzYearLookup.UserAgent</c>
-    /// (SPEC F76.1). Read once from this assembly's own build-stamped
-    /// <see cref="AssemblyInformationalVersionAttribute"/> (SPEC F65.1), never a hardcoded literal.
+    /// "GenWave/&lt;version&gt; (+repo)" — the same shape as
+    /// <c>MusicBrainzYearLookup</c>'s own User-Agent (SPEC F76.1), built from the injected
+    /// <see cref="IAppVersion"/> (SPEC F211.1, STORY-483, PLAN T590) rather than a reflected assembly
+    /// stamp. An instance field: this class is resolved as a DI singleton, not a static helper,
+    /// precisely so it can hold this.
     /// </summary>
-    static readonly string UserAgent =
-        $"GenWave/{typeof(CatalogHttpFetcher).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown"} (+https://github.com/GenWave-Org/genwave)";
+    readonly string userAgent = EtiquetteUserAgent.Build(appVersion);
 
-    public static async Task<CatalogFetchOutcome> FetchAsync(
-        IHttpClientFactory httpClientFactory, Uri uri, int maxBytes, CancellationToken ct)
+    internal async Task<CatalogFetchOutcome> FetchAsync(Uri uri, int maxBytes, CancellationToken ct)
     {
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-            request.Headers.UserAgent.ParseAdd(UserAgent);
+            request.Headers.UserAgent.ParseAdd(userAgent);
             // HttpCompletionOption.ResponseHeadersRead (review finding) — the default,
             // ResponseContentRead, makes SendAsync itself buffer the ENTIRE body up front before
             // this method ever sees a byte, making ReadBoundedAsync's own cap dead code: every

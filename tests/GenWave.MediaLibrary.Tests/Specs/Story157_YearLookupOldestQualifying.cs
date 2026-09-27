@@ -19,6 +19,8 @@ using System.Net;
 using System.Text;
 using Dapper;
 using Microsoft.Extensions.Options;
+using GenWave.Core;
+using GenWave.Core.Abstractions;
 using GenWave.MediaLibrary.Catalog;
 using GenWave.MediaLibrary.Options;
 using GenWave.MediaLibrary.Tests.Fakes;
@@ -28,6 +30,10 @@ namespace GenWave.MediaLibrary.Tests.Specs;
 
 public static class FeatureYearLookupOldestQualifying
 {
+    // Fixed test IAppVersion (STORY-483, PLAN T590) — MusicBrainzYearLookup now builds its UA from an
+    // injected IAppVersion.Display, never a reflected assembly stamp.
+    static readonly IAppVersion TestAppVersion = AppVersion.From("5.13.2+abc1234");
+
     // ─────────────────────────────────────────────────────────────────────────
     // HAPPY PATH — the comparator
     // ─────────────────────────────────────────────────────────────────────────
@@ -313,7 +319,7 @@ public static class FeatureYearLookupOldestQualifying
             }));
             var http = new HttpClient(handler);
             IOptionsMonitor<YearLookupOptions> options = new FakeOptionsMonitor<YearLookupOptions>(new YearLookupOptions());
-            return (new MusicBrainzYearLookup(http, options, new MusicBrainzRateLimiter(TimeProvider.System)), handler);
+            return (new MusicBrainzYearLookup(http, options, new MusicBrainzRateLimiter(TimeProvider.System), TestAppVersion), handler);
         }
     }
 
@@ -331,6 +337,6 @@ public static class FeatureYearLookupOldestQualifying
         }));
         var http = new HttpClient(handler);
         IOptionsMonitor<YearLookupOptions> options = new FakeOptionsMonitor<YearLookupOptions>(new YearLookupOptions());
-        return new MusicBrainzYearLookup(http, options, new MusicBrainzRateLimiter(TimeProvider.System));
+        return new MusicBrainzYearLookup(http, options, new MusicBrainzRateLimiter(TimeProvider.System), TestAppVersion);
     }
 }

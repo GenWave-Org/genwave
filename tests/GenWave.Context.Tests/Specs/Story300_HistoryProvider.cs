@@ -3,6 +3,8 @@ using System.Net;
 using System.Text;
 using GenWave.Context.History;
 using GenWave.Context.Tests.Fakes;
+using GenWave.Core;
+using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
@@ -68,6 +70,10 @@ public static class FeatureHistoryProvider
     const string TodayFile = "08-08.json";
     const string TomorrowFile = "08-09.json";
 
+    // Fixed test IAppVersion (STORY-483, PLAN T590) — HistoryContextProvider now builds its UA from
+    // an injected IAppVersion.Display, never a reflected assembly stamp.
+    static readonly IAppVersion TestAppVersion = AppVersion.From("5.13.2+abc1234");
+
     static (HistoryContextProvider Provider, FakeHttpMessageHandler Handler, string CacheRoot, FakeTimeProvider Time)
         Build(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> respond, string? cacheRoot = null)
     {
@@ -77,7 +83,7 @@ public static class FeatureHistoryProvider
         var cacheRootProvider = new FakeContextCacheRootProvider { Root = root };
         var time = new FakeTimeProvider(FixedNow);
         var logger = new CapturingLogger<HistoryContextProvider>();
-        var provider = new HistoryContextProvider(http, cacheRootProvider, time, logger);
+        var provider = new HistoryContextProvider(http, cacheRootProvider, time, logger, TestAppVersion);
 
         return (provider, handler, root, time);
     }
@@ -305,7 +311,7 @@ public static class FeatureHistoryProvider
             cacheRoots.Add(cacheRoot);
             var cacheRootProvider = new FakeContextCacheRootProvider { Root = cacheRoot };
             var logger = new CapturingLogger<HistoryContextProvider>();
-            var provider = new HistoryContextProvider(http, cacheRootProvider, new FakeTimeProvider(FixedNow), logger);
+            var provider = new HistoryContextProvider(http, cacheRootProvider, new FakeTimeProvider(FixedNow), logger, TestAppVersion);
 
             await provider.FetchAsync(CancellationToken.None);
 
@@ -377,7 +383,7 @@ public static class FeatureHistoryProvider
             var time = new FakeTimeProvider(FixedNow);
             var stationClock = new FakeStationClockProvider(new DateTimeOffset(2026, 8, 9, 3, 0, 0, TimeSpan.Zero));
             var provider = new HistoryContextProvider(
-                http, cacheRootProvider, time, new CapturingLogger<HistoryContextProvider>(), stationClock);
+                http, cacheRootProvider, time, new CapturingLogger<HistoryContextProvider>(), TestAppVersion, stationClock);
 
             await provider.FetchAsync(CancellationToken.None);
 
@@ -475,7 +481,7 @@ public static class FeatureHistoryProvider
             var http = new HttpClient(handler) { BaseAddress = new Uri(HistoryContextProvider.WikimediaBaseAddress) };
             var cacheRootProvider = new FakeContextCacheRootProvider(); // Root defaults to "" — never wired.
             var logger = new CapturingLogger<HistoryContextProvider>();
-            var provider = new HistoryContextProvider(http, cacheRootProvider, new FakeTimeProvider(FixedNow), logger);
+            var provider = new HistoryContextProvider(http, cacheRootProvider, new FakeTimeProvider(FixedNow), logger, TestAppVersion);
 
             var content = await provider.FetchAsync(CancellationToken.None);
 
@@ -499,7 +505,7 @@ public static class FeatureHistoryProvider
             var http = new HttpClient(handler) { BaseAddress = new Uri(HistoryContextProvider.WikimediaBaseAddress) };
             var cacheRootProvider = new FakeContextCacheRootProvider(); // Never set — blank, misconfigured.
             var time = new FakeTimeProvider(FixedNow);
-            var provider = new HistoryContextProvider(http, cacheRootProvider, time, new CapturingLogger<HistoryContextProvider>());
+            var provider = new HistoryContextProvider(http, cacheRootProvider, time, new CapturingLogger<HistoryContextProvider>(), TestAppVersion);
 
             var settings = new FakeContextSettingsProvider();
             settings.Set("history", new ContextProviderSettings(true, 60, 60, null));

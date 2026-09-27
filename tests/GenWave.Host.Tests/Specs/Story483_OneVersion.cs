@@ -12,11 +12,16 @@
 
 using System.Net;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
+using GenWave.Context.History;
 using GenWave.Core;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.Host.Catalog;
 using GenWave.Host.Tests.Fakes;
+using GenWave.Host.Tests.Support;
+using GenWave.MediaLibrary.YearLookup;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -28,8 +33,6 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureOneVersion
 {
-    const string PendingUa = "pending: T590 — User-Agent builders inject IAppVersion (STORY-483)";
-
     public sealed class ScenarioDiResolvesTheOneProvider : IDisposable
     {
         // Given: the real Program.cs composition root, booted with no database reachable
@@ -104,25 +107,129 @@ public static class FeatureOneVersion
         public void ReadsV5132() => Assert.Equal("v5.13.2", version);
     }
 
-    public sealed class ScenarioTheUserAgentCarriesTheDisplayForm
+    public sealed class ScenarioTheUserAgentCarriesTheDisplayForm : IAsyncLifetime
     {
-        // Given: host IAppVersion from "5.13.2+abc1234"; one fetch each through the MusicBrainz year
-        //        lookup, the history context provider and CatalogHttpFetcher, each on a capturing
-        //        handler
+        // Given: the real Program.cs composition root with IAppVersion swapped for one built from
+        //        "5.13.2+abc1234", and one capturing primary handler per outbound seam (MusicBrainz,
+        //        History, Catalog) — one fetch each, through the seam DI itself resolves (T590
+        //        review: hand-building each seam directly proved nothing about how Program.cs
+        //        actually wires IAppVersion into them).
 
         const string Expected = "GenWave/v5.13.2 (+https://github.com/GenWave-Org/genwave)";
 
+        TempDir? cacheRoot;
+        string musicBrainzUserAgent = "";
+        string historyUserAgent = "";
+        string catalogUserAgent = "";
+
+        public async Task InitializeAsync()
+        {
+            cacheRoot = new TempDir();
+            await using var factory = new OneVersionUserAgentWebFactory(cacheRoot.Path);
+
+            var musicBrainzLookup = factory.Services.GetRequiredService<MusicBrainzYearLookup>();
+            await musicBrainzLookup.TryLookupAsync("The Testers", "Testing Waters", null, CancellationToken.None);
+            musicBrainzUserAgent = RequireCapturedUserAgent(factory.MusicBrainzHandler, nameof(MusicBrainzYearLookup));
+
+            var historyProvider = factory.Services.GetRequiredService<HistoryContextProvider>();
+            // Fetches BOTH today's day file and tomorrow's pre-fetch (HistoryContextProvider's own
+            // remarks) — both requests carry the SAME instance-level userAgent field, so the first
+            // captured request speaks for both.
+            await historyProvider.FetchAsync(CancellationToken.None);
+            historyUserAgent = RequireCapturedUserAgent(factory.HistoryHandler, nameof(HistoryContextProvider));
+
+            var catalogFetcher = factory.Services.GetRequiredService<CatalogHttpFetcher>();
+            await catalogFetcher.FetchAsync(
+                new Uri("https://catalog.test/repo/index.json"), 1024, CancellationToken.None);
+            catalogUserAgent = RequireCapturedUserAgent(factory.CatalogHandler, nameof(CatalogHttpFetcher));
+        }
+
+        public Task DisposeAsync()
+        {
+            cacheRoot?.Dispose();
+            return Task.CompletedTask;
+        }
+
+        /// <summary>The seam actually reached its own capturing handler — a capture failure throws
+        /// here, in arrange, rather than surfacing as a confusing failure inside one of the three
+        /// single-assertion facts below.</summary>
+        static string RequireCapturedUserAgent(FakeHttpMessageHandler handler, string seamName) =>
+            handler.Requests.Count > 0
+                ? handler.Requests[0].Headers.UserAgent.ToString()
+                : throw new InvalidOperationException($"{seamName}'s capturing handler saw no outbound request.");
+
         /// <summary>AC8 — MusicBrainz UA is <see cref="Expected"/></summary>
-        [Fact(Skip = PendingUa)]
-        public void MusicBrainz() => Assert.Fail(PendingUa);
+        [Fact]
+        public void MusicBrainz() => Assert.Equal(Expected, musicBrainzUserAgent);
 
         /// <summary>AC8 — history UA is <see cref="Expected"/></summary>
-        [Fact(Skip = PendingUa)]
-        public void History() => Assert.Fail(PendingUa);
+        [Fact]
+        public void History() => Assert.Equal(Expected, historyUserAgent);
 
         /// <summary>AC8 — catalog UA is <see cref="Expected"/></summary>
-        [Fact(Skip = PendingUa)]
-        public void Catalog() => Assert.Fail(PendingUa);
+        [Fact]
+        public void Catalog() => Assert.Equal(Expected, catalogUserAgent);
+    }
+}
+
+/// <summary>
+/// <see cref="FeatureOneVersion.ScenarioTheUserAgentCarriesTheDisplayForm"/>'s own factory (STORY-483
+/// AC8, PLAN T590 review) — swaps <see cref="IAppVersion"/> for one built from "5.13.2+abc1234" and
+/// puts one capturing <see cref="FakeHttpMessageHandler"/> on each outbound seam's own client: the
+/// MusicBrainz/History TYPED clients (<c>MediaLibraryServiceCollectionExtensions</c>/
+/// <c>ContextServiceCollectionExtensions</c>'s own <c>AddHttpClient&lt;T&gt;</c> registrations) and
+/// the Catalog NAMED client (<see cref="CatalogProxyService.HttpClientName"/>). Mirrors
+/// Story297_ContextTickerWire's own <c>ConfigurePrimaryHttpMessageHandler</c> idiom throughout: calling
+/// <c>AddHttpClient</c> again for a client Program.cs already registered composes onto that SAME
+/// named client's configuration rather than replacing it, so only the transport is swapped —
+/// BaseAddress/Timeout/MaxResponseContentBufferSize all survive from the real registration.
+/// </summary>
+file sealed class OneVersionUserAgentWebFactory(string cacheRoot) : WebApplicationFactory<Program>
+{
+    internal const string Password = "test-password-t590-one-version-ua";
+
+    internal FakeHttpMessageHandler MusicBrainzHandler { get; } =
+        new((_, _) => Task.FromResult(JsonOk("""{ "recordings": [] }""")));
+
+    internal FakeHttpMessageHandler HistoryHandler { get; } = new((_, _) => Task.FromResult(
+        JsonOk("""{ "selected": [ { "text": "A curated fact.", "year": 2001, "pages": [] } ] }""")));
+
+    internal FakeHttpMessageHandler CatalogHandler { get; } = new((_, _) => Task.FromResult(JsonOk("{}")));
+
+    static HttpResponseMessage JsonOk(string body) => new(HttpStatusCode.OK)
+    {
+        Content = new StringContent(body, Encoding.UTF8, "application/json"),
+    };
+
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        builder.UseEnvironment("Development");
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
+        builder.UseSetting("Admin:Password", Password);
+        builder.UseSetting("Station:Id", "genwave-1");
+        builder.UseSetting("Station:Name", "GWAV 108.8");
+        builder.UseSetting("Station:Voice", "af_heart");
+        builder.UseSetting("Station:Scope:LibraryIds:0", "1");
+
+        builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<IHostedService>();
+
+            services.RemoveAll<IAppVersion>();
+            services.AddSingleton<IAppVersion>(AppVersion.From("5.13.2+abc1234"));
+
+            // A writable scratch cache root (STORY-483 AC8) — Program.cs's own real
+            // IContextCacheRootProvider binding reads Tts:CacheRoot ("/tts" by default), which this
+            // suite has no permission to create; HistoryContextProvider.FetchAsync would otherwise
+            // fail closed with zero requests before HistoryHandler ever saw one (see
+            // FixedContextCacheRootProvider's own remarks).
+            services.RemoveAll<IContextCacheRootProvider>();
+            services.AddSingleton<IContextCacheRootProvider>(new FixedContextCacheRootProvider(cacheRoot));
+
+            services.AddHttpClient<MusicBrainzYearLookup>().ConfigurePrimaryHttpMessageHandler(() => MusicBrainzHandler);
+            services.AddHttpClient<HistoryContextProvider>().ConfigurePrimaryHttpMessageHandler(() => HistoryHandler);
+            services.AddHttpClient(CatalogProxyService.HttpClientName).ConfigurePrimaryHttpMessageHandler(() => CatalogHandler);
+        });
     }
 }
 
@@ -245,4 +352,14 @@ file sealed class NoOpAdminMediaQuery : IAdminMediaQuery
 {
     public Task<PagedResult<AdminMediaDto>> ListAdminAsync(LibraryScope scope, MediaQuery query, CancellationToken ct) =>
         throw new NotSupportedException("Not exercised by STORY-483's version-display facts.");
+}
+
+/// <summary>AC8's own minimal <see cref="IContextCacheRootProvider"/> — a plain writable temp
+/// directory, no config/options plumbing: <see cref="ScenarioTheUserAgentCarriesTheDisplayForm.History"/>
+/// only needs <see cref="HistoryContextProvider.FetchAsync"/> to actually reach the network (a blank
+/// root would fail-closed with zero requests — that class's own remarks), never a real cache-lifecycle
+/// fact.</summary>
+file sealed class FixedContextCacheRootProvider(string root) : IContextCacheRootProvider
+{
+    public string Root => root;
 }

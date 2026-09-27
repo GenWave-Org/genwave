@@ -79,4 +79,15 @@
     <ProjectReference Include="..\GenWave.TestSupport\GenWave.TestSupport.csproj" />
   </ItemGroup>
 
+  <!-- STORY-483 AC11 (PLAN T590): the Abstractions surface-pin proof reuses GenWave.Host.Tests'
+       own reflection-based enumerator (GenWave.Host.Tests.Support.PublicSurface, already visible
+       here transitively via the SeamIndexGenerator ProjectReference above — a second Compile Link
+       of that same source file would double-define the type and fail CS0436) and its committed
+       baseline fixture, copied into this project's own output the same way GenWave.MediaLibrary.Tests
+       .csproj's TestNetwork.cs Link shares a SOURCE file (that file has no transitive-assembly path
+       here, so it stays a Compile Link; a content fixture has no such conflict either way). -->
+  <ItemGroup>
+    <None Include="..\GenWave.Host.Tests\Fixtures\abstractions-5.10.0-surface.txt" Link="Fixtures\abstractions-5.10.0-surface.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

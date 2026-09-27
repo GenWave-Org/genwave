@@ -356,6 +356,7 @@ builder.Services
         client.MaxResponseContentBufferSize = CatalogProxyService.MaxIndexBytes;
     })
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.AddSingleton<CatalogHttpFetcher>();
 builder.Services.AddSingleton<CatalogProxyService>();
 
 // Installs a catalog persona entry's own sidecar face after a successful catalog-origin import

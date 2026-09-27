@@ -13,10 +13,11 @@
 // EnrichmentService.BackfillYearLookupAsync twice, proving the second pass makes zero HTTP calls.
 
 using System.Net;
-using System.Reflection;
 using System.Text;
 using Dapper;
 using Microsoft.Extensions.Time.Testing;
+using GenWave.Core;
+using GenWave.Core.Abstractions;
 using GenWave.MediaLibrary.Options;
 using GenWave.MediaLibrary.Tests.Fakes;
 using GenWave.MediaLibrary.YearLookup;
@@ -29,14 +30,18 @@ public static class FeatureMusicBrainzEtiquette
     // Helpers
     // ---------------------------------------------------------------------
 
+    // Fixed test IAppVersion (STORY-483, PLAN T590) — MusicBrainzYearLookup now builds its UA from an
+    // injected IAppVersion.Display, never a reflected assembly stamp, so the "descriptive User-Agent"
+    // oracle below is this SAME fixed version's Display, not a second, independent reflection.
+    static readonly IAppVersion TestAppVersion = AppVersion.From("5.13.2+abc1234");
+
     static HttpResponseMessage EmptyRecordingsResponse() => new(HttpStatusCode.OK)
     {
         Content = new StringContent("""{ "recordings": [] }""", Encoding.UTF8, "application/json"),
     };
 
     static string ExpectedUserAgent() =>
-        $"GenWave/{typeof(MusicBrainzYearLookup).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown"} " +
-        "(+https://github.com/GenWave-Org/genwave)";
+        $"GenWave/{TestAppVersion.Display} (+https://github.com/GenWave-Org/genwave)";
 
     // ---------------------------------------------------------------------
     // HAPPY PATH — throttle + identity (F76.1, AC1)
@@ -59,7 +64,8 @@ public static class FeatureMusicBrainzEtiquette
             var lookup = new MusicBrainzYearLookup(
                 new HttpClient(handler),
                 new FakeOptionsMonitor<YearLookupOptions>(new YearLookupOptions()),
-                new MusicBrainzRateLimiter(fakeTime));
+                new MusicBrainzRateLimiter(fakeTime),
+                TestAppVersion);
 
             // When the first lookup completes...
             await lookup.TryLookupAsync("Artist One", "Song One", null, CancellationToken.None);
@@ -92,7 +98,8 @@ public static class FeatureMusicBrainzEtiquette
             var lookup = new MusicBrainzYearLookup(
                 new HttpClient(handler),
                 new FakeOptionsMonitor<YearLookupOptions>(new YearLookupOptions()),
-                new MusicBrainzRateLimiter(fakeTime));
+                new MusicBrainzRateLimiter(fakeTime),
+                TestAppVersion);
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
 
@@ -124,7 +131,8 @@ public static class FeatureMusicBrainzEtiquette
             var lookup = new MusicBrainzYearLookup(
                 new HttpClient(handler),
                 new FakeOptionsMonitor<YearLookupOptions>(new YearLookupOptions()),
-                new MusicBrainzRateLimiter(TimeProvider.System));
+                new MusicBrainzRateLimiter(TimeProvider.System),
+                TestAppVersion);
 
             // When a lookup is performed...
             await lookup.TryLookupAsync("The Testers", "Testing Waters", null, CancellationToken.None);
@@ -161,7 +169,7 @@ public static class FeatureMusicBrainzEtiquette
             var handler = new FakeHttpMessageHandler((_, _) => Task.FromResult(EmptyRecordingsResponse()));
             var yearLookupOptions = new FakeOptionsMonitor<YearLookupOptions>(new YearLookupOptions());
             var yearLookup = new MusicBrainzYearLookup(
-                new HttpClient(handler), yearLookupOptions, new MusicBrainzRateLimiter(TimeProvider.System));
+                new HttpClient(handler), yearLookupOptions, new MusicBrainzRateLimiter(TimeProvider.System), TestAppVersion);
             var svc = Harness.BackfillYearLookupWith(repo, yearLookup, yearLookupOptions);
 
             // When the first enrichment pass runs over the row...
