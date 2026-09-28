@@ -9,9 +9,15 @@
 # exported, never read again anywhere in this script or by genwave.liq.
 #
 # ROBUSTNESS CONTRACT:
-#   • 3 attempts, 2-second timeout each.
-#   • On any failure (api not yet up, network error, non-200 response, parse error)
-#     the existing env values (set by compose as fallback defaults) are preserved.
+#   • Retries for a 30 s wall-clock budget (SPEC F213.2), tracked in MILLISECONDS via
+#     `date +%s%3N` — whole-second `date +%s` under-counts elapsed time by up to 999 ms, which
+#     lets the last try or sleep overrun the deadline. Remaining budget is checked before every
+#     try and before every sleep; each try's --max-time and each sleep are capped at whatever
+#     budget remains, so neither can itself cross the deadline. This is a wall-clock budget, not
+#     a fixed try count.
+#   • On any failure (api not yet up, network error, non-200 response, parse error) — including
+#     the budget running out — the existing env values (set by compose as fallback defaults)
+#     are preserved.
 #   • The engine ALWAYS boots — a missing/slow api is NOT a fatal error here.
 #
 # SECURITY: /internal/engine-config is anonymous and exposes only these tuning numbers plus
@@ -27,18 +33,45 @@ API_HOST="${API_HOST:-api}"
 API_PORT="${API_PORT:-8080}"
 CONFIG_URL="http://${API_HOST}:${API_PORT}/internal/engine-config"
 
-MAX_ATTEMPTS=3
+FETCH_BUDGET_MS=30000
+TRY_MAX_MS=2000
+SLEEP_MAX_MS=1000
+
+now_ms() { date +%s%3N; }
+
+# Formats a millisecond count as fractional seconds, e.g. 1234 -> "1.234" — the form curl
+# --max-time and sleep both accept.
+ms_as_seconds() {
+    printf '%d.%03d' $(( $1 / 1000 )) $(( $1 % 1000 ))
+}
+
+DEADLINE_MS=$(( $(now_ms) + FETCH_BUDGET_MS ))
 ATTEMPT=0
 FETCHED=""
 
-while [ "${ATTEMPT}" -lt "${MAX_ATTEMPTS}" ]; do
+while true; do
+    REMAINING_MS=$(( DEADLINE_MS - $(now_ms) ))
+    [ "${REMAINING_MS}" -le 0 ] && break
+
+    TRY_MS="${TRY_MAX_MS}"
+    [ "${REMAINING_MS}" -lt "${TRY_MS}" ] && TRY_MS="${REMAINING_MS}"
+
     ATTEMPT=$(( ATTEMPT + 1 ))
-    RESPONSE=$(curl --silent --max-time 2 --fail "${CONFIG_URL}" 2>/dev/null)
+    TRY_TIMEOUT=$(ms_as_seconds "${TRY_MS}")
+    RESPONSE=$(curl --silent --max-time "${TRY_TIMEOUT}" --fail "${CONFIG_URL}" 2>/dev/null)
     if [ $? -eq 0 ] && [ -n "${RESPONSE}" ]; then
         FETCHED="${RESPONSE}"
         break
     fi
-    echo "[engine-entrypoint] attempt ${ATTEMPT}/${MAX_ATTEMPTS}: could not reach ${CONFIG_URL}" >&2
+    echo "[engine-entrypoint] attempt ${ATTEMPT}: could not reach ${CONFIG_URL}" >&2
+
+    REMAINING_MS=$(( DEADLINE_MS - $(now_ms) ))
+    [ "${REMAINING_MS}" -le 0 ] && break
+
+    SLEEP_MS="${SLEEP_MAX_MS}"
+    [ "${REMAINING_MS}" -lt "${SLEEP_MS}" ] && SLEEP_MS="${REMAINING_MS}"
+
+    sleep "$(ms_as_seconds "${SLEEP_MS}")"
 done
 
 if [ -n "${FETCHED}" ]; then
@@ -89,7 +122,7 @@ EOF
     echo "[engine-entrypoint] safe-track gap: GW_SAFE_GAP_SECONDS=${GW_SAFE_GAP_SECONDS}" >&2
     echo "[engine-entrypoint] control-plane version: GW_APP_VERSION=${app_version:-<unset>}" >&2
 else
-    echo "[engine-entrypoint] api unreachable after ${MAX_ATTEMPTS} attempts; using fallback env: GW_XFADE_MIN=${GW_XFADE_MIN:-<unset>} GW_XFADE_MAX=${GW_XFADE_MAX:-<unset>} GW_SAFE_GAP_SECONDS=${GW_SAFE_GAP_SECONDS:-<unset>}" >&2
+    echo "[engine-entrypoint] api unreachable after ${ATTEMPT} attempts; using fallback env: GW_XFADE_MIN=${GW_XFADE_MIN:-<unset>} GW_XFADE_MAX=${GW_XFADE_MAX:-<unset>} GW_SAFE_GAP_SECONDS=${GW_SAFE_GAP_SECONDS:-<unset>}" >&2
     # No fallback default exists for the version marker (unlike the three keys above, which
     # compose seeds with real fallback defaults) — there is nothing meaningful to log when the
     # api was never reached, so it is omitted here rather than printed as another "<unset>" line.

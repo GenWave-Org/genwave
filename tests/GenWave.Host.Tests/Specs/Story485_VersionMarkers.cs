@@ -507,30 +507,14 @@ public abstract class EntrypointRunArc(string curlAppVersionArg) : IAsyncLifetim
         var repoRoot = RepoRootLocator.Find(AppContext.BaseDirectory);
         GenwaveLiqText = File.ReadAllText(Path.Combine(repoRoot, "engine", "genwave.liq"));
 
-        // MakeBinDir's default toolset symlinks the REAL curl in (gh-#776's shared superset) —
-        // the symlink must go before AddStub can shadow it with a scripted stub (Story405/
-        // Story345's own "delete the default symlink first" idiom).
-        var bin = ScriptProcess.MakeBinDir();
-        File.Delete(Path.Combine(bin, "curl"));
+        // EntrypointHarness owns the scratch PATH + liquidsoap-recording stub (shared with Story487).
+        var bin = EntrypointHarness.MakeBinDirWithLiquidsoapStub(out var recorded);
         ScriptProcess.AddStub(bin, "curl", $"""
             printf '%s\n' 'GW_XFADE_MIN=2' 'GW_XFADE_MAX=8' 'GW_SAFE_GAP_SECONDS=7' {curlAppVersionArg}
             exit 0
             """);
 
-        var scratch = TempDir.CreateForProcessLifetime();
-        var recorded = Path.Combine(scratch, "liquidsoap.recorded");
-        ScriptProcess.AddStub(bin, "liquidsoap", $"""
-            printf '%s\n' "$@" > "{recorded}"
-            env >> "{recorded}"
-            exit 0
-            """);
-
-        var run = ScriptProcess.RunWithEmptyEnvironment("engine/entrypoint.sh", bin);
-        if (run.ExitCode != 0)
-            throw new InvalidOperationException(
-                $"engine/entrypoint.sh exited {run.ExitCode}; stderr:\n{run.StdErr}");
-
-        StdErrLines = run.StdErr.Split('\n');
+        StdErrLines = EntrypointHarness.RunOrThrow(bin).Split('\n');
         LiquidsoapArgsAndEnv = File.ReadAllText(recorded);
 
         return Task.CompletedTask;
