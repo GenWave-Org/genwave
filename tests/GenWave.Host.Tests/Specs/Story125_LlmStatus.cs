@@ -32,6 +32,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using GenWave.Core;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Host.Api;
@@ -197,7 +198,9 @@ public static class FeatureLlmStatus
             voiceHealthReader,
             new FakeActivePersonaAccessor { Persona = activePersona },
             new ProcessStartTime(new DateTimeOffset(2026, 7, 11, 9, 30, 0, TimeSpan.Zero)),
-            new PluginStatusAccessor())
+            new PluginStatusAccessor(),
+            AppVersion.From("0.0.0-test"),
+            new SchemaVersionStatus())
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
         };

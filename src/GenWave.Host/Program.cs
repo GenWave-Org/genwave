@@ -89,6 +89,15 @@ builder.Services.AddSingleton<IAppVersion>(AppVersion.FromAssembly(typeof(Progra
 // builder.Configuration (appends the live overlay source), so it runs before anything binds options.
 builder.AddGenWaveStationSettings();
 
+// The schema-drift boot check (SPEC F211.6, STORY-485, PLAN T593) — the first consumer of
+// ISchemaJournal, just registered above via AddGenWaveStationSettings' own AddSchemaJournal call.
+// SchemaVersionStatus is the cached result GET /api/status reads (Api.SchemaVersionStatus's own
+// remarks); the hosted service is what populates it, once, without blocking Kestrel from listening —
+// see Api.SchemaVersionDriftHostedService's own remarks for why this is a BackgroundService rather
+// than an inline await here (a real Postgres round trip that must never stall boot).
+builder.Services.AddSingleton<SchemaVersionStatus>();
+builder.Services.AddHostedService<SchemaVersionDriftHostedService>();
+
 // The runtime theme catalog (SPEC F103.7, STORY-271, PLAN T182): shipped ∪ owner, over the
 // IThemeStore AddGenWaveStationSettings() just registered. CreateForStation itself reads only
 // embedded resources (no DB call merely from resolving this singleton — the shipped-only canary

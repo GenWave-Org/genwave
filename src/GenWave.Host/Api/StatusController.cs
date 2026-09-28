@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
+using GenWave.Core;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Host.Options;
@@ -31,7 +32,9 @@ public sealed class StatusController(
     VoiceHealthReader voiceHealthReader,
     IActivePersonaAccessor personaAccessor,
     ProcessStartTime startTime,
-    PluginStatusAccessor pluginStatus) : ControllerBase
+    PluginStatusAccessor pluginStatus,
+    IAppVersion appVersion,
+    SchemaVersionStatus schemaVersionStatus) : ControllerBase
 {
     /// <summary>
     /// GET /api/status — cookie-auth (covered by the deny-by-default fallback policy when
@@ -42,7 +45,8 @@ public sealed class StatusController(
     /// llm: { enabled, model, activePersona, lastOutcome, lastAttemptAt, dominantCause, dominantCauseCount, dominantCauseModel },
     /// degradation: { mode, pinned, since, cause },
     /// voice: { engine, degraded, reason, checkedAt },
-    /// plugins: [{ name, version, contracts, state, reason? }] }</c>.
+    /// plugins: [{ name, version, contracts, state, reason? }],
+    /// version: { app, build, schema: { expected, applied } } }</c>.
     ///
     /// <c>Station:SafeScope:LibraryIds</c> is read via <see cref="IOptionsMonitor{TOptions}.CurrentValue"/>
     /// on every call — not a boot-time snapshot — so a live <c>PUT /api/settings</c> edit
@@ -121,6 +125,18 @@ public sealed class StatusController(
     /// <c>RootUnreadable</c> outcome reports as <c>"skipped"</c> too, with <c>name</c>/<c>version</c>
     /// both null); <c>reason</c> is present only when <c>state</c> is <c>"skipped"</c>, naming the
     /// failed stage plus the already-neutralized detail text.
+    ///
+    /// <c>version</c> (SPEC F211.5/F211.6, STORY-485, PLAN T593) reports this release's own identity
+    /// plus how the database compares to what this build expects. <c>app</c>/<c>build</c> are
+    /// <see cref="IAppVersion.Display"/>/<see cref="IAppVersion.Build"/> straight through — the SAME
+    /// singleton About/the ad worker/outbound User-Agents already read (SPEC F211.1's one-reader
+    /// law). <c>schema.expected</c> is the build-time <see cref="SchemaVersion.Expected"/> constant;
+    /// <c>schema.applied</c> is <see cref="SchemaVersionStatus.Applied"/> — the ONE boot-time
+    /// <c>ISchemaJournal</c> read <see cref="SchemaVersionDriftHostedService"/> makes, cached rather
+    /// than re-queried on every poll (that type's own remarks explain why), <see langword="null"/>
+    /// for an empty/missing/unreadable journal exactly like the boot WARN it also drives. Drift is
+    /// reported here, never enforced — a mismatch never changes this endpoint's 200, only what
+    /// <c>schema.applied</c> reads (SPEC F211.6).
     /// </summary>
     [HttpGet("status")]
     public async Task<IActionResult> Get(CancellationToken ct)
@@ -203,6 +219,16 @@ public sealed class StatusController(
                 checkedAt = voice.CheckedAt,
             },
             plugins = pluginStatus.Reports.Select(ToPluginDto),
+            version = new
+            {
+                app = appVersion.Display,
+                build = appVersion.Build,
+                schema = new
+                {
+                    expected = SchemaVersion.Expected,
+                    applied = schemaVersionStatus.Applied,
+                },
+            },
         });
     }
 
