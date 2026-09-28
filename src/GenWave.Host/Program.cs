@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using GenWave.Ads;
+using GenWave.Core;
 using GenWave.Core.Abstractions;
 using GenWave.Host.Announcements;
 using GenWave.Host.Api;
@@ -77,9 +78,25 @@ if (!shippedThemeCanary.TryGetBySlug(ThemeCatalog.ShippedDefaultSlug, out _))
 // GET /api/status's startedAt (SPEC F28.6) reflects true process start.
 builder.Services.AddSingleton(new ProcessStartTime(DateTimeOffset.UtcNow));
 
+// The one GenWave release identity (SPEC F211.1, STORY-483, PLAN T588) — read from THIS Host
+// assembly's build stamp exactly once, here, and shared as a singleton. Deliberately
+// typeof(Program).Assembly, never Assembly.GetEntryAssembly(): under WebApplicationFactory the entry
+// assembly is the test host process, not GenWave.Host (see AppVersion.FromAssembly's own remarks). No
+// other type may read AssemblyInformationalVersionAttribute (architecture law, PLAN T590).
+builder.Services.AddSingleton<IAppVersion>(AppVersion.FromAssembly(typeof(Program).Assembly));
+
 // Station settings overlay + store + persona store (ConnectionStrings:Station). Mutates
 // builder.Configuration (appends the live overlay source), so it runs before anything binds options.
 builder.AddGenWaveStationSettings();
+
+// The schema-drift boot check (SPEC F211.6, STORY-485, PLAN T593) — the first consumer of
+// ISchemaJournal, just registered above via AddGenWaveStationSettings' own AddSchemaJournal call.
+// SchemaVersionStatus is the cached result GET /api/status reads (Api.SchemaVersionStatus's own
+// remarks); the hosted service is what populates it, once, without blocking Kestrel from listening —
+// see Api.SchemaVersionDriftHostedService's own remarks for why this is a BackgroundService rather
+// than an inline await here (a real Postgres round trip that must never stall boot).
+builder.Services.AddSingleton<SchemaVersionStatus>();
+builder.Services.AddHostedService<SchemaVersionDriftHostedService>();
 
 // The runtime theme catalog (SPEC F103.7, STORY-271, PLAN T182): shipped ∪ owner, over the
 // IThemeStore AddGenWaveStationSettings() just registered. CreateForStation itself reads only
@@ -348,6 +365,7 @@ builder.Services
         client.MaxResponseContentBufferSize = CatalogProxyService.MaxIndexBytes;
     })
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.AddSingleton<CatalogHttpFetcher>();
 builder.Services.AddSingleton<CatalogProxyService>();
 
 // Installs a catalog persona entry's own sidecar face after a successful catalog-origin import

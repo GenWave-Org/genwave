@@ -48,6 +48,17 @@
 #   after an earlier one fails, and failures are reported but never stop the run) — it
 #   remains available for anyone invoking migrate.sh standalone who wants that.
 #
+# Schema journal (SPEC F211.3, STORY-484, PLAN T591):
+#   Before the loop, a preamble creates station.schema_migration if it isn't there yet (an
+#   upgrading pre-F211 box) — mirrored in db/06 too, so a fresh box has it without ever
+#   running this preamble. After each migration this script itself applies successfully, it
+#   upserts one row: script = the file's base name, applied_at = now(), app_version =
+#   $GW_VERSION if set, else null. The migrations themselves are never touched — the journal
+#   lives here, not in db/*-migration.sh. GW_VERSION and the script name cross into the db
+#   container only via `-e` env / psql `-v` bind variables, never string-interpolated into
+#   SQL text. A failed journal write is treated exactly like a failed migration (see
+#   "Failure handling" above) — it is never silently skipped.
+#
 # Exit: 0 — every migration ran (or --dry-run listed what would have)
 #       1 — a migration failed (fail-fast: the first one; --keep-going: any of them),
 #           or the db service isn't running / reachable
@@ -148,6 +159,66 @@ if [ "$(docker inspect "$db_cid" --format '{{.State.Running}}' 2>/dev/null)" != 
   exit 1
 fi
 
+# --- schema journal preamble (SPEC F211.3, STORY-484, PLAN T591) -----------------------
+# station.schema_migration already exists on every fresh box (db/06's own fresh-init mirror,
+# gh-#618); this only matters on a box upgrading from before F211, where migrate.sh has
+# never created it yet. No dynamic data here, so no bind variables are needed. Relies on db/06
+# having already created the station_svc role and the station schema itself (the SET ROLE below
+# would fail otherwise) — true on every public box: db/06 runs as a Postgres init script on every
+# fresh install, and this script only ever runs against an already-initialized (db/01+db/06, at
+# minimum) box in the first place.
+ensure_schema_journal() {
+  compose exec -T db bash -s <<-'BASH'
+	set -euo pipefail
+	: "${POSTGRES_USER:?POSTGRES_USER must be set}" "${POSTGRES_DB:?POSTGRES_DB must be set}"
+	psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'SQL'
+		SET ROLE station_svc;
+		SET search_path = station;
+		CREATE TABLE IF NOT EXISTS station.schema_migration (
+		  script      text        NOT NULL PRIMARY KEY CHECK (script <> ''),
+		  applied_at  timestamptz NOT NULL,
+		  app_version text
+		);
+		SQL
+	BASH
+}
+
+if ! ensure_schema_journal; then
+  echo "migrate.sh: failed to prepare station.schema_migration — check 'docker compose logs db'" >&2
+  exit 1
+fi
+
+# One upsert per successfully-applied migration. GW_VERSION and the script's own base name
+# cross into the container only via `-e` (compose exec) and psql `-v` bind variables — never
+# string-interpolated into the SQL text itself, since GW_VERSION is an operator-controlled
+# shell env var. `nullif(:'app_version', '')` turns an unset GW_VERSION into SQL NULL.
+journal_migration() {
+  local migration="$1" script
+  script="${migration##*/}"
+  if [ -z "$script" ]; then
+    echo "migrate.sh: could not derive a script name from '$migration' — refusing to journal with an empty key" >&2
+    return 1
+  fi
+  if ! compose exec -T -e GW_SCRIPT="$script" -e GW_VERSION="${GW_VERSION:-}" db bash -s <<-'BASH'
+	set -euo pipefail
+	: "${POSTGRES_USER:?POSTGRES_USER must be set}" "${POSTGRES_DB:?POSTGRES_DB must be set}"
+	psql -v ON_ERROR_STOP=1 -v script="$GW_SCRIPT" -v app_version="$GW_VERSION" \
+	  --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'SQL'
+		SET ROLE station_svc;
+		SET search_path = station;
+		INSERT INTO station.schema_migration (script, applied_at, app_version)
+		VALUES (:'script', now(), NULLIF(:'app_version', ''))
+		ON CONFLICT (script) DO UPDATE
+		  SET applied_at = excluded.applied_at,
+		      app_version = excluded.app_version;
+		SQL
+	BASH
+  then
+    echo "migrate.sh: failed to journal $script — check 'docker compose logs db'" >&2
+    return 1
+  fi
+}
+
 # --- the loop itself — extracted from launch.sh verbatim in shape/output ---------------
 echo "==> Applying in-place schema migrations (idempotent)"
 
@@ -171,7 +242,9 @@ run_migration() {
 any_failed=0
 for migration in db/*-migration.sh; do
   [ -f "$migration" ] || continue
-  if ! run_migration "$migration"; then
+  if run_migration "$migration" && journal_migration "$migration"; then
+    :
+  else
     any_failed=1
     if [ "$KEEP_GOING" != "1" ]; then
       echo "migrate.sh: stopping — a migration failed and --keep-going was not passed." >&2

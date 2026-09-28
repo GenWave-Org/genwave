@@ -14,8 +14,8 @@
 using System.Linq;
 using System.Net;
 using System.Net.Http.Json;
-using System.Reflection;
 using System.Text.Json;
+using GenWave.Core;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Host.Api;
@@ -54,16 +54,18 @@ public static class FeatureAbout
                 doc.RootElement.EnumerateObject().Select(property => property.Name).ToHashSet());
         }
 
-        /// <summary>AC2 — version equals the assembly informational version</summary>
+        /// <summary>AC2 — version matches the Host assembly's own build stamp, independently
+        /// re-derived by this fact's own oracle (<see cref="AppVersion.FromAssembly"/> against
+        /// <c>typeof(Program).Assembly</c>, SPEC F211.2, PLAN T589) rather than read back off the
+        /// SAME DI singleton the controller itself serves — a same-value comparison there would prove
+        /// only that the controller passes DI's value through unchanged, never that DI holds the
+        /// right one.</summary>
         [Fact]
-        public void MatchesTheAssemblyVersion()
-        {
-            var expected =
-                typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
-                    ?? "unknown";
+        public void MatchesTheAssemblyVersion() => Assert.Equal(arc.ExpectedVersion, arc.Response.Version);
 
-            Assert.Equal(expected, arc.Response.Version);
-        }
+        /// <summary>AC2 — the served version reads like a release tag: "v" + a SemVer core.</summary>
+        [Fact]
+        public void VersionReadsLikeARelease() => Assert.Matches(@"^v[0-9]+\.[0-9]+\.[0-9]+", arc.Response.Version);
 
         /// <summary>AC3 — attributions equal GET /api/attributions</summary>
         [Fact]
@@ -179,12 +181,22 @@ public sealed class AboutArc : IAsyncLifetime
 
     public AboutResponse Response { get; private set; } = new("", "", "", 0, 0, new([]));
 
+    /// <summary>AC2's own real-stamp oracle (PLAN T589) — independently re-derived straight from the
+    /// Host assembly's own build stamp (mirrors the composition root's own
+    /// <c>AppVersion.FromAssembly(typeof(Program).Assembly)</c> call), never read back off the SAME
+    /// DI singleton the controller itself resolves: a same-instance comparison there would only prove
+    /// the controller passes DI's value through unchanged, never that DI holds the right one (see
+    /// <see cref="FeatureAbout.ScenarioGetAboutWithASession.MatchesTheAssemblyVersion"/>'s own
+    /// remarks).</summary>
+    public string ExpectedVersion { get; private set; } = "";
+
     public async Task InitializeAsync()
     {
         await using var db = await AboutDatabase.StartAsync();
         await using var factory = new AboutWebFactory(db);
 
         _ = factory.CreateClient();
+        ExpectedVersion = AppVersion.FromAssembly(typeof(Program).Assembly).Display;
         var fontStore = factory.Services.GetRequiredService<IFontPackStore>();
         await fontStore.UpsertAsync(FontSlug, FontFamily, FontDefinitionJson, "test-fixture", [], CancellationToken.None);
 

@@ -43,6 +43,75 @@ public static class PublicSurface
         return lines;
     }
 
+    /// <summary>
+    /// The lines present in <paramref name="from"/> more times than in <paramref name="than"/> — a
+    /// change in how many times an identical line occurs (e.g. an overload that would otherwise
+    /// render the same line twice) can never be masked by de-duplication. Ordinally sorted, one
+    /// entry per excess occurrence. Shared by every surface-diff fact against a committed baseline
+    /// (STORY-431 AC6, STORY-483 AC11 · PLAN T590) so the counting rule lives in exactly one place.
+    /// </summary>
+    public static IReadOnlyList<string> ExcessOf(IReadOnlyList<string> from, IReadOnlyList<string> than)
+    {
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var line in than)
+            counts[line] = counts.GetValueOrDefault(line) + 1;
+
+        var excess = new List<string>();
+        foreach (var line in from)
+        {
+            var remaining = counts.GetValueOrDefault(line);
+            if (remaining > 0)
+                counts[line] = remaining - 1;
+            else
+                excess.Add(line);
+        }
+
+        excess.Sort(StringComparer.Ordinal);
+        return excess;
+    }
+
+    /// <summary>
+    /// <paramref name="current"/> vs. <paramref name="baseline"/> rendered as a human-readable diff:
+    /// empty when the two are the same multiset (via <see cref="ExcessOf"/> both ways — an added line
+    /// and a removed line are never the same thing, so both directions are always computed), else
+    /// <paramref name="heading"/> followed by one <c>"+ "</c> line per addition and one <c>"- "</c>
+    /// line per removal. Shared by every surface-diff fact against a committed baseline (STORY-431
+    /// AC6, STORY-483 AC11 · PLAN T590) so the message-building rule, like the counting rule above,
+    /// lives in exactly one place; the heading is a parameter (not hard-coded here) because each
+    /// caller names its own baseline.
+    /// </summary>
+    public static IReadOnlyList<string> DiffAgainst(IReadOnlyList<string> current, IReadOnlyList<string> baseline, string heading)
+    {
+        var added = ExcessOf(current, baseline);
+        var removed = ExcessOf(baseline, current);
+
+        if (added.Count == 0 && removed.Count == 0)
+            return [];
+
+        return new[] { heading }
+            .Concat(added.Select(line => $"+ {line}"))
+            .Concat(removed.Select(line => $"- {line}"))
+            .ToList();
+    }
+
+    /// <summary>
+    /// A committed baseline fixture's lines, minus its first-line provenance comment — shared by
+    /// every surface-diff fact against a committed baseline (STORY-431 AC6, STORY-483 AC11 ·
+    /// PLAN T590) so the fixture-read rule lives in exactly one place. Throws rather than asserting:
+    /// a missing fixture is an arrange-time packaging bug (is it CopyToOutputDirectory in the
+    /// csproj?), never the behavior under test, so it must never be reported as a failed Fact.
+    /// </summary>
+    public static IReadOnlyList<string> ReadBaseline(string path)
+    {
+        if (!File.Exists(path))
+        {
+            throw new FileNotFoundException(
+                $"missing baseline fixture at {path} — is it CopyToOutputDirectory in the csproj?", path);
+        }
+
+        return File.ReadAllLines(path).Skip(1).ToList();
+    }
+
     static IEnumerable<string> MemberLinesOf(Type type, string owner)
     {
         // Property/event accessor methods are collected in one full, non-lazy pass BEFORE any line

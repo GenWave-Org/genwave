@@ -26,7 +26,7 @@ using GenWave.Host.Options;
 /// independent "resolves under the index directory" check) BEFORE it is ever turned into a URI, and
 /// an index that fails ANY of that is rejected WHOLESALE with one WARN naming the offending value
 /// (F90.2) — never partially trusted. No redirects are ever followed: the <see cref="HttpClientName"/>
-/// client this service resolves has <c>AllowAutoRedirect = false</c> (Program.cs), so a 3xx response
+/// client <see cref="CatalogHttpFetcher"/> resolves has <c>AllowAutoRedirect = false</c> (Program.cs), so a 3xx response
 /// is just another non-2xx status — just another fetch failure, never a hop this process takes.
 /// </para>
 ///
@@ -57,19 +57,17 @@ using GenWave.Host.Options;
 /// </para>
 /// </summary>
 public sealed class CatalogProxyService(
-    IHttpClientFactory httpClientFactory,
     CommunityCatalogAccessor catalogAccessor,
     TimeProvider timeProvider,
-    ILogger<CatalogProxyService> logger)
+    ILogger<CatalogProxyService> logger,
+    CatalogHttpFetcher catalogHttpFetcher)
 {
     /// <summary>
-    /// Name of the <see cref="IHttpClientFactory"/> client this service resolves (registered in
-    /// Program.cs). A NAMED client resolved per call, not a typed <see cref="HttpClient"/>
-    /// constructor parameter (contrast <c>MusicBrainzYearLookup</c>/the health probes): those are
-    /// stateless and fine as <c>AddHttpClient&lt;T&gt;()</c> transients, but this service's cache
-    /// and single-flight gate (SPEC F90.4) only work if it is the SAME instance across every
-    /// request — the same "constructor-injected <see cref="IHttpClientFactory"/> + plain
-    /// <c>AddSingleton&lt;T&gt;()</c>" shape <c>LlmCopyWriter</c> already uses for the same reason.
+    /// Name of the <see cref="IHttpClientFactory"/> client <see cref="CatalogHttpFetcher"/> resolves
+    /// per call (registered in Program.cs) — a NAMED client, not a typed <see cref="HttpClient"/>
+    /// constructor parameter (contrast <c>MusicBrainzYearLookup</c>/the health probes): this service's
+    /// cache and single-flight gate (SPEC F90.4) only work if it is the SAME instance across every
+    /// request, so both it and the fetcher are plain <c>AddSingleton&lt;T&gt;()</c> registrations.
     /// </summary>
     public const string HttpClientName = "CatalogProxy";
 
@@ -669,7 +667,7 @@ public sealed class CatalogProxyService(
 
     async Task<IReadOnlyList<CatalogEntrySummary>?> FetchAndValidateIndexAsync(Uri indexUri, Uri directory, CancellationToken ct)
     {
-        var outcome = await CatalogHttpFetcher.FetchAsync(httpClientFactory, indexUri, MaxIndexBytes, ct);
+        var outcome = await catalogHttpFetcher.FetchAsync(indexUri, MaxIndexBytes, ct);
         switch (outcome)
         {
             case CatalogFetchOutcome.Ok ok:
@@ -759,7 +757,7 @@ public sealed class CatalogProxyService(
         if (!CatalogIndexValidator.TryResolveWithinDirectory(directory, fileRef.Path, out var uri))
             throw new UnreachableException($"'{fileRef.Path}' no longer resolves under its index directory.");
 
-        var outcome = await CatalogHttpFetcher.FetchAsync(httpClientFactory, uri, maxBytes, ct);
+        var outcome = await catalogHttpFetcher.FetchAsync(uri, maxBytes, ct);
         return outcome switch
         {
             CatalogFetchOutcome.Ok ok => VerifyHash(ok.Bytes, fileRef, part),
@@ -796,7 +794,7 @@ public sealed class CatalogProxyService(
             throw new UnreachableException($"'{assetRef.Path}' no longer resolves under its index directory.");
 
         var effectiveCap = (int)Math.Min(assetRef.Bytes, AssetFetchCapFor(kind));
-        var outcome = await CatalogHttpFetcher.FetchAsync(httpClientFactory, uri, effectiveCap, ct);
+        var outcome = await catalogHttpFetcher.FetchAsync(uri, effectiveCap, ct);
         return outcome switch
         {
             CatalogFetchOutcome.Ok ok => VerifyAssetHash(ok.Bytes, assetRef),

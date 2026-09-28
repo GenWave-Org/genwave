@@ -51,7 +51,8 @@ public sealed class SpectatorController(
     CachingScheduleResolver scheduleResolver,
     IActivePersonaAccessor personaAccessor,
     IRequestCatalogProbe requestCatalogProbe,
-    PersonaAvatarTokenCache avatarTokenCache) : ControllerBase
+    PersonaAvatarTokenCache avatarTokenCache,
+    IAppVersion appVersion) : ControllerBase
 {
     /// <summary>Hard cap on <c>GET /spectator/api/play-history</c> entries (SPEC F62.6), independent
     /// of the operator-configurable <c>Admin:PlayHistoryCapacity</c> ring size.</summary>
@@ -316,7 +317,7 @@ public sealed class SpectatorController(
     {
         var options = stationMonitor.CurrentValue;
         return Ok(new SpectatorAbout(
-            options.Name, HostVersion.Value, License, ProjectUrl, options.PublicStreamUrl, options.Requests.Enabled));
+            options.Name, appVersion.Display, License, ProjectUrl, options.PublicStreamUrl, options.Requests.Enabled));
     }
 
     /// <summary>

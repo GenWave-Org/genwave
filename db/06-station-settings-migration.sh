@@ -848,4 +848,16 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	  imported_at   timestamptz NOT NULL DEFAULT now(),
 	  created_at    timestamptz NOT NULL DEFAULT now()
 	);
+
+	-- Schema journal (SPEC F211.3, STORY-484, PLAN T591). migrate.sh's own preamble creates this
+	-- table on an upgrading box before its loop runs; mirrored here (gh-#618's fresh-init law) so a
+	-- brand-new box has it too without ever needing that preamble to run. Natural-key primary key
+	-- (script, not a surrogate id) — same shape as station.settings above — since the file name
+	-- already is the identity migrate.sh upserts on. db/06 never inserts a row here itself; only
+	-- migrate.sh writes one, after each script it successfully applies.
+	CREATE TABLE IF NOT EXISTS station.schema_migration (
+	  script      text        NOT NULL PRIMARY KEY CHECK (script <> ''),
+	  applied_at  timestamptz NOT NULL,
+	  app_version text
+	);
 	SQL

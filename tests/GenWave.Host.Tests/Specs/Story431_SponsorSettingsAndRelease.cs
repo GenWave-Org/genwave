@@ -169,19 +169,10 @@ public static class FeatureSponsorSettingsOptionsLawsAndTheRelease
 
     public sealed class ScenarioAbstractionsUnchanged
     {
+        const string DiffHeading = "GenWave.Abstractions public surface differs from the 5.10.0 baseline:";
+
         static string BaselinePath() =>
             Path.Combine(AppContext.BaseDirectory, "Fixtures", "abstractions-5.10.0-surface.txt");
-
-        /// <summary>
-        /// The committed baseline's own lines, minus its first-line provenance comment (see
-        /// <c>Fixtures/abstractions-5.10.0-surface.txt</c>'s own header).
-        /// </summary>
-        static IReadOnlyList<string> BaselineLines()
-        {
-            var path = BaselinePath();
-            Assert.True(File.Exists(path), $"missing baseline fixture at {path} — is it CopyToOutputDirectory in the csproj?");
-            return File.ReadAllLines(path).Skip(1).ToList();
-        }
 
         // AC6 (SPEC F176.4): the package public surface must stay byte-identical between
         // regenerations — so a release that leaves src/GenWave.Abstractions alone ships the surface
@@ -207,50 +198,16 @@ public static class FeatureSponsorSettingsOptionsLawsAndTheRelease
         [Fact]
         public void ThePackageSurfaceDiffVs5100IsEmpty()
         {
-            var baseline = BaselineLines();
+            var baseline = PublicSurface.ReadBaseline(BaselinePath());
             Assert.True(baseline.Count > 20, $"the baseline fixture has only {baseline.Count} lines — too small to be a real enumeration.");
 
             var current = PublicSurface.Of(typeof(IAdSpotSource).Assembly);
+            var diffLines = PublicSurface.DiffAgainst(current, baseline, DiffHeading);
 
-            var added = ExcessOf(current, baseline);
-            var removed = ExcessOf(baseline, current);
-
-            if (added.Count == 0 && removed.Count == 0)
+            if (diffLines.Count == 0)
                 return;
 
-            var message = string.Join(
-                Environment.NewLine,
-                new[] { "GenWave.Abstractions public surface differs from the 5.10.0 baseline:" }
-                    .Concat(added.Select(l => $"+ {l}"))
-                    .Concat(removed.Select(l => $"- {l}")));
-            Assert.Fail(message);
-        }
-
-        /// <summary>
-        /// The lines present in <paramref name="from"/> more times than in
-        /// <paramref name="than"/> — a count-aware (multiset) difference, not a set difference, so
-        /// a change in how many times an identical line occurs (e.g. an overload that would
-        /// otherwise render the same line twice) can never be masked by de-duplication. Ordinally
-        /// sorted, one entry per excess occurrence.
-        /// </summary>
-        static List<string> ExcessOf(IReadOnlyList<string> from, IReadOnlyList<string> than)
-        {
-            var counts = new Dictionary<string, int>(StringComparer.Ordinal);
-            foreach (var line in than)
-                counts[line] = counts.GetValueOrDefault(line) + 1;
-
-            var excess = new List<string>();
-            foreach (var line in from)
-            {
-                var remaining = counts.GetValueOrDefault(line);
-                if (remaining > 0)
-                    counts[line] = remaining - 1;
-                else
-                    excess.Add(line);
-            }
-
-            excess.Sort(StringComparer.Ordinal);
-            return excess;
+            Assert.Fail(string.Join(Environment.NewLine, diffLines));
         }
     }
 

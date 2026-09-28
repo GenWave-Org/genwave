@@ -1,0 +1,35 @@
+# Disposable Postgres for driving the REAL ./migrate.sh end-to-end (STORY-484, PLAN T591).
+# migrate.sh hardcodes the compose service name `db` (matching production compose.yaml) — the
+# existing db-compose.yaml's service is named `testdb`, so it cannot host these facts. Otherwise
+# identical to db-compose.yaml: same init scripts, same idempotent-safe images, same "one
+# ephemeral db per test run" shape. `name:` is overridden per run via `docker compose -p` /
+# COMPOSE_PROJECT_NAME (gh-#569), and the container port is left unpublished-to-a-fixed-host-port
+# so Docker picks a free ephemeral one; MigrateShDatabase discovers it with `docker compose port`.
+name: genwave-migratetest
+
+services:
+  db:
+    image: postgres:16.4
+    environment:
+      POSTGRES_DB: genwave
+      POSTGRES_USER: genwave
+      POSTGRES_PASSWORD: test
+      LIBRARY_DB_PASSWORD: libtest
+      STATION_DB_PASSWORD: stationtest
+    ports:
+      - "5432"
+    volumes:
+      - ../../db/01-library.sh:/docker-entrypoint-initdb.d/01-library.sh:ro
+      - ../../db/06-station-settings-migration.sh:/docker-entrypoint-initdb.d/06-station-settings-migration.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U genwave -d genwave"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+# gh-#649: joins the one shared "gw-test" network every fixture container uses, instead of letting
+# compose allocate a fresh project network per run — TestNetwork.Ensure creates it before `up`.
+networks:
+  default:
+    name: gw-test
+    external: true

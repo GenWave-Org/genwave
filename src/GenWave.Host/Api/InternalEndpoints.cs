@@ -20,7 +20,8 @@ namespace GenWave.Host.Api;
 ///     session cookie — network isolation (the <c>core</c> Docker network) is the boundary.
 ///
 /// Security rationale: this group exposes only operator-controlled tuning numbers (crossfade
-/// and safe-gap seconds). No secrets, no connection strings, no per-user data. An attacker who
+/// and safe-gap seconds) plus the control plane's own display version string (SPEC F211.5,
+/// STORY-485) — never a secret. No connection strings, no per-user data. An attacker who
 /// can reach this endpoint is already on the internal Docker network and can already reach the
 /// unauthenticated Liquidsoap telnet port on :1234, which is a far higher-value target.
 /// Adding authentication here would give no real defence.
@@ -28,10 +29,13 @@ namespace GenWave.Host.Api;
 static class InternalEndpoints
 {
     /// <summary>
-    /// Keys emitted by the engine-config endpoint — exactly these three, nothing else.
+    /// The three <see cref="IConfiguration"/>-backed keys the engine-config endpoint emits —
+    /// nothing else is ever read off <see cref="IConfiguration"/> for this response.
     /// GW_SAFE_GAP_SECONDS rides the same path as GW_XFADE_MIN/MAX (F29.8, STORY-100): it must
     /// appear here or a PUT /api/settings override would persist to the overlay but never reach
-    /// the engine on its next boot.
+    /// the engine on its next boot. A fourth key, GW_APP_VERSION, is appended after these three
+    /// (SPEC F211.5) — it is sourced from <see cref="IAppVersion"/>, not <see cref="IConfiguration"/>,
+    /// so it lives outside this array; the response body carries four keys in total.
     /// </summary>
     static readonly string[] EngineConfigKeys = ["GW_XFADE_MIN", "GW_XFADE_MAX", "GW_SAFE_GAP_SECONDS"];
 
@@ -46,20 +50,25 @@ static class InternalEndpoints
         //   GW_XFADE_MIN=<effective-value>
         //   GW_XFADE_MAX=<effective-value>
         //   GW_SAFE_GAP_SECONDS=<effective-value>
+        //   GW_APP_VERSION=<display>
         //
         // "Effective value" = overlay wins over appsettings default (IConfiguration already
         // merges the station.settings provider after env/appsettings in Program.cs, so a
         // stored override is automatically visible here).
         //
-        // Only the keys in EngineConfigKeys are ever emitted — never any other config key.
-        group.MapGet("/engine-config", (IConfiguration configuration) =>
+        // Only the keys in EngineConfigKeys, plus GW_APP_VERSION last, are ever emitted — never
+        // any other config key. GW_APP_VERSION carries IAppVersion.Display (SPEC F211.5,
+        // STORY-485) — the engine entrypoint logs it once at boot and reads it for nothing else
+        // (engine/entrypoint.sh's own remarks).
+        group.MapGet("/engine-config", (IConfiguration configuration, IAppVersion appVersion) =>
         {
             var lines = EngineConfigKeys
                 .Select(key =>
                 {
                     var value = configuration[key] ?? string.Empty;
                     return $"{key}={value}";
-                });
+                })
+                .Append($"GW_APP_VERSION={appVersion.Display}");
 
             var body = string.Join('\n', lines) + '\n';
 

@@ -23,11 +23,12 @@ public sealed class AboutController(
     IOptionsMonitor<StationOptions> stationMonitor,
     ProcessStartTime startTime,
     TimeProvider timeProvider,
-    AttributionProjector attributionProjector) : ControllerBase
+    AttributionProjector attributionProjector,
+    IAppVersion appVersion) : ControllerBase
 {
     /// <summary>
     /// GET /api/about. <c>version</c>/<c>stationName</c>/<c>tagline</c> read exactly as
-    /// <see cref="SpectatorController.GetAbout"/> does (<see cref="HostVersion.Value"/>,
+    /// <see cref="SpectatorController.GetAbout"/> does (<see cref="IAppVersion.Display"/>,
     /// <see cref="IOptionsMonitor{StationOptions}.CurrentValue"/>) — live, per request, so a
     /// <c>PUT /api/settings</c> edit to <c>Station:Name</c>/<c>Station:Tagline</c> reaches the very
     /// next call with no api restart. <c>tagline</c> is <c>""</c> when unset (SPEC's own "the page
@@ -66,6 +67,6 @@ public sealed class AboutController(
         var uptimeSeconds = (long)(timeProvider.GetUtcNow() - startTime.Value).TotalSeconds;
 
         return Ok(new AboutResponse(
-            HostVersion.Value, options.Name, options.Tagline, libraryCount, uptimeSeconds, attributions));
+            appVersion.Display, options.Name, options.Tagline, libraryCount, uptimeSeconds, attributions));
     }
 }

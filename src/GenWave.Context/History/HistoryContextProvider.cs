@@ -126,16 +126,16 @@ using GenWave.Core.Http;
 ///
 /// <para>
 /// <b>Wikimedia etiquette (SPEC F109.1, the F76 MusicBrainz precedent).</b> Every request carries a
-/// descriptive, version-stamped <see cref="UserAgent"/> identifying GenWave and a contact URL — built
+/// descriptive, version-stamped <see cref="userAgent"/> identifying GenWave and a contact URL — built
 /// by the shared <see cref="GenWave.Core.Http.EtiquetteUserAgent"/> helper (F7 fix, T228 review — this
 /// class's own construction used to be a hand-copied twin of <c>MusicBrainzYearLookup</c>'s; see that
-/// helper's own remarks) from this assembly's build-stamped <c>AssemblyInformationalVersionAttribute</c>
-/// (SPEC F65.1), never a hardcoded literal.
+/// helper's own remarks) from the injected <see cref="IAppVersion"/>'s display form (SPEC F211.1,
+/// STORY-483, PLAN T590), never a reflected assembly stamp.
 /// </para>
 /// </summary>
 public sealed class HistoryContextProvider(
     HttpClient http, IContextCacheRootProvider cacheRootProvider, TimeProvider timeProvider,
-    ILogger<HistoryContextProvider> logger, IStationClockProvider? stationClock = null)
+    ILogger<HistoryContextProvider> logger, IAppVersion appVersion, IStationClockProvider? stationClock = null)
     : IContextProvider, ISelfGatingContextProvider
 {
     /// <summary>The fixed, keyless Wikimedia host (SPEC F109.1) — set as this typed client's
@@ -151,16 +151,11 @@ public sealed class HistoryContextProvider(
     /// endpoint could make this client buffer.</summary>
     public const long MaxResponseContentBytes = 1_048_576;
 
-    /// <summary>The project's public repository — the "contact URL" half of the etiquette
-    /// User-Agent (mirrors <c>MusicBrainzYearLookup.ProjectUrl</c>).</summary>
-    const string ProjectUrl = "https://github.com/GenWave-Org/genwave";
-
-    /// <summary>"GenWave/&lt;version&gt; (+repo)" (SPEC F109.1, the F76 MusicBrainz precedent),
-    /// byte-identical to the pre-F7 construction — see
-    /// <see cref="GenWave.Core.Http.EtiquetteUserAgent"/>'s own remarks for how the version segment is
-    /// derived and why this assembly's own <see cref="System.Reflection.Assembly"/> is passed
-    /// explicitly rather than resolved inside the shared helper.</summary>
-    static readonly string UserAgent = EtiquetteUserAgent.Build(typeof(HistoryContextProvider).Assembly, ProjectUrl);
+    /// <summary>"GenWave/&lt;version&gt; (+repo)" (SPEC F109.1, the F76 MusicBrainz precedent) — see
+    /// <see cref="GenWave.Core.Http.EtiquetteUserAgent"/>'s own remarks for how the version and
+    /// project-URL segments are derived. An instance field, not <see langword="static"/>: the version
+    /// comes from the injected <see cref="IAppVersion"/>, not a reflected assembly stamp (PLAN T590).</summary>
+    readonly string userAgent = EtiquetteUserAgent.Build(appVersion);
 
     /// <summary>How long a day file survives with no cache hit at all before the next sweep removes it
     /// (see this class's own remarks for why last-write time, not a "fetched at" stamp inside the
@@ -364,7 +359,7 @@ public sealed class HistoryContextProvider(
             using var request = new HttpRequestMessage(HttpMethod.Get, BuildRequestUri(date));
             // Set per-request, not on the shared HttpClient (mirrors MusicBrainzYearLookup — keeps
             // this seam testable against a captured HttpRequestMessage).
-            request.Headers.UserAgent.ParseAdd(UserAgent);
+            request.Headers.UserAgent.ParseAdd(userAgent);
 
             var response = await http.SendAsync(request, ct).ConfigureAwait(false);
             response.EnsureSuccessStatusCode(); // throws HttpRequestException on non-2xx

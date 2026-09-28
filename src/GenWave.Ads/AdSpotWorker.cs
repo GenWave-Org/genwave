@@ -82,7 +82,7 @@ public sealed class AdSpotWorker(
     AdSpotStamper stamper,
     IOnAirRenderSignal onAirRenderSignal,
     IBoothLogAppender boothLog,
-    AdAppVersion appVersion,
+    IAppVersion appVersion,
     IOptionsMonitor<AdsOptions> adsOptions,
     IOptionsMonitor<LlmOptions> llmOptions,
     IConfiguration configuration,
@@ -551,7 +551,7 @@ public sealed class AdSpotWorker(
     async Task NarrateAutoRerenderAsync(AdSpot spot, CancellationToken ct)
     {
         var summary = $"Ad \"{LogSanitize.Strip(spot.Title)}\" for {LogSanitize.Strip(spot.SponsorName)} " +
-                      $"was re-rendered automatically on {appVersion.Value}. The new take replaces the old one.";
+                      $"was re-rendered automatically on {appVersion.Display}. The new take replaces the old one.";
         try
         {
             await boothLog.AppendAsync(new BoothLogAppendRequest(AutoRerenderBoothKind, summary, PersonaId: null), ct);
@@ -624,7 +624,7 @@ public sealed class AdSpotWorker(
         try
         {
             var outcome = await renderService.RenderStaleAsync(
-                spot, oldMediaId, liveSettings, appVersion.Value, renderCts.Token);
+                spot, oldMediaId, liveSettings, appVersion.Display, renderCts.Token);
             if (outcome is AdStaleRenderOutcome.Swapped)
             {
                 logger.LogInformation(

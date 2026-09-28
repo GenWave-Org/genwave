@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **128 seams across 7 projects.**
+> **130 seams across 8 projects.**
 
 ## GenWave.Ads (2 seams)
 
@@ -59,6 +59,12 @@
 |---|---|---|---|
 | `GenWave.Core.Abstractions.IContextPatterFactSource` | `GenWave.Context.ContextPipeline` | Singleton | also registered: `GenWave.Core.Abstractions.NoOpContextPatterFactSource` (GenWave.Core) |
 | `GenWave.Core.Abstractions.IContextProvider` | `GenWave.Context.History.HistoryContextProvider` | Singleton | also registered: `GenWave.Context.Weather.WeatherContextProvider` (GenWave.Context) |
+
+## GenWave.Core (1 seam)
+
+| Port | Adapter | Lifetime | Notes |
+|---|---|---|---|
+| `GenWave.Core.Abstractions.IAppVersion` | `GenWave.Core.AppVersion` | Singleton | — |
 
 ## GenWave.Host (36 seams)
 
@@ -111,7 +117,7 @@
 | `GenWave.Core.Abstractions.IEnergyAnalyzer` | `GenWave.Loudness.FfmpegEnergyAnalyzer` | Singleton | — |
 | `GenWave.Core.Abstractions.ILoudnessAnalyzer` | `GenWave.Loudness.FfmpegLoudnessAnalyzer` | Singleton | — |
 
-## GenWave.MediaLibrary (56 seams)
+## GenWave.MediaLibrary (57 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -163,6 +169,7 @@
 | `GenWave.Core.Abstractions.IScanGate` | `GenWave.MediaLibrary.Scan.ScanGate` | Singleton | — |
 | `GenWave.Core.Abstractions.IScheduleSpecialStore` | `GenWave.MediaLibrary.Station.SpecialsRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IScheduleStore` | `GenWave.MediaLibrary.Station.ScheduleRepository` | Singleton | — |
+| `GenWave.Core.Abstractions.ISchemaJournal` | `GenWave.MediaLibrary.Station.SchemaJournalRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IShowImagingScope` | `GenWave.MediaLibrary.Catalog.ShowImagingScopeRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IShowStore` | `GenWave.MediaLibrary.Station.ShowRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.ISponsorStore` | `GenWave.MediaLibrary.Station.SponsorRepository` | Singleton | — |
