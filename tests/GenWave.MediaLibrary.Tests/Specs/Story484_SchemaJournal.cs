@@ -1,7 +1,6 @@
 // STORY-484 — The schema journal (gh-#868 · SPEC F211.3–F211.4 · PLAN T591, T592)
 //
-// BDD specification — xUnit, Postgres-backed (Category=Integration). RED at plan time: every fact is
-// [Fact(Skip = Pending)] with a loud body — remove the Skip only in the task that makes it green.
+// BDD specification — xUnit, Postgres-backed (Category=Integration). Every fact is live (T591, T592).
 // Each Given comment names the arrange the scenario needs.
 // Entry point: the real ./migrate.sh against a throwaway compose db (T591); the Postgres journal
 // reader via DatabaseCollection (T592).
@@ -10,15 +9,67 @@
 // "Arc" pattern as Story367_TheStationRemembersEveryAiring.cs's LedgerSeedArc/SeedIdempotencyArc), not
 // once per [Fact] — xUnit constructs a new scenario-class instance per Fact, so putting IAsyncLifetime
 // directly on the scenario class re-runs migrate.sh (and re-provisions a whole compose db) per assert.
+// Exception: the single-fact reader scenarios over the shared DatabaseFixture (T592) put IAsyncLifetime
+// on the scenario class — one fact means the arrange still runs exactly once.
 
+using Dapper;
+using GenWave.Core.Abstractions;
 using GenWave.Host.Tests.Support;
+using GenWave.MediaLibrary.Station;
 using GenWave.MediaLibrary.Tests.Support;
+using Npgsql;
 
 namespace GenWave.MediaLibrary.Tests.Specs;
 
 public static class FeatureSchemaJournal
 {
-    const string PendingReader = "pending: T592 — ISchemaJournal reader (STORY-484)";
+    /// <summary>
+    /// <see cref="ISchemaJournal"/> constructed directly over the fixture's own station_svc data
+    /// source (SPEC F211.4, PLAN T592) — mirrors <see cref="Harness.AnnouncementRepo"/>'s own factory
+    /// shape for a station-schema store, one connection role over. <see cref="SchemaJournalRepository"/>
+    /// has default (internal) accessibility, same as every other station-schema repository
+    /// <see cref="Harness"/> constructs directly (<c>InternalsVisibleTo</c> grants this test project
+    /// access) — resolved here instead of added to <see cref="Harness"/> itself, since this is the
+    /// only spec file with a reason to read the journal.
+    /// </summary>
+    static ISchemaJournal Journal(DatabaseFixture db) => new SchemaJournalRepository(new Lazy<NpgsqlDataSource>(() => db.StationDataSource));
+
+    /// <summary>
+    /// Ensures <c>station.schema_migration</c> exists (db/06's own DDL — SPEC F211.3) and is empty,
+    /// regardless of what a PRIOR scenario in this collection left behind: <see cref="DatabaseCollection"/>
+    /// runs every class sharing <see cref="DatabaseFixture"/> against the SAME database, in an order
+    /// xUnit does not guarantee, and <see cref="ScenarioNoJournalTable"/> below deliberately drops this
+    /// very table (restoring it itself in its own <c>DisposeAsync</c>) — so a scenario that needs the
+    /// table PRESENT still checks defensively rather than assuming <see cref="DatabaseFixture.InitializeAsync"/>'s
+    /// own fresh-init copy has survived. Never recreates the table with inline DDL — a missing table is
+    /// restored by rerunning db/06 itself (the one real copy of this DDL), same as
+    /// <see cref="ScenarioNoJournalTable"/>'s own restore.
+    /// </summary>
+    static async Task ResetJournalTableAsync(DatabaseFixture db)
+    {
+        await using (var conn = await db.StationDataSource.OpenConnectionAsync())
+        {
+            var tableExists = await conn.ExecuteScalarAsync<bool>(
+                "select exists(select 1 from pg_tables where schemaname = 'station' and tablename = 'schema_migration')");
+            if (!tableExists)
+            {
+                db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "06-station-settings-migration.sh"));
+                return;
+            }
+        }
+
+        await using var truncateConn = await db.StationDataSource.OpenConnectionAsync();
+        await truncateConn.ExecuteAsync("truncate table station.schema_migration");
+    }
+
+    /// <summary>Journals one row for <paramref name="script"/> — <see cref="ResetJournalTableAsync"/>'s own sibling for AC7's seed.</summary>
+    static async Task SeedJournalRowAsync(DatabaseFixture db, string script)
+    {
+        await using var conn = await db.StationDataSource.OpenConnectionAsync();
+        await conn.ExecuteAsync(
+            "insert into station.schema_migration (script, applied_at) values (@Script, now())",
+            new { Script = script });
+    }
 
     /// <summary>The planted, always-failing migration AC9's fail-fast scenario plants — sorts LAST (after every real script), so fail-fast and --keep-going look identical through it (both run every real script first, then hit the failure).</summary>
     internal const string FailingScript = "50-spec-fail-migration.sh";
@@ -127,13 +178,27 @@ public static class FeatureSchemaJournal
 
     [Collection(DatabaseCollection.Name)]
     [Trait("Category", "Integration")]
-    public sealed class ScenarioAppliedIsTheHighestJournalledNumber(DatabaseFixture db)
+    public sealed class ScenarioAppliedIsTheHighestJournalledNumber(DatabaseFixture db) : IAsyncLifetime
     {
         // Given: journal rows for 47-, 48- and 49-*-migration.sh; the reader's GetAppliedAsync
 
+        int? applied;
+
+        public async Task InitializeAsync()
+        {
+            await ResetJournalTableAsync(db);
+            await SeedJournalRowAsync(db, "47-spec-seed-migration.sh");
+            await SeedJournalRowAsync(db, "48-spec-seed-migration.sh");
+            await SeedJournalRowAsync(db, "49-spec-seed-migration.sh");
+
+            applied = await Journal(db).GetAppliedAsync(CancellationToken.None);
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
         /// <summary>AC7 — Applied is 49</summary>
-        [Fact(Skip = PendingReader)]
-        public void AppliedIs49() => Assert.Fail($"{PendingReader} {db}");
+        [Fact]
+        public void AppliedIs49() => Assert.Equal(49, applied);
     }
 
     // ---------------------------------------------------------------------
@@ -188,24 +253,55 @@ public static class FeatureSchemaJournal
 
     [Collection(DatabaseCollection.Name)]
     [Trait("Category", "Integration")]
-    public sealed class ScenarioAnEmptyJournal(DatabaseFixture db)
+    public sealed class ScenarioAnEmptyJournal(DatabaseFixture db) : IAsyncLifetime
     {
         // Given: station.schema_migration truncated; GetAppliedAsync
 
+        int? applied;
+
+        public async Task InitializeAsync()
+        {
+            await ResetJournalTableAsync(db);
+
+            applied = await Journal(db).GetAppliedAsync(CancellationToken.None);
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
         /// <summary>AC10 — Applied is null</summary>
-        [Fact(Skip = PendingReader)]
-        public void AppliedIsNull() => Assert.Fail($"{PendingReader} {db}");
+        [Fact]
+        public void AppliedIsNull() => Assert.Null(applied);
     }
 
     [Collection(DatabaseCollection.Name)]
     [Trait("Category", "Integration")]
-    public sealed class ScenarioNoJournalTable(DatabaseFixture db)
+    public sealed class ScenarioNoJournalTable(DatabaseFixture db) : IAsyncLifetime
     {
         // Given: station.schema_migration dropped (pre-F211 db); GetAppliedAsync
 
+        int? applied;
+
+        public async Task InitializeAsync()
+        {
+            await using (var conn = await db.StationDataSource.OpenConnectionAsync())
+                await conn.ExecuteAsync("drop table if exists station.schema_migration");
+
+            applied = await Journal(db).GetAppliedAsync(CancellationToken.None);
+        }
+
+        // Restores the REAL DDL (db/06's own CREATE TABLE) rather than leaving the table dropped for
+        // whichever scenario in this shared DatabaseCollection runs next — same pattern as
+        // Story242_UpgradeChangesNothing.cs and Story042_StationSettingsSchemaAndRole.cs: the table is
+        // present again by the time this fact finishes.
+        public Task DisposeAsync()
+        {
+            db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "06-station-settings-migration.sh"));
+            return Task.CompletedTask;
+        }
+
         /// <summary>AC10 (STORY-485) — Applied is null, no throw (42P01 swallowed)</summary>
-        [Fact(Skip = PendingReader)]
-        public void AppliedIsNull() => Assert.Fail($"{PendingReader} {db}");
+        [Fact]
+        public void AppliedIsNull() => Assert.Null(applied);
     }
 }
 

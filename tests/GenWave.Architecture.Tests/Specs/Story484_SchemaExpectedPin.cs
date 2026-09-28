@@ -1,17 +1,16 @@
 // STORY-484 — The schema journal (gh-#868 · SPEC F211.4 · PLAN T592)
 //
-// BDD specification — xUnit. AC11 and the mirror pin are live (T591); the facts still marked
-// [Fact(Skip = Pending)] go green in T592. Each Given comment names the arrange the scenario needs.
+// BDD specification — xUnit. AC6 (this file) and AC11/the mirror pin are all live. Each Given comment
+// names the arrange the scenario needs.
 
 using System.Diagnostics;
 using GenWave.Architecture.Tests.Support;
+using GenWave.Core;
 
 namespace GenWave.Architecture.Tests.Specs;
 
 public static class FeatureSchemaExpectedPin
 {
-    const string Pending = "pending: T592 — SchemaVersion.Expected pin (STORY-484)";
-
     /// <summary>
     /// The station.schema_migration CREATE TABLE extraction/whitespace-normalisation shared by
     /// <see cref="ScenarioSchemaMigrationDdlIsMirroredByteIdentically"/> (migrate.sh vs. db/06, both
@@ -44,8 +43,37 @@ public static class FeatureSchemaExpectedPin
         // Given: the highest NN among db/NN-*-migration.sh in the repo
 
         /// <summary>AC6 — SchemaVersion.Expected equals it (a migration PR that forgets the bump is red)</summary>
-        [Fact(Skip = Pending)]
-        public void ExpectedIsTheHighestMigration() => Assert.Fail(Pending);
+        [Fact]
+        public void ExpectedIsTheHighestMigration() => Assert.Equal(SchemaVersion.Expected, HighestMigrationNumber());
+
+        /// <summary>
+        /// The SAME "leading run of ASCII digits" parse rule
+        /// <c>GenWave.MediaLibrary.Station.SchemaJournalRepository</c>'s own SQL applies to journalled
+        /// <c>script</c> rows (that type's own remarks) — applied here to <c>db/</c>'s own file names
+        /// instead. A name with no leading digit at all (never happens today: every real
+        /// <c>db/*-migration.sh</c> starts with <c>NN-</c>) is ignored rather than thrown on, the same
+        /// "an unparseable row doesn't participate" posture the SQL side takes; numeric comparison
+        /// (never lexical) so <c>100</c> would outrank <c>99</c>.
+        /// </summary>
+        static int HighestMigrationNumber()
+        {
+            var dbDir = Path.Combine(SolutionLocator.Root(), "db");
+            return Directory.GetFiles(dbDir, "*-migration.sh")
+                .Select(Path.GetFileName)
+                .OfType<string>()
+                .Select(TryLeadingNumber)
+                .OfType<int>()
+                .Max();
+        }
+
+        static int? TryLeadingNumber(string fileName)
+        {
+            var digitCount = 0;
+            while (digitCount < fileName.Length && char.IsAsciiDigit(fileName[digitCount]))
+                digitCount++;
+
+            return digitCount > 0 && int.TryParse(fileName[..digitCount], out var number) ? number : null;
+        }
     }
 
     public sealed class ScenarioMigrationsAreNotEdited

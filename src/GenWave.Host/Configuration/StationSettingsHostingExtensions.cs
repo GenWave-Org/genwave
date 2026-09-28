@@ -240,6 +240,12 @@ static class StationSettingsHostingExtensions
         // voice-pack store above just followed.
         builder.Services.AddJinglePackStore(stationConnStr, libraryConnStr);
 
+        // Schema journal reader (SPEC F211.4, STORY-484, PLAN T592) — same station_svc connection
+        // string as every registration above; station.schema_migration lives in the same schema.
+        // SchemaJournalRepository ships dark at T592 (AddSchemaJournal itself registers no consumer):
+        // PLAN T593's /api/status is the first Host call site.
+        builder.Services.AddSchemaJournal(stationConnStr);
+
         return builder;
     }
 }
