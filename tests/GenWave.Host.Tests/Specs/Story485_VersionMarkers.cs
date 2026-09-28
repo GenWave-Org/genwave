@@ -126,6 +126,15 @@ public static class FeatureVersionMarkers
         public void LogsTheVersion() =>
             Assert.Single(arc.StdErrLines, l => l.Contains("v5.14.0", StringComparison.Ordinal));
 
+        /// <summary>Proves the recorded argv+env dump this scenario's "never sees" facts assert
+        /// against is not vacuously empty: entrypoint.sh DOES export the three crossfade/safe-gap
+        /// keys (the curl stub's first three lines, this file's own <see cref="EntrypointRunArc"/>
+        /// remarks) into the environment Liquidsoap actually execs into, so a recorder that captured
+        /// nothing would fail this fact rather than let the absent-version facts pass by accident.</summary>
+        [Fact]
+        public void LiquidsoapWasHandedTheTuningKeys() =>
+            Assert.Contains("GW_XFADE_MIN=2", arc.LiquidsoapArgsAndEnv, StringComparison.Ordinal);
+
         /// <summary>AC5 — Liquidsoap itself never receives the version value: neither its argv nor
         /// its environment at exec time (recorded by the liquidsoap stub, this file's own header
         /// remarks) carries it, because <c>app_version</c> is a plain shell variable, never
@@ -474,6 +483,13 @@ public sealed class EngineConfigArc : IAsyncLifetime
 /// Liquidsoap; a recorded exec can). Also reads genwave.liq's own source once, for the cheap text
 /// fact that rounds out "nothing else reads it": the script Liquidsoap actually runs never names
 /// the key either.
+///
+/// Runs entrypoint.sh via <see cref="ScriptProcess.RunWithEmptyEnvironment"/>, not <see
+/// cref="ScriptProcess.Run"/>: the argv/env facts this arc feeds read the liquidsoap stub's OWN
+/// recorded environment byte-for-byte, so any variable merely PASSED THROUGH from the test
+/// process (a CI runner's <c>GITHUB_HEAD_REF</c>, say — a branch name can itself contain the
+/// version substring under test) would otherwise read as a false leak. An empty starting
+/// environment makes the fact describe entrypoint.sh's OWN behaviour only.
 /// </summary>
 public abstract class EntrypointRunArc(string curlAppVersionArg) : IAsyncLifetime
 {
@@ -509,7 +525,7 @@ public abstract class EntrypointRunArc(string curlAppVersionArg) : IAsyncLifetim
             exit 0
             """);
 
-        var run = ScriptProcess.Run("engine/entrypoint.sh", bin);
+        var run = ScriptProcess.RunWithEmptyEnvironment("engine/entrypoint.sh", bin);
         if (run.ExitCode != 0)
             throw new InvalidOperationException(
                 $"engine/entrypoint.sh exited {run.ExitCode}; stderr:\n{run.StdErr}");

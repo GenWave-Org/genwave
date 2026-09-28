@@ -67,12 +67,47 @@ public static class ScriptProcess
         IReadOnlyDictionary<string, string>? extraEnv = null, params string[] args)
     {
         var startInfo = BuildStartInfo(script, binDir, envFile, extraEnv, redirectStdin: false, args);
+        return StartAndDrain(startInfo, script);
+    }
 
+    /// <summary>
+    /// Runs <paramref name="script"/> like <see cref="Run"/>, but starting the child from an
+    /// EMPTY environment rather than <see cref="Sanitize"/>'s blocklist over a copy of the test
+    /// process's own: <c>PATH</c> is set to <paramref name="binDir"/> and <paramref
+    /// name="extraEnv"/> layered on top, and nothing else survives — not even a name <see
+    /// cref="IsStripped"/> doesn't know to remove (a CI runner's own <c>GITHUB_HEAD_REF</c>/
+    /// <c>RUNNER_*</c> export, say). <see cref="Run"/>'s blocklist is the right default
+    /// everywhere else — most specs assert on the SCRIPT's own behaviour, which still needs a
+    /// realistic ambient environment (HOME, LANG, TERM, ...) to run correctly — but for the rare
+    /// fact whose assertions read a CHILD process's own recorded argv/env (STORY-485's liquidsoap
+    /// stub: "did the control-plane version value or key ever reach here") any inherited
+    /// pass-through value is itself the exact false positive under test: a CI branch name that
+    /// happens to contain the version substring would fail the fact for a leak that never
+    /// happened. <paramref name="script"/> is repo-relative; <paramref name="binDir"/> must carry
+    /// everything the script needs to run (including <c>bash</c> itself when built by <see
+    /// cref="MakeBinDir"/>), since no ambient PATH survives to fall back on.
+    /// </summary>
+    public static (int ExitCode, string StdOut, string StdErr) RunWithEmptyEnvironment(
+        string script, string binDir, IReadOnlyDictionary<string, string>? extraEnv = null, params string[] args)
+    {
+        var repoRoot = RepoRootLocator.Find(AppContext.BaseDirectory);
+        var startInfo = CreateStartInfo(script, repoRoot, redirectStdin: false, args);
+
+        startInfo.Environment.Clear();
+        startInfo.Environment["PATH"] = binDir;
+        ApplyExtraEnv(startInfo, extraEnv);
+
+        return StartAndDrain(startInfo, script);
+    }
+
+    /// <summary>Starts <paramref name="startInfo"/>, drains stdout/stderr concurrently — a script
+    /// that fills the stderr pipe buffer while a caller blocks synchronously on stdout (or vice
+    /// versa) would otherwise hang — then waits for exit. Shared by every <c>Run*</c> overload.</summary>
+    static (int ExitCode, string StdOut, string StdErr) StartAndDrain(ProcessStartInfo startInfo, string script)
+    {
         using var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException($"failed to start {script}");
 
-        // Start draining both streams before WaitForExit — a script that fills the stderr pipe
-        // buffer while we block synchronously on stdout (or vice versa) would otherwise hang.
         var stdOutTask = process.StandardOutput.ReadToEndAsync();
         var stdErrTask = process.StandardError.ReadToEndAsync();
         process.WaitForExit();
@@ -105,7 +140,19 @@ public static class ScriptProcess
         IReadOnlyDictionary<string, string>? extraEnv, bool redirectStdin, string[] args)
     {
         var repoRoot = RepoRootLocator.Find(AppContext.BaseDirectory);
+        var startInfo = CreateStartInfo(script, repoRoot, redirectStdin, args);
 
+        Sanitize(startInfo, binDir, envFile, extraEnv);
+        return startInfo;
+    }
+
+    /// <summary>Builds the bash <see cref="ProcessStartInfo"/> every <c>Run*</c>/<see cref="Start"/>
+    /// overload shares — repo-rooted working directory, the script (resolved against <paramref
+    /// name="repoRoot"/>) plus <paramref name="args"/> on the argument list, stdout/stderr
+    /// redirected. Never touches the environment: <see cref="Sanitize"/> and <see
+    /// cref="RunWithEmptyEnvironment"/> each apply their own environment policy on top.</summary>
+    static ProcessStartInfo CreateStartInfo(string script, string repoRoot, bool redirectStdin, string[] args)
+    {
         var startInfo = new ProcessStartInfo("bash")
         {
             WorkingDirectory = repoRoot,
@@ -117,8 +164,6 @@ public static class ScriptProcess
         startInfo.ArgumentList.Add(Path.Combine(repoRoot, script));
         foreach (var arg in args)
             startInfo.ArgumentList.Add(arg);
-
-        Sanitize(startInfo, binDir, envFile, extraEnv);
         return startInfo;
     }
 
@@ -144,6 +189,15 @@ public static class ScriptProcess
         startInfo.Environment["PATH"] = binDir;
         if (envFile is not null)
             startInfo.Environment["GW_ENV_FILE"] = envFile;
+        ApplyExtraEnv(startInfo, extraEnv);
+    }
+
+    /// <summary>Layers <paramref name="extraEnv"/> onto <paramref name="startInfo"/>'s environment,
+    /// last so a caller can restore exactly the one seam it needs on top of whatever came before —
+    /// shared by <see cref="Sanitize"/>'s blocklist path and <see
+    /// cref="RunWithEmptyEnvironment"/>'s empty-environment path.</summary>
+    static void ApplyExtraEnv(ProcessStartInfo startInfo, IReadOnlyDictionary<string, string>? extraEnv)
+    {
         if (extraEnv is not null)
             foreach (var (key, value) in extraEnv)
                 startInfo.Environment[key] = value;
