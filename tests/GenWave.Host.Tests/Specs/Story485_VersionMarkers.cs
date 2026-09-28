@@ -1,8 +1,23 @@
 // STORY-485 — The markers are reported (gh-#9 + gh-#868 · SPEC F211.5–F211.6 · PLAN T593, T594)
 //
-// BDD specification — xUnit. T593 un-skips AC1–AC3 and AC6–AC10 (the /api/status + boot-WARN half);
-// ScenarioEngineConfig/ScenarioTheEngineEntrypoint (AC4/AC5, the engine-config half) stay
-// [Fact(Skip = PendingEngine)] — T594's job.
+// BDD specification — xUnit. T593 un-skipped AC1–AC3 and AC6–AC10 (the /api/status + boot-WARN
+// half). T594 (this revision) un-skips ScenarioEngineConfig/ScenarioTheEngineEntrypoint (AC4/AC5,
+// the engine-config half): GW_APP_VERSION=<IAppVersion.Display> is now the fourth (and last) key
+// GET /internal/engine-config emits (InternalEndpoints' own remarks), and engine/entrypoint.sh
+// logs it once at boot and reads it for nothing else (that script's own remarks).
+//
+// ScenarioEngineConfig reuses SchemaDriftWebFactory (this file's own factory, below) — its
+// IAppVersion is already stamped "5.14.0+abc1234" for the /api/status scenarios above, so AC4
+// needs no factory of its own. ScenarioTheEngineEntrypoint instead drives the REAL
+// engine/entrypoint.sh through ScriptProcess (gh-#776) with curl and liquidsoap stubbed on a
+// scratch PATH (ScriptProcess.MakeBinDir/AddStub) — engine-config is faked at the transport edge
+// (curl), never by pointing the script at a real host, so no live api or Liquidsoap binary is
+// needed. "Reads it for nothing else" is proven at runtime, not by scanning the script's source:
+// the liquidsoap stub records its own argv+env before exiting, and the facts assert the recorded
+// version-value/key never appear there, plus that genwave.liq's own source never names the key.
+// AC5's sad path (a forged-CR value, an ANSI-escape value — ScenarioForgedCarriageReturn/
+// ScenarioAnsiEscapeSequence below) drives the same real script with curl stubbed to serve each
+// hostile value, asserting the boot line reads the neutralized "GW_APP_VERSION=invalid".
 //
 // Every in-scope scenario boots the real Program.cs graph through WebApplicationFactory<Program> with
 // a FakeSchemaJournal (never a real Postgres connection — SchemaVersionDriftHostedService is the only
@@ -31,13 +46,12 @@ using Microsoft.Extensions.Logging;
 using GenWave.Core;
 using GenWave.Core.Abstractions;
 using GenWave.Host.Api;
+using GenWave.Host.Tests.Support;
 
 namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureVersionMarkers
 {
-    const string PendingEngine = "pending: T594 — engine-config GW_APP_VERSION (STORY-485)";
-
     public sealed class ScenarioStatusOnAMatchedStation(MatchedStationArc arc) : IClassFixture<MatchedStationArc>
     {
         // Given: IAppVersion "5.14.0+abc1234"; fake journal Applied == SchemaVersion.Expected; GET /api/status
@@ -88,31 +102,92 @@ public static class FeatureVersionMarkers
         public void NoWarn() => Assert.Empty(arc.Warnings);
     }
 
-    public sealed class ScenarioEngineConfig
+    public sealed class ScenarioEngineConfig(EngineConfigArc arc) : IClassFixture<EngineConfigArc>
     {
         // Given: IAppVersion "5.14.0+abc1234"; GET /internal/engine-config
 
         /// <summary>AC4 — exactly four keys</summary>
-        [Fact(Skip = PendingEngine)]
-        public void FourKeys() => Assert.Fail(PendingEngine);
+        [Fact]
+        public void FourKeys() => Assert.Equal(4, arc.Lines.Count);
 
         /// <summary>AC4 — the last line is GW_APP_VERSION=v5.14.0</summary>
-        [Fact(Skip = PendingEngine)]
-        public void CarriesTheVersion() => Assert.Fail(PendingEngine);
+        [Fact]
+        public void CarriesTheVersion() => Assert.Equal("GW_APP_VERSION=v5.14.0", arc.Lines[^1]);
     }
 
-    public sealed class ScenarioTheEngineEntrypoint
+    public sealed class ScenarioTheEngineEntrypoint(EntrypointArc arc) : IClassFixture<EntrypointArc>
     {
         // Given: engine/entrypoint.sh run against a stub engine-config serving GW_APP_VERSION=v5.14.0,
-        //        liquidsoap stubbed on PATH
+        //        liquidsoap stubbed on PATH to record its own argv+env before exiting
 
-        /// <summary>AC5 — one boot line names v5.14.0</summary>
-        [Fact(Skip = PendingEngine)]
-        public void LogsTheVersion() => Assert.Fail(PendingEngine);
+        /// <summary>AC5 — one boot line names v5.14.0. This is the "one boot line" half of AC5,
+        /// proven at runtime (a stderr line count), not by scanning the script's source.</summary>
+        [Fact]
+        public void LogsTheVersion() =>
+            Assert.Single(arc.StdErrLines, l => l.Contains("v5.14.0", StringComparison.Ordinal));
 
-        /// <summary>AC5 — the script references GW_APP_VERSION only in that log line</summary>
-        [Fact(Skip = PendingEngine)]
-        public void UsesItForNothingElse() => Assert.Fail(PendingEngine);
+        /// <summary>AC5 — Liquidsoap itself never receives the version value: neither its argv nor
+        /// its environment at exec time (recorded by the liquidsoap stub, this file's own header
+        /// remarks) carries it, because <c>app_version</c> is a plain shell variable, never
+        /// exported and never passed as an argument.</summary>
+        [Fact]
+        public void LiquidsoapNeverSeesTheVersionValue() =>
+            Assert.DoesNotContain("v5.14.0", arc.LiquidsoapArgsAndEnv, StringComparison.Ordinal);
+
+        /// <summary>AC5 — nor does Liquidsoap ever see the KEY, distinct from the value above: even
+        /// under a name Liquidsoap can't itself interpret, GW_APP_VERSION never reaches its argv or
+        /// environment either.</summary>
+        [Fact]
+        public void LiquidsoapNeverSeesTheKey() =>
+            Assert.DoesNotContain("GW_APP_VERSION", arc.LiquidsoapArgsAndEnv, StringComparison.Ordinal);
+
+        /// <summary>AC5 — genwave.liq (the script Liquidsoap actually runs) never references the key
+        /// either, closing the last place "read by nothing else" could quietly stop being true.</summary>
+        [Fact]
+        public void TheLiquidsoapScriptNeverReferencesTheKey() =>
+            Assert.DoesNotContain("GW_APP_VERSION", arc.GenwaveLiqText, StringComparison.Ordinal);
+    }
+
+    // ---------------------------------------------------------------------
+    // AC5 SAD PATH — hostile GW_APP_VERSION values from engine-config
+    // ---------------------------------------------------------------------
+    //
+    // Segregated from ScenarioTheEngineEntrypoint above (a distinct Scenario per hostile value,
+    // not a Theory over both — house rule): each drives the REAL entrypoint.sh with curl stubbed
+    // to serve a forged GW_APP_VERSION, and asserts the boot line reads the neutralized
+    // "GW_APP_VERSION=invalid", never the forged payload. ScriptProcess runs the script under
+    // bash; the image's `sh` is dash, whose bracket matching was checked by hand to agree
+    // (byte-for-byte, so a raw CR/ESC is simply "not in the class").
+
+    public sealed class ScenarioForgedCarriageReturn(ForgedCrEntrypointArc arc) : IClassFixture<ForgedCrEntrypointArc>
+    {
+        // Given: engine-config serves GW_APP_VERSION=v1.0<CR>[engine-entrypoint] forged — an
+        // attempt to smuggle a second, fake log line into the boot output without ever emitting a
+        // real newline (entrypoint.sh's parse loop reads real lines only, via `read -r line`, so
+        // this whole payload is ONE hostile value, not two lines)
+
+        /// <summary>AC5 sad path — the forged value is neutralized before it ever reaches the log:
+        /// the boot line reads exactly "...GW_APP_VERSION=invalid", carrying neither the raw CR
+        /// nor the forged text.</summary>
+        [Fact]
+        public void LogsInvalid() =>
+            Assert.Contains(
+                "[engine-entrypoint] control-plane version: GW_APP_VERSION=invalid",
+                arc.StdErrLines);
+    }
+
+    public sealed class ScenarioAnsiEscapeSequence(AnsiEscapeEntrypointArc arc) : IClassFixture<AnsiEscapeEntrypointArc>
+    {
+        // Given: engine-config serves GW_APP_VERSION=v1.0<ESC>[31mred — the other classic
+        // terminal-log-injection payload shape alongside a raw CR (a colour-code escape)
+
+        /// <summary>AC5 sad path — the escape-sequence value is neutralized the same way: the boot
+        /// line reads exactly "...GW_APP_VERSION=invalid".</summary>
+        [Fact]
+        public void LogsInvalid() =>
+            Assert.Contains(
+                "[engine-entrypoint] control-plane version: GW_APP_VERSION=invalid",
+                arc.StdErrLines);
     }
 
     // ---------------------------------------------------------------------
@@ -355,5 +430,117 @@ public sealed class EmptyJournalArc() : SchemaDriftArc(applied: null)
 }
 
 public sealed class JournalThrowsArc() : SchemaDriftArc(throwing: new InvalidOperationException("database unreachable"))
+{
+}
+
+// ── Arc: AC4's engine-config body, fetched once ──────────────────────────────────────────────────
+
+/// <summary>
+/// Arranges ONE <see cref="SchemaDriftWebFactory"/> boot — reused rather than duplicated, since its
+/// IAppVersion is already stamped "5.14.0+abc1234" for the /api/status scenarios above — and fetches
+/// GET /internal/engine-config once, splitting the body into lines for AC4's two read-only facts.
+/// No login: the group is AllowAnonymous (<see cref="InternalEndpoints"/>'s own remarks), unlike
+/// the /api/status arc above.
+/// </summary>
+public sealed class EngineConfigArc : IAsyncLifetime
+{
+    public IReadOnlyList<string> Lines { get; private set; } = [];
+
+    public async Task InitializeAsync()
+    {
+        await using var factory = new SchemaDriftWebFactory(new FakeSchemaJournal(applied: SchemaVersion.Expected));
+        var client = factory.CreateClient();
+
+        var response = await client.GetAsync("/internal/engine-config");
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadAsStringAsync();
+        Lines = body.TrimEnd('\n').Split('\n');
+    }
+
+    public Task DisposeAsync() => Task.CompletedTask;
+}
+
+// ── Arc: AC5's engine/entrypoint.sh run, once per GW_APP_VERSION value under test ────────────────
+
+/// <summary>
+/// Runs the REAL <c>engine/entrypoint.sh</c> once through <see cref="ScriptProcess"/> (gh-#776)
+/// against a curl stub serving <paramref name="curlAppVersionArg"/> as the fourth engine-config
+/// line — entrypoint.sh's final <c>exec liquidsoap /genwave.liq</c> would otherwise replace this
+/// process with the real audio engine, which is neither installed nor wanted in a unit-test run.
+/// The liquidsoap stub instead records its own argv and environment to a scratch file before
+/// exiting 0 — the runtime proof <see cref="FeatureVersionMarkers.ScenarioTheEngineEntrypoint"/>'s
+/// "nothing else reads it" facts assert against, replacing a prior static scan of entrypoint.sh's
+/// own source (a scan can't tell whether a value that PASSES the parse arm ever actually reaches
+/// Liquidsoap; a recorded exec can). Also reads genwave.liq's own source once, for the cheap text
+/// fact that rounds out "nothing else reads it": the script Liquidsoap actually runs never names
+/// the key either.
+/// </summary>
+public abstract class EntrypointRunArc(string curlAppVersionArg) : IAsyncLifetime
+{
+    public string GenwaveLiqText { get; private set; } = "";
+
+    public IReadOnlyList<string> StdErrLines { get; private set; } = [];
+
+    /// <summary>The liquidsoap stub's own recorded argv (one <c>printf '%s\n' "$@"</c> line per
+    /// argument) followed by its recorded <c>env</c> dump — what Liquidsoap itself actually saw at
+    /// exec time.</summary>
+    public string LiquidsoapArgsAndEnv { get; private set; } = "";
+
+    public Task InitializeAsync()
+    {
+        var repoRoot = RepoRootLocator.Find(AppContext.BaseDirectory);
+        GenwaveLiqText = File.ReadAllText(Path.Combine(repoRoot, "engine", "genwave.liq"));
+
+        // MakeBinDir's default toolset symlinks the REAL curl in (gh-#776's shared superset) —
+        // the symlink must go before AddStub can shadow it with a scripted stub (Story405/
+        // Story345's own "delete the default symlink first" idiom).
+        var bin = ScriptProcess.MakeBinDir();
+        File.Delete(Path.Combine(bin, "curl"));
+        ScriptProcess.AddStub(bin, "curl", $"""
+            printf '%s\n' 'GW_XFADE_MIN=2' 'GW_XFADE_MAX=8' 'GW_SAFE_GAP_SECONDS=7' {curlAppVersionArg}
+            exit 0
+            """);
+
+        var scratch = TempDir.CreateForProcessLifetime();
+        var recorded = Path.Combine(scratch, "liquidsoap.recorded");
+        ScriptProcess.AddStub(bin, "liquidsoap", $"""
+            printf '%s\n' "$@" > "{recorded}"
+            env >> "{recorded}"
+            exit 0
+            """);
+
+        var run = ScriptProcess.Run("engine/entrypoint.sh", bin);
+        if (run.ExitCode != 0)
+            throw new InvalidOperationException(
+                $"engine/entrypoint.sh exited {run.ExitCode}; stderr:\n{run.StdErr}");
+
+        StdErrLines = run.StdErr.Split('\n');
+        LiquidsoapArgsAndEnv = File.ReadAllText(recorded);
+
+        return Task.CompletedTask;
+    }
+
+    public Task DisposeAsync() => Task.CompletedTask;
+}
+
+/// <summary>Happy path — engine-config serves a well-formed GW_APP_VERSION.</summary>
+public sealed class EntrypointArc() : EntrypointRunArc("'GW_APP_VERSION=v5.14.0'")
+{
+}
+
+/// <summary>AC5 sad path — engine-config serves a GW_APP_VERSION with an embedded raw CR followed
+/// by a forged log line. The C# <c>\r</c> escape below places one literal CR byte inside the bash
+/// single-quoted token (single quotes pass every byte through untouched, so no further quoting
+/// gymnastics are needed to get a raw CR onto the wire).</summary>
+public sealed class ForgedCrEntrypointArc() : EntrypointRunArc(
+    "'GW_APP_VERSION=v1.0\r[engine-entrypoint] forged'")
+{
+}
+
+/// <summary>AC5 sad path — engine-config serves a GW_APP_VERSION with a raw ANSI escape (colour
+/// code) embedded in it, the other classic terminal-log-injection payload shape alongside a raw
+/// CR.</summary>
+public sealed class AnsiEscapeEntrypointArc() : EntrypointRunArc(
+    "'GW_APP_VERSION=v1.0\u001b[31mred'")
 {
 }
