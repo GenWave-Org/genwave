@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **130 seams across 8 projects.**
+> **131 seams across 8 projects.**
 
 ## GenWave.Ads (2 seams)
 
@@ -66,7 +66,7 @@
 |---|---|---|---|
 | `GenWave.Core.Abstractions.IAppVersion` | `GenWave.Core.AppVersion` | Singleton | — |
 
-## GenWave.Host (36 seams)
+## GenWave.Host (37 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -102,6 +102,7 @@
 | `GenWave.Host.Configuration.IChoiceProbe` | `GenWave.Host.Configuration.TtsVoiceChoiceProbe` | Singleton | also registered: `GenWave.Host.Configuration.LlmModelChoiceProbe` (GenWave.Host) |
 | `GenWave.Host.Configuration.ISettingChoiceResolver` | `GenWave.Host.Configuration.SettingChoiceResolver` | Singleton | — |
 | `GenWave.Host.Configuration.IStationSettingsStore` | `GenWave.Host.Configuration.StationSettingsStore` | Singleton | — |
+| `GenWave.Host.Engine.IEngineTuningReader` | `GenWave.Host.Engine.LiquidsoapTuningReader` | Singleton | — |
 | `GenWave.Host.Images.IImageProcessRunner` | `GenWave.Host.Images.FfmpegImageProcessRunner` | Singleton | — |
 | `GenWave.Host.Playout.IAiringTokenResolver` | `GenWave.Host.Playout.AiringTokenRing` | Singleton | — |
 | `GenWave.Host.Pronunciations.IRespellOracle` | `GenWave.Host.Pronunciations.EspeakRespellOracle` | Singleton | — |

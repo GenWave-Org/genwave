@@ -1,6 +1,4 @@
 using System.Globalization;
-using System.Net.Sockets;
-using System.Text;
 using Microsoft.Extensions.Logging;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
@@ -139,27 +137,11 @@ sealed class LiquidsoapControl(
     }
 
     // --- transport: send one command, collect the reply up to the END terminator line ---
+    // The wire protocol itself lives in LiquidsoapTelnet (shared with LiquidsoapTuningReader,
+    // SPEC F213.5, PLAN T601) — this wrapper only adds the debug log line.
     async Task<string> SendAsync(string command, CancellationToken ct)
     {
         log.LogDebug("Liquidsoap command: {Command}", command);
-
-        using var client = new TcpClient();
-        await client.ConnectAsync(cfg.Host, cfg.Port, ct);
-        await using var stream = client.GetStream();
-
-        await stream.WriteAsync(Encoding.UTF8.GetBytes(command + "\n"), ct);
-
-        var sb = new StringBuilder();
-        var buf = new byte[4096];
-        int read;
-        while ((read = await stream.ReadAsync(buf, ct)) > 0)
-        {
-            sb.Append(Encoding.UTF8.GetString(buf, 0, read));
-            // Each Liquidsoap response is terminated by "END" on its own line.
-            if (sb.ToString().Replace("\r", "").Split('\n').Contains("END")) break;
-        }
-
-        var lines = sb.ToString().Replace("\r", "").Split('\n');
-        return string.Join('\n', lines.TakeWhile(l => l != "END")).Trim();
+        return await LiquidsoapTelnet.SendAsync(cfg.Host, cfg.Port, command, ct);
     }
 }

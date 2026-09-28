@@ -9,13 +9,14 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using GenWave.Host.Engine;
+using GenWave.Host.Options;
 using GenWave.Host.Tests.Support;
 
 namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureEngineSettingsVerdict
 {
-    const string PendingVerdict = "pending: T601 — IEngineTuningReader + verdict compute (STORY-488)";
     const string PendingStatus = "pending: T602 — probe-cached verdict on /api/status + WARN/INFO (STORY-488)";
 
     public sealed class ScenarioTheEngineReportsWhatItRuns
@@ -184,27 +185,157 @@ public static class FeatureEngineSettingsVerdict
     public sealed class ScenarioEqualValues
     {
         // Given: effective settings 2 / 8 / 7.0; reader returns "GW_XFADE_MIN=2.0 GW_XFADE_MAX=8.0 GW_SAFE_GAP_SECONDS=7.0"
+        readonly EngineSettingsVerdict verdict = EngineSettingsVerdict.Compute(
+            new Dictionary<string, string?>
+            {
+                ["GW_XFADE_MIN"] = "2",
+                ["GW_XFADE_MAX"] = "8",
+                ["GW_SAFE_GAP_SECONDS"] = "7.0",
+            },
+            "GW_XFADE_MIN=2.0 GW_XFADE_MAX=8.0 GW_SAFE_GAP_SECONDS=7.0");
 
         /// <summary>AC3 — verdict is inSync</summary>
-        [Fact(Skip = PendingVerdict)]
-        public void InSync() => Assert.Fail(PendingVerdict);
+        [Fact]
+        public void InSync() => Assert.Equal(EngineSettingsState.InSync, verdict.State);
 
         /// <summary>AC3 — differs is empty</summary>
-        [Fact(Skip = PendingVerdict)]
-        public void NothingDiffers() => Assert.Fail(PendingVerdict);
+        [Fact]
+        public void NothingDiffers() => Assert.Empty(verdict.Differs);
     }
 
     public sealed class ScenarioOneValueDiffers
     {
         // Given: effective GW_XFADE_MIN 3 (others equal); reader reports 2.0
+        readonly EngineSettingsVerdict verdict = EngineSettingsVerdict.Compute(
+            new Dictionary<string, string?>
+            {
+                ["GW_XFADE_MIN"] = "3",
+                ["GW_XFADE_MAX"] = "8",
+                ["GW_SAFE_GAP_SECONDS"] = "7.0",
+            },
+            "GW_XFADE_MIN=2.0 GW_XFADE_MAX=8.0 GW_SAFE_GAP_SECONDS=7.0");
 
         /// <summary>AC4 — verdict is restartNeeded</summary>
-        [Fact(Skip = PendingVerdict)]
-        public void RestartNeeded() => Assert.Fail(PendingVerdict);
+        [Fact]
+        public void RestartNeeded() => Assert.Equal(EngineSettingsState.RestartNeeded, verdict.State);
 
         /// <summary>AC4 — differs is exactly ["GW_XFADE_MIN"]</summary>
-        [Fact(Skip = PendingVerdict)]
-        public void NamesTheKey() => Assert.Fail(PendingVerdict);
+        [Fact]
+        public void NamesTheKey() => Assert.Equal(["GW_XFADE_MIN"], verdict.Differs);
+    }
+
+    public sealed class ScenarioEffectiveValueOutprecisesTheEngine
+    {
+        // Given: effective GW_XFADE_MIN "2.1234567890123" (others at defaults); the engine echoes
+        // it back rounded to its own 12-significant-digit print precision (PLAN T601 review F1 —
+        // an exact == here would read a saved value as restartNeeded forever).
+        readonly EngineSettingsVerdict verdict = EngineSettingsVerdict.Compute(
+            new Dictionary<string, string?>
+            {
+                ["GW_XFADE_MIN"] = "2.1234567890123",
+                ["GW_XFADE_MAX"] = "8",
+                ["GW_SAFE_GAP_SECONDS"] = "7",
+            },
+            "GW_XFADE_MIN=2.12345678901 GW_XFADE_MAX=8.0 GW_SAFE_GAP_SECONDS=7.0");
+
+        /// <summary>AC9/F213.6 — rounding to the engine's print precision before comparing gives inSync.</summary>
+        [Fact]
+        public void InSync() => Assert.Equal(EngineSettingsState.InSync, verdict.State);
+    }
+
+    public sealed class ScenarioGenuineDifferenceSurvivesTheRounding
+    {
+        // Given: effective GW_XFADE_MIN 2.12345678902 (12 significant digits); reader reports
+        // 2.12345678901 — a real difference at the engine's own print precision, which the
+        // rounding fix must not swallow (PLAN T601 review F1).
+        readonly EngineSettingsVerdict verdict = EngineSettingsVerdict.Compute(
+            new Dictionary<string, string?>
+            {
+                ["GW_XFADE_MIN"] = "2.12345678902",
+                ["GW_XFADE_MAX"] = "8",
+                ["GW_SAFE_GAP_SECONDS"] = "7",
+            },
+            "GW_XFADE_MIN=2.12345678901 GW_XFADE_MAX=8.0 GW_SAFE_GAP_SECONDS=7.0");
+
+        /// <summary>A true 12th-significant-digit difference still gives restartNeeded.</summary>
+        [Fact]
+        public void RestartNeeded() => Assert.Equal(EngineSettingsState.RestartNeeded, verdict.State);
+    }
+
+    public sealed class ScenarioTelnetReaderAgainstAFakeSocket : IAsyncDisposable
+    {
+        // Given: a loopback FakeEngineServer that answers gw_tuning with the started values
+        // (PLAN T601 — "telnet impl covered against a fake socket").
+        const string Reply = "GW_XFADE_MIN=2.0 GW_XFADE_MAX=8.0 GW_SAFE_GAP_SECONDS=7.0";
+
+        readonly FakeEngineServer engineServer = new(_ => Reply);
+        readonly LiquidsoapTuningReader reader;
+
+        public ScenarioTelnetReaderAgainstAFakeSocket()
+        {
+            reader = new LiquidsoapTuningReader(new LiquidsoapOptions
+            {
+                Host = "127.0.0.1",
+                Port = engineServer.Port,
+            });
+        }
+
+        /// <summary>Sends exactly the gw_tuning command — no other telnet traffic.</summary>
+        [Fact]
+        public async Task SendsGwTuning()
+        {
+            await reader.ReadAsync(CancellationToken.None);
+
+            Assert.Equal(["gw_tuning"], engineServer.Commands);
+        }
+
+        /// <summary>Returns the reply line verbatim, unparsed.</summary>
+        [Fact]
+        public async Task ReturnsTheReplyLineVerbatim()
+        {
+            Assert.Equal(Reply, await reader.ReadAsync(CancellationToken.None));
+        }
+
+        public async ValueTask DisposeAsync() => await engineServer.DisposeAsync();
+    }
+
+    public sealed class ScenarioTelnetReaderTimesOut : IAsyncDisposable
+    {
+        // Given: a listener that accepts the connection but never replies; reader given a 200 ms
+        // timeout (PLAN T601 review F2 — proves the "or times out" half of AC9, not just "throws").
+        readonly NeverRepliesEngineServer engineServer = new();
+        readonly LiquidsoapTuningReader reader;
+
+        public ScenarioTelnetReaderTimesOut()
+        {
+            reader = new LiquidsoapTuningReader(
+                new LiquidsoapOptions { Host = "127.0.0.1", Port = engineServer.Port },
+                TimeSpan.FromMilliseconds(200));
+        }
+
+        /// <summary>AC9 — the reader itself throws TimeoutException, never a bare OperationCanceledException.</summary>
+        [Fact]
+        public async Task ReadAsyncThrowsTimeoutException() =>
+            await Assert.ThrowsAsync<TimeoutException>(() => reader.ReadAsync(CancellationToken.None));
+
+        /// <summary>AC9 — ComputeAsync maps that timeout to Unknown, exactly like a refused connection.</summary>
+        [Fact]
+        public async Task ComputeAsyncGivesUnknown()
+        {
+            var verdict = await EngineSettingsVerdict.ComputeAsync(
+                reader,
+                new Dictionary<string, string?>
+                {
+                    ["GW_XFADE_MIN"] = "2",
+                    ["GW_XFADE_MAX"] = "8",
+                    ["GW_SAFE_GAP_SECONDS"] = "7",
+                },
+                CancellationToken.None);
+
+            Assert.Equal(EngineSettingsState.Unknown, verdict.State);
+        }
+
+        public async ValueTask DisposeAsync() => await engineServer.DisposeAsync();
     }
 
     public sealed class ScenarioStatusCarriesTheVerdict
@@ -266,10 +397,23 @@ public static class FeatureEngineSettingsVerdict
     public sealed class ScenarioEngineUnreachable
     {
         // Given: reader throws (socket refused / timeout)
+        static readonly Dictionary<string, string?> EffectiveConfig = new()
+        {
+            ["GW_XFADE_MIN"] = "2",
+            ["GW_XFADE_MAX"] = "8",
+            ["GW_SAFE_GAP_SECONDS"] = "7",
+        };
 
         /// <summary>AC9 — verdict is unknown</summary>
-        [Fact(Skip = PendingVerdict)]
-        public void Unknown() => Assert.Fail(PendingVerdict);
+        [Fact]
+        public async Task Unknown()
+        {
+            var reader = new FakeThrowingEngineTuningReader(new SocketException());
+
+            var verdict = await EngineSettingsVerdict.ComputeAsync(reader, EffectiveConfig, CancellationToken.None);
+
+            Assert.Equal(EngineSettingsState.Unknown, verdict.State);
+        }
 
         /// <summary>AC9 — no new WARN (via WAF + one probe tick)</summary>
         [Fact(Skip = PendingStatus)]
@@ -279,10 +423,21 @@ public static class FeatureEngineSettingsVerdict
     public sealed class ScenarioGarbledReply
     {
         // Given: reader returns "GW_XFADE_MIN=abc"
+        static readonly Dictionary<string, string?> EffectiveConfig = new()
+        {
+            ["GW_XFADE_MIN"] = "2",
+            ["GW_XFADE_MAX"] = "8",
+            ["GW_SAFE_GAP_SECONDS"] = "7",
+        };
 
         /// <summary>AC10 — verdict is unknown</summary>
-        [Fact(Skip = PendingVerdict)]
-        public void Unknown() => Assert.Fail(PendingVerdict);
+        [Fact]
+        public void Unknown()
+        {
+            var verdict = EngineSettingsVerdict.Compute(EffectiveConfig, "GW_XFADE_MIN=abc");
+
+            Assert.Equal(EngineSettingsState.Unknown, verdict.State);
+        }
     }
 
     public sealed class ScenarioBeforeTheFirstProbe
@@ -296,5 +451,63 @@ public static class FeatureEngineSettingsVerdict
         /// <summary>AC11 — status returns 200</summary>
         [Fact(Skip = PendingStatus)]
         public void StatusIs200() => Assert.Fail(PendingStatus);
+    }
+}
+
+/// <summary>An <see cref="IEngineTuningReader"/> that always fails — stands in for a refused
+/// connection or a timed-out read (AC9).</summary>
+file sealed class FakeThrowingEngineTuningReader(Exception toThrow) : IEngineTuningReader
+{
+    public Task<string> ReadAsync(CancellationToken ct) => Task.FromException<string>(toThrow);
+}
+
+/// <summary>
+/// A loopback listener that takes the TCP handshake and then never writes a single byte back —
+/// stands in for a Liquidsoap socket that accepted the connection but hung (PLAN T601 review F2,
+/// the "or times out" half of AC9), which <see cref="FakeEngineServer"/> can't produce since its
+/// <c>respond</c> callback always answers.
+/// <para>
+/// Not <c>file</c>-scoped, unlike <see cref="FakeThrowingEngineTuningReader"/>: it's held in a
+/// typed field (part of a member signature), and a file-local type can only appear there when its
+/// own enclosing type is file-local too — <see cref="FakeThrowingEngineTuningReader"/> instead only
+/// ever appears behind a <c>var</c> local, which isn't a signature.
+/// </para>
+/// </summary>
+sealed class NeverRepliesEngineServer : IAsyncDisposable
+{
+    readonly TcpListener listener;
+    readonly CancellationTokenSource cts = new();
+    readonly Task acceptLoop;
+
+    public NeverRepliesEngineServer()
+    {
+        listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        acceptLoop = AcceptForeverAsync(cts.Token);
+    }
+
+    public int Port => ((IPEndPoint)listener.LocalEndpoint).Port;
+
+    async Task AcceptForeverAsync(CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                using var client = await listener.AcceptTcpClientAsync(ct);
+                // Hold the connection open — silence, not a reply — until torn down.
+                await Task.Delay(Timeout.Infinite, ct);
+            }
+        }
+        catch (OperationCanceledException) { /* expected on shutdown */ }
+        catch (ObjectDisposedException) { /* expected on shutdown */ }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await cts.CancelAsync();
+        listener.Stop();
+        try { await acceptLoop; } catch { /* expected on shutdown */ }
+        cts.Dispose();
     }
 }
