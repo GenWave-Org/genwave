@@ -85,10 +85,11 @@ services:
     build:
       context: ./engine                        # engine/Dockerfile extends savonet/liquidsoap:v2.4.5 with curl + entrypoint.sh
     networks: [core]                            # control port 1234 deliberately NOT published
-    # No hard depends_on: api here — the entrypoint.sh fetches config with retries and falls back
-    # to the GW_XFADE_* env vars below if the api is slow/down on a cold start. A strict
-    # depends_on: api: service_healthy here would create a potential deadlock (api already depends
-    # on icecast+engine being healthy for its own healthcheck path). Startup is tolerant by design.
+    # No depends_on: api here — the entrypoint.sh fetches config with retries and falls back to
+    # the GW_XFADE_* env vars below if the api is slow/down on a cold start. The api no longer
+    # depends_on: engine either (gh-#879/F213.1): the two boot in parallel, and this healthcheck's
+    # start_period below gives the entrypoint's retry/fallback window room to run before the
+    # engine is judged unhealthy. Startup is tolerant by design.
     depends_on:
       icecast:
         condition: service_healthy              # connect the source to a live Icecast
@@ -115,6 +116,8 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+      start_period: 45s                          # covers entrypoint.sh's api-config fetch/retry budget
+                                                   # (gh-#879/F213.3) so a slow api never marks engine unhealthy
     restart: unless-stopped
 
   api:
@@ -131,8 +134,11 @@ services:
     depends_on:
       db:
         condition: service_healthy              # schema must exist before first query
-      engine:
-        condition: service_healthy              # convenience; the feeder retries regardless
+      # No engine entry (gh-#879/F213.1): the api no longer waits on the engine being healthy —
+      # engine healthy means Liquidsoap's control port is open, which only happens after
+      # entrypoint.sh has already tried to fetch its config from the api, so on every fresh up
+      # that fetch ran before the api existed and the engine booted on the compose fallbacks.
+      # The feeder retries the socket regardless, so the two now boot in parallel.
       # required: false (SPEC F136.2, STORY-343, compose >=2.20 — this repo's v2.24+ floor
       # covers it): condition still orders api's start AFTER kokoro's when kokoro is part of
       # this launch, but a kokoro that never comes up (piper-only's profile-disabled kokoro,

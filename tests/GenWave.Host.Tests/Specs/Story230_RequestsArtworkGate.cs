@@ -352,7 +352,12 @@ public static class FeatureRequestsArtworkGate
             // root-owned directory, and voice-seed's own comment notes it is not redundant with
             // Docker's empty-volume auto-populate (api mounts the volume first under launch.sh's
             // staged startup, and api's image has no `/voices` path to auto-populate from).
-            const string ComposeYamlSha256  = "f00cda8db515a99be83944b2478ed7c46e0b24c5a970e6a006dfc10115846a79";
+            // ComposeYamlSha256 re-pinned 2026-09-28 (PLAN T598, SPEC F213.1/F213.3, gh-#879): the
+            // api's depends_on no longer carries an engine: service_healthy entry (the two now boot
+            // in parallel) and the engine healthcheck gains start_period: 45s; the engine service's
+            // own comment block was rewritten to state the truth post-change. EngineScriptSha256
+            // unchanged — this task does not touch engine/genwave.liq.
+            const string ComposeYamlSha256  = "c7e1828aa16edb18081078478751006a01ccad26697b0927aa8c54749c9ee9b4";
 
             Assert.Equal(EngineScriptSha256, Sha256Hex(Path.Combine("engine", "genwave.liq")));
             Assert.Equal(ComposeYamlSha256, Sha256Hex("compose.yaml"));

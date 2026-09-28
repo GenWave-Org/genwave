@@ -6,32 +6,53 @@
 // engine/entrypoint.sh run through ScriptProcess.RunWithEmptyEnvironment with PATH stubs for curl, sleep,
 // date (a fake clock) and liquidsoap (records argv + env) — never a real 30 s wait.
 
+using System.Text.Json;
+
+using GenWave.Host.Tests.Support;
+
 namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureEngineSettingsOnFreshUp
 {
-    const string PendingCompose = "pending: T598 — api drops depends_on engine; engine start_period (STORY-487)";
     const string PendingWait = "pending: T599 — entrypoint 30 s wall-clock budget (STORY-487)";
 
     public sealed class ScenarioComposeRender
     {
         // Given: `docker compose config` of compose.yaml, and of compose.yaml + compose.piper-only.yaml
+        // — rendered once per scenario (static Lazy, the Gh242 idiom) since every fact below reads
+        // the same two renders.
+        static readonly Lazy<JsonDocument> Base = new(() => ComposeConfigRender.Render());
+        static readonly Lazy<JsonDocument> PiperOnly = new(() => ComposeConfigRender.Render("compose.piper-only.yaml"));
 
         /// <summary>AC1 — the api's depends_on has no engine (compose.yaml)</summary>
-        [Fact(Skip = PendingCompose)]
-        public void ApiDoesNotWaitOnTheEngine() => Assert.Fail(PendingCompose);
+        [Fact]
+        [Trait("Category", "Integration")]
+        public void ApiDoesNotWaitOnTheEngine() =>
+            Assert.DoesNotContain("engine", ComposeConfigRender.DependsOnNames(Base.Value, "api"));
 
         /// <summary>AC1 — the api's depends_on has no engine (piper-only overlay)</summary>
-        [Fact(Skip = PendingCompose)]
-        public void PiperOnlyApiDoesNotWaitOnTheEngine() => Assert.Fail(PendingCompose);
+        [Fact]
+        [Trait("Category", "Integration")]
+        public void PiperOnlyApiDoesNotWaitOnTheEngine() =>
+            Assert.DoesNotContain("engine", ComposeConfigRender.DependsOnNames(PiperOnly.Value, "api"));
 
         /// <summary>AC2 — the engine still waits on icecast service_healthy</summary>
-        [Fact(Skip = PendingCompose)]
-        public void EngineWaitsOnIcecast() => Assert.Fail(PendingCompose);
+        [Fact]
+        [Trait("Category", "Integration")]
+        public void EngineWaitsOnIcecast() =>
+            Assert.Equal(
+                "service_healthy",
+                Base.Value.RootElement.GetProperty("services").GetProperty("engine")
+                    .GetProperty("depends_on").GetProperty("icecast").GetProperty("condition").GetString());
 
         /// <summary>AC3 — the engine healthcheck start_period is at least 45 s</summary>
-        [Fact(Skip = PendingCompose)]
-        public void HealthcheckCoversTheWait() => Assert.Fail(PendingCompose);
+        [Fact]
+        [Trait("Category", "Integration")]
+        public void HealthcheckCoversTheWait() =>
+            Assert.True(45 <= ComposeConfigRender.ParseSecondsDuration(
+                Base.Value.RootElement.GetProperty("services").GetProperty("engine")
+                    .GetProperty("healthcheck").GetProperty("start_period").GetString()
+                    ?? throw new InvalidOperationException("engine healthcheck has no start_period")));
     }
 
     public sealed class ScenarioASlowApi

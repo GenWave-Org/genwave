@@ -9,8 +9,9 @@
 # What it does on top of compose.yaml (and, when stacked, compose.demo.yaml):
 #   * removes the kokoro service — its ~1.2GiB fresh baseline is the single biggest
 #     resident in the stack, and a 4GB box (Raspberry Pi 4, small VPS) can't afford it
-#   * drops api's hard `depends_on: kokoro: service_healthy` (keeps db/engine), so the
-#     api boots without any kokoro container existing at all
+#   * drops api's hard `depends_on: kokoro: service_healthy` (keeps db only — base compose.yaml
+#     no longer depends_on: engine either, gh-#879/F213.1), so the api boots without any kokoro
+#     container existing at all
 #   * resets the piper service's `profiles: ["fallback"]` gate (base compose.yaml, SPEC F99.3)
 #     back to unconditional — on THIS topology piper is not an opt-in fallback, it is the
 #     PRIMARY engine (SPEC F99.4, STORY-257), so it must always run
@@ -66,7 +67,7 @@ services:
   # The two MUST travel together: ollama-init's `depends_on: ollama` would name a
   # profile-disabled service and fail the whole render, the same trap the api/kokoro
   # comment below describes. Nothing else depends on either (gh-#242 pinned api's
-  # depends_on to db+engine), so no reset is needed beyond this pair.
+  # depends_on to db only), so no reset is needed beyond this pair.
   #
   # Declaring a service that exists only in compose.demo.yaml is safe in the dev flow
   # (compose.yaml + this file, no demo layer): an inactive profile excludes the block
@@ -105,8 +106,6 @@ services:
     depends_on: !override
       db:
         condition: service_healthy              # schema must exist before first query
-      engine:
-        condition: service_healthy              # convenience; the feeder retries regardless
     environment:
       # Piper as the PRIMARY engine (SPEC F99.4, STORY-257), not a fallback hop pinned by kind:
       # TtsServiceCollectionExtensions selects PiperPrimaryTtsSynthesizer as

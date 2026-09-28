@@ -5,8 +5,9 @@
 // ordinary suite (no daemon touched, same as Story201).
 //
 // Pins under guard: the DEFAULT render's api service still hard-depends on kokoro; the piper-only
-// overlay removes kokoro and resets api's depends_on to db+engine only; the overlay stacks cleanly
-// on compose.demo.yaml; and launch.sh --piper-only merges the overlay file LAST in both flows.
+// overlay removes kokoro and resets api's depends_on to db only (gh-#879/F213.1, PLAN T598: the
+// api no longer depends_on the engine on any topology); the overlay stacks cleanly on
+// compose.demo.yaml; and launch.sh --piper-only merges the overlay file LAST in both flows.
 //
 // ⚠️ SUPERSEDED IN PART 2026-08-14 (PLAN T148, SPEC F99.2–F99.4, STORY-257): two of this file's
 // original pins described the pre-STORY-257 shape and are no longer true —
@@ -25,7 +26,6 @@
 // Scenarios below are UPDATED in place (not left stale) — the gh-#242 constraints that still
 // hold (kokoro depends_on, the overlay's own presence/merge-order pins) are unchanged.
 
-using System.Diagnostics;
 using System.Text.Json;
 
 using GenWave.Host.Tests.Support;
@@ -36,59 +36,20 @@ public static class FeatureComposePiperOnlyOverride
 {
     const string OverlayFile = "compose.piper-only.yaml";
 
+    // Render + depends_on-names plumbing lives in Support.ComposeConfigRender (PLAN T598 review) —
+    // shared with Story487, which needs the same `docker compose config` idiom.
     static JsonDocument RenderConfig(bool demoOverlay, bool piperOnlyOverlay)
     {
-        var startInfo = new ProcessStartInfo("docker")
-        {
-            WorkingDirectory = RepoRootLocator.Find(AppContext.BaseDirectory),
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-        var args = new List<string> { "compose", "-f", "compose.yaml" };
-        if (demoOverlay) { args.Add("-f"); args.Add("compose.demo.yaml"); }
+        var overlays = new List<string>();
+        if (demoOverlay) overlays.Add("compose.demo.yaml");
         // The overlay always merges LAST — the same ordering launch.sh --piper-only produces —
         // so its kokoro removal + depends_on reset win over anything the demo overlay merged.
-        if (piperOnlyOverlay) { args.Add("-f"); args.Add(OverlayFile); }
-        args.AddRange(new[] { "config", "--format", "json" });
-        foreach (var arg in args) startInfo.ArgumentList.Add(arg);
-
-        // Same dummy-secret idiom as Story181/Story202/Gh148: `config` only merges text, no
-        // daemon reached.
-        foreach (var (key, value) in new Dictionary<string, string>
-        {
-            ["POSTGRES_PASSWORD"] = "gh242-dummy",
-            ["LIBRARY_DB_PASSWORD"] = "gh242-dummy",
-            ["STATION_DB_PASSWORD"] = "gh242-dummy",
-            ["ICECAST_SOURCE_PASSWORD"] = "gh242-dummy",
-            ["ICECAST_ADMIN_PASSWORD"] = "gh242-dummy",
-            ["ADMIN_PASSWORD"] = "gh242-dummy",
-            ["MEDIA_DIR"] = Path.GetTempPath(),
-            ["PUBLIC_HOST"] = "gh242.invalid",
-            // gh-#249: explicit-but-empty shadows BOTH ambient COMPOSE_PROFILES and a dev
-            // box's repo-root .env value, so the render sees the same profile set (none)
-            // CI does. Overlay/flag-selected profiles are unaffected — a --profile flag
-            // takes precedence over this variable entirely (verified empirically).
-            ["COMPOSE_PROFILES"] = "",
-        })
-        {
-            startInfo.Environment[key] = value;
-        }
-
-        using var process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("failed to start docker compose config");
-        var stdOut = process.StandardOutput.ReadToEnd();
-        var stdErr = process.StandardError.ReadToEnd();
-        process.WaitForExit();
-        if (process.ExitCode != 0)
-            throw new InvalidOperationException($"docker compose config failed (exit {process.ExitCode}): {stdErr}");
-
-        return JsonDocument.Parse(stdOut);
+        if (piperOnlyOverlay) overlays.Add(OverlayFile);
+        return ComposeConfigRender.Render([.. overlays]);
     }
 
     static string[] DependsOnNames(JsonDocument render, string service) =>
-        render.RootElement.GetProperty("services").GetProperty(service)
-            .GetProperty("depends_on").EnumerateObject().Select(p => p.Name).Order().ToArray();
+        ComposeConfigRender.DependsOnNames(render, service);
 
     public static class ScenarioDefaultExperienceUnchanged
     {
@@ -113,7 +74,9 @@ public static class FeatureComposePiperOnlyOverride
         [Trait("Category", "Integration")]
         public static void Api_still_hard_depends_on_kokoro_by_default()
         {
-            Assert.Equal(new[] { "db", "engine", "kokoro", "voice-seed" }, DependsOnNames(Base.Value, "api"));
+            // No "engine" entry (gh-#879/F213.1, PLAN T598): the api no longer waits on the
+            // engine being healthy on any topology.
+            Assert.Equal(new[] { "db", "kokoro", "voice-seed" }, DependsOnNames(Base.Value, "api"));
             var dependsOn = Base.Value.RootElement.GetProperty("services").GetProperty("api").GetProperty("depends_on");
             Assert.Equal("service_healthy", dependsOn.GetProperty("kokoro").GetProperty("condition").GetString());
             // SPEC F166.2 — the voices volume's seed container; api's own boot tolerates it
@@ -158,15 +121,16 @@ public static class FeatureComposePiperOnlyOverride
 
         [Fact]
         [Trait("Category", "Integration")]
-        public static void Api_depends_only_on_db_and_engine()
+        public static void Api_depends_only_on_db()
         {
             // The `depends_on: !override` reset — without it the merged render is invalid
-            // ("api depends on undefined service kokoro") and nothing would boot at all.
+            // ("api depends on undefined service kokoro") and nothing would boot at all. No
+            // "engine" entry either (gh-#879/F213.1, PLAN T598): the base render already dropped
+            // it, so this overlay's reset has nothing left to carry forward for engine.
             var render = BasePiperOnly.Value;
-            Assert.Equal(new[] { "db", "engine" }, DependsOnNames(render, "api"));
+            Assert.Equal(new[] { "db" }, DependsOnNames(render, "api"));
             var dependsOn = render.RootElement.GetProperty("services").GetProperty("api").GetProperty("depends_on");
             Assert.Equal("service_healthy", dependsOn.GetProperty("db").GetProperty("condition").GetString());
-            Assert.Equal("service_healthy", dependsOn.GetProperty("engine").GetProperty("condition").GetString());
         }
 
         [Fact]
@@ -212,7 +176,7 @@ public static class FeatureComposePiperOnlyOverride
         {
             var render = DemoPiperOnly.Value;
             Assert.False(render.RootElement.GetProperty("services").TryGetProperty("kokoro", out _));
-            Assert.Equal(new[] { "db", "engine" }, DependsOnNames(render, "api"));
+            Assert.Equal(new[] { "db" }, DependsOnNames(render, "api"));
         }
 
         [Fact]
