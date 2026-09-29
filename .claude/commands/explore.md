@@ -1,9 +1,14 @@
 ---
 description: Interview the idea — problem, who, why, scope. Owns docs/PROJECT.md.
 argument-hint: [one-line idea]
+model: fable
 ---
 
 # explore
+
+> 🧭 **Optional deep dive.** `/sprint` is the normal way in and it doesn't
+> need this. Run `/explore` when the idea is still fuzzy and you want to
+> talk it through before committing to anything.
 
 Think through an idea with me. This is a **problem-space** interview, not a
 solution. By the end, `docs/PROJECT.md` says what we're building and why,
@@ -56,4 +61,4 @@ Do targeted research only when an answer hinges on a fact you can check.
 ## Hand off
 
 State what's still `TODO` in PROJECT.md, then:
-`Suggested next: /design — or re-run /explore to close open questions first.`
+`Suggested next: /sprint <the idea> to build it (it reads PROJECT.md), or /design to go deep on the architecture first.`

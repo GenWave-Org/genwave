@@ -1,6 +1,7 @@
 ---
 description: Interview the solution — architecture, schema, platform. Owns ARCHITECTURE.md + SPEC.md.
 argument-hint: [area to focus, optional]
+model: fable
 ---
 
 # design
@@ -8,6 +9,11 @@ argument-hint: [area to focus, optional]
 > 🎯 **Design for change.** Every architectural decision here is judged by
 > one question: when this changes, how big is the diff? Pick the boundaries,
 > seams, and data shapes that make the *next* change small and local.
+
+> 🧭 **Optional deep dive.** `/sprint` is the normal way in, and its
+> architect makes these calls without an interview. Run `/design` for
+> greenfield work or a risky change, when you want to make each
+> architectural decision yourself.
 
 Decide *how* to build what `/explore` defined. This is a **solution-space**
 interview. Output: an architecture, a data model, and a behavioral spec.
@@ -69,4 +75,4 @@ Up to ~10 questions, adaptive, batched (4 at a time). Bank:
 ## Hand off
 
 Note any `TODO` in ARCHITECTURE.md / SPEC.md, then:
-`Suggested next: /plan — or /document to refresh README/ARCHITECTURE prose.`
+`Suggested next: /plan, then /build-loop. Or /sprint <the idea> to have the product owner round it out first (it reads SPEC.md and ARCHITECTURE.md).`

@@ -107,7 +107,7 @@ Work in parallel respecting the dependency. Wait for all, then I synthesize.
 Parallel review (read-only, competing lenses):
 
 ```text
-Create an agent team to review PR gitea-#142. Spawn:
+Create an agent team to review PR #142. Spawn:
 - "security-reviewer" — auth, input validation, secrets
 - "perf-reviewer" — hot paths, N+1s, allocations
 - "test-reviewer" — coverage and edge cases
