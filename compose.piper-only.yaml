@@ -9,9 +9,11 @@
 # What it does on top of compose.yaml (and, when stacked, compose.demo.yaml):
 #   * removes the kokoro service — its ~1.2GiB fresh baseline is the single biggest
 #     resident in the stack, and a 4GB box (Raspberry Pi 4, small VPS) can't afford it
-#   * drops api's hard `depends_on: kokoro: service_healthy` (keeps db only — base compose.yaml
-#     no longer depends_on: engine either, gh-#879/F213.1), so the api boots without any kokoro
-#     container existing at all
+#   * drops api's hard `depends_on: kokoro: service_healthy` and instead makes it wait
+#     (required: false) on piper — the topology's PRIMARY engine (SPEC F99.4) — before its
+#     first render is attempted (base compose.yaml no longer depends_on: engine either,
+#     gh-#879/F213.1); see the api service's depends_on block below for the full gh-#888
+#     rationale
 #   * resets the piper service's `profiles: ["fallback"]` gate (base compose.yaml, SPEC F99.3)
 #     back to unconditional — on THIS topology piper is not an opt-in fallback, it is the
 #     PRIMARY engine (SPEC F99.4, STORY-257), so it must always run
@@ -66,8 +68,9 @@ services:
   #
   # The two MUST travel together: ollama-init's `depends_on: ollama` would name a
   # profile-disabled service and fail the whole render, the same trap the api/kokoro
-  # comment below describes. Nothing else depends on either (gh-#242 pinned api's
-  # depends_on to db only), so no reset is needed beyond this pair.
+  # comment below describes. Nothing else depends on either — api's own depends_on
+  # reset below now names db + piper (gh-#888), and never named ollama/ollama-init even
+  # before that change — so no reset is needed beyond this pair.
   #
   # Declaring a service that exists only in compose.demo.yaml is safe in the dev flow
   # (compose.yaml + this file, no demo layer): an inactive profile excludes the block
@@ -106,6 +109,22 @@ services:
     depends_on: !override
       db:
         condition: service_healthy              # schema must exist before first query
+      # gh-#888 — on this topology Piper is the PRIMARY engine (SPEC F99.4), and the first-boot
+      # SafeLoopSeeder's "please stand by" render goes straight through it (no kokoro to fall
+      # back to at all here). Without this, api starts as soon as db is healthy — before
+      # Piper's model download/load finishes — and that first render fails with "Connection
+      # refused (piper:5000) … will retry on next boot", leaving the safe scope empty and the
+      # station silent. `required: false` mirrors api's `depends_on: kokoro` block in base compose.yaml
+      # (SPEC F136.2): Compose still orders api's start after piper's healthcheck resolves one
+      # way or the other — piper's own start_period (60s) plus its retries (10 x 5s interval)
+      # means Compose waits up to ~110s for piper to report healthy before starting api anyway
+      # (with a warning, in the unhealthy case) — so this delays api's start by at most Piper's
+      # healthcheck window and never fails api outright; music still plays. A Piper that is
+      # merely slower than that ~110s window still leaves the safe-loop seed empty on THIS
+      # boot; it fills on the next one instead (tracked in gh-#889).
+      piper:
+        condition: service_healthy
+        required: false
     environment:
       # Piper as the PRIMARY engine (SPEC F99.4, STORY-257), not a fallback hop pinned by kind:
       # TtsServiceCollectionExtensions selects PiperPrimaryTtsSynthesizer as
