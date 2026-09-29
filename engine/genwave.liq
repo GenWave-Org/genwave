@@ -245,6 +245,19 @@ genwave = fallback(track_sensitive=false, [main, safe])
 #     nothing remembered to replay (gh-#791), or every remembered file is gone. ---
 genwave = mksafe(genwave)
 
+# --- Read-only tuning report (SPEC F213.4, STORY-488, gh-#879). `gw_tuning` answers the
+#     crossfade/safe-gap values this PROCESS actually started with — xfade_min, xfade_max,
+#     gw_safe_gap_seconds, bound above — so the control plane can tell a live engine apart from
+#     one that hasn't restarted since the last settings edit. Read-only by design: the handler
+#     ignores its argument (bound as `fun (_)`) and there is no companion write command — the
+#     three values are set once at boot and never mutated. ---
+server.register(
+  description="Report the crossfade/safe-gap values this engine started with (read-only).",
+  usage="gw_tuning",
+  "gw_tuning",
+  fun (_) -> "GW_XFADE_MIN=#{xfade_min} GW_XFADE_MAX=#{xfade_max} GW_SAFE_GAP_SECONDS=#{gw_safe_gap_seconds}"
+)
+
 # --- Export our stamped custom fields + on_air onto the output metadata (PRD §0).
 #     output.<id>.metadata is FILTERED to this list: standard tags (title, artist, …) are exported
 #     by default, but custom annotate fields (track_id, pos) do NOT appear unless added here — which

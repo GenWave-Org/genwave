@@ -7,7 +7,6 @@
 // in real Liquidsoap — fake commands for the cache rules, the real curl line against a stub api
 // on a private docker network for the stall.
 
-using System.Diagnostics;
 using GenWave.Host.Tests.Support;
 using System.Text.RegularExpressions;
 
@@ -15,8 +14,7 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureSafeResolverSurvivesApiOutage
 {
-    static string RepoRoot =>
-        Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+    static string RepoRoot => RepoRootLocator.Find(AppContext.BaseDirectory);
 
     static string EngineScriptText => File.ReadAllText(Path.Combine(RepoRoot, "engine", "genwave.liq"));
 
@@ -36,41 +34,6 @@ public static class FeatureSafeResolverSurvivesApiOutage
     /// <summary>The shipped `gw_safe_track_cmd = ref("curl …")` line.</summary>
     static string CommandLine() =>
         EngineScriptText.Split('\n').Single(l => l.StartsWith("gw_safe_track_cmd = ref(", StringComparison.Ordinal));
-
-    static (int ExitCode, string Stdout, string Stderr) Docker(params string[] args)
-    {
-        var info = new ProcessStartInfo("docker")
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-        foreach (var arg in args)
-        {
-            info.ArgumentList.Add(arg);
-        }
-
-        using var process = Process.Start(info) ?? throw new InvalidOperationException("Failed to start docker.");
-        var stdout = process.StandardOutput.ReadToEndAsync();
-        var stderr = process.StandardError.ReadToEndAsync();
-        if (!process.WaitForExit(TimeSpan.FromMinutes(5)))
-        {
-            process.Kill(entireProcessTree: true);
-            throw new TimeoutException($"docker {string.Join(' ', args)} did not finish in 5 minutes.");
-        }
-
-        return (process.ExitCode, stdout.Result, stderr.Result);
-    }
-
-    /// <summary>Arrange, not assert: a failed docker step is an environment problem.</summary>
-    static void Arrange(params string[] args)
-    {
-        var r = Docker(args);
-        if (r.ExitCode != 0)
-        {
-            throw new InvalidOperationException($"docker {string.Join(' ', args)} failed (exit {r.ExitCode}): {r.Stderr}");
-        }
-    }
 
     /// <summary>
     /// Wraps the sliced block in a harness: <paramref name="prelude"/> defines gw_safe_track_cmd,
@@ -113,7 +76,7 @@ public static class FeatureSafeResolverSurvivesApiOutage
         var args = new List<string> { "run", "--rm", "--pull", "never", "-v", $"{dir.Path}:/h:ro" };
         args.AddRange(dockerArgs);
         args.AddRange(["--entrypoint", "liquidsoap", image, "/h/harness.liq"]);
-        var r = Docker([.. args]);
+        var r = DockerCli.Run([.. args]);
         var output = r.Stdout + r.Stderr;
         Assert.True(r.ExitCode == 0, $"harness failed (exit {r.ExitCode}):\n{output}");
 
@@ -171,7 +134,7 @@ public static class FeatureSafeResolverSurvivesApiOutage
 
         public RulesRun()
         {
-            Arrange("pull", "-q", Image);
+            DockerCli.Arrange("pull", "-q", Image);
 
             // 20 distinct answers overflow the 16-deep memory; 16 outage replays then walk it once.
             var overflow = string.Concat(Enumerable.Range(1, 20)
@@ -281,14 +244,14 @@ public static class FeatureSafeResolverSurvivesApiOutage
         public WireRun()
         {
             const string image = "gw-engine-spec:gh791";
-            Arrange("pull", "-q", Stub);
-            Arrange("build", "-q", "-t", image, Path.Combine(RepoRoot, "engine"));
-            Arrange("network", "create", network);
+            DockerCli.Arrange("pull", "-q", Stub);
+            DockerCli.Arrange("build", "-q", "-t", image, Path.Combine(RepoRoot, "engine"));
+            DockerCli.Arrange("network", "create", network);
 
             // `api` answers one annotate line; `stall` accepts the connection and never replies.
-            Arrange("run", "-d", "--rm", "--name", $"{network}-api", "--network", network, "--network-alias", "api", Stub,
+            DockerCli.Arrange("run", "-d", "--rm", "--name", $"{network}-api", "--network", network, "--network-alias", "api", Stub,
                 "sh", "-c", "mkdir -p /www/internal && echo '" + Answer + "' > /www/internal/safe-track && httpd -f -p 8080 -h /www");
-            Arrange("run", "-d", "--rm", "--name", $"{network}-stall", "--network", network, "--network-alias", "stall", Stub,
+            DockerCli.Arrange("run", "-d", "--rm", "--name", $"{network}-stall", "--network", network, "--network-alias", "stall", Stub,
                 "sh", "-c", "sleep 600 | nc -l -p 8080");
 
             var steps = """
@@ -317,8 +280,8 @@ public static class FeatureSafeResolverSurvivesApiOutage
 
         public void Dispose()
         {
-            Docker("rm", "-f", $"{network}-api", $"{network}-stall");
-            Docker("network", "rm", network);
+            DockerCli.Run("rm", "-f", $"{network}-api", $"{network}-stall");
+            DockerCli.Run("network", "rm", network);
         }
     }
 

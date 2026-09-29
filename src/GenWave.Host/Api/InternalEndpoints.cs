@@ -28,17 +28,6 @@ namespace GenWave.Host.Api;
 /// </summary>
 static class InternalEndpoints
 {
-    /// <summary>
-    /// The three <see cref="IConfiguration"/>-backed keys the engine-config endpoint emits —
-    /// nothing else is ever read off <see cref="IConfiguration"/> for this response.
-    /// GW_SAFE_GAP_SECONDS rides the same path as GW_XFADE_MIN/MAX (F29.8, STORY-100): it must
-    /// appear here or a PUT /api/settings override would persist to the overlay but never reach
-    /// the engine on its next boot. A fourth key, GW_APP_VERSION, is appended after these three
-    /// (SPEC F211.5) — it is sourced from <see cref="IAppVersion"/>, not <see cref="IConfiguration"/>,
-    /// so it lives outside this array; the response body carries four keys in total.
-    /// </summary>
-    static readonly string[] EngineConfigKeys = ["GW_XFADE_MIN", "GW_XFADE_MAX", "GW_SAFE_GAP_SECONDS"];
-
     public static RouteGroupBuilder MapInternalEndpoints(this IEndpointRouteBuilder app)
     {
         // Group under /internal; AllowAnonymous so the deny-by-default fallback policy
@@ -56,18 +45,17 @@ static class InternalEndpoints
         // merges the station.settings provider after env/appsettings in Program.cs, so a
         // stored override is automatically visible here).
         //
-        // Only the keys in EngineConfigKeys, plus GW_APP_VERSION last, are ever emitted — never
-        // any other config key. GW_APP_VERSION carries IAppVersion.Display (SPEC F211.5,
-        // STORY-485) — the engine entrypoint logs it once at boot and reads it for nothing else
-        // (engine/entrypoint.sh's own remarks).
+        // Only the keys in EngineTuningKeys.All, plus GW_APP_VERSION last, are ever emitted —
+        // never any other config key. EngineTuningKeys.All is the SAME list EngineSettingsVerdict
+        // compares gw_tuning against (SPEC F213.5, PLAN T601), so the two can never drift apart.
+        // GW_APP_VERSION carries IAppVersion.Display (SPEC F211.5, STORY-485) — the engine
+        // entrypoint logs it once at boot and reads it for nothing else (engine/entrypoint.sh's
+        // own remarks).
         group.MapGet("/engine-config", (IConfiguration configuration, IAppVersion appVersion) =>
         {
-            var lines = EngineConfigKeys
-                .Select(key =>
-                {
-                    var value = configuration[key] ?? string.Empty;
-                    return $"{key}={value}";
-                })
+            var effective = EngineTuningKeys.ReadEffective(configuration);
+            var lines = EngineTuningKeys.All
+                .Select(key => $"{key}={effective[key] ?? string.Empty}")
                 .Append($"GW_APP_VERSION={appVersion.Display}");
 
             var body = string.Join('\n', lines) + '\n';

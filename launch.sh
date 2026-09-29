@@ -625,11 +625,11 @@ if [ "$USE_PINNED_OVERLAY" = "1" ]; then
   #
   # --no-deps only when STAGED — UP1_ARGS/STAGE1_TARGETS were computed once, above (see the
   # authoritative comment near CORE_SERVICES for why). Safe for this call specifically because
-  # db is already explicitly health-waited above and api's other dependency (engine) is
-  # convenience only (the feeder retries) — both are already CORE_SERVICES members brought up
-  # in this same command anyway. When STAGED=0, UP1_ARGS carries no --no-deps and
-  # STAGE1_TARGETS is empty, so this call is then byte-for-flags the pre-F136 unstaged
-  # `up -d --remove-orphans`.
+  # db is already explicitly health-waited above, and api no longer depends_on: engine at all
+  # (gh-#879/F213.1) — the two boot in parallel and the feeder retries regardless. Both are
+  # already CORE_SERVICES members brought up in this same command anyway. When STAGED=0,
+  # UP1_ARGS carries no --no-deps and STAGE1_TARGETS is empty, so this call is then
+  # byte-for-flags the pre-F136 unstaged `up -d --remove-orphans`.
   if ! compose up "${UP1_ARGS[@]}" "${STAGE1_TARGETS[@]}"; then
     # `ps -a`, not `ps`: plain `ps` lists RUNNING containers only — so it omitted exactly the
     # one service this message tells the operator to go inspect. A container the daemon

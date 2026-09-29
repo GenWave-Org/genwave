@@ -118,7 +118,11 @@ public static class FeatureAcceptanceGatePersonaVisibility
         // comments refreshed in compose.yaml + engine/genwave.liq (prose only, zero functional
         // bytes — the FROM bump itself lives in engine/Dockerfile, outside both pinned files).
         // Another intentional edit from a later epic, not a regression of the zero-diff promise.
-        const string EngineScriptSha256 = "bbe4a4aadde0f32a5cc96a0dfa3a9e7506945d5d45a3e89ea1ee63fc4a49e803";
+        // EngineScriptSha256 re-pinned 2026-09-28 (PLAN T600, SPEC F213.4, STORY-488, gh-#879):
+        // genwave.liq gains a read-only gw_tuning server.register command reporting
+        // GW_XFADE_MIN/GW_XFADE_MAX/GW_SAFE_GAP_SECONDS — an intentional edit from a later
+        // epic, not a regression of this gate's own zero-diff promise.
+        const string EngineScriptSha256 = "acd4067e7633a795d7fb9b509d13f97cc5c0fa80b3afc3b469cd6a721c875b6e";
         // ComposeYamlSha256 re-pinned 2026-07-30 (gh-#276): kokoro mem_limit 3g->4g + comment
         // refresh — ops-only edit, no service/wire/volume change. Another intentional edit from
         // a later epic, not a regression of this epic's zero-diff promise.
@@ -152,7 +156,12 @@ public static class FeatureAcceptanceGatePersonaVisibility
         // voice-seed's own comment notes it is not redundant with Docker's empty-volume
         // auto-populate (api mounts the volume first under launch.sh's staged startup, and
         // api's image has no `/voices` path to auto-populate from).
-        const string ComposeYamlSha256  = "f00cda8db515a99be83944b2478ed7c46e0b24c5a970e6a006dfc10115846a79";
+        // ComposeYamlSha256 re-pinned 2026-09-28 (PLAN T598, SPEC F213.1/F213.3, gh-#879): the
+        // api's depends_on no longer carries an engine: service_healthy entry (the two now boot
+        // in parallel) and the engine healthcheck gains start_period: 45s; the engine service's
+        // own comment block was rewritten to state the truth post-change. EngineScriptSha256
+        // unchanged — this task does not touch engine/genwave.liq.
+        const string ComposeYamlSha256  = "c7e1828aa16edb18081078478751006a01ccad26697b0927aa8c54749c9ee9b4";
 
         [Fact]
         public static void EngineScriptByteMatchesMain()

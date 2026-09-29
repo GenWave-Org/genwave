@@ -75,7 +75,11 @@ public static class FeatureIcecastTwoFive
         // comments refreshed in compose.yaml + engine/genwave.liq (prose only, zero functional
         // bytes — the FROM bump itself lives in engine/Dockerfile, outside both pinned files).
         // Another intentional edit from a later epic, not a regression of the zero-diff promise.
-        const string EngineScriptSha256 = "bbe4a4aadde0f32a5cc96a0dfa3a9e7506945d5d45a3e89ea1ee63fc4a49e803";
+        // EngineScriptSha256 re-pinned 2026-09-28 (PLAN T600, SPEC F213.4, STORY-488, gh-#879):
+        // genwave.liq gains a read-only gw_tuning server.register command reporting
+        // GW_XFADE_MIN/GW_XFADE_MAX/GW_SAFE_GAP_SECONDS — an intentional edit from a later
+        // epic, not a regression of this gate's own zero-diff promise.
+        const string EngineScriptSha256 = "acd4067e7633a795d7fb9b509d13f97cc5c0fa80b3afc3b469cd6a721c875b6e";
 
         [Fact]
         public static void StreamTitleBuilderInputsRemainPinned()

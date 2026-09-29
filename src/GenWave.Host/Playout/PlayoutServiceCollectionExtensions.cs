@@ -140,6 +140,11 @@ static class PlayoutServiceCollectionExtensions
                     sp.GetRequiredService<ILogger<LiquidsoapControl>>()),
                 sp.GetRequiredService<IDeadFileReporter>(),
                 sp.GetRequiredService<ILogger<MediaExistencePushGuard>>()))
+            // The engine-settings verdict's read side (SPEC F213.5, PLAN T601) — a narrow seam
+            // separate from ILiquidsoapControl above; bound to the SAME configured Liquidsoap host
+            // (LiquidsoapOptions). T602 wires the probe/cache that calls it into /api/status.
+            .AddSingleton<IEngineTuningReader>(sp => new LiquidsoapTuningReader(
+                sp.GetRequiredService<IOptions<LiquidsoapOptions>>().Value))
             // Loudness target/ceiling are deliberate boot-time values (engine-side knobs apply on
             // restart) — snapshot IOptions, not a live monitor.
             .AddSingleton(sp =>
