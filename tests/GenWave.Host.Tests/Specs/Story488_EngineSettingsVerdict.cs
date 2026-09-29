@@ -1,23 +1,55 @@
 // STORY-488 — Status says whether the engine runs the saved settings (gh-#879 · SPEC F213.4–F213.9 · PLAN T600–T602)
 //
-// BDD specification — xUnit. RED at plan time: every fact is [Fact(Skip = Pending)] with a loud body —
-// remove the Skip only in the task that makes it green. Each Given comment names the arrange the scenario needs.
-// Entry point: GET /api/status through WebApplicationFactory with a fake IEngineTuningReader and a
-// FakeTimeProvider-driven probe; WARN/INFO read from a capturing logger provider. The gw_tuning command is
-// proven against real Liquidsoap (engine image) — Integration.
+// BDD specification — xUnit. AC5–AC8/AC11/AC12 were [Fact(Skip = Pending)] at plan time; T602 makes
+// them green. Each Given comment names the arrange the scenario needs.
+// Entry point: GET /api/status through WebApplicationFactory with a fake IEngineTuningReader; most
+// scenarios drive the probe cycle (EngineSettingsCheck.RunOnceAsync) directly, exactly N ticks per
+// scenario — the same "unit-test the cycle, not the timer" shape as DependencyHealthProber/
+// ProbeService. The cadence loop itself (EngineSettingsCheck.RunAsync) IS covered directly against a
+// FakeTimeProvider (ScenarioProbeLoopCadence), mirroring GenWave.Tts.Tests' own
+// Story187_CachedHealthProbes.ScenarioLiveCadence: a PeriodicTimer(TimeProvider) DOES have a
+// reliable FakeTimeProvider hook (PLAN T602 review F1 — an earlier draft of this header claimed
+// otherwise; DependencyHealthProber.RunAsync already proved it wrong). WARN/INFO read from a
+// capturing logger provider. The gw_tuning command is proven against real Liquidsoap (engine image)
+// — Integration.
 
 using System.Net;
+using System.Net.Http.Json;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.Json;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
+using GenWave.Core.Abstractions;
 using GenWave.Host.Engine;
+using GenWave.Host.Health;
 using GenWave.Host.Options;
 using GenWave.Host.Tests.Support;
+using GenWave.Tts;
 
 namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureEngineSettingsVerdict
 {
-    const string PendingStatus = "pending: T602 — probe-cached verdict on /api/status + WARN/INFO (STORY-488)";
+    /// <summary>Logs in against <paramref name="factory"/>'s own <see cref="EngineSettingsWebFactory.Password"/>
+    /// and hands back a cookie-carrying client — shared by every AC5–AC11 scenario below (mirrors
+    /// Story163_NamedAuthorizationPolicies's own <c>LoggedInClientAsync</c>).</summary>
+    static async Task<HttpClient> LoggedInClientAsync(WebApplicationFactory<Program> factory)
+    {
+        var client = factory.CreateClient();
+        var login = await client.PostAsJsonAsync(
+            "/api/auth/login", new { password = EngineSettingsWebFactory.Password });
+        Assert.Equal(HttpStatusCode.NoContent, login.StatusCode);
+        return client;
+    }
 
     public sealed class ScenarioTheEngineReportsWhatItRuns
     {
@@ -338,56 +370,153 @@ public static class FeatureEngineSettingsVerdict
         public async ValueTask DisposeAsync() => await engineServer.DisposeAsync();
     }
 
-    public sealed class ScenarioStatusCarriesTheVerdict
+    public sealed class ScenarioStatusCarriesTheVerdict : IAsyncLifetime
     {
-        // Given: WAF; fake reader reports GW_XFADE_MIN 2 against effective 3; one probe tick; GET /api/status
+        // Given: WAF at its default effective config (GW_XFADE_MIN 2, GW_XFADE_MAX 8,
+        // GW_SAFE_GAP_SECONDS 7 — appsettings.json's own defaults); fake reader reports GW_XFADE_MIN
+        // 3.0 (a genuine difference on that one key alone); one probe tick; GET /api/status.
+        JsonElement engineJson;
+
+        public async Task InitializeAsync()
+        {
+            var reader = new ScriptedEngineTuningReader(
+                "GW_XFADE_MIN=3.0 GW_XFADE_MAX=8.0 GW_SAFE_GAP_SECONDS=7.0");
+            await using var factory = new EngineSettingsWebFactory(reader, new CapturingLevelLoggerProvider());
+            var check = factory.Services.GetRequiredService<EngineSettingsCheck>();
+            await check.RunOnceAsync(CancellationToken.None);
+
+            var client = await LoggedInClientAsync(factory);
+            var response = await client.GetAsync("/api/status");
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+            engineJson = body.GetProperty("engine");
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
 
         /// <summary>AC5 — engine.settings is "restartNeeded"</summary>
-        [Fact(Skip = PendingStatus)]
-        public void Settings() => Assert.Fail(PendingStatus);
+        [Fact]
+        public void Settings() =>
+            Assert.Equal("restartNeeded", engineJson.GetProperty("settings").GetString());
 
         /// <summary>AC5 — engine.differs is ["GW_XFADE_MIN"]</summary>
-        [Fact(Skip = PendingStatus)]
-        public void Differs() => Assert.Fail(PendingStatus);
+        [Fact]
+        public void Differs() =>
+            Assert.Equal(
+                ["GW_XFADE_MIN"],
+                engineJson.GetProperty("differs").EnumerateArray().Select(e => e.GetString() ?? "").ToArray());
 
         /// <summary>AC12 — the engine block holds only settings and differs</summary>
-        [Fact(Skip = PendingStatus)]
-        public void NoValuesLeak() => Assert.Fail(PendingStatus);
+        [Fact]
+        public void NoValuesLeak() =>
+            Assert.Equal(["settings", "differs"], engineJson.EnumerateObject().Select(p => p.Name).ToArray());
     }
 
-    public sealed class ScenarioStatusNeverOpensASocket
+    public sealed class ScenarioStatusNeverOpensASocket : IAsyncLifetime
     {
-        // Given: WAF; counting fake reader; one probe tick, counter reset; 5 × GET /api/status inside the interval
+        // Given: WAF; counting fake reader; one probe tick; 5 × GET /api/status inside the interval —
+        // the reader's own call count must not grow across them (AC6).
+        int callCountAfterProbe;
+        int callCountAfterGets;
 
-        /// <summary>AC6 — the reader count stays 0</summary>
-        [Fact(Skip = PendingStatus)]
-        public void ReaderNotCalled() => Assert.Fail(PendingStatus);
+        public async Task InitializeAsync()
+        {
+            var reader = new ScriptedEngineTuningReader(
+                "GW_XFADE_MIN=2.0 GW_XFADE_MAX=8.0 GW_SAFE_GAP_SECONDS=7.0");
+            await using var factory = new EngineSettingsWebFactory(reader, new CapturingLevelLoggerProvider());
+            var check = factory.Services.GetRequiredService<EngineSettingsCheck>();
+            await check.RunOnceAsync(CancellationToken.None);
+            callCountAfterProbe = reader.CallCount;
+
+            var client = await LoggedInClientAsync(factory);
+            for (var i = 0; i < 5; i++)
+            {
+                var response = await client.GetAsync("/api/status");
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            }
+            callCountAfterGets = reader.CallCount;
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        /// <summary>AC6 — the reader count stays exactly what it was after the one probe tick; GET
+        /// /api/status never grows it (never opens a socket of its own).</summary>
+        [Fact]
+        public void ReaderNotCalled() => Assert.Equal(callCountAfterProbe, callCountAfterGets);
     }
 
-    public sealed class ScenarioEnteringRestartNeeded
+    public sealed class ScenarioEnteringRestartNeeded : IAsyncLifetime
     {
-        // Given: WAF; fake reader scripted inSync → restartNeeded → restartNeeded; 3 probe ticks
+        // Given: WAF; fake reader scripted inSync → restartNeeded → restartNeeded; 3 probe ticks.
+        IReadOnlyList<string> warnMessages = [];
 
-        /// <summary>AC7 — exactly one WARN</summary>
-        [Fact(Skip = PendingStatus)]
-        public void OneWarn() => Assert.Fail(PendingStatus);
+        public async Task InitializeAsync()
+        {
+            var reader = new ScriptedEngineTuningReader(
+                "GW_XFADE_MIN=2.0 GW_XFADE_MAX=8.0 GW_SAFE_GAP_SECONDS=7.0",
+                "GW_XFADE_MIN=3.0 GW_XFADE_MAX=8.0 GW_SAFE_GAP_SECONDS=7.0",
+                "GW_XFADE_MIN=3.0 GW_XFADE_MAX=8.0 GW_SAFE_GAP_SECONDS=7.0");
+            var logs = new CapturingLevelLoggerProvider();
+            await using var factory = new EngineSettingsWebFactory(reader, logs);
+            var check = factory.Services.GetRequiredService<EngineSettingsCheck>();
+
+            for (var i = 0; i < 3; i++)
+                await check.RunOnceAsync(CancellationToken.None);
+
+            warnMessages = logs.Entries
+                .Where(e => e.Level == LogLevel.Warning
+                    && e.Category == typeof(EngineSettingsCheck).FullName)
+                .Select(e => e.Message)
+                .ToArray();
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        /// <summary>AC7 — exactly one WARN across all 3 ticks (entering RestartNeeded once; staying
+        /// there on the 3rd tick does not re-warn — PLAN T602's own edge-case decision).</summary>
+        [Fact]
+        public void OneWarn() => Assert.Single(warnMessages);
 
         /// <summary>AC7 — the WARN names GW_XFADE_MIN</summary>
-        [Fact(Skip = PendingStatus)]
-        public void WarnNamesTheKey() => Assert.Fail(PendingStatus);
+        [Fact]
+        public void WarnNamesTheKey() =>
+            Assert.Contains(warnMessages, m => m.Contains("GW_XFADE_MIN", StringComparison.Ordinal));
 
         /// <summary>AC7 — the WARN names `docker compose restart engine`</summary>
-        [Fact(Skip = PendingStatus)]
-        public void WarnNamesTheFix() => Assert.Fail(PendingStatus);
+        [Fact]
+        public void WarnNamesTheFix() =>
+            Assert.Contains(warnMessages, m => m.Contains("docker compose restart engine", StringComparison.Ordinal));
     }
 
-    public sealed class ScenarioBackInSync
+    public sealed class ScenarioBackInSync : IAsyncLifetime
     {
-        // Given: WAF; fake reader scripted restartNeeded → inSync; 2 probe ticks
+        // Given: WAF; fake reader scripted restartNeeded → inSync; 2 probe ticks.
+        IReadOnlyList<string> infoMessages = [];
+
+        public async Task InitializeAsync()
+        {
+            var reader = new ScriptedEngineTuningReader(
+                "GW_XFADE_MIN=3.0 GW_XFADE_MAX=8.0 GW_SAFE_GAP_SECONDS=7.0",
+                "GW_XFADE_MIN=2.0 GW_XFADE_MAX=8.0 GW_SAFE_GAP_SECONDS=7.0");
+            var logs = new CapturingLevelLoggerProvider();
+            await using var factory = new EngineSettingsWebFactory(reader, logs);
+            var check = factory.Services.GetRequiredService<EngineSettingsCheck>();
+
+            await check.RunOnceAsync(CancellationToken.None);
+            await check.RunOnceAsync(CancellationToken.None);
+
+            infoMessages = logs.Entries
+                .Where(e => e.Level == LogLevel.Information
+                    && e.Category == typeof(EngineSettingsCheck).FullName)
+                .Select(e => e.Message)
+                .ToArray();
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
 
         /// <summary>AC8 — exactly one INFO saying the engine settings are back in sync</summary>
-        [Fact(Skip = PendingStatus)]
-        public void OneInfo() => Assert.Fail(PendingStatus);
+        [Fact]
+        public void OneInfo() => Assert.Single(infoMessages);
     }
 
     // ---------------------------------------------------------------------
@@ -416,8 +545,18 @@ public static class FeatureEngineSettingsVerdict
         }
 
         /// <summary>AC9 — no new WARN (via WAF + one probe tick)</summary>
-        [Fact(Skip = PendingStatus)]
-        public void NoNewWarn() => Assert.Fail(PendingStatus);
+        [Fact]
+        public async Task NoNewWarn()
+        {
+            var reader = new FakeThrowingEngineTuningReader(new SocketException());
+            var logs = new CapturingLevelLoggerProvider();
+            await using var factory = new EngineSettingsWebFactory(reader, logs);
+            var check = factory.Services.GetRequiredService<EngineSettingsCheck>();
+
+            await check.RunOnceAsync(CancellationToken.None);
+
+            Assert.DoesNotContain(logs.Entries, e => e.Level == LogLevel.Warning);
+        }
     }
 
     public sealed class ScenarioGarbledReply
@@ -440,17 +579,200 @@ public static class FeatureEngineSettingsVerdict
         }
     }
 
-    public sealed class ScenarioBeforeTheFirstProbe
+    public sealed class ScenarioBeforeTheFirstProbe : IAsyncLifetime
     {
         // Given: WAF just booted; no probe tick; GET /api/status
+        HttpStatusCode statusCode;
+        JsonElement engineJson;
+
+        public async Task InitializeAsync()
+        {
+            var reader = new ScriptedEngineTuningReader(
+                "GW_XFADE_MIN=2.0 GW_XFADE_MAX=8.0 GW_SAFE_GAP_SECONDS=7.0");
+            await using var factory = new EngineSettingsWebFactory(reader, new CapturingLevelLoggerProvider());
+
+            var client = await LoggedInClientAsync(factory);
+            var response = await client.GetAsync("/api/status");
+            statusCode = response.StatusCode;
+            var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+            engineJson = body.GetProperty("engine");
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
 
         /// <summary>AC11 — engine.settings is "unknown"</summary>
-        [Fact(Skip = PendingStatus)]
-        public void Unknown() => Assert.Fail(PendingStatus);
+        [Fact]
+        public void Unknown() => Assert.Equal("unknown", engineJson.GetProperty("settings").GetString());
 
         /// <summary>AC11 — status returns 200</summary>
-        [Fact(Skip = PendingStatus)]
-        public void StatusIs200() => Assert.Fail(PendingStatus);
+        [Fact]
+        public void StatusIs200() => Assert.Equal(HttpStatusCode.OK, statusCode);
+    }
+
+    // ---------------------------------------------------------------------
+    // PLAN T602 REVIEW F1 — the cadence loop itself, not just RunOnceAsync
+    // ---------------------------------------------------------------------
+
+    public sealed class ScenarioProbeLoopCadence
+    {
+        // Given: EngineSettingsCheck.RunAsync driven by a FakeTimeProvider — mirrors
+        // GenWave.Tts.Tests' Story187_CachedHealthProbes.ScenarioLiveCadence one project over,
+        // proving PeriodicTimer(TimeProvider) DOES have a reliable FakeTimeProvider hook. No
+        // wall-clock sleep in this scenario ever waits OUT the production interval: cycles elapse
+        // only on Time.Advance. Each fact below gets its own fresh arrange (own check/reader/time),
+        // since the facts assert different call counts at different points in the loop's life.
+        static readonly TimeSpan Interval = TimeSpan.FromSeconds(30);
+
+        static (EngineSettingsCheck Check, ScriptedEngineTuningReader Reader, FakeTimeProvider Time) Arrange()
+        {
+            var reader = new ScriptedEngineTuningReader(
+                "GW_XFADE_MIN=2.0 GW_XFADE_MAX=8.0 GW_SAFE_GAP_SECONDS=7.0");
+            var time = new FakeTimeProvider();
+            var check = new EngineSettingsCheck(
+                reader,
+                new ConfigurationBuilder().Build(),
+                new EngineSettingsStatus(),
+                time,
+                NullLogger<EngineSettingsCheck>.Instance);
+            return (check, reader, time);
+        }
+
+        /// <summary>AC11 — the first cycle runs at boot, with no Advance at all: the reader is
+        /// called exactly once (a verdict exists as soon as possible, not only after the first
+        /// full interval elapses).</summary>
+        [Fact]
+        public async Task FirstCycleRunsImmediatelyWithNoAdvance()
+        {
+            var (check, reader, _) = Arrange();
+            using var cts = new CancellationTokenSource();
+            var runTask = check.RunAsync(() => Interval, cts.Token);
+
+            await WaitUntilAsync(() => reader.CallCount >= 1);
+
+            Assert.Equal(1, reader.CallCount);
+
+            await cts.CancelAsync();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => runTask);
+        }
+
+        /// <summary>Before the interval elapses, no second cycle runs.</summary>
+        [Fact]
+        public async Task NoSecondCycleBeforeTheIntervalElapses()
+        {
+            var (check, reader, _) = Arrange();
+            using var cts = new CancellationTokenSource();
+            var runTask = check.RunAsync(() => Interval, cts.Token);
+            await WaitUntilAsync(() => reader.CallCount >= 1);
+
+            // A bounded real-time settle window, NOT a wait for the production interval: nothing
+            // but an explicit Advance below can ever start a second cycle, so the count staying at
+            // 1 here is deterministic regardless of how slow the runner is — it can only make this
+            // fact slower, never wrong.
+            await Task.Delay(TimeSpan.FromMilliseconds(100));
+
+            Assert.Equal(1, reader.CallCount);
+
+            await cts.CancelAsync();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => runTask);
+        }
+
+        /// <summary>After the interval elapses, exactly one more cycle runs.</summary>
+        [Fact]
+        public async Task OneMoreCycleAfterTheIntervalElapses()
+        {
+            var (check, reader, time) = Arrange();
+            using var cts = new CancellationTokenSource();
+            var runTask = check.RunAsync(() => Interval, cts.Token);
+            await WaitUntilAsync(() => reader.CallCount >= 1);
+
+            time.Advance(Interval);
+            await WaitUntilAsync(() => reader.CallCount >= 2);
+
+            Assert.Equal(2, reader.CallCount);
+
+            await cts.CancelAsync();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => runTask);
+        }
+
+        /// <summary>Cancelling the token ends RunAsync: the task completes.</summary>
+        [Fact]
+        public async Task CancellingTheTokenEndsTheLoop()
+        {
+            var (check, reader, _) = Arrange();
+            using var cts = new CancellationTokenSource();
+            var runTask = check.RunAsync(() => Interval, cts.Token);
+            await WaitUntilAsync(() => reader.CallCount >= 1);
+
+            await cts.CancelAsync();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => runTask);
+        }
+
+        /// <summary>Polls <paramref name="condition"/> on a short real-time cadence until it holds,
+        /// or throws — the same "give the loop's continuations a real-time window to settle"
+        /// shape as Story187's own WaitUntil, used here only to synchronize with a FakeTimeProvider
+        /// tick, never to wait out a production interval.</summary>
+        static async Task WaitUntilAsync(Func<bool> condition)
+        {
+            var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(5);
+            while (DateTimeOffset.UtcNow < deadline)
+            {
+                if (condition())
+                {
+                    return;
+                }
+
+                await Task.Delay(TimeSpan.FromMilliseconds(10));
+            }
+
+            if (!condition())
+            {
+                throw new TimeoutException("condition was never satisfied");
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // PLAN T602 REVIEW F1 — the DI graph resolves
+    // ---------------------------------------------------------------------
+
+    public sealed class ScenarioEngineSettingsCheckServiceIsRegistered
+    {
+        /// <summary>
+        /// Proves the DI graph <c>AddGenWaveDependencyHealth</c> wires (PLAN T602) actually builds.
+        /// GenWave.Architecture.Tests has no DI-graph-validation spec (see
+        /// tests/GenWave.Architecture.Tests/Support/ProductionArchitecture.cs — its checks are
+        /// namespace/reference rules, not a container build), and every WAF elsewhere in THIS file
+        /// strips <see cref="IHostedService"/> before it ever gets a chance to construct
+        /// <see cref="EngineSettingsCheckService"/> — so nothing else in the suite proves the
+        /// registration itself resolves.
+        /// <para>
+        /// Built off a plain <see cref="ServiceProvider"/>, not a <see cref="WebApplicationFactory{TEntryPoint}"/>:
+        /// <see cref="ServiceCollection.BuildServiceProvider(bool)"/> only ever CONSTRUCTS the
+        /// registered services, never calls <see cref="IHostedService.StartAsync"/> — the same
+        /// distinction that keeps this cheap and safe. Only the four dependencies
+        /// <c>AddGenWaveDependencyHealth</c>'s own graph actually needs are fed in (TimeProvider,
+        /// IConfiguration, DependencyHealthStore, IEngineTuningReader) — none of them touch Postgres
+        /// or Liquidsoap, so no fake stands in for a real one.
+        /// </para>
+        /// </summary>
+        [Fact]
+        public void ResolvesFromARealServiceProvider()
+        {
+            var configuration = new ConfigurationBuilder().Build();
+            var services = new ServiceCollection();
+            services.AddLogging();
+            services.AddSingleton<IConfiguration>(configuration);
+            services.AddSingleton(TimeProvider.System);
+            services.AddSingleton<DependencyHealthStore>();
+            services.AddSingleton<IEngineTuningReader>(
+                new ScriptedEngineTuningReader("GW_XFADE_MIN=2.0 GW_XFADE_MAX=8.0 GW_SAFE_GAP_SECONDS=7.0"));
+            services.AddGenWaveDependencyHealth(configuration);
+
+            using var provider = services.BuildServiceProvider(validateScopes: true);
+
+            Assert.Contains(provider.GetServices<IHostedService>(), service => service is EngineSettingsCheckService);
+        }
     }
 }
 
@@ -509,5 +831,115 @@ sealed class NeverRepliesEngineServer : IAsyncDisposable
         listener.Stop();
         try { await acceptLoop; } catch { /* expected on shutdown */ }
         cts.Dispose();
+    }
+}
+
+/// <summary>
+/// An <see cref="IEngineTuningReader"/> that replays a scripted sequence of gw_tuning replies — one
+/// per <see cref="EngineSettingsCheck.RunOnceAsync"/> call; once the script runs out, the last reply
+/// repeats, so a scenario can tick past its scripted transitions without throwing. <see cref="CallCount"/>
+/// is what AC6 checks never grows across a run of <c>GET /api/status</c> calls, and what
+/// <c>ScenarioProbeLoopCadence</c> counts probe cycles with.
+/// <para>
+/// Not <c>file</c>-scoped, unlike <see cref="FakeThrowingEngineTuningReader"/>: <c>ScenarioProbeLoopCadence</c>'s
+/// own <c>Arrange</c> helper returns it inside a tuple, which is a member signature — a file-local
+/// type can only appear there when its own enclosing type is file-local too (the same rule
+/// <see cref="NeverRepliesEngineServer"/>'s own remarks already document).
+/// </para>
+/// </summary>
+sealed class ScriptedEngineTuningReader(params string[] replies) : IEngineTuningReader
+{
+    int callCount;
+
+    public int CallCount => callCount;
+
+    public Task<string> ReadAsync(CancellationToken ct)
+    {
+        var index = Interlocked.Increment(ref callCount) - 1;
+        return Task.FromResult(replies[Math.Min(index, replies.Length - 1)]);
+    }
+}
+
+/// <summary>
+/// Captures every log entry at every level, unlike Story186's own <c>CapturingDebugLoggerProvider</c>
+/// (Debug+ only) — AC7/AC8 need the WARN/INFO transition lines by exact level, and AC7's "exactly
+/// one WARN across 3 ticks" needs nothing filtered away before it reaches <see cref="Entries"/>.
+/// </summary>
+file sealed class CapturingLevelLoggerProvider : ILoggerProvider
+{
+    readonly List<(LogLevel Level, string Category, string Message)> entries = [];
+
+    public IReadOnlyList<(LogLevel Level, string Category, string Message)> Entries
+    {
+        get { lock (entries) return entries.ToList(); }
+    }
+
+    public ILogger CreateLogger(string categoryName) => new Logger(this, categoryName);
+    public void Dispose() { }
+
+    void Add(LogLevel level, string category, string message) { lock (entries) entries.Add((level, category, message)); }
+
+    sealed class Logger(CapturingLevelLoggerProvider owner, string category) : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => logLevel != LogLevel.None;
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (IsEnabled(logLevel)) owner.Add(logLevel, category, formatter(state, exception));
+        }
+    }
+}
+
+/// <summary>
+/// Boots a real Host pipeline for the AC5–AC12 <c>GET /api/status</c> scenarios: replaces the same 4
+/// Postgres-backed dependencies Story084's <c>StatusApiWebFactory</c> fakes (StatusController's own
+/// deps), plus <see cref="IEngineTuningReader"/> itself so each scenario scripts its own gw_tuning
+/// replies, strips every <see cref="IHostedService"/> (these scenarios drive
+/// <see cref="EngineSettingsCheck.RunOnceAsync"/> once per tick; the loop itself is covered by
+/// <c>ScenarioProbeLoopCadence</c>), and wires
+/// <paramref name="logs"/> at Trace for <see cref="EngineSettingsCheck"/>'s own category so its
+/// WARN/INFO transition lines are observable.
+/// </summary>
+file sealed class EngineSettingsWebFactory(IEngineTuningReader reader, CapturingLevelLoggerProvider logs)
+    : WebApplicationFactory<Program>
+{
+    internal const string Password = "test-password-x6f3";
+
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        builder.UseEnvironment("Development");
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
+        builder.UseSetting("Admin:Password", Password);
+
+        builder.ConfigureLogging(logging =>
+        {
+            logging.AddFilter("GenWave.Host.Engine.EngineSettingsCheck", LogLevel.Trace);
+            logging.AddProvider(logs);
+        });
+
+        builder.ConfigureTestServices(services =>
+        {
+            // No Liquidsoap or DB connections during this test — same reasoning as Story084's
+            // StatusApiWebFactory for the first 4 fakes below.
+            services.RemoveAll<IHostedService>();
+
+            services.RemoveAll<IMediaCatalog>();
+            services.AddSingleton<IMediaCatalog>(new FakeMediaCatalog(ready: null));
+
+            services.RemoveAll<IMediaRotationSink>();
+            services.AddSingleton<IMediaRotationSink>(new FakeMediaRotationSink());
+
+            services.RemoveAll<IRotFindingStore>();
+            services.AddSingleton<IRotFindingStore>(new FakeRotFindingStore());
+
+            services.RemoveAll<IActivePersonaAccessor>();
+            services.AddSingleton<IActivePersonaAccessor>(new FakeActivePersonaAccessor());
+
+            // The one dependency unique to this suite: each scenario scripts its own gw_tuning replies.
+            services.RemoveAll<IEngineTuningReader>();
+            services.AddSingleton(reader);
+        });
     }
 }

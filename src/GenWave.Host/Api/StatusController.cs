@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using GenWave.Core;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.Host.Engine;
 using GenWave.Host.Options;
 using GenWave.Plugins;
 using GenWave.Tts;
@@ -34,7 +35,8 @@ public sealed class StatusController(
     ProcessStartTime startTime,
     PluginStatusAccessor pluginStatus,
     IAppVersion appVersion,
-    SchemaVersionStatus schemaVersionStatus) : ControllerBase
+    SchemaVersionStatus schemaVersionStatus,
+    EngineSettingsStatus engineSettingsStatus) : ControllerBase
 {
     /// <summary>
     /// GET /api/status — cookie-auth (covered by the deny-by-default fallback policy when
@@ -137,6 +139,17 @@ public sealed class StatusController(
     /// for an empty/missing/unreadable journal exactly like the boot WARN it also drives. Drift is
     /// reported here, never enforced — a mismatch never changes this endpoint's 200, only what
     /// <c>schema.applied</c> reads (SPEC F211.6).
+    ///
+    /// <c>engine</c> (SPEC F213.5–F213.8, STORY-488, PLAN T602) reports whether the running
+    /// Liquidsoap engine's crossfade/safe-gap tuning matches GenWave's effective configuration.
+    /// <c>settings</c> is <c>"inSync"</c>, <c>"restartNeeded"</c>, or <c>"unknown"</c>;
+    /// <c>differs</c> lists the <c>GW_XFADE_MIN</c>/<c>GW_XFADE_MAX</c>/<c>GW_SAFE_GAP_SECONDS</c>
+    /// keys that disagree (empty otherwise). Both come straight off
+    /// <see cref="EngineSettingsStatus"/> — the cache the engine-settings check writes on the
+    /// dependency-health probe cadence — never a live telnet round trip on THIS request (AC6):
+    /// <c>"unknown"</c>/empty is what a fresh boot reads before that check's first cycle completes
+    /// (AC11), exactly like <c>version.schema.applied</c> above degrades to null rather than blocking
+    /// this endpoint on I/O of its own.
     /// </summary>
     [HttpGet("status")]
     public async Task<IActionResult> Get(CancellationToken ct)
@@ -228,6 +241,11 @@ public sealed class StatusController(
                     expected = SchemaVersion.Expected,
                     applied = schemaVersionStatus.Applied,
                 },
+            },
+            engine = new
+            {
+                settings = engineSettingsStatus.Settings,
+                differs = engineSettingsStatus.Differs,
             },
         });
     }

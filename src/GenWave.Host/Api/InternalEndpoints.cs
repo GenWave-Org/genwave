@@ -53,12 +53,9 @@ static class InternalEndpoints
         // own remarks).
         group.MapGet("/engine-config", (IConfiguration configuration, IAppVersion appVersion) =>
         {
+            var effective = EngineTuningKeys.ReadEffective(configuration);
             var lines = EngineTuningKeys.All
-                .Select(key =>
-                {
-                    var value = configuration[key] ?? string.Empty;
-                    return $"{key}={value}";
-                })
+                .Select(key => $"{key}={effective[key] ?? string.Empty}")
                 .Append($"GW_APP_VERSION={appVersion.Display}");
 
             var body = string.Join('\n', lines) + '\n';

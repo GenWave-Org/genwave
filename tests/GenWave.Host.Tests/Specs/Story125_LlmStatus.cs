@@ -36,6 +36,7 @@ using GenWave.Core;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Host.Api;
+using GenWave.Host.Engine;
 using GenWave.Host.Options;
 using GenWave.Tts;
 
@@ -200,7 +201,8 @@ public static class FeatureLlmStatus
             new ProcessStartTime(new DateTimeOffset(2026, 7, 11, 9, 30, 0, TimeSpan.Zero)),
             new PluginStatusAccessor(),
             AppVersion.From("0.0.0-test"),
-            new SchemaVersionStatus())
+            new SchemaVersionStatus(),
+            new EngineSettingsStatus())
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
         };
