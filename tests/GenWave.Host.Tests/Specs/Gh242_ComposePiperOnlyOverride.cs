@@ -5,12 +5,14 @@
 // ordinary suite (no daemon touched, same as Story201).
 //
 // Pins under guard: the DEFAULT render's api service still hard-depends on kokoro; the piper-only
-// overlay removes kokoro and resets api's depends_on to db only (gh-#879/F213.1, PLAN T598: the
-// api no longer depends_on the engine on any topology); the overlay stacks cleanly on
-// compose.demo.yaml; and launch.sh --piper-only merges the overlay file LAST in both flows.
+// overlay removes kokoro and resets api's depends_on to db + piper (gh-#879/F213.1, PLAN T598: the
+// api no longer depends_on the engine on any topology; gh-#888: api still waits, required: false,
+// on piper — the topology's PRIMARY engine — so the first-boot safe-loop render has Piper's
+// model-load window before it tries); the overlay stacks cleanly on compose.demo.yaml; and
+// launch.sh --piper-only merges the overlay file LAST in both flows.
 //
-// ⚠️ SUPERSEDED IN PART 2026-08-14 (PLAN T148, SPEC F99.2–F99.4, STORY-257): two of this file's
-// original pins described the pre-STORY-257 shape and are no longer true —
+// ⚠️ SUPERSEDED IN PART 2026-08-14 (PLAN T148, SPEC F99.2–F99.4, STORY-257) and 2026-09-29
+// (gh-#888): three of this file's original pins described an earlier shape and are no longer true —
 //   * the DEFAULT render no longer carries `piper` at all (F99.3: a station with no fallback
 //     configured does not run the sidecar; `piper` now sits behind `profiles: ["fallback"]`,
 //     off by default) — gh-#242's "existing boxes never change behaviour on upgrade" constraint
@@ -23,6 +25,11 @@
 //     review finding F1: this pointer used to promise a proof that did not yet exist — that
 //     scenario binds Tts:PiperPrimaryEndpoint through the real configuration binder into
 //     AddGenWaveTts and proves which concrete primary renders, against real stub servers)
+//   * the piper-only overlay's api service no longer depends on db ALONE (gh-#888, F213.1
+//     follow-up): api now also waits (required: false) on piper: condition: service_healthy —
+//     see compose.piper-only.yaml's api depends_on block for the full rationale, and
+//     ScenarioPiperOnlyRender's Api_waits_for_piper_healthy / Api_piper_dependency_is_not_required
+//     facts below.
 // Scenarios below are UPDATED in place (not left stale) — the gh-#242 constraints that still
 // hold (kokoro depends_on, the overlay's own presence/merge-order pins) are unchanged.
 
@@ -121,16 +128,47 @@ public static class FeatureComposePiperOnlyOverride
 
         [Fact]
         [Trait("Category", "Integration")]
-        public static void Api_depends_only_on_db()
+        public static void Api_depends_on_db_and_piper()
         {
             // The `depends_on: !override` reset — without it the merged render is invalid
             // ("api depends on undefined service kokoro") and nothing would boot at all. No
             // "engine" entry either (gh-#879/F213.1, PLAN T598): the base render already dropped
             // it, so this overlay's reset has nothing left to carry forward for engine.
-            var render = BasePiperOnly.Value;
-            Assert.Equal(new[] { "db" }, DependsOnNames(render, "api"));
-            var dependsOn = render.RootElement.GetProperty("services").GetProperty("api").GetProperty("depends_on");
+            Assert.Equal(new[] { "db", "piper" }, DependsOnNames(BasePiperOnly.Value, "api"));
+        }
+
+        [Fact]
+        [Trait("Category", "Integration")]
+        public static void Api_waits_for_db_healthy()
+        {
+            var dependsOn = BasePiperOnly.Value.RootElement.GetProperty("services").GetProperty("api").GetProperty("depends_on");
             Assert.Equal("service_healthy", dependsOn.GetProperty("db").GetProperty("condition").GetString());
+        }
+
+        [Fact]
+        [Trait("Category", "Integration")]
+        public static void Api_waits_for_piper_healthy()
+        {
+            // gh-#888: piper is a REAL depends_on here, not dropped like kokoro — on this
+            // topology piper is the PRIMARY engine (SPEC F99.4) and the first-boot safe-loop
+            // render goes straight through it, so api needs Piper's own start_period (model
+            // download/load) before its first render is attempted. See compose.piper-only.yaml's
+            // api depends_on block for the full rationale.
+            var dependsOn = BasePiperOnly.Value.RootElement.GetProperty("services").GetProperty("api").GetProperty("depends_on");
+            Assert.Equal("service_healthy", dependsOn.GetProperty("piper").GetProperty("condition").GetString());
+        }
+
+        [Fact]
+        [Trait("Category", "Integration")]
+        public static void Api_piper_dependency_is_not_required()
+        {
+            // The load-bearing gh-#888 pin. `required: false` — same posture as base
+            // compose.yaml's kokoro block (SPEC F136.2) — means api's start is delayed by at
+            // most Piper's own healthcheck window (start_period 60s + retries 10x5s ~= 110s),
+            // and never fails api outright if Piper never comes up healthy; music still
+            // plays. See compose.piper-only.yaml's api depends_on block for the full rationale.
+            var dependsOn = BasePiperOnly.Value.RootElement.GetProperty("services").GetProperty("api").GetProperty("depends_on");
+            Assert.False(dependsOn.GetProperty("piper").GetProperty("required").GetBoolean());
         }
 
         [Fact]
@@ -172,11 +210,30 @@ public static class FeatureComposePiperOnlyOverride
 
         [Fact]
         [Trait("Category", "Integration")]
-        public static void Kokoro_is_absent_and_the_depends_on_reset_holds_after_the_demo_merge()
+        public static void Kokoro_is_absent_after_the_demo_merge()
         {
-            var render = DemoPiperOnly.Value;
-            Assert.False(render.RootElement.GetProperty("services").TryGetProperty("kokoro", out _));
-            Assert.Equal(new[] { "db" }, DependsOnNames(render, "api"));
+            Assert.False(DemoPiperOnly.Value.RootElement.GetProperty("services").TryGetProperty("kokoro", out _));
+        }
+
+        [Fact]
+        [Trait("Category", "Integration")]
+        public static void The_depends_on_reset_holds_after_the_demo_merge()
+        {
+            // gh-#888: the piper-only overlay's db + piper depends_on reset survives the demo
+            // overlay's own merge (compose.demo.yaml never touches api's depends_on for either
+            // key) the same way the kokoro-absence pin does.
+            Assert.Equal(new[] { "db", "piper" }, DependsOnNames(DemoPiperOnly.Value, "api"));
+        }
+
+        [Fact]
+        [Trait("Category", "Integration")]
+        public static void Piper_dependency_stays_not_required_after_the_demo_merge()
+        {
+            // gh-#888: compose.demo.yaml never touches api's depends_on, so the piper-only
+            // overlay's `required: false` posture survives the demo merge untouched. See
+            // compose.piper-only.yaml's api depends_on block for the full rationale.
+            var dependsOn = DemoPiperOnly.Value.RootElement.GetProperty("services").GetProperty("api").GetProperty("depends_on");
+            Assert.False(dependsOn.GetProperty("piper").GetProperty("required").GetBoolean());
         }
 
         [Fact]
