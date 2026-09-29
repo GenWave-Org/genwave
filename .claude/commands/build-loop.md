@@ -1,5 +1,5 @@
 ---
-description: Drive a PLAN.md to completion task-by-task — builder builds, reviewer gates, commit only on pass.
+description: Drive a PLAN.md to completion task-by-task — builder builds, reviewer gates, commit only on pass, product owner accepts at the end.
 argument-hint: [path-to-PLAN.md]
 ---
 
@@ -15,7 +15,8 @@ code or review it yourself — you dispatch and gate.
 
 ## Scope
 
-- IN: build each unchecked task, get it through review, commit it.
+- IN: build each unchecked task, get it through review, commit it, then
+  get the finished work accepted by the product owner.
 - OUT: planning, writing PLAN.md, authoring specs, refactor/refinement passes.
   This command **consumes** a plan; it does not author one.
 
@@ -42,7 +43,8 @@ For each task still unchecked (`- [ ]`), in order, top to bottom:
 1. **Build.** Dispatch a `builder` subagent (Agent tool,
    `subagent_type: builder`, model **sonnet** — alias, tracks the current
    generation). The brief contains: the exact task text, the relevant
-   section of PLAN.md, the files it owns, the skills to invoke
+   section of PLAN.md, the files it owns, the story's spec file (its
+   pending specs for this task get activated), the skills to invoke
    (`csharp-best-practices` for C#, `typescript-best-practices` for TS,
    `postgres-dba` for schema work), and the exact test command from
    Preflight step 5. The builder **does not commit**.
@@ -109,19 +111,52 @@ For each task still unchecked (`- [ ]`), in order, top to bottom:
 
 7. Next task.
 
+## Extras
+
+Tasks tagged `delight:` go through the same loop as everything else. Two
+differences:
+
+- If a `delight:` task fails review three times, **skip it** instead of
+  stopping the loop. Revert its changes, mark it `- [-]` in PLAN.md with a
+  one-line reason, log it in `docs/MEMORY.md`, and move on. An extra never
+  blocks the sprint.
+- The reviewer checks it against the budget: no new dependency, no schema
+  change, nothing else depends on it.
+
+## Acceptance
+
+When every box is checked, run the full solution once more, then:
+
+1. Dispatch a `product-owner` subagent in **acceptance mode** (Agent tool,
+   `subagent_type: product-owner`). Give it `docs/BRIEF.md` (or
+   `docs/PROJECT.md` and `docs/SPEC.md` if there's no brief) and the run
+   command from `CLAUDE.md` (`./launch.sh`).
+2. Act on the verdict:
+   - `ACCEPT`: go to Finish.
+   - `POLISH`: append each item to PLAN.md as a `polish:` task and run
+     them through the loop above, review gate included. Same skip rule as
+     extras. **One round only.** Don't dispatch the product owner again.
+   - `REJECT`: the named brief line didn't happen. Append a task that
+     fixes it, run it through the loop, then re-run acceptance once. If
+     it's rejected again, stop and report.
+3. Copy anything the product owner listed under "Next" into the **Next**
+   section of `docs/BRIEF.md`.
+
 ## Finish
 
-When every box is checked: run the full solution once more, `git worktree
-prune`, then report a summary (tasks completed, commits, round count per
-task, anything still red). Architect / final design check is a separate
+`git worktree prune`, then report a summary (tasks completed, extras
+shipped and skipped, polish items, commits, round count per task, anything
+still red, what's under Next). Architect / final design check is a separate
 step — not part of this loop. Merging the branch is Dean's, per action.
 
 ## Rules
 
 - Sequential, dependency-ordered. This is a pipeline, not a parallel team — use
   the Agent tool (subagents), not Agent Teams.
-- Builder owns code; reviewer owns the gate; you own sequencing and the
-  checkbox state. Never collapse these roles.
+- Builder owns code; reviewer owns the gate; product owner owns acceptance;
+  you own sequencing and the checkbox state. Never collapse these roles.
+- **Builders don't freelance.** Extras come from the plan. A diff that
+  includes something the task didn't ask for is a review finding.
 - Three `FAIL`s on a task stops the loop (step 3). Report; never commit
   degraded code to get past a gate.
 - Scratch hygiene: anything you rsync for a subagent excludes

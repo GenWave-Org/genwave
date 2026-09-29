@@ -82,8 +82,17 @@ generating files.
 ### 4. Generate the specs
 
 For every story, produce a spec file built from the templates. Map
-stories to features 1:1, write the file, then stop and let the user
-review before any implementation.
+stories to features 1:1 and write the file.
+
+**Generated specs start pending** (`[Fact(Skip = "pending — …")]` in
+xUnit; `it.todo` / `it.skip` / `test.todo` in Jest). Whoever implements a
+story activates its specs first, watches them fail, then makes them pass.
+The suite stays green between tasks, so a red test always means something
+broke.
+
+When run by hand, stop and let the user review before any implementation.
+When run by `/plan` or `/sprint`, the requirements were already approved,
+so write the files and hand back.
 
 ## The spec structure (mandatory shape)
 

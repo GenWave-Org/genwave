@@ -1,6 +1,7 @@
 ---
 description: Scaffold the project files I like — CLAUDE.md and the /docs skeleton.
 argument-hint: [project name]
+model: sonnet
 ---
 
 # init
@@ -31,8 +32,8 @@ Use this when creating CLAUDE.md
 ## Scope
 
 - IN: create CLAUDE.md, the `docs/` skeleton, a README stub, `.gitignore`.
-- OUT: deciding what the project *is* (that is `/explore`), architecture
-  (`/design`), tasks (`/plan`). This command does not interview the problem.
+- OUT: deciding what the project *is* or how it's built (that is `/sprint`),
+  tasks (`/plan`). This command does not interview the problem.
 
 ## Preflight
 
@@ -45,14 +46,13 @@ Use this when creating CLAUDE.md
 
 ## Produce
 
-- **CLAUDE.md** (root, owned here) — the **how**: stack, conventions, test &
-  run commands, the phase commands available (`/explore`, `/design`, `/plan`,
-  `/document`), and the rule that each doc has one owner.
-- **docs/PROJECT.md** — stub, owned by `/explore`. Headings: Problem, Who it's
-  for, Goals, Scope (in/out), Open questions.
-- **docs/ARCHITECTURE.md** — stub, owned by `/design`.
-- **docs/SPEC.md** — stub, owned by `/design`.
-- **docs/STORIES.md** — stub, owned by `/plan`.
+- **CLAUDE.md** (root, owned here): the **how**. Stack, conventions, test &
+  run commands, the commands available (`/sprint`, `/build-loop`,
+  `/quick-fix`, `/document`, plus `/explore` and `/design` for deep
+  dives), and the rule that each doc has one owner.
+- **docs/ARCHITECTURE.md**: stub. `/sprint` adds each sprint's decisions
+  to it. `/design` owns a full rewrite.
+- **docs/STORIES.md**: stub, owned by `/plan`.
 - **docs/PLAN.md** — stub, owned by `/plan`. Empty checklist.
 - **docs/MEMORY.md** — the project decision log: decisions made with AI,
   preserved for Claude Code. Header + an empty dated-entry list. Curated by
@@ -61,6 +61,10 @@ Use this when creating CLAUDE.md
 - **README.md** — one-line stub, owned by `/document`.
 
 Each stub names its owner command at the top so nobody writes the wrong file.
+
+Don't create these. Their owners make them when they run:
+`docs/BRIEF.md` (`/sprint`), `docs/PROJECT.md` (`/explore`),
+`docs/SPEC.md` (`/design`).
 
 ## Interview
 
@@ -71,4 +75,4 @@ silent and scaffold.
 ## Hand off
 
 End with the file list (created vs. skipped) and:
-`Suggested next: /explore — to define what this project is and why.`
+`Suggested next: /sprint <what you want built>`

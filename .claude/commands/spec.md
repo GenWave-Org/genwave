@@ -1,36 +1,40 @@
 ---
 description: Generate executable BDD specs from STORIES.md via the bdd-specs skill. Stories-first, idempotent, pending by default.
 argument-hint: [scope or story id, optional]
+model: sonnet
 ---
 
 # spec
 
 Turn `docs/STORIES.md` into executable spec files using the **`bdd-specs`**
-skill. This command is the bridge between agreed stories and red specs that
-`/build-loop` will turn green.
+skill. `/plan` already does this for every story it writes. Run `/spec` on
+its own when stories were added or edited afterward and need specs.
 
 ## Scope
 
 - IN: generating spec files from finalized stories; helping author stories
   when none exist yet; reporting on existing specs.
 - OUT: writing implementation code (`/build-loop`); changing requirements
-  (`/explore`, `/design`); ordering tasks (`/plan`).
+  (`/sprint`); ordering tasks (`/plan`).
 
 ## Preflight (refuse early)
 
-1. **Require project info.** If `docs/PROJECT.md` is missing or still a stub
-   (mostly `TODO`s), **refuse** and tell the user:
-   `No PROJECT.md — run /explore first to define what we're building.`
-2. **Require a spec.** If `docs/SPEC.md` is missing or a stub, **refuse**:
-   `No SPEC.md — run /design first so there's something to spec against.`
-3. **Stories check.** If `docs/STORIES.md` is missing or empty, do NOT refuse —
+1. **Require something to spec against.** Either of these will do:
+   - `docs/BRIEF.md`, filled in and approved (from `/sprint`), or
+   - `docs/PROJECT.md` plus `docs/SPEC.md`, filled in (from `/explore`
+     and `/design`).
+
+   If neither is there, or they're stubs full of `TODO`, **refuse**:
+   `Nothing to spec against. Run /sprint first.`
+2. **Stories check.** If `docs/STORIES.md` is missing or empty, do NOT refuse —
    instead, **help create them**: invoke the `user-stories` skill to author
    `docs/STORIES.md` from SPEC.md before continuing.
 
 ## Behavior
 
-1. Read `docs/PROJECT.md`, `docs/SPEC.md`, `docs/STORIES.md`,
-   `docs/ARCHITECTURE.md` (for context), and any existing spec files
+1. Read `docs/BRIEF.md` (or `docs/PROJECT.md` and `docs/SPEC.md`),
+   `docs/STORIES.md`, `docs/ARCHITECTURE.md` (for context), and any
+   existing spec files
    (e.g. `**/*.Tests/**/*.cs`, `tests/**/*.spec.ts`, `specs/**/*.ts`,
    `**/__tests__/**`).
 2. **If specs already exist for a story, LEAVE THEM ALONE.** Do not
@@ -42,9 +46,9 @@ skill. This command is the bridge between agreed stories and red specs that
    one Specification).
 4. **Every newly generated spec is pending by default** — use the runner's
    skip / todo / pending marker (`[Fact(Skip = "pending — not yet implemented")]`
-   for xUnit; `it.todo` / `it.skip` / `test.todo` for Jest).
-   They must not accidentally pass; they must be visibly *pending* until
-   `/build-loop` implements them.
+   for xUnit; `it.todo` / `it.skip` / `test.todo` for Jest). They must not
+   accidentally pass; they must be visibly *pending* until a builder
+   activates them at the start of its task.
 5. Specs must align to stories, but **names should read naturally**:
    - **File name:** a readable slug from the story title — no
      `story-NNN` prefix. e.g. `atomic-create-user-order-entitlements.spec.ts`

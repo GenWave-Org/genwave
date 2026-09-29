@@ -69,8 +69,13 @@ as a finding instead. A reviewer that fixes its own findings isn't a gate.
    case-insensitive file lookups, server-local time-zone reliance. Any hit
    on a production path is a `FAIL`. The fact that it works on the dev box
    does not mean it runs in the container.
-7. Apply the skills above.
-8. Return a verdict:
+7. **Scope check.** The diff does what the task says and nothing else.
+   Anything the task didn't ask for is a finding, even if it's a nice
+   touch. Extras reach the code through the plan. For a `delight:` or
+   `polish:` task, also check its limits: no new dependency, no schema
+   change, nothing else depends on it. Breaking a limit is a `FAIL`.
+8. Apply the skills above.
+9. Return a verdict:
    - `PASS` — correct, secure, idiomatic, tests genuinely green, zero
      warnings, **entry-point trace reaches the promised side effect**, no
      ghost code, platform-parity clean. Safe to commit.

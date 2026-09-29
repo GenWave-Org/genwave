@@ -1,6 +1,7 @@
 ---
 description: Reconcile docs with reality — README, DEPLOYMENT values, ARCHITECTURE prose, MEMORY log. Run anytime.
 argument-hint: [area to focus, optional]
+model: sonnet
 ---
 
 # document
@@ -13,14 +14,15 @@ it does not re-interview the project.
 
 - IN: README, DEPLOYMENT.md value accuracy, ARCHITECTURE.md prose accuracy,
   curating docs/MEMORY.md.
-- OUT: making product/architecture **decisions** (that's `/explore`,
-  `/design`). If reconciling reveals an undecided question, log it and point
+- OUT: making product/architecture **decisions** (that's `/sprint`, or
+  `/explore` / `/design`). If reconciling reveals an undecided question, log it and point
   at the owning command — don't decide it here.
 
 ## Preflight
 
-1. Read `CLAUDE.md`, `docs/PROJECT.md`, `docs/ARCHITECTURE.md`,
-   `docs/SPEC.md`, `docs/MEMORY.md`, `README.md`, `DEPLOYMENT.md`.
+1. Read `CLAUDE.md`, `docs/BRIEF.md`, `docs/ARCHITECTURE.md`,
+   `docs/MEMORY.md`, `README.md`, `DEPLOYMENT.md`, plus `docs/PROJECT.md`
+   and `docs/SPEC.md` if they exist.
 2. Read the actual code/structure. Diff **docs vs. reality**, not docs vs.
    docs. Build a short drift list (claimed but absent, present but
    undocumented, contradictions).
