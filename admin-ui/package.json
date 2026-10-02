@@ -36,7 +36,7 @@
     "postcss": "^8.5.28",
     "shadcn": "^4.21.0",
     "tailwindcss": "^4.3.2",
-    "ts-jest": "^29.4.12",
+    "ts-jest": "^29.4.14",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.70.1"
   },
