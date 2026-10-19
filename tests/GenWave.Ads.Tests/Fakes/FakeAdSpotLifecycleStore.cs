@@ -26,7 +26,8 @@ namespace GenWave.Ads.Tests.Fakes;
 /// <see cref="ListPendingRetiresAsync"/>/<see cref="ListPendingConfirmsAsync"/>'s own later drain to
 /// retry, rather than rolling back the swap itself or the other flip.</param>
 public sealed class FakeAdSpotLifecycleStore(
-    IAdminMediaLookup? adminLookup = null, IAuthoredCatalogWriter? catalogWriter = null) : IAdSpotStore
+    IAdminMediaLookup? adminLookup = null, IAuthoredCatalogWriter? catalogWriter = null,
+    TimeProvider? timeProvider = null) : IAdSpotStore
 {
     readonly List<AdSpot> spots = [];
     long nextId = 1;
@@ -512,7 +513,9 @@ public sealed class FakeAdSpotLifecycleStore(
 
     public Task<IReadOnlyList<AdSpot>> ListReadyOlderThanAsync(TimeSpan age, CancellationToken ct)
     {
-        var threshold = DateTime.UtcNow - age;
+        // The harness's own clock, never the wall clock — a spec pinned to a fixed Now ages past the
+        // refresh window in real time otherwise (the 2026-10 Story389 time bomb).
+        var threshold = (timeProvider ?? TimeProvider.System).GetUtcNow().UtcDateTime - age;
         IReadOnlyList<AdSpot> candidates = spots
             .Where(s => s.State == AdState.Ready && s.Source != AdSource.Owner && s.StateChangedAt < threshold)
             .OrderBy(s => s.StateChangedAt).ThenBy(s => s.Id)
