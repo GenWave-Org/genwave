@@ -122,7 +122,7 @@ internal static class AdSpotWorkerHarness
         // facts before a swap, and flipping catalogWriter's eligibility (old-then-new, best-effort)
         // after one commits — so a stale re-render spec can observe the exact same all-or-nothing shape
         // the production transaction gives it.
-        var store = new FakeAdSpotLifecycleStore(adminLookup, catalogWriter);
+        var store = new FakeAdSpotLifecycleStore(adminLookup, catalogWriter, timeProvider);
         var briefs = new FakeAdBriefStore();
         var sponsors = new FakeSponsorStore(id => briefs.SponsorIdsByBrand
             .Where(pair => pair.Value == id)
