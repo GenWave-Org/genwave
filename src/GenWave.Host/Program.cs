@@ -426,13 +426,14 @@ builder.Services.AddSingleton(sp => new Lazy<ITtsVoiceLister>(sp.GetRequiredServ
 builder.Services.AddSingleton<IChoiceProbe, LlmModelChoiceProbe>();
 builder.Services.AddSingleton<IChoiceProbe, TtsVoiceChoiceProbe>();
 
-// The one IChoiceCatalog this codebase ships (SPEC F205.7d, STORY-482, PLAN T585) — backs
+// IChoiceCatalogs (SPEC F205.7d, STORY-482, PLAN T585). ShowChoiceCatalog backs
 // Crosstalk:Shows' MultiChoice entry. IShowStore is registered unconditionally by
 // builder.AddGenWaveStationSettings() above (AddShowStore is not gated behind any connection-string
 // presence check), so this registration can never resolve to a missing dependency. Resolving it here
 // (ChoiceSourceBootCheck.Verify below does, once) is side-effect free the same way IShowStore itself
 // is — see ShowChoiceCatalog's own remarks.
 builder.Services.AddSingleton<IChoiceCatalog, ShowChoiceCatalog>();
+builder.Services.AddSingleton<IChoiceCatalog, TimezoneChoiceCatalog>(); // Station:Timezone (gh-#260)
 builder.Services.AddSingleton<ISettingChoiceResolver, SettingChoiceResolver>();
 
 builder.Services.AddControllers();

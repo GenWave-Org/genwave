@@ -544,7 +544,7 @@
     <value>Station timezone</value>
   </data>
   <data name="Station:Timezone.Help" xml:space="preserve">
-    <value>The IANA timezone the DJ's spoken date/time follows (e.g. America/Edmonton). Empty uses the container's own clock. Changes apply live. The schedule grid and persona taste gates follow it too, so changing it immediately shifts which slot is on the air.</value>
+    <value>The timezone the DJ's spoken date/time follows. Server clock uses the container's own clock. Changes apply live. The schedule grid and persona taste gates follow it too, so changing it immediately shifts which slot is on the air.</value>
   </data>
 
   <!-- ── Theme selection ──────────────────────────────────────────────────────────────────── -->

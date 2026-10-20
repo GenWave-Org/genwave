@@ -7,7 +7,7 @@ namespace GenWave.Host.Configuration;
 /// <see cref="ProbedChoiceCache"/> in front of it (SPEC F205.7d — "reads the database on every
 /// request"), no scope key, no 60 s freshness window or 2 s timeout, since none of those exist to
 /// absorb network latency/flakiness a local store call does not have. Host-internal: <see cref="ShowChoiceCatalog"/>
-/// is the only implementation this codebase ships, wired into <c>Program.cs</c> — not a public plugin
+/// and <see cref="TimezoneChoiceCatalog"/> are the implementations this codebase ships, wired into <c>Program.cs</c> — not a public plugin
 /// seam.
 /// </summary>
 internal interface IChoiceCatalog

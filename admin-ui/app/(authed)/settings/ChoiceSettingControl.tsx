@@ -1,12 +1,16 @@
 "use client";
 
-import type { ChangeEvent, ReactNode } from "react";
+import { useState, type ChangeEvent, type ReactNode } from "react";
 import type { SettingControlProps } from "./settings-types";
 
 /** Matches SettingField's shipped single-line control styling (text/number inputs, the
  * `AudienceSettingControl` precedent). */
 const CONTROL_CLASSES =
   "h-9 w-full max-w-md rounded-[6px] border border-line bg-surface px-2 text-[0.85rem] text-ink disabled:opacity-50";
+
+/** Lists longer than this get a filter box above the select (gh-#260 — `Station:Timezone` carries
+ * every zone the host knows, several hundred). */
+export const CHOICE_FILTER_THRESHOLD = 30;
 
 /**
  * The generic control for any `SettingKind.Choice` setting (SPEC F102.14, STORY-265; registered
@@ -86,6 +90,10 @@ const CONTROL_CLASSES =
  * `choicesFailed` forces the select `disabled` and skips the "no choices available" alert even
  * when `choices` is empty — a failed probe with nothing cached is still `choicesFailed`, not the
  * wiring-bug state that alert exists for.
+ *
+ * A list longer than {@link CHOICE_FILTER_THRESHOLD} gets a filter box (gh-#260): typing narrows the
+ * options by label or value, case-insensitive. The option for the staged `value` always stays in the
+ * list, so the select never shows a selection the filter hid.
  */
 export function ChoiceSettingControl({
   controlId,
@@ -98,6 +106,7 @@ export function ChoiceSettingControl({
 }: SettingControlProps): ReactNode {
   const failed = choicesFailed === true;
   const stale = choicesStale === true;
+  const [filter, setFilter] = useState("");
 
   if ((choices === undefined || choices.length === 0) && !failed) {
     return (
@@ -115,6 +124,17 @@ export function ChoiceSettingControl({
   const offListNoticeId = `${controlId}-off-list-notice`;
   const staleNoticeId = `${controlId}-stale-notice`;
   const failedNoticeId = `${controlId}-failed-notice`;
+  const filterable = availableChoices.length > CHOICE_FILTER_THRESHOLD;
+  const needle = filter.trim().toLowerCase();
+  const shownChoices =
+    filterable && needle !== ""
+      ? availableChoices.filter(
+          (choice) =>
+            choice.value === value ||
+            choice.label.toLowerCase().includes(needle) ||
+            choice.value.toLowerCase().includes(needle),
+        )
+      : availableChoices;
   const describedByIds = [
     currentIsOffList ? offListNoticeId : null,
     stale ? staleNoticeId : null,
@@ -136,7 +156,7 @@ export function ChoiceSettingControl({
         </option>
       )}
       {currentIsOffList && <option value={value}>{`${value} (current)`}</option>}
-      {availableChoices.map((choice) => (
+      {shownChoices.map((choice) => (
         <option key={choice.value} value={choice.value}>
           {choice.label}
         </option>
@@ -144,10 +164,22 @@ export function ChoiceSettingControl({
     </select>
   );
 
-  if (!currentIsOffList && !stale && !failed) return select;
+  if (!filterable && !currentIsOffList && !stale && !failed) return select;
 
   return (
     <div className="flex flex-col gap-1.5">
+      {filterable && (
+        <input
+          type="search"
+          value={filter}
+          onChange={(e: ChangeEvent<HTMLInputElement>) => setFilter(e.currentTarget.value)}
+          disabled={disabled || failed}
+          placeholder="Type to narrow the list"
+          aria-label="Narrow the list"
+          aria-controls={controlId}
+          className={CONTROL_CLASSES}
+        />
+      )}
       {select}
       {currentIsOffList && (
         // STORY-337 AC6 (review finding F1): the dangling value is already visible in the select

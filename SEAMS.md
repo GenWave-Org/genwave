@@ -98,7 +98,7 @@
 | `GenWave.Core.Abstractions.IStationScopeProvider` | `GenWave.Host.Options.OptionsMonitorStationScopeProvider` | Singleton | — |
 | `GenWave.Host.Auth.IAnnounceTokenStore` | `GenWave.Host.Auth.AnnounceTokenStore` | Singleton | — |
 | `GenWave.Host.Catalog.ICatalogPersonaAvatarInstaller` | `GenWave.Host.Catalog.CatalogPersonaAvatarInstaller` | Singleton | — |
-| `GenWave.Host.Configuration.IChoiceCatalog` | `GenWave.Host.Configuration.ShowChoiceCatalog` | Singleton | — |
+| `GenWave.Host.Configuration.IChoiceCatalog` | `GenWave.Host.Configuration.TimezoneChoiceCatalog` | Singleton | also registered: `GenWave.Host.Configuration.ShowChoiceCatalog` (GenWave.Host) |
 | `GenWave.Host.Configuration.IChoiceProbe` | `GenWave.Host.Configuration.TtsVoiceChoiceProbe` | Singleton | also registered: `GenWave.Host.Configuration.LlmModelChoiceProbe` (GenWave.Host) |
 | `GenWave.Host.Configuration.ISettingChoiceResolver` | `GenWave.Host.Configuration.SettingChoiceResolver` | Singleton | — |
 | `GenWave.Host.Configuration.IStationSettingsStore` | `GenWave.Host.Configuration.StationSettingsStore` | Singleton | — |
