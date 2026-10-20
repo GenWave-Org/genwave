@@ -420,7 +420,12 @@ public static class StationSettingsAllowlist
         // the honest "container's own clock" state, pre-gh-#117 behavior unchanged. Live so a PUT
         // here reaches the very next prompt build / SegmentRequest stamp with no api restart —
         // OptionsMonitorStationClockProvider re-resolves IOptionsMonitor<StationOptions> per call.
-        new("Station:Timezone", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Station),
+        // A Choice off the host's own zone list (gh-#260, TimezoneChoiceCatalog) so a typo can't be
+        // staged; IsValidStationTimezone still guards the PUT.
+        new("Station:Timezone", SettingApplyMode.Live, SettingKind.Choice, "", SettingGroup.Station, [])
+        {
+            ChoiceSource = new SettingChoiceSource.Catalog(TimezoneChoiceCatalog.CatalogKind),
+        },
 
         // Theme selection (SPEC F102.14, F102.15, F103.7, STORY-265/271, PLAN T163/T183) — closed
         // CHOICE, not free text: a typo in a String value would silently fail to resolve (F102.6's

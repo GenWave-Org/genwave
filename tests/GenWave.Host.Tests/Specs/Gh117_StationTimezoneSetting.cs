@@ -64,7 +64,7 @@ public static class FeatureStationTimezoneSetting
 
             var allowed = StationSettingsAllowlist.ByKey[Key];
             Assert.Equal(SettingApplyMode.Live, allowed.ApplyMode);
-            Assert.Equal(SettingKind.String, allowed.Kind);
+            Assert.Equal(SettingKind.Choice, allowed.Kind); // gh-#260 picker
         }
 
         [Fact]
