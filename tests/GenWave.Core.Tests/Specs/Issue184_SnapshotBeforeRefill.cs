@@ -83,7 +83,7 @@ public static class FeatureSnapshotBeforeRefill
     public sealed class ScenarioColdStartPublishesNothing
     {
         [Fact]
-        public async Task An_unresolved_engine_read_leaves_CurrentOnAir_null_and_skips_refill()
+        public async Task An_unresolved_engine_read_leaves_CurrentOnAir_null_and_asks_for_a_refill()
         {
             // Given an engine that has not resolved anything yet (cold start)
             var provider = new BlockingNextItemProvider(Item("m2"));
@@ -93,8 +93,8 @@ public static class FeatureSnapshotBeforeRefill
             // When the observe phase runs
             var observed = await feeder.ObserveAsync(CancellationToken.None);
 
-            // Then there is nothing to publish and nothing to refill against
-            Assert.False(observed);
+            // Then there is nothing to publish, but the empty engine still gets filled (gh-#889)
+            Assert.True(observed);
             Assert.Null(feeder.CurrentOnAir);
         }
     }
