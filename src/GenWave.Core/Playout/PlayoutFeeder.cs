@@ -177,6 +177,7 @@ public sealed class PlayoutFeeder(
     int prepared;
     DateTimeOffset onAirStartedAt;  // wall-clock instant the current on-air item was first detected
     int safeCoverTicks;             // consecutive observe ticks with safe rotation airing (gh-#612)
+    int silentTicks;                // consecutive observe ticks with nothing on air at all (gh-#889)
 
     /// <summary>
     /// The "pushed but never aired" diagnostic (gh-#612): non-null once the safe rotation has
@@ -222,13 +223,39 @@ public sealed class PlayoutFeeder(
     /// in engine-socket time — the entire point of the phase split (gh-#184: the refill lawfully
     /// blocks for an LLM+TTS render window, and the on-air snapshot must not wait behind it;
     /// measured 38-40s of stale "DJ break" at every track start on the demo box).
-    /// Returns false on cold start (engine returned no resolvable id yet): nothing to refill
-    /// against, and <see cref="CurrentOnAir"/> is left untouched.
+    /// Returns whether the refill phase should run. When the engine reports nothing on air at all
+    /// (cold start), <see cref="CurrentOnAir"/> is left untouched and the refill still runs
+    /// (gh-#889), throttled while an earlier push may still be resolving.
     /// </summary>
     public async Task<bool> ObserveAsync(CancellationToken ct)
     {
         var id = await ls.OnAirNewestAsync(ct);     // stamped media id, drain token, or null
-        if (id is null) return false;                 // nothing resolved yet (cold start)
+        if (id is null)
+        {
+            // gh-#889: nothing has ever reached air. With an empty safe scope the engine plays
+            // unannotated silence, the drain token never appears, and waiting for it deadlocks the
+            // station silent with ready music in the library (SPEC F1.3). The engine queue is
+            // provably empty of anything airing, so fill it from here. booted is set because the
+            // feeder now knows the queue state — it filled it — so its own push reaching air is a
+            // normal advance, not a boot reconciliation. A push still resolving gets the same
+            // grace the push-loss signal uses before the refill retries. An empty read only comes
+            // from an engine with no metadata history, so losing an on-air id means the engine
+            // restarted and its queue went with it: release the departed id and refill now.
+            if (onAirId is not null)
+            {
+                if (pendingDepartedOnAirId is not null) ReleaseIfDead(pendingDepartedOnAirId);
+                pendingDepartedOnAirId = onAirId;
+                onAirId = null;
+                prepared = 0;
+            }
+            onAirIsReal = false;
+            booted = true;
+            if (prepared != 0 && ++silentTicks < SafeCoverTicksBeforePushLossSignal) return false;
+            silentTicks = 0;
+            prepared = 0;
+            return true;
+        }
+        silentTicks = 0;
 
         if (id != onAirId)                            // boot, a real advance, or a drain transition
         {
