@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **131 seams across 8 projects.**
+> **133 seams across 8 projects.**
 
 ## GenWave.Ads (2 seams)
 
@@ -118,10 +118,11 @@
 | `GenWave.Core.Abstractions.IEnergyAnalyzer` | `GenWave.Loudness.FfmpegEnergyAnalyzer` | Singleton | — |
 | `GenWave.Core.Abstractions.ILoudnessAnalyzer` | `GenWave.Loudness.FfmpegLoudnessAnalyzer` | Singleton | — |
 
-## GenWave.MediaLibrary (57 seams)
+## GenWave.MediaLibrary (59 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
+| `GenWave.Core.Abstractions.IAdAudioReferences` | `GenWave.MediaLibrary.Station.AdSpotRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IAdBedPool` | `GenWave.MediaLibrary.Catalog.AdBedPoolRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IAdBriefStore` | `GenWave.MediaLibrary.Station.AdBriefRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IAdSpotStore` | `GenWave.MediaLibrary.Station.AdSpotRepository` | Singleton | — |
@@ -134,6 +135,7 @@
 | `GenWave.Core.Abstractions.IAnnouncementStore` | `GenWave.MediaLibrary.Station.AnnouncementRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IArtworkTokenStore` | `GenWave.MediaLibrary.Catalog.ArtworkTokenRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IAuthoredCatalogWriter` | `GenWave.MediaLibrary.Catalog.MediaRepository` | Singleton | — |
+| `GenWave.Core.Abstractions.IAuthoredMediaSweep` | `GenWave.MediaLibrary.Catalog.MediaRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IAvatarPackStore` | `GenWave.MediaLibrary.Station.AvatarPackRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IBoothLogAppender` | `GenWave.MediaLibrary.Station.BoothLogRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IBoothLogEventConsumer` | `GenWave.MediaLibrary.Station.BoothLogWriter` | Singleton | — |

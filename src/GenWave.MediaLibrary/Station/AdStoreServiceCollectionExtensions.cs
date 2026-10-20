@@ -42,12 +42,18 @@ public static class AdStoreServiceCollectionExtensions
     /// registration must work whichever order the two calls run in.
     /// </para>
     /// </summary>
-    public static IServiceCollection AddAdSpotStore(this IServiceCollection services, string connectionString) =>
-        services.AddSingleton<IAdSpotStore>(sp => new AdSpotRepository(
+    public static IServiceCollection AddAdSpotStore(this IServiceCollection services, string connectionString)
+    {
+        services.AddSingleton(sp => new AdSpotRepository(
             new Lazy<NpgsqlDataSource>(() => new NpgsqlDataSourceBuilder(connectionString).Build()),
             sp.GetRequiredService<IAdminMediaLookup>(),
             sp.GetRequiredService<IAuthoredCatalogWriter>(),
             sp.GetRequiredService<ILogger<AdSpotRepository>>()));
+        services.AddSingleton<IAdSpotStore>(sp => sp.GetRequiredService<AdSpotRepository>());
+        // Retired ad audio sweep, station half (gh-#3): the SAME repository instance.
+        services.AddSingleton<IAdAudioReferences>(sp => sp.GetRequiredService<AdSpotRepository>());
+        return services;
+    }
 
     /// <summary>
     /// Registers <see cref="IAdBriefStore"/> the same lazy way <see cref="AddAdSpotStore"/> registers

@@ -41,7 +41,7 @@ sealed class AdSpotRepository(
     Lazy<NpgsqlDataSource> dataSource,
     IAdminMediaLookup adminLookup,
     IAuthoredCatalogWriter catalogWriter,
-    ILogger<AdSpotRepository> logger) : IAdSpotStore
+    ILogger<AdSpotRepository> logger) : IAdSpotStore, IAdAudioReferences
 {
     /// <summary>
     /// The full column list, shared verbatim by every <c>SELECT</c> (via <see cref="SelectColumns"/>)
@@ -991,6 +991,36 @@ sealed class AdSpotRepository(
             """,
             new { id }, cancellationToken: ct));
         return affected == 1;
+    }
+
+    /// <summary><see cref="IAdAudioReferences.ListMediaIdsInUseAsync"/> (gh-#3). A retired spot's
+    /// <c>retired_at</c> falls back to <c>state_changed_at</c> for any row retired before that stamp
+    /// existed.</summary>
+    public async Task<IReadOnlySet<long>> ListMediaIdsInUseAsync(DateTimeOffset retiredBefore, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var ids = await conn.QueryAsync<long>(new CommandDefinition(
+            """
+            select media_id from station.ad_spot
+            where media_id is not null
+              and not (state = 'retired'::station.ad_state
+                       and coalesce(retired_at, state_changed_at) < @cutoff)
+            union select bed_media_id from station.ad_spot where bed_media_id is not null
+            union select pending_retire_media_id from station.ad_spot where pending_retire_media_id is not null
+            union select pending_confirm_media_id from station.ad_spot where pending_confirm_media_id is not null
+            """,
+            new { cutoff = retiredBefore.UtcDateTime }, cancellationToken: ct));
+        return ids.ToHashSet();
+    }
+
+    /// <summary><see cref="IAdAudioReferences.ListPreviewPathsAsync"/> (gh-#3).</summary>
+    public async Task<IReadOnlySet<string>> ListPreviewPathsAsync(CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var paths = await conn.QueryAsync<string>(new CommandDefinition(
+            "select preview_path from station.ad_spot where preview_path is not null",
+            cancellationToken: ct));
+        return paths.ToHashSet(StringComparer.Ordinal);
     }
 
     /// <summary>

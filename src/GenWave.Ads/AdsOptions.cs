@@ -94,6 +94,15 @@ public sealed class AdsOptions
     public int PreviewRetentionDays { get; set; } = 7;
 
     /// <summary>
+    /// How many days a retired or replaced ad's audio is kept before <c>AdAudioSweepService</c> deletes
+    /// its file and its <c>library.media</c> row (gh-#3). Default 30. Range 1-365. Counts from the spot's
+    /// retirement, or from the render for audio no spot references any more. Only the ads library is
+    /// swept — safe segments and jingle packs are never auto-deleted.
+    /// </summary>
+    [Range(1, 365)]
+    public int RetiredAudioRetentionDays { get; set; } = 30;
+
+    /// <summary>
     /// The bounded capacity of <c>AdSpotJobService</c>'s (T441) FIFO render-job <c>Channel</c> —
     /// once full, a new enqueue is refused with 429 <c>ad_job_queue_full</c> (SPEC F174.2, F176.2,
     /// gh-#714, STORY-431). Default 8. Range 1-64 (SPEC F176.2's own explicit bounds): a queue of

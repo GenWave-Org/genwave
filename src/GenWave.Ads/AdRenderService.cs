@@ -169,8 +169,12 @@ public sealed class AdRenderService(
     /// (<c>Path.TrimEndingDirectorySeparator(Path.GetFullPath(...))</c>) so <see cref="AdPreviewRoot.IsUnder"/>
     /// re-assertions against either root compare like for like.
     /// </summary>
-    string ResolveAdsRoot() =>
-        Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.Combine(locatorRoots.AuthoredRoot, "ads")));
+    string ResolveAdsRoot() => ResolveAdsRoot(locatorRoots);
+
+    /// <summary>The same root from bare <paramref name="roots"/> — <see cref="AdAudioSweepService"/>
+    /// (gh-#3) re-asserts every file it deletes against exactly this.</summary>
+    internal static string ResolveAdsRoot(AdSpotLocatorRoots roots) =>
+        Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.Combine(roots.AuthoredRoot, "ads")));
 
     /// <summary>
     /// Promotes <paramref name="spot"/>'s CURRENT preview file to a real, airable <c>library.media</c>

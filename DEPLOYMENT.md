@@ -753,6 +753,7 @@ Live settings (allowlisted, PUT-able through the settings API/UI, no `api` resta
 | `Ads__LibraryName` | `ads` | — | Display name of the seeded ads library `AdsLibrarySeeder` creates if absent at boot |
 | `Ads__RenderBudgetSeconds` | 180 | 10–1800 | Wall-clock budget the worker gives one render attempt before cancelling it |
 | `Ads__PreviewRetentionDays` | 7 | 1–90 | How many days a rendered sponsor preview is kept before the retention sweep deletes it |
+| `Ads__RetiredAudioRetentionDays` | 30 | 1–365 | How many days a retired or replaced ad's audio is kept before the hourly sweep deletes its file and library row (ads only — safe segments and jingle packs are never auto-deleted) |
 | `Ads__JobQueueCapacity` | 8 | 1–64 | How many queued render jobs the sponsor job queue holds before new requests are refused |
 
 | Key | Default | Range | What it bounds |
