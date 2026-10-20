@@ -87,6 +87,8 @@ public static class MediaLibraryServiceCollectionExtensions
         // IAdminMediaWrite for the same zero-blast-radius reason as IMediaExplicitOverride above.
         // First consumer: MediaPurgeController.
         services.AddSingleton<IMediaPurge>(sp => sp.GetRequiredService<MediaRepository>());
+        // Retired ad audio sweep, library half (gh-#3): its own seam for the same zero-blast-radius reason.
+        services.AddSingleton<IAuthoredMediaSweep>(sp => sp.GetRequiredService<MediaRepository>());
 
         // Rating: the operator taste signal on any catalog row (SPEC F33), standalone from
         // curation (F33.7) — no LibraryScope gating anywhere in this seam (F33.5). Same

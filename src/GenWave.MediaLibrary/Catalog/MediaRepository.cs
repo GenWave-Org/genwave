@@ -24,7 +24,7 @@ sealed class MediaRepository(
     IAudiencePostureProvider audiencePosture,
     IStationEventSink? events = null)
     : IMediaCatalog, IAdminMediaLookup, IAdminMediaQuery, IAdminMediaWrite, IAdminMediaReenrichment,
-      IAuthoredCatalogWriter, IMediaExplicitOverride, IMediaPurge
+      IAuthoredCatalogWriter, IMediaExplicitOverride, IMediaPurge, IAuthoredMediaSweep
 {
     // MediaMutated publish seam for the admin writes (gitea-#246); no-op unless the host binds a real sink.
     readonly IStationEventSink events = events ?? NoOpStationEventSink.Instance;
@@ -2247,6 +2247,40 @@ sealed class MediaRepository(
         var affected = await conn.ExecuteAsync(new CommandDefinition(
             "update library.media set eligible = @eligible where id = @mediaId",
             new { mediaId, eligible }, cancellationToken: ct));
+        return affected == 1;
+    }
+
+    // ── Retired ad audio sweep (IAuthoredMediaSweep — gh-#3) ──────────────────────────────────────
+
+    /// <summary>Bound on one <see cref="ListIneligibleAsync"/> page; a larger backlog drains over
+    /// several sweeps.</summary>
+    const int MaxSweepRows = 1000;
+
+    /// <summary><see cref="IAuthoredMediaSweep.ListIneligibleAsync"/>. Authored inserts stamp
+    /// <c>mtime</c> from the rendered file and leave <c>discovered_at</c> null, so <c>mtime</c> is the age.</summary>
+    public async Task<IReadOnlyList<AuthoredMediaFile>> ListIneligibleAsync(
+        long libraryId, DateTimeOffset modifiedBefore, CancellationToken ct)
+    {
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        var rows = await conn.QueryAsync<AuthoredMediaFile>(new CommandDefinition(
+            """
+            select id as Id, path as Path from library.media
+            where library_id = @libraryId and eligible = false and mtime < @cutoff
+            order by id
+            limit @limit
+            """,
+            new { libraryId, cutoff = modifiedBefore.UtcDateTime, limit = MaxSweepRows }, cancellationToken: ct));
+        return rows.ToList();
+    }
+
+    /// <summary><see cref="IAuthoredMediaSweep.DeleteIneligibleAsync"/> — the <c>eligible = false</c>
+    /// guard makes a row re-enabled since the list read survive. Child rows cascade.</summary>
+    public async Task<bool> DeleteIneligibleAsync(long mediaId, CancellationToken ct)
+    {
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        var affected = await conn.ExecuteAsync(new CommandDefinition(
+            "delete from library.media where id = @mediaId and eligible = false",
+            new { mediaId }, cancellationToken: ct));
         return affected == 1;
     }
 

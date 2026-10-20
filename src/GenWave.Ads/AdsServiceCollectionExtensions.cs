@@ -94,6 +94,8 @@ public static class AdsServiceCollectionExtensions
         // worker's re-render marker and the About surfaces resolve — no second registration here.
         services.AddHostedService<AdSpotWorker>();
         services.AddHostedService<AdSpotLifecycleGuardianService>();
+        // Retired ad audio + leaked preview cleanup (gh-#3) — hourly, its own cadence.
+        services.AddHostedService<AdAudioSweepService>();
 
         // The station-wide preview/write job runner (SPEC F174.2, F174.3; STORY-422, STORY-423; PLAN
         // T441) — registered as a concrete singleton FIRST, then exposed as a hosted service resolving
