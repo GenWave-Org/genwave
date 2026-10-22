@@ -23,6 +23,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="gauntlet\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- The tool's own tests drive Cli.Run in-process. -->
     <InternalsVisibleTo Include="GenWave.VoiceOff.Tests" />
   </ItemGroup>

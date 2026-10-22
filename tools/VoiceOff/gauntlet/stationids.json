@@ -1,0 +1,67 @@
+{
+  "lines": [
+    {
+      "id": "stationid-bubbly-1",
+      "class": "StationId",
+      "register": "bubbly",
+      "text": "You are listening to GenWave, the little station run by our friends and neighbors, and we are so glad you are here!",
+      "cues": []
+    },
+    {
+      "id": "stationid-bubbly-2",
+      "class": "StationId",
+      "register": "bubbly",
+      "text": "This is GenWave, music all day for our community, and you are the best part of it, so thank you!",
+      "cues": []
+    },
+    {
+      "id": "stationid-bubbly-3",
+      "class": "StationId",
+      "register": "bubbly",
+      "text": "Welcome back to GenWave, where the music never stops and the company is always good, so stay right there!",
+      "cues": []
+    },
+    {
+      "id": "stationid-laconic-1",
+      "class": "StationId",
+      "register": "laconic",
+      "text": "This is GenWave, music for our community, all day and all night.",
+      "cues": []
+    },
+    {
+      "id": "stationid-laconic-2",
+      "class": "StationId",
+      "register": "laconic",
+      "text": "You are listening to GenWave, the station that belongs to all of us.",
+      "cues": []
+    },
+    {
+      "id": "stationid-laconic-3",
+      "class": "StationId",
+      "register": "laconic",
+      "text": "GenWave is on the air, with more music on the way, so stay tuned.",
+      "cues": []
+    },
+    {
+      "id": "stationid-late-night-1",
+      "class": "StationId",
+      "register": "late-night",
+      "text": "You are tuned to GenWave, and we will be here playing music for you all through the night.",
+      "cues": []
+    },
+    {
+      "id": "stationid-late-night-2",
+      "class": "StationId",
+      "register": "late-night",
+      "text": "This is GenWave, the soft glow in the dark corner of your evening, so settle in and stay a while.",
+      "cues": []
+    },
+    {
+      "id": "stationid-late-night-3",
+      "class": "StationId",
+      "register": "late-night",
+      "text": "GenWave, music for the late hours, for the people who are still awake, and for anyone who needs the company.",
+      "cues": []
+    }
+  ]
+}

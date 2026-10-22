@@ -5,6 +5,7 @@
 // AC1, AC2, AC6 (the laws) live in GenWave.Architecture.Tests' Story501_VoiceOffSlugFence.
 
 using System.Xml.Linq;
+using GenWave.VoiceOff.Tests.Support;
 
 namespace GenWave.VoiceOff.Tests.Specs;
 
@@ -34,16 +35,8 @@ public static class FeatureNothingShipsAndNoSlugInCode
         public void TheyAreGenWaveTtsAndGenWaveLoudness() =>
             Assert.Equal(["GenWave.Loudness", "GenWave.Tts"], references);
 
-        private static string FindToolProject()
-        {
-            DirectoryInfo? dir = new(AppContext.BaseDirectory);
-            while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "GenWave.sln")))
-            {
-                dir = dir.Parent;
-            }
-
-            return Path.Combine(dir?.FullName ?? string.Empty, "tools", "VoiceOff", "VoiceOff.csproj");
-        }
+        private static string FindToolProject() =>
+            Path.Combine(RepoRootLocator.Find(AppContext.BaseDirectory), "tools", "VoiceOff", "VoiceOff.csproj");
     }
 
     // AC4 — the solution builds it
