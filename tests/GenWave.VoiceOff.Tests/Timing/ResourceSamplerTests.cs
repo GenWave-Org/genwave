@@ -26,6 +26,66 @@ public sealed class ResourceSamplerTests
         Assert.Null(usage.PeakVramMb);
     }
 
+    private static async Task<(ScriptedResourceProbe Probe, ResourceUsage Usage)> SampleWithAsync(string?[] gpu, bool readGpu, string? pids = ScriptedResourceProbe.DefaultPids)
+    {
+        using CancellationTokenSource window = new();
+        ScriptedResourceProbe probe = new(["1MiB"], gpu, window, null, pids);
+        ResourceSampler sampler = new(probe, "engine-box", new ManualTimeProvider(), readGpu);
+        Task run = sampler.RunAsync(window.Token);
+        await run.WaitAsync(TimeSpan.FromSeconds(5));
+        return (probe, sampler.Usage);
+    }
+
+    [Fact]
+    public async Task TheCpuTierNeverAsksTheGpu()
+    {
+        (ScriptedResourceProbe probe, _) = await SampleWithAsync(["101, 800"], readGpu: false);
+        Assert.Equal(0, probe.GpuReads);
+    }
+
+    [Fact]
+    public async Task TheCpuTierReportsVramUnknown()
+    {
+        (_, ResourceUsage usage) = await SampleWithAsync(["101, 800"], readGpu: false);
+        Assert.Null(usage.PeakVramMb);
+    }
+
+    [Fact]
+    public async Task AnUnreadablePidListSkipsTheGpuRead()
+    {
+        (ScriptedResourceProbe probe, _) = await SampleWithAsync(["101, 800"], readGpu: true, pids: null);
+        Assert.Equal(0, probe.GpuReads);
+    }
+
+    [Fact]
+    public async Task AContainerWithNoGpuProcessReportsZero()
+    {
+        ResourceUsage usage = await ScriptedResourceProbe.SampleAsync(["1MiB", "1MiB"], [ScriptedResourceProbe.ForeignGpuLine, ScriptedResourceProbe.ForeignGpuLine]);
+        Assert.Equal(0, usage.PeakVramMb);
+    }
+
+    [Fact]
+    public async Task AnUnreadablePidListLeavesVramUnknown()
+    {
+        ResourceUsage usage = await ScriptedResourceProbe.SampleAsync(["1MiB", "1MiB"], ["101, 800", "101, 800"], pids: "PID\nnope\n");
+        Assert.Null(usage.PeakVramMb);
+    }
+
+    [Fact]
+    public async Task AnUnreadableGpuLineSkipsThatSampleOnly()
+    {
+        ResourceUsage usage = await ScriptedResourceProbe.SampleAsync(["1MiB", "1MiB", "1MiB"], ["101, 800", "101, [N/A]", "101, 700"]);
+        Assert.Equal(800, usage.PeakVramMb);
+    }
+
+    [Fact]
+    public async Task AProbeTimeoutIsASkippedSampleNotTheEndOfTheWindow()
+    {
+        ResourceUsage usage = await ScriptedResourceProbe.SampleAsync(
+            ["1MiB", "1MiB", "1MiB"], ["101, 800", "101, 900", "101, 700"], wrap: inner => new ThrowingResourceProbe(inner, gpuRead: 1, failure: new OperationCanceledException()));
+        Assert.Equal(800, usage.PeakVramMb);
+    }
+
     [Fact]
     public async Task AFailedContainerReadIsSkippedAndTheRunKeepsGoing()
     {
@@ -49,11 +109,11 @@ public sealed class ResourceSamplerTests
     }
 
     [Fact]
-    public async Task AThrowingBaselineReadLeavesVramUnknown()
+    public async Task AThrowingGpuReadIsSkippedAndTheRunKeepsGoing()
     {
         ResourceUsage usage = await ScriptedResourceProbe.SampleAsync(
-            ["1MiB", "1MiB"], ["800", "3600", "3600"], wrap: inner => new ThrowingResourceProbe(inner, gpuRead: 0));
-        Assert.Null(usage.PeakVramMb);
+            ["1MiB", "1MiB", "1MiB"], ["101, 800", "101, 3600", "101, 700"], wrap: inner => new ThrowingResourceProbe(inner, gpuRead: 1));
+        Assert.Equal(800, usage.PeakVramMb);
     }
 
     [Fact]

@@ -1,0 +1,135 @@
+using GenWave.VoiceOff.Script;
+using GenWave.VoiceOff.Speech;
+using GenWave.VoiceOff.Timing;
+
+namespace GenWave.VoiceOff.Render;
+
+/// <summary>
+/// <c>voiceoff render</c> (SPEC F214.1 to F214.8): the gauntlet through every selected engine and lane, loudness-matched into a new
+/// run folder with <c>run.json</c>, <c>timing.jsonl</c> and <c>gates.json</c>. An engine that is not attempted, unreachable or failing a
+/// gate is a row in the output, never a failed run.
+/// </summary>
+internal static class RenderCommand
+{
+    internal const int Ok = 0;
+    internal const int Failed = 1;
+    internal const int UsageError = 2;
+    internal const int Interrupted = 130;
+
+    internal const string CorrectionsPendingNotice =
+        "Corrections are pending: export the station's corrections before trusting pronunciation results.";
+
+    /// <param name="args">The arguments after the <c>render</c> verb.</param>
+    internal static async Task<int> RunAsync(IReadOnlyList<string> args, TextWriter output, TextWriter error, RenderServices services, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(output);
+        ArgumentNullException.ThrowIfNull(error);
+        ArgumentNullException.ThrowIfNull(services);
+
+        if (!RenderOptionsParser.TryParse(args, out RenderOptions? options, out string? usage) || options is null)
+        {
+            error.WriteLine(usage);
+            return UsageError;
+        }
+
+        if (!TryLoad(options, error, out EngineProfileSet? profiles, out GauntletSet? set) || profiles is null || set is null)
+        {
+            return Failed;
+        }
+
+        string? unknown = options.Engines.FirstOrDefault(slug => profiles.Profiles.All(p => !string.Equals(p.Slug, slug, StringComparison.Ordinal)));
+        if (unknown is not null)
+        {
+            error.WriteLine($"Unknown engine '{unknown}'. Known engines: {string.Join(", ", profiles.Profiles.Select(p => p.Slug))}.");
+            return UsageError;
+        }
+
+        try
+        {
+            return await RunLoadedAsync(options, profiles, set, output, error, services, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            output.WriteLine("Cancelled; the files written so far are kept.");
+            return Interrupted;
+        }
+    }
+
+    private static bool TryLoad(RenderOptions options, TextWriter error, out EngineProfileSet? profiles, out GauntletSet? set)
+    {
+        profiles = null;
+        set = null;
+        try
+        {
+            profiles = EngineProfileSet.Load(options.EnginesDirectory);
+            set = GauntletSet.Load(options.GauntletDirectory);
+            return true;
+        }
+        catch (Exception ex) when (ex is InvalidDataException or DirectoryNotFoundException)
+        {
+            error.WriteLine(ex.Message);
+            return false;
+        }
+    }
+
+    private static async Task<int> RunLoadedAsync(
+        RenderOptions options, EngineProfileSet profiles, GauntletSet set, TextWriter output, TextWriter error, RenderServices services, CancellationToken ct)
+    {
+        if (set.CorrectionsPending)
+        {
+            output.WriteLine(CorrectionsPendingNotice);
+        }
+
+        DateTimeOffset startedAt = services.Time.GetUtcNow();
+        RunLayout layout = new(options.Root, RunId.Format(startedAt, options.Tier));
+        if (Directory.Exists(layout.RunDirectory))
+        {
+            error.WriteLine($"The run folder {layout.RunDirectory} already exists; wait a second and run again.");
+            return Failed;
+        }
+
+        try
+        {
+            Directory.CreateDirectory(layout.RunDirectory);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            error.WriteLine($"Cannot create the run folder {layout.RunDirectory}: {ex.Message}");
+            return Failed;
+        }
+
+        await new RunManifest(layout.RunId, RunId.TierName(options.Tier), services.HostName, startedAt, set.ContentHash, set.CorrectionsPending)
+            .WriteAsync(layout.RunJsonPath, ct);
+        output.WriteLine($"Run {layout.RunId} -> {layout.RunDirectory}");
+
+        EngineProfile[] selected = profiles.Profiles
+            .Where(p => options.Engines.Count == 0 || options.Engines.Contains(p.Slug, StringComparer.Ordinal))
+            .OrderBy(p => p.Slug, StringComparer.Ordinal)
+            .ToArray();
+        List<GateEntry> entries = [];
+        try
+        {
+            EngineRun run = new(services, options, set, layout, new TimingLog(layout.TimingPath), output);
+            foreach (EngineProfile profile in selected)
+            {
+                EngineRunResult result = await run.RunAsync(profile, ct);
+                entries.Add(result.Gates);
+                output.WriteLine(Summary(result));
+            }
+        }
+        finally
+        {
+            await new GatesFile(entries).WriteAsync(layout.GatesJsonPath, CancellationToken.None);
+        }
+
+        return Ok;
+    }
+
+    private static string Summary(EngineRunResult result) => result.Gates switch
+    {
+        { Attempted: false } skipped => EngineSummary.ForNotAttempted(skipped),
+        { Container.Passed: false } failed => EngineSummary.ForFailedContainer(failed),
+        _ => EngineSummary.For(result),
+    };
+}

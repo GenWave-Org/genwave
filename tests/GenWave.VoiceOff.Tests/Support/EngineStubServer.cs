@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -21,7 +22,57 @@ internal sealed class EngineStubServer : IAsyncDisposable
 
     internal sealed class Capture
     {
-        internal string? SpeechBody { get; set; }
+        private readonly Lock gate = new();
+        private readonly List<string> speechBodies = [];
+        private int speechRequests;
+        private int totalRequests;
+
+        /// <summary>The body of the latest speech request.</summary>
+        internal string? SpeechBody { get; private set; }
+
+        /// <summary>Every speech request body, in arrival order.</summary>
+        internal IReadOnlyList<string> SpeechBodies
+        {
+            get
+            {
+                lock (gate)
+                {
+                    return [.. speechBodies];
+                }
+            }
+        }
+
+        /// <summary>The <c>voice</c> of every speech request, in arrival order.</summary>
+        internal IReadOnlyList<string?> SpeechVoices => SpeechField("voice");
+
+        /// <summary>The <c>input</c> text of every speech request, in arrival order.</summary>
+        internal IReadOnlyList<string?> SpeechInputs => SpeechField("input");
+
+        /// <summary>The <c>speed</c> of every speech request, in arrival order.</summary>
+        internal IReadOnlyList<double?> SpeechSpeeds =>
+            SpeechBodies.Select(b => JsonNode.Parse(b)?["speed"]?.GetValue<double>()).ToList();
+
+        /// <summary>How many speech requests have arrived.</summary>
+        internal int SpeechRequests => Volatile.Read(ref speechRequests);
+
+        /// <summary>How many requests of any kind (any path) have arrived.</summary>
+        internal int TotalRequests => Volatile.Read(ref totalRequests);
+
+        internal void CountRequest() => Interlocked.Increment(ref totalRequests);
+
+        internal void RecordSpeech(string body)
+        {
+            lock (gate)
+            {
+                speechBodies.Add(body);
+                SpeechBody = body;
+            }
+
+            Interlocked.Increment(ref speechRequests);
+        }
+
+        private List<string?> SpeechField(string name) =>
+            SpeechBodies.Select(b => JsonNode.Parse(b)?[name]?.GetValue<string>()).ToList();
     }
 
     internal Uri BaseUri { get; }
@@ -31,13 +82,15 @@ internal sealed class EngineStubServer : IAsyncDisposable
     /// <param name="speechDelay">How long the speech route waits before answering.</param>
     /// <param name="speechStatus">The status the speech route answers with.</param>
     /// <param name="speechBody">The body the speech route answers with; defaults to <see cref="Audio"/> on 200.</param>
+    /// <param name="speechBodyForVoice">Answers a 200 with the body for the requested voice instead of <paramref name="speechBody"/>.</param>
     /// <param name="voicesJson">The voices route body; null leaves the route unmapped (404).</param>
     internal static async Task<EngineStubServer> StartAsync(
         TimeSpan speechDelay = default,
         int speechStatus = 200,
         byte[]? speechBody = null,
         string? voicesJson = """{"voices":["a","b"]}""",
-        bool dropMidBody = false)
+        bool dropMidBody = false,
+        Func<string, byte[]>? speechBodyForVoice = null)
     {
         WebApplicationBuilder builder = WebApplication.CreateSlimBuilder();
         builder.Logging.ClearProviders();
@@ -46,10 +99,17 @@ internal sealed class EngineStubServer : IAsyncDisposable
         Capture capture = new();
         byte[] body = speechBody ?? (speechStatus == 200 ? Audio : []);
 
+        app.Use(async (ctx, next) =>
+        {
+            capture.CountRequest();
+            await next(ctx);
+        });
+
         app.MapPost("/v1/audio/speech", async (HttpContext ctx) =>
         {
             using StreamReader reader = new(ctx.Request.Body);
-            capture.SpeechBody = await reader.ReadToEndAsync(ctx.RequestAborted);
+            string requestBody = await reader.ReadToEndAsync(ctx.RequestAborted);
+            capture.RecordSpeech(requestBody);
             if (speechDelay > TimeSpan.Zero)
             {
                 await Task.Delay(speechDelay, ctx.RequestAborted);
@@ -62,7 +122,9 @@ internal sealed class EngineStubServer : IAsyncDisposable
             }
 
             ctx.Response.StatusCode = speechStatus;
-            await ctx.Response.Body.WriteAsync(body, ctx.RequestAborted);
+            string? voice = JsonNode.Parse(requestBody)?["voice"]?.GetValue<string>();
+            byte[] answer = speechBodyForVoice is not null && voice is not null && speechStatus == 200 ? speechBodyForVoice(voice) : body;
+            await ctx.Response.Body.WriteAsync(answer, ctx.RequestAborted);
         });
 
         if (voicesJson is not null)

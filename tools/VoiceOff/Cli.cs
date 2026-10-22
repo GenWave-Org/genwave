@@ -1,3 +1,5 @@
+using GenWave.VoiceOff.Render;
+
 namespace GenWave.VoiceOff;
 
 /// <summary>Verb dispatch for the Voice Off tool. Output streams are injected so tests run it in-process.</summary>
@@ -16,7 +18,15 @@ internal static class Cli
     internal const int NotBuilt = 1;
     internal const int UsageError = 2;
 
-    internal static int Run(string[] args, TextWriter output, TextWriter error)
+    /// <summary>The synchronous entry for callers with no async context: every verb with the real services, never cancelled.</summary>
+    internal static int Run(string[] args, TextWriter output, TextWriter error) =>
+        Run(args, output, error, RenderServices.Default());
+
+    /// <summary>Like <see cref="RunAsync"/>, blocking until the verb finishes; for in-process callers (specs) that have no async context.</summary>
+    internal static int Run(string[] args, TextWriter output, TextWriter error, RenderServices services, CancellationToken ct = default) =>
+        RunAsync(args, output, error, services, ct).GetAwaiter().GetResult();
+
+    internal static async Task<int> RunAsync(string[] args, TextWriter output, TextWriter error, RenderServices services, CancellationToken ct)
     {
         if (args.Length == 0 || IsHelp(args[0]))
         {
@@ -25,6 +35,11 @@ internal static class Cli
         }
 
         string verb = args[0];
+        if (string.Equals(verb, "render", StringComparison.Ordinal))
+        {
+            return await RenderCommand.RunAsync(args[1..], output, error, services, ct);
+        }
+
         if (Verbs.Any(v => string.Equals(v.Name, verb, StringComparison.Ordinal)))
         {
             error.WriteLine($"The {verb} verb is not built yet.");

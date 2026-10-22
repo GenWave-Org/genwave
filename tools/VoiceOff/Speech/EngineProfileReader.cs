@@ -44,7 +44,7 @@ internal static partial class EngineProfileReader
         string? License,
         string? Notes);
 
-    [GeneratedRegex("^[a-z0-9]+(-[a-z0-9]+)*$")]
+    [GeneratedRegex(@"\A[a-z0-9]+(-[a-z0-9]+)*\z")]
     private static partial Regex SlugShape();
 
     [GeneratedRegex("^[A-Za-z0-9][A-Za-z0-9_.-]*$")]

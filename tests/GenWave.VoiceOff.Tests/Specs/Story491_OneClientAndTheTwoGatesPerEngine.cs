@@ -3,7 +3,11 @@
 // BDD specification — xUnit. Every fact is pending at plan time (2026-10-21); the named task
 // activates its facts, watches them fail, then makes them pass.
 
+using System.Net;
+using System.Net.Sockets;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using GenWave.VoiceOff.Render;
 using GenWave.VoiceOff.Speech;
 using GenWave.VoiceOff.Script;
 using GenWave.VoiceOff.Tests.Support;
@@ -151,29 +155,67 @@ public static class FeatureOneClientAndTheTwoGatesPerEngine
     }
 
     // AC8 — no container fails the gate
-    public sealed class ScenarioNoContainerFailsTheGate
+    public sealed class ScenarioNoContainerFailsTheGate : IDisposable
     {
         // Given a profile whose container is not running
         // When  the container gate is computed
 
-        [Fact(Skip = "pending: T611 — see docs/PLAN.md")]
-        public void ItIs() => Assert.Fail("pending: T611 — it is ❌");
+        private readonly RenderScenario scenario = new();
+        private readonly RenderRun run;
 
-        [Fact(Skip = "pending: T611 — see docs/PLAN.md")]
-        public void TheEngineGetsNoPairs() => Assert.Fail("pending: T611 — the engine gets no pairs");
+        public ScenarioNoContainerFailsTheGate()
+        {
+            EngineStubServer stub = scenario.StartStubAsync().GetAwaiter().GetResult();
+            scenario.AddEngine("alpha", stub.BaseUri);
+            run = scenario.Run(
+                new FakeDockerInspector(new ContainerState(true, false, "10.0.0.2")),
+                scenario.EnginesDirectory, scenario.GauntletDirectory(RenderScenario.ThreeLines()), "cpu");
+        }
+
+        [Fact]
+        public void ItIs()
+        {
+            JsonNode gates = JsonNode.Parse(File.ReadAllText(run.PathIn("gates.json"))) ?? throw new InvalidOperationException("gates.json is empty");
+            Assert.Equal(false, gates["engines"]?[0]?["container"]?["passed"]?.GetValue<bool>());
+        }
+
+        [Fact]
+        public void TheEngineGetsNoPairs() => Assert.False(Directory.Exists(run.PathIn(Path.Combine("wav", "alpha"))));
+
+        public void Dispose() => scenario.Dispose();
     }
 
     // AC9 — an unreachable engine is recorded
-    public sealed class ScenarioAnUnreachableEngineIsRecorded
+    public sealed class ScenarioAnUnreachableEngineIsRecorded : IDisposable
     {
         // Given a profile whose endpoint refuses connections
         // When  render runs
 
-        [Fact(Skip = "pending: T611 — see docs/PLAN.md")]
-        public void TheRunFinishes() => Assert.Fail("pending: T611 — the run finishes");
+        private readonly RenderScenario scenario = new();
+        private readonly RenderRun run;
 
-        [Fact(Skip = "pending: T611 — see docs/PLAN.md")]
-        public void TheEngineRowShowsWithTheError() => Assert.Fail("pending: T611 — the engine row shows ❌ with the error");
+        public ScenarioAnUnreachableEngineIsRecorded()
+        {
+            scenario.AddEngine("alpha", new Uri($"http://127.0.0.1:{ClosedPort()}/"));
+            run = scenario.Run(scenario.EnginesDirectory, scenario.GauntletDirectory(RenderScenario.ThreeLines()), "cpu");
+        }
+
+        [Fact]
+        public void TheRunFinishes() => Assert.Equal(0, run.Exit);
+
+        [Fact]
+        public void TheEngineRowShowsWithTheError() =>
+            Assert.Contains(run.OutputLines, l => l.StartsWith("alpha: ❌ container: voices endpoint at http://127.0.0.1:", StringComparison.Ordinal) && l.Contains("failed:", StringComparison.Ordinal));
+
+        // A port nothing listens on: bind a free one, then let it go.
+        private static int ClosedPort()
+        {
+            using TcpListener listener = new(IPAddress.Loopback, 0);
+            listener.Start();
+            return ((IPEndPoint)listener.LocalEndpoint).Port;
+        }
+
+        public void Dispose() => scenario.Dispose();
     }
 
     // AC10 — two baselines are refused

@@ -13,7 +13,7 @@ internal static partial class GauntletLineParser
     private sealed record LineDto(
         string? Id, string? Class, string? Register, string? Text, List<string?>? Cues, List<TurnDto?>? Turns);
 
-    [GeneratedRegex("^[a-z0-9]+(-[a-z0-9]+)*$")]
+    [GeneratedRegex(@"\A[a-z0-9]+(-[a-z0-9]+)*\z")]
     private static partial Regex IdShape();
 
     private sealed record FileDto(List<LineDto?>? Lines);

@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using GenWave.Core.Domain;
 using GenWave.Tts;
 using PronunciationRule = GenWave.Tts.PronunciationRule;
+using GenWave.VoiceOff.Render;
 using GenWave.VoiceOff.Script;
 using GenWave.VoiceOff.Tests.Support;
 using static GenWave.VoiceOff.Tests.Support.GauntletFixtureDirectory;
@@ -660,6 +661,20 @@ public static class FeatureTheGauntletSpeaksTheStationsText
         public void Dispose() => fixtures.Dispose();
     }
 
+    // AC11ab — an id that ends in a newline is not lowercase words and hyphens either
+    public sealed class ScenarioAnIdWithATrailingNewlineIsRefused : IDisposable
+    {
+        private readonly GauntletFixtureDirectory fixtures = new();
+        private readonly InvalidDataException failure;
+
+        public ScenarioAnIdWithATrailingNewlineIsRefused() => failure = LoadFailure(fixtures.Create(("a.json", """{ "lines": [ { "id": "ok-id\n", "class": "LeadIn", "register": "bubbly", "text": "one two three four five six seven eight", "cues": [] } ] }""")));
+
+        [Fact]
+        public void LoadingFailsSayingTheIdShape() => Assert.Contains("lowercase words", failure.Message, StringComparison.Ordinal);
+
+        public void Dispose() => fixtures.Dispose();
+    }
+
     // AC11ac — a cue listed twice is refused
     public sealed class ScenarioADuplicateCueIsRefused : IDisposable
     {
@@ -734,12 +749,26 @@ public static class FeatureTheGauntletSpeaksTheStationsText
     }
 
     // AC12 — pending corrections are visible
-    public sealed class ScenarioPendingCorrectionsAreVisible
+    public sealed class ScenarioPendingCorrectionsAreVisible : IDisposable
     {
         // Given corrections.json with "provenance":"pending"
         // When  render starts
 
-        [Fact(Skip = "pending: T611 — see docs/PLAN.md")]
-        public void ItPrintsALineSayingCorrectionsArePending() => Assert.Fail("pending: T611 — it prints a line saying corrections are pending");
+        private readonly RenderScenario scenario = new();
+        private readonly RenderRun run;
+
+        public ScenarioPendingCorrectionsAreVisible()
+        {
+            EngineStubServer stub = scenario.StartStubAsync().GetAwaiter().GetResult();
+            scenario.AddEngine("alpha", stub.BaseUri);
+            run = scenario.Run(
+                scenario.EnginesDirectory, scenario.GauntletDirectory([GauntletFixtureDirectory.Line("leadin-1", "LeadIn", RenderScenario.Eight)], correctionsPending: true), "cpu");
+        }
+
+        [Fact]
+        public void ItPrintsALineSayingCorrectionsArePending() =>
+            Assert.Equal(RenderCommand.CorrectionsPendingNotice, run.OutputLines[0]);
+
+        public void Dispose() => scenario.Dispose();
     }
 }

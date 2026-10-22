@@ -26,6 +26,7 @@ public sealed class EngineProfileLoadingTests(ITestOutputHelper output)
         new("slug absent", () => EngineProfileJson.With(n => n.Remove("slug")), "slug"),
         new("slug differs from the file name", () => EngineProfileJson.With(n => n["slug"] = "other"), "must equal the file name"),
         new("slug has bad shape", () => EngineProfileJson.With(n => n["slug"] = "Bad_Slug", "Bad_Slug"), "lowercase", "Bad_Slug.json"),
+        new("slug has a trailing newline", () => EngineProfileJson.With(n => n["slug"] = "alpha\n"), "lowercase", "alpha\n.json"),
         new("baseline is not a bool", () => EngineProfileJson.With(n => n["baseline"] = "yes"), "baseline"),
         new("container absent", () => EngineProfileJson.With(n => n.Remove("container")), "container"),
         new("container blank", () => EngineProfileJson.With(n => n["container"] = "  "), "container"),

@@ -1,18 +1,18 @@
 namespace GenWave.VoiceOff.Timing;
 
 /// <summary>
-/// Samples an engine container's memory and the GPU's memory every second until cancelled (SPEC F214.7).
-/// Peak RSS is the largest <c>docker stats</c> reading; peak VRAM is the largest GPU-total reading minus the
-/// baseline read once before the first sample. A probe that fails for one sample is skipped; timing never fails a run.
+/// Samples an engine container's memory, and on the GPU tier its GPU memory, every second until cancelled (SPEC F214.7).
+/// Peak RSS is the largest <c>docker stats</c> reading. Peak VRAM is the largest per-sample sum of the GPU memory used by
+/// the container's own processes. On the CPU tier VRAM is never read and stays null. A probe that fails for one sample
+/// is skipped; timing never fails a run.
 /// </summary>
-internal sealed class ResourceSampler(IResourceProbe probe, string container, TimeProvider time)
+internal sealed class ResourceSampler(IResourceProbe probe, string container, TimeProvider time, bool readGpu = false)
 {
     internal static readonly TimeSpan Cadence = TimeSpan.FromSeconds(1);
 
     private readonly Lock gate = new();
     private double? peakRssMib;
     private long? peakVramMib;
-    private long? baselineMib;
 
     /// <summary>The peaks so far; read it after <see cref="RunAsync"/> returns for the final figures.</summary>
     internal ResourceUsage Usage
@@ -21,9 +21,7 @@ internal sealed class ResourceSampler(IResourceProbe probe, string container, Ti
         {
             lock (gate)
             {
-                return new ResourceUsage(
-                    peakRssMib is double rss ? Megabytes.FromMib(rss) : null,
-                    peakVramMib is long vram && baselineMib is long baseline ? NvidiaSmiParser.DeltaMb(baseline, vram) : null);
+                return new ResourceUsage(peakRssMib is double rss ? Megabytes.FromMib(rss) : null, peakVramMib);
             }
         }
     }
@@ -33,12 +31,6 @@ internal sealed class ResourceSampler(IResourceProbe probe, string container, Ti
     {
         try
         {
-            long? baseline = NvidiaSmiParser.ParseUsedMib(await TryReadAsync(() => probe.ReadGpuMemoryAsync(ct)));
-            lock (gate)
-            {
-                baselineMib = baseline;
-            }
-
             using PeriodicTimer timer = new(Cadence, time);
             do
             {
@@ -46,16 +38,16 @@ internal sealed class ResourceSampler(IResourceProbe probe, string container, Ti
             }
             while (await timer.WaitForNextTickAsync(ct));
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            // Cancellation ends the window.
+            // Cancellation ends the window. A probe's own timeout is not cancellation, so it does not reach here.
         }
     }
 
     private async Task SampleAsync(CancellationToken ct)
     {
-        double? rss = DockerStatsParser.ParseMib(await TryReadAsync(() => probe.ReadContainerMemoryAsync(container, ct)));
-        long? vram = NvidiaSmiParser.ParseUsedMib(await TryReadAsync(() => probe.ReadGpuMemoryAsync(ct)));
+        double? rss = DockerStatsParser.ParseMib(await TryReadAsync(() => probe.ReadContainerMemoryAsync(container, ct), ct));
+        long? vram = readGpu ? await ReadVramAsync(ct) : null;
         lock (gate)
         {
             if (rss is double r)
@@ -70,14 +62,30 @@ internal sealed class ResourceSampler(IResourceProbe probe, string container, Ti
         }
     }
 
-    /// <summary>One probe read; a probe that throws gives no sample. Cancellation still ends the window.</summary>
-    private static async Task<string?> TryReadAsync(Func<Task<string?>> read)
+    private async Task<long?> ReadVramAsync(CancellationToken ct)
+    {
+        IReadOnlySet<int>? pids = NvidiaSmiParser.ParsePids(await TryReadAsync(() => probe.ReadContainerPidsAsync(container, ct), ct));
+        if (pids is null)
+        {
+            return null;
+        }
+
+        string? gpu = await TryReadAsync(() => probe.ReadGpuProcessesAsync(ct), ct);
+        return NvidiaSmiParser.ParseContainerUsedMib(gpu, pids);
+    }
+
+    /// <summary>One probe read; a probe that throws gives no sample. The caller's own cancellation still ends the window.</summary>
+    private static async Task<string?> TryReadAsync(Func<Task<string?>> read, CancellationToken ct)
     {
         try
         {
             return await read();
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
         {
             return null;
         }
