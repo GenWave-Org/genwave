@@ -3,10 +3,28 @@
 // BDD specification — xUnit. Every fact is pending at plan time (2026-10-21); the named task
 // activates its facts, watches them fail, then makes them pass.
 
+using System.Text.Json;
+using GenWave.VoiceOff.Speech;
+using GenWave.VoiceOff.Script;
+using GenWave.VoiceOff.Tests.Support;
+
 namespace GenWave.VoiceOff.Tests.Specs;
 
 public static class FeatureOneClientAndTheTwoGatesPerEngine
 {
+    private const string Line = "hello there";
+
+    private sealed record Rendered(SpeechResult Result, string? RequestBody);
+
+    private static async Task<Rendered> RenderAsync(TimeSpan delay = default)
+    {
+        await using EngineStubServer stub = await EngineStubServer.StartAsync(speechDelay: delay);
+        using HttpClient http = SpeechClient.CreateHttpClient();
+        SpeechResult result = await new SpeechClient(http, stub.BaseUri, TimeSpan.FromSeconds(10))
+            .RenderAsync(Line, "v1", 1.0, CancellationToken.None);
+        return new Rendered(result, stub.Requests.SpeechBody);
+    }
+
     // ---------------------------------------------------------------------
     // HAPPY PATH
     // ---------------------------------------------------------------------
@@ -14,64 +32,108 @@ public static class FeatureOneClientAndTheTwoGatesPerEngine
     // AC1 — the profile shape loads
     public sealed class ScenarioTheProfileShapeLoads
     {
-        // Given engines/kokoro.json with slug, endpoint, tiers, voices per register, markup, license, baseline:true
-        // When  the profile set is loaded
+        private readonly EngineProfileSet set = EngineProfileSet.Load(RealEngines.Directory);
 
-        [Fact(Skip = "pending: T608 — see docs/PLAN.md")]
-        public void KokoroIsTheSingleBaseline() => Assert.Fail("pending: T608 — Kokoro is the single baseline");
+        [Fact]
+        public void KokoroIsTheSingleBaseline() => Assert.Equal("kokoro", set.Baseline.Slug);
     }
 
     // AC2 — the client speaks the contract
-    public sealed class ScenarioTheClientSpeaksTheContract
+    public sealed class ScenarioTheClientSpeaksTheContract : IAsyncLifetime
     {
-        // Given a stub server answering POST /v1/audio/speech
-        // When  the client renders "hello there" with voice v1 at speed 1.0
+        private Rendered rendered = new(new SpeechResult(default, 0, null), null);
 
-        [Fact(Skip = "pending: T608 — see docs/PLAN.md")]
-        public void TheRequestBodyIsInputVoiceSpeedResponseFormatWav() => Assert.Fail("pending: T608 — the request body is {input, voice, speed, response_format:'wav'}");
+        public async Task InitializeAsync() => rendered = await RenderAsync();
 
-        [Fact(Skip = "pending: T608 — see docs/PLAN.md")]
-        public void TheBytesReturnedAreTheStubS() => Assert.Fail("pending: T608 — the bytes returned are the stub's");
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void TheRequestBodyIsInputVoiceSpeedResponseFormatWav()
+        {
+            using JsonDocument body = JsonDocument.Parse(rendered.RequestBody ?? "");
+            Assert.Equal(
+                """{"input":"hello there","voice":"v1","speed":1,"response_format":"wav"}""",
+                JsonSerializer.Serialize(body.RootElement));
+        }
+
+        [Fact]
+        public void TheBytesReturnedAreTheStubS() => Assert.Equal(EngineStubServer.Audio, rendered.Result.Audio.ToArray());
     }
 
     // AC3 — the client times the render
-    public sealed class ScenarioTheClientTimesTheRender
+    public sealed class ScenarioTheClientTimesTheRender : IAsyncLifetime
     {
-        // Given the stub answers after a known delay
-        // When  the client renders a line
+        private static readonly TimeSpan Delay = TimeSpan.FromMilliseconds(150);
+        private Rendered rendered = new(new SpeechResult(default, 0, null), null);
 
-        [Fact(Skip = "pending: T608 — see docs/PLAN.md")]
-        public void TheResultCarriesWallClockMillisecondsAtLeastThatDelay() => Assert.Fail("pending: T608 — the result carries wall-clock milliseconds at least that delay");
+        public async Task InitializeAsync() => rendered = await RenderAsync(Delay);
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void TheResultCarriesWallClockMillisecondsAtLeastThatDelay()
+        {
+            SpeechResult result = rendered.Result;
+            Assert.True(result.WallMilliseconds >= Delay.TotalMilliseconds, $"wall was {result.WallMilliseconds} ms");
+        }
     }
 
     // AC4 — voices are listed
-    public sealed class ScenarioVoicesAreListed
+    public sealed class ScenarioVoicesAreListed : IAsyncLifetime
     {
-        // Given the stub answers GET /v1/audio/voices with ["a","b"]
-        // When  the client lists voices
+        private VoiceListResult listed = new([], null);
 
-        [Fact(Skip = "pending: T608 — see docs/PLAN.md")]
-        public void ItReturnsAAndB() => Assert.Fail("pending: T608 — it returns a and b");
+        public async Task InitializeAsync() => listed = await ListAsync();
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        private static async Task<VoiceListResult> ListAsync()
+        {
+            await using EngineStubServer stub = await EngineStubServer.StartAsync();
+            using HttpClient http = SpeechClient.CreateHttpClient();
+            return await new SpeechClient(http, stub.BaseUri, TimeSpan.FromSeconds(10)).ListVoicesAsync(CancellationToken.None);
+        }
+
+        [Fact]
+        public void ItReturnsAAndB() => Assert.Equal(["a", "b"], listed.VoiceIds);
     }
 
     // AC5 — distinct voices pass voiceSelect
     public sealed class ScenarioDistinctVoicesPassVoiceSelect
     {
-        // Given two voice renders whose fingerprint distance is ≥ 3× the same-voice distance
-        // When  the voiceSelect gate is computed
+        // Same-voice distance 0.1, cross-voice distance 1.0: 10x, over the 3x margin.
+        private readonly GateResult gate = VoiceSelectGate.Evaluate(
+            new AudioFingerprint([0.0, 0.0]), new AudioFingerprint([0.1, 0.0]), new AudioFingerprint([1.0, 0.0]));
 
-        [Fact(Skip = "pending: T608 — see docs/PLAN.md")]
-        public void ItPasses() => Assert.Fail("pending: T608 — it passes");
+        [Fact]
+        public void ItPasses() => Assert.True(gate.Passed);
     }
 
     // AC6 — a re-pick replaces
     public sealed class ScenarioARePickReplaces
     {
-        // Given a profile whose register voice carries a re-pick with a reason
-        // When  renders for that register are recorded
+        private readonly RenderLedger ledger = new();
 
-        [Fact(Skip = "pending: T608 — see docs/PLAN.md")]
-        public void OnlyTheRePickedVoiceSRendersAreKept() => Assert.Fail("pending: T608 — only the re-picked voice's renders are kept");
+        public ScenarioARePickReplaces()
+        {
+            EngineProfile first = EngineProfileReader.Parse(EngineProfileJson.Valid().ToJsonString(), "alpha.json");
+            EngineProfile repicked = EngineProfileReader.Parse(
+                EngineProfileJson.With(n => n["repick"] = JsonSerializer.SerializeToNode(
+                    new { register = "bubbly", voice = "v9", reason = "v1 clipped on plosives" })), "alpha.json");
+            ledger.Record(new RenderRecord(GauntletRegister.Bubbly, "line-1", RenderLane.Plain, first.VoiceFor(GauntletRegister.Bubbly), "a.wav"));
+            ledger.Record(new RenderRecord(GauntletRegister.Bubbly, "line-2", RenderLane.Plain, first.VoiceFor(GauntletRegister.Bubbly), "b.wav"));
+            ledger.Record(new RenderRecord(GauntletRegister.Bubbly, "line-1", RenderLane.Plain, repicked.VoiceFor(GauntletRegister.Bubbly), "c.wav"));
+            ledger.Record(new RenderRecord(GauntletRegister.Bubbly, "line-1", RenderLane.Markup, repicked.VoiceFor(GauntletRegister.Bubbly), "d.wav"));
+            ledger.Retain(repicked);
+        }
+
+        [Fact]
+        public void OnlyTheRePickedVoiceSRendersAreKept() =>
+            Assert.Equal([("v9", "c.wav")], ledger.Records.Where(r => r.Lane == RenderLane.Plain).Select(r => (r.Voice, r.AudioPath)));
+
+        [Fact]
+        public void TheMarkupLaneRenderOfTheSameLineIsKeptBesideThePlainOne() =>
+            Assert.Equal(["c.wav", "d.wav"], ledger.Records.Select(r => r.AudioPath).Order(StringComparer.Ordinal));
     }
 
     // ---------------------------------------------------------------------
@@ -81,11 +143,11 @@ public static class FeatureOneClientAndTheTwoGatesPerEngine
     // AC7 — same audio fails voiceSelect
     public sealed class ScenarioSameAudioFailsVoiceSelect
     {
-        // Given two voice renders with identical fingerprints
-        // When  the gate is computed
+        private readonly GateResult gate = VoiceSelectGate.Evaluate(
+            new AudioFingerprint([0.5, 0.5]), new AudioFingerprint([0.5, 0.5]), new AudioFingerprint([0.5, 0.5]));
 
-        [Fact(Skip = "pending: T608 — see docs/PLAN.md")]
-        public void VoiceSelectIs() => Assert.Fail("pending: T608 — voiceSelect is ❌");
+        [Fact]
+        public void VoiceSelectIs() => Assert.False(gate.Passed);
     }
 
     // AC8 — no container fails the gate
@@ -115,12 +177,23 @@ public static class FeatureOneClientAndTheTwoGatesPerEngine
     }
 
     // AC10 — two baselines are refused
-    public sealed class ScenarioTwoBaselinesAreRefused
+    public sealed class ScenarioTwoBaselinesAreRefused : IDisposable
     {
-        // Given two profiles with baseline:true
-        // When  profiles load
+        private readonly EngineDirectoryFixture directories = new();
 
-        [Fact(Skip = "pending: T608 — see docs/PLAN.md")]
-        public void LoadingFails() => Assert.Fail("pending: T608 — loading fails");
+        public void Dispose() => directories.Dispose();
+
+        [Fact]
+        public void LoadingFails()
+        {
+            string directory = directories.Create(
+                ("alpha.json", EngineProfileJson.Valid("alpha").ToJsonString()),
+                ("beta.json", EngineProfileJson.Valid("beta").ToJsonString()));
+
+            InvalidDataException ex = Assert.Throws<InvalidDataException>(() => EngineProfileSet.Load(directory));
+            Assert.True(
+                ex.Message.Contains("alpha.json", StringComparison.Ordinal) && ex.Message.Contains("beta.json", StringComparison.Ordinal),
+                $"The refusal must name both files: {ex.Message}");
+        }
     }
 }

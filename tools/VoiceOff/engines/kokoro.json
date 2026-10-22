@@ -1,0 +1,16 @@
+{
+  "slug": "kokoro",
+  "baseline": true,
+  "container": "genwave-kokoro-1",
+  "port": 8880,
+  "tiers": ["cpu", "gpu"],
+  "voices": {
+    "bubbly": "af_heart",
+    "laconic": "am_michael",
+    "late-night": "am_onyx"
+  },
+  "voiceReason": "Each is a voice the station already airs: bubbly is the shipped default (af_heart), laconic is am_michael and late-night is am_onyx, both from the shipped cast voices. Three clearly different stock voices, one per register.",
+  "markup": { "pause": null, "laugh": null, "sigh": null, "breath": null, "um": null, "emphasis": null },
+  "license": "Apache-2.0",
+  "notes": "Baseline. The plain lane for this engine already carries the station's shipped pause markup (the station speech style in CueText), so the plain lane is what airs today. It has no native cue tags, so every cue is stripped in the markup lane."
+}

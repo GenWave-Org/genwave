@@ -118,13 +118,10 @@ internal static partial class GauntletLineParser
         return new GauntletTurn(register, turn.Text);
     }
 
-    private static GauntletRegister ParseRegister(string id, string? value) => value switch
-    {
-        "bubbly" => GauntletRegister.Bubbly,
-        "laconic" => GauntletRegister.Laconic,
-        "late-night" => GauntletRegister.LateNight,
-        _ => throw new InvalidDataException($"Line {id} has an unknown register \"{value}\"."),
-    };
+    private static GauntletRegister ParseRegister(string id, string? value) =>
+        RegisterKeys.TryParse(value, out GauntletRegister register)
+            ? register
+            : throw new InvalidDataException($"Line {id} has an unknown register \"{value}\".");
 
     private static void CheckWords(string id, string text)
     {

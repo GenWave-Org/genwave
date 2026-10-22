@@ -24,6 +24,7 @@
 
   <ItemGroup>
     <None Include="gauntlet\**" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="engines\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

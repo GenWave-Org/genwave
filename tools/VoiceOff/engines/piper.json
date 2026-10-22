@@ -1,0 +1,15 @@
+{
+  "slug": "piper",
+  "container": "voiceoff-piper",
+  "port": 8880,
+  "tiers": ["cpu"],
+  "voices": {
+    "bubbly": "en_US-lessac-medium",
+    "laconic": "en_US-lessac-medium",
+    "late-night": "en_US-lessac-medium"
+  },
+  "voiceReason": "The station's image bakes exactly one voice per container, so every register gets it.",
+  "markup": { "pause": null, "laugh": null, "sigh": null, "breath": null, "um": null, "emphasis": null },
+  "license": "GPL-3.0",
+  "notes": "Needs shims/piper (F214.18 spike): the station image speaks POST / with text/plain, not the /v1 contract, and no such shim container exists yet. The single baked voice fails voiceSelect by design (the gh-#147 lesson). Expect red gates until a shim lands."
+}
