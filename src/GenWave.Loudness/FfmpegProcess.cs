@@ -27,6 +27,18 @@ public static class FfmpegProcess
     /// </summary>
     public static async Task RunFfmpegAsync(IReadOnlyList<string> args, CancellationToken ct)
     {
+        FfmpegRunResult result = await RunFfmpegCapturingStderrAsync(args, ct);
+        if (!result.Succeeded)
+            throw new InvalidOperationException($"ffmpeg exited with code {result.ExitCode}: {result.Stderr}");
+    }
+
+    /// <summary>
+    /// Like <see cref="RunFfmpegAsync"/> but never throws on a non-zero exit and always returns stderr —
+    /// for callers that need ffmpeg's report (a <c>loudnorm</c> measurement block) or that treat a bad
+    /// input as an expected outcome. Same argv-only start and kill-on-cancel shape.
+    /// </summary>
+    public static async Task<FfmpegRunResult> RunFfmpegCapturingStderrAsync(IReadOnlyList<string> args, CancellationToken ct)
+    {
         var psi = new ProcessStartInfo("ffmpeg") { RedirectStandardError = true, UseShellExecute = false };
         foreach (var a in args)
             psi.ArgumentList.Add(a);
@@ -44,8 +56,7 @@ public static class FfmpegProcess
             throw;
         }
 
-        if (p.ExitCode != 0)
-            throw new InvalidOperationException($"ffmpeg exited with code {p.ExitCode}: {stderr}");
+        return new FfmpegRunResult(p.ExitCode, stderr);
     }
 
     /// <summary>Probes the container duration of <paramref name="path"/> via ffprobe, argv-only.</summary>
