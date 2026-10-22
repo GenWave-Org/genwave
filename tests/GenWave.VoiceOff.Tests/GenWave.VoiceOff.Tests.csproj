@@ -19,6 +19,8 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
-  <!-- The ProjectReference to tools/VoiceOff arrives with T606 (scaffold). -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\tools\VoiceOff\VoiceOff.csproj" />
+  </ItemGroup>
 
 </Project>

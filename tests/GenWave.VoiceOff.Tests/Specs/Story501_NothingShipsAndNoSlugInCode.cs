@@ -4,6 +4,8 @@
 // activates its facts, watches them fail, then makes them pass.
 // AC1, AC2, AC6 (the laws) live in GenWave.Architecture.Tests' Story501_VoiceOffSlugFence.
 
+using System.Xml.Linq;
+
 namespace GenWave.VoiceOff.Tests.Specs;
 
 public static class FeatureNothingShipsAndNoSlugInCode
@@ -17,9 +19,31 @@ public static class FeatureNothingShipsAndNoSlugInCode
     {
         // Given tools/VoiceOff/VoiceOff.csproj
         // When  its ProjectReferences are listed
+        private readonly string[] references;
 
-        [Fact(Skip = "pending: T606 — see docs/PLAN.md")]
-        public void TheyAreGenWaveTtsAndGenWaveLoudness() => Assert.Fail("pending: T606 — they are GenWave.Tts and GenWave.Loudness");
+        public ScenarioTheToolReferencesOnlyTtsAndLoudness()
+        {
+            references = XDocument.Load(FindToolProject())
+                .Descendants("ProjectReference")
+                .Select(e => Path.GetFileNameWithoutExtension(((string?)e.Attribute("Include") ?? string.Empty).Replace('\\', '/')))
+                .Order(StringComparer.Ordinal)
+                .ToArray();
+        }
+
+        [Fact]
+        public void TheyAreGenWaveTtsAndGenWaveLoudness() =>
+            Assert.Equal(["GenWave.Loudness", "GenWave.Tts"], references);
+
+        private static string FindToolProject()
+        {
+            DirectoryInfo? dir = new(AppContext.BaseDirectory);
+            while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "GenWave.sln")))
+            {
+                dir = dir.Parent;
+            }
+
+            return Path.Combine(dir?.FullName ?? string.Empty, "tools", "VoiceOff", "VoiceOff.csproj");
+        }
     }
 
     // AC4 — the solution builds it
@@ -27,9 +51,10 @@ public static class FeatureNothingShipsAndNoSlugInCode
     {
         // Given GenWave.sln
         // When  `dotnet build GenWave.sln` runs
+        private readonly string builtAssembly = typeof(Cli).Assembly.GetName().Name ?? string.Empty;
 
-        [Fact(Skip = "pending: T606 — see docs/PLAN.md")]
-        public void VoiceOffDllIsProduced() => Assert.Fail("pending: T606 — VoiceOff.dll is produced");
+        [Fact]
+        public void VoiceOffDllIsProduced() => Assert.Equal("VoiceOff", builtAssembly);
     }
 
     // AC5 — help lists every verb
@@ -37,8 +62,22 @@ public static class FeatureNothingShipsAndNoSlugInCode
     {
         // Given the built tool
         // When  `voiceoff --help` runs
+        private readonly string help;
 
-        [Fact(Skip = "pending: T606 — see docs/PLAN.md")]
-        public void RenderPairServeReelAndScoreEachPrintWithAnExample() => Assert.Fail("pending: T606 — render, pair, serve, reel and score each print with an example");
+        public ScenarioHelpListsEveryVerb()
+        {
+            StringWriter output = new();
+            Cli.Run(["--help"], output, TextWriter.Null);
+            help = output.ToString();
+        }
+
+        [Theory]
+        [InlineData("voiceoff render --tier cpu")]
+        [InlineData("voiceoff pair --run <run-id>")]
+        [InlineData("voiceoff serve --run <run-id> --port 8765")]
+        [InlineData("voiceoff reel --run <run-id>")]
+        [InlineData("voiceoff score --run <run-id>")]
+        public void EachVerbPrintsWithAnExample(string example) =>
+            Assert.Contains($"Example: {example}", help, StringComparison.Ordinal);
     }
 }
