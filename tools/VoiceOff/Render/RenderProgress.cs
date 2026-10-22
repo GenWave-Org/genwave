@@ -20,7 +20,9 @@ internal static class RenderProgress
 
         double median = RtfSummary.Percentile(doneWallMs.Order().ToArray(), 0.5);
         int remaining = Math.Max(total - clipNumber + 1, 1);
-        double minutes = Math.Max(Math.Ceiling(median * remaining / 60_000), 1);
-        return string.Create(CultureInfo.InvariantCulture, $"{head} · ~{minutes:0} min left");
+        return string.Create(CultureInfo.InvariantCulture, $"{head} · ~{EtaMinutes(median, remaining):0} min left");
     }
+
+    /// <summary>Whole minutes for <paramref name="clips"/> at a median of <paramref name="medianWallMs"/> each: rounded up, never under one.</summary>
+    internal static double EtaMinutes(double medianWallMs, int clips) => Math.Max(Math.Ceiling(medianWallMs * clips / 60_000), 1);
 }

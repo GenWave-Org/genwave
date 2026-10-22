@@ -7,7 +7,7 @@ internal static class Cli
 {
     internal static readonly IReadOnlyList<VerbHelp> Verbs =
     [
-        new("render", "Render the test scripts with each voice engine.", "voiceoff render --tier cpu"),
+        new("render", "Render the test scripts with each voice engine.", "voiceoff render --tier cpu", "voiceoff render --tier cpu --dry-run"),
         new("pair", "Build blind A/B pairs from a finished render run.", "voiceoff pair --run <run-id>"),
         new("serve", "Serve the pairs on a local web page for listening.", "voiceoff serve --run <run-id> --port 8765"),
         new("reel", "Join a run's clips into one reel to listen through.", "voiceoff reel --run <run-id>"),
@@ -64,6 +64,10 @@ internal static class Cli
         {
             output.WriteLine($"  {verb.Name,-8}{verb.Summary}");
             output.WriteLine($"          Example: {verb.Example}");
+            if (verb.SecondExample is not null)
+            {
+                output.WriteLine($"          Example: {verb.SecondExample}");
+            }
         }
     }
 }

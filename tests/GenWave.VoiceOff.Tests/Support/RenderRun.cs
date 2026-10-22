@@ -6,5 +6,5 @@ internal sealed record RenderRun(int Exit, string Output, string Error, string? 
     internal string[] OutputLines => Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     internal string PathIn(string relative) =>
-        Path.Combine(RunDirectory ?? throw new InvalidOperationException("The run made no folder."), relative);
+        Path.Combine(RunDirectory ?? throw new InvalidOperationException("The run made no single run folder."), relative);
 }

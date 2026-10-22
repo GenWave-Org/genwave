@@ -6,6 +6,7 @@ namespace GenWave.VoiceOff.Render;
 internal static class RenderOptionsParser
 {
     internal const string DefaultRootFolder = "genwave-voiceoff";
+    private const string DryRunFlag = "--dry-run";
 
     /// <summary>The default run folder: <c>~/genwave-voiceoff</c>.</summary>
     internal static string DefaultRoot() =>
@@ -18,6 +19,7 @@ internal static class RenderOptionsParser
         options = null;
         Dictionary<string, string> single = new(StringComparer.Ordinal);
         List<string> engines = [];
+        bool dryRun = false;
 
         for (int i = 0; i < args.Count; i++)
         {
@@ -28,6 +30,18 @@ internal static class RenderOptionsParser
                     ? $"Unknown option '{name}'. Run 'voiceoff --help' to see the verbs."
                     : $"Unexpected argument '{name}'. Options start with '--'.";
                 return false;
+            }
+
+            if (string.Equals(name, DryRunFlag, StringComparison.Ordinal))
+            {
+                if (dryRun)
+                {
+                    error = $"Option '{name}' was given more than once.";
+                    return false;
+                }
+
+                dryRun = true;
+                continue;
             }
 
             if (i + 1 >= args.Count || args[i + 1].StartsWith("--", StringComparison.Ordinal))
@@ -54,13 +68,13 @@ internal static class RenderOptionsParser
             }
         }
 
-        return TryBuild(single, engines, out options, out error);
+        return TryBuild(single, engines, dryRun, out options, out error);
     }
 
     private static bool IsKnown(string name) =>
-        name is "--tier" or "--engine" or "--root" or "--engines" or "--gauntlet";
+        name is "--tier" or "--engine" or "--root" or "--engines" or "--gauntlet" or DryRunFlag;
 
-    private static bool TryBuild(Dictionary<string, string> single, List<string> engines, out RenderOptions? options, out string? error)
+    private static bool TryBuild(Dictionary<string, string> single, List<string> engines, bool dryRun, out RenderOptions? options, out string? error)
     {
         options = null;
         if (!single.TryGetValue("--tier", out string? tierText))
@@ -89,7 +103,8 @@ internal static class RenderOptionsParser
             engines,
             Path.GetFullPath(single.GetValueOrDefault("--root") ?? DefaultRoot()),
             Path.GetFullPath(single.GetValueOrDefault("--engines") ?? Path.Combine(baseDirectory, "engines")),
-            Path.GetFullPath(single.GetValueOrDefault("--gauntlet") ?? Path.Combine(baseDirectory, "gauntlet")));
+            Path.GetFullPath(single.GetValueOrDefault("--gauntlet") ?? Path.Combine(baseDirectory, "gauntlet")),
+            dryRun);
         error = null;
         return true;
     }

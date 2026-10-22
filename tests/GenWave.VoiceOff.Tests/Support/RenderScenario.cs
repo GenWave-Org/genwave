@@ -110,7 +110,8 @@ internal sealed class RenderScenario : IDisposable
         StringWriter output = new();
         StringWriter error = new();
         int exit = Cli.Run(args, output, error, services, ct);
-        string? runDirectory = Directory.Exists(root) ? Directory.GetDirectories(root).SingleOrDefault() : null;
+        string[] folders = Directory.Exists(root) ? Directory.GetDirectories(root) : [];
+        string? runDirectory = folders.Length == 1 ? folders[0] : null;
         return new RenderRun(exit, output.ToString(), error.ToString(), runDirectory, probe.GpuReads);
     }
 

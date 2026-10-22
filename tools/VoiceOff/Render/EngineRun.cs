@@ -39,7 +39,14 @@ internal sealed class EngineRun(RenderServices services, RenderOptions options, 
         return await RenderClipsAsync(profile, client, gates, ct);
     }
 
-    private bool AttemptsTier(EngineProfile profile) => profile.Tiers.Contains(options.Tier);
+    /// <summary>Whether a run at <paramref name="tier"/> renders this engine; the one rule the real run and the dry run share.</summary>
+    internal static bool AttemptsTier(EngineProfile profile, EngineTier tier)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        return profile.Tiers.Contains(tier);
+    }
+
+    private bool AttemptsTier(EngineProfile profile) => AttemptsTier(profile, options.Tier);
 
     /// <summary>Takes the engines this run's tier skips off the total, so the first progress line already shows the final N.</summary>
     internal void DropTierSkips(IEnumerable<EngineProfile> profiles)

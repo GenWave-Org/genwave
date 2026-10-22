@@ -45,6 +45,11 @@ internal static class RenderCommand
             return UsageError;
         }
 
+        if (options.DryRun)
+        {
+            return await DryRunReport.RunAsync(options, SelectEngines(profiles, options), set, output, ct);
+        }
+
         try
         {
             return await RunLoadedAsync(options, profiles, set, output, error, services, ct);
@@ -103,10 +108,7 @@ internal static class RenderCommand
             .WriteAsync(layout.RunJsonPath, ct);
         output.WriteLine($"Run {layout.RunId} -> {layout.RunDirectory}");
 
-        EngineProfile[] selected = profiles.Profiles
-            .Where(p => options.Engines.Count == 0 || options.Engines.Contains(p.Slug, StringComparer.Ordinal))
-            .OrderBy(p => p.Slug, StringComparer.Ordinal)
-            .ToArray();
+        EngineProfile[] selected = SelectEngines(profiles, options);
         List<GateEntry> entries = [];
         try
         {
@@ -127,6 +129,12 @@ internal static class RenderCommand
 
         return Ok;
     }
+
+    /// <summary>The engines the run was asked for (all when none was named), in slug order.</summary>
+    private static EngineProfile[] SelectEngines(EngineProfileSet profiles, RenderOptions options) => profiles.Profiles
+        .Where(p => options.Engines.Count == 0 || options.Engines.Contains(p.Slug, StringComparer.Ordinal))
+        .OrderBy(p => p.Slug, StringComparer.Ordinal)
+        .ToArray();
 
     private static string Summary(EngineRunResult result) => result.Gates switch
     {
