@@ -5,8 +5,6 @@ namespace GenWave.VoiceOff.Render;
 /// <summary>How long a WAV is, read from its header: the <c>data</c> chunk's bytes over the <c>fmt </c> chunk's byte rate.</summary>
 internal sealed record WavInfo(double DurationMs)
 {
-    private const int RiffHeaderBytes = 12;
-    private const int ChunkHeaderBytes = 8;
     private const int ByteRateOffset = 8;
     private const int ByteRateEnd = 12;
 
@@ -16,21 +14,16 @@ internal sealed record WavInfo(double DurationMs)
     /// <summary>The info, or null with <paramref name="problem"/> saying why the bytes are not a usable WAV.</summary>
     internal static WavInfo? Read(ReadOnlySpan<byte> bytes, out string? problem)
     {
-        if (bytes.Length < RiffHeaderBytes
-            || !bytes[..4].SequenceEqual("RIFF"u8)
-            || !bytes[8..12].SequenceEqual("WAVE"u8))
+        if (!RiffChunkReader.IsWave(bytes))
         {
             problem = "the audio is not a RIFF/WAVE file";
             return null;
         }
 
         uint byteRate = 0;
-        int position = RiffHeaderBytes;
-        while (position + ChunkHeaderBytes <= bytes.Length)
+        RiffChunkReader chunks = new(bytes);
+        while (chunks.TryNext(out ReadOnlySpan<byte> id, out long size, out int body))
         {
-            ReadOnlySpan<byte> id = bytes.Slice(position, 4);
-            long size = BinaryPrimitives.ReadUInt32LittleEndian(bytes.Slice(position + 4, 4));
-            int body = position + ChunkHeaderBytes;
             if (id.SequenceEqual("fmt "u8))
             {
                 if (size < ByteRateEnd || body + ByteRateEnd > bytes.Length)
@@ -45,8 +38,6 @@ internal sealed record WavInfo(double DurationMs)
             {
                 return FromData(size, bytes.Length - body, byteRate, out problem);
             }
-
-            position = (int)Math.Min(int.MaxValue, body + size + (size & 1));
         }
 
         problem = "the WAV has no data chunk";

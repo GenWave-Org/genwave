@@ -3,8 +3,8 @@ namespace GenWave.VoiceOff.Tests.Support;
 /// <summary>Builds small WAV byte arrays for header-reading facts.</summary>
 internal static class WavBytes
 {
-    /// <summary>A 16-bit mono WAV of <paramref name="dataBytes"/> bytes at <paramref name="sampleRate"/>; <paramref name="declaredData"/> overrides the data size the header claims.</summary>
-    internal static byte[] Make(int sampleRate, int dataBytes, uint? declaredData = null, bool withFmt = true, string riff = "RIFF", string extraChunk = "", string form = "WAVE", int fmtSize = 16)
+    /// <summary>A 16-bit mono WAV of <paramref name="dataBytes"/> bytes at <paramref name="sampleRate"/>; <paramref name="declaredData"/> overrides the data size the header claims. The <paramref name="extraChunk"/> carries <paramref name="listBody"/> and may declare <paramref name="listDeclared"/> bytes.</summary>
+    internal static byte[] Make(int sampleRate, int dataBytes, uint? declaredData = null, bool withFmt = true, string riff = "RIFF", string extraChunk = "", string form = "WAVE", int fmtSize = 16, byte[]? listBody = null, uint? listDeclared = null)
     {
         using MemoryStream stream = new();
         using BinaryWriter writer = new(stream);
@@ -14,8 +14,13 @@ internal static class WavBytes
         if (extraChunk.Length > 0)
         {
             writer.Write(System.Text.Encoding.ASCII.GetBytes(extraChunk));
-            writer.Write(3);
-            writer.Write(new byte[] { 1, 2, 3, 0 });
+            byte[] body = listBody ?? [1, 2, 3];
+            writer.Write(listDeclared ?? (uint)body.Length);
+            writer.Write(body);
+            if (body.Length % 2 == 1)
+            {
+                writer.Write((byte)0);
+            }
         }
 
         if (withFmt)

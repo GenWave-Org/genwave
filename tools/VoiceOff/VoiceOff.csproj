@@ -28,6 +28,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The listening page is one self-contained file that pair writes next to the clips. -->
+    <EmbeddedResource Include="Listening\page.html" LogicalName="page.html" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- The tool's own tests drive Cli.Run in-process. -->
     <InternalsVisibleTo Include="GenWave.VoiceOff.Tests" />
   </ItemGroup>

@@ -20,6 +20,11 @@ internal static class StrictJson
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase, allowIntegerValues: false) },
     };
 
+    private static readonly JsonSerializerOptions WriteOptions = new(Options) { WriteIndented = true };
+
+    /// <summary>Indented JSON in the same shape <see cref="Read{T}"/> accepts, so what <c>pair</c> writes is what the readers take.</summary>
+    internal static string Write<T>(T value) => JsonSerializer.Serialize(value, WriteOptions) + "\n";
+
     /// <exception cref="JsonException">The text is not exactly one valid <typeparamref name="T"/>.</exception>
     internal static T Read<T>(string json)
         where T : class =>

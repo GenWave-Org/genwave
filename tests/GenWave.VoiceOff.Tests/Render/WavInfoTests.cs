@@ -18,6 +18,10 @@ public sealed class WavInfoTests
         Assert.Equal(1000, WavInfo.Read(WavBytes.Make(24000, 48000, declaredData: uint.MaxValue), out _)?.DurationMs);
 
     [Fact]
+    public void AListChunkThatDeclaresFourGigabytesIsRefusedNotThrown() =>
+        Assert.Null(WavInfo.Read(WavBytes.Make(24000, 100, extraChunk: "LIST", listDeclared: uint.MaxValue), out _));
+
+    [Fact]
     public void NotRiffIsRefused() => Assert.Null(WavInfo.Read(WavBytes.Make(24000, 100, riff: "RIFX"), out _));
 
     [Fact]
