@@ -110,7 +110,9 @@ internal static class RenderCommand
         List<GateEntry> entries = [];
         try
         {
-            EngineRun run = new(services, options, set, layout, new TimingLog(layout.TimingPath), output);
+            EngineRun run = new(services, options, set, layout, new TimingLog(layout.TimingPath),
+                new RunProgress(selected.Sum(p => RunProgress.ClipsFor(p, set))), output);
+            run.DropTierSkips(selected);
             foreach (EngineProfile profile in selected)
             {
                 EngineRunResult result = await run.RunAsync(profile, ct);

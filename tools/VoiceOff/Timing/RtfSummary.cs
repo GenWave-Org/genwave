@@ -19,7 +19,7 @@ internal sealed record RtfSummary(double Median, double P95)
         return rtfs.Length == 0 ? null : new RtfSummary(Percentile(rtfs, 0.5), Percentile(rtfs, 0.95));
     }
 
-    private static double Percentile(double[] sorted, double p)
+    internal static double Percentile(double[] sorted, double p)
     {
         double rank = p * (sorted.Length - 1);
         int lower = (int)Math.Floor(rank);
