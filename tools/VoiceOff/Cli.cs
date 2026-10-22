@@ -1,4 +1,5 @@
 using GenWave.VoiceOff.Render;
+using GenWave.VoiceOff.Scoring;
 
 namespace GenWave.VoiceOff;
 
@@ -11,7 +12,7 @@ internal static class Cli
         new("pair", "Build blind A/B pairs from a finished render run.", "voiceoff pair --run <run-id>"),
         new("serve", "Serve the pairs on a local web page for listening.", "voiceoff serve --run <run-id> --port 8765"),
         new("reel", "Join a run's clips into one reel to listen through.", "voiceoff reel --run <run-id>"),
-        new("score", "Score the listening results of a run.", "voiceoff score --run <run-id>"),
+        new("score", "Score the listening results of a run.", "voiceoff score --run <run-id> [--run <run-id>] [--root <dir>] [--engines <dir>] [--out <file>] [--budget-seconds <n>]"),
     ];
 
     internal const int Ok = 0;
@@ -38,6 +39,11 @@ internal static class Cli
         if (string.Equals(verb, "render", StringComparison.Ordinal))
         {
             return await RenderCommand.RunAsync(args[1..], output, error, services, ct);
+        }
+
+        if (string.Equals(verb, "score", StringComparison.Ordinal))
+        {
+            return await ScoreCommand.RunAsync(args[1..], output, error, ct);
         }
 
         if (Verbs.Any(v => string.Equals(v.Name, verb, StringComparison.Ordinal)))
