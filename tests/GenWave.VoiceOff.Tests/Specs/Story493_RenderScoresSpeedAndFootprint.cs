@@ -3,6 +3,10 @@
 // BDD specification — xUnit. Every fact is pending at plan time (2026-10-21); the named task
 // activates its facts, watches them fail, then makes them pass.
 
+using GenWave.VoiceOff.Speech;
+using GenWave.VoiceOff.Tests.Support;
+using GenWave.VoiceOff.Timing;
+
 namespace GenWave.VoiceOff.Tests.Specs;
 
 public static class FeatureRenderScoresSpeedAndFootprint
@@ -17,8 +21,9 @@ public static class FeatureRenderScoresSpeedAndFootprint
         // Given a render of 2000 ms wall clock producing 4000 ms of audio
         // When  the timing record is written
 
-        [Fact(Skip = "pending: T610 — see docs/PLAN.md")]
-        public void RtfIs05() => Assert.Fail("pending: T610 — rtf is 0.5");
+        [Fact]
+        public void RtfIs05() =>
+            Assert.Equal(0.5, new TimingRecord("alpha", RenderLane.Plain, "hard-01", EngineTier.Cpu, 2000, 4000, null, null, true, null).Rtf);
     }
 
     // AC2 — median and p95
@@ -27,8 +32,16 @@ public static class FeatureRenderScoresSpeedAndFootprint
         // Given rtf values 1..20 for one engine
         // When  the summary is computed
 
-        [Fact(Skip = "pending: T610 — see docs/PLAN.md")]
-        public void MedianIs105AndP95Is1905() => Assert.Fail("pending: T610 — median is 10.5 and p95 is 19.05");
+        private static RtfSummary Summary() =>
+            RtfSummary.From(Enumerable.Range(1, 20).Select(i =>
+                new TimingRecord("alpha", RenderLane.Plain, $"line-{i}", EngineTier.Cpu, i * 1000, 1000, null, null, true, null)))
+            ?? throw new InvalidOperationException("expected a summary");
+
+        [Fact]
+        public void MedianIs105() => Assert.Equal(10.5, Summary().Median, 10);
+
+        [Fact]
+        public void P95Is1905() => Assert.Equal(19.05, Summary().P95, 10);
     }
 
     // AC3 — RSS peak from docker stats
@@ -37,8 +50,12 @@ public static class FeatureRenderScoresSpeedAndFootprint
         // Given docker stats lines reading 512MiB, 1.2GiB, 900MiB
         // When  the sampler is parsed
 
-        [Fact(Skip = "pending: T610 — see docs/PLAN.md")]
-        public void PeakRSSIs1229MB() => Assert.Fail("pending: T610 — peak RSS is 1229 MB");
+        [Fact]
+        public async Task PeakRSSIs1229MB()
+        {
+            ResourceUsage usage = await ScriptedResourceProbe.SampleAsync(["512MiB / 4GiB", "1.2GiB / 4GiB", "900MiB / 4GiB"], ["0"]);
+            Assert.Equal(1229, usage.PeakRssMb);
+        }
     }
 
     // AC4 — VRAM is the GPU delta
@@ -47,8 +64,12 @@ public static class FeatureRenderScoresSpeedAndFootprint
         // Given nvidia-smi baseline 800 MiB and samples 800, 3600, 3100
         // When  the sampler is parsed
 
-        [Fact(Skip = "pending: T610 — see docs/PLAN.md")]
-        public void VRAMDeltaIs2800MB() => Assert.Fail("pending: T610 — VRAM delta is 2800 MB");
+        [Fact]
+        public async Task VRAMDeltaIs2800MB()
+        {
+            ResourceUsage usage = await ScriptedResourceProbe.SampleAsync(["1MiB", "1MiB", "1MiB"], ["800", "800", "3600", "3100"]);
+            Assert.Equal(2800, usage.PeakVramMb);
+        }
     }
 
     // AC5 — the tier is a run fact

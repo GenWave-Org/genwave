@@ -1,50 +1,22 @@
-using System.ComponentModel;
-using System.Diagnostics;
+using GenWave.VoiceOff.Processes;
 
 namespace GenWave.VoiceOff.Speech;
 
 /// <summary>Asks the docker CLI about a container with <c>docker inspect</c> only (argv, no shell).</summary>
-internal sealed class DockerCliInspector : IDockerInspector
+internal sealed class DockerCliInspector(string program = "docker") : IDockerInspector
 {
     private const string Format = "{{.State.Running}} {{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}";
 
     public async Task<ContainerState> InspectAsync(string container, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(container);
-        ProcessStartInfo psi = new("docker")
+        (int ExitCode, string Stdout, string Stderr)? result = await CliRunner.RunAsync(program, Arguments(container), ct);
+        return result switch
         {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
+            null => ContainerState.DockerUnavailable("docker is not available: the program was not found"),
+            { ExitCode: 0 } ok => Parse(ok.Stdout),
+            { } failed => Classify(failed.Stderr.Trim()),
         };
-        foreach (string arg in Arguments(container))
-        {
-            psi.ArgumentList.Add(arg);
-        }
-
-        try
-        {
-            using Process process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start docker.");
-            Task<string> stdout = process.StandardOutput.ReadToEndAsync(ct);
-            Task<string> stderr = process.StandardError.ReadToEndAsync(ct);
-            try
-            {
-                await process.WaitForExitAsync(ct);
-            }
-            catch (OperationCanceledException)
-            {
-                process.Kill(entireProcessTree: true);
-                throw;
-            }
-
-            return process.ExitCode == 0
-                ? Parse(await stdout)
-                : Classify((await stderr).Trim());
-        }
-        catch (Win32Exception ex)
-        {
-            return ContainerState.DockerUnavailable($"docker is not available: {ex.Message}");
-        }
     }
 
     /// <summary>The exact argv after <c>docker</c>: read-only <c>inspect</c>, the name after <c>--</c> so it can never be a flag.</summary>
