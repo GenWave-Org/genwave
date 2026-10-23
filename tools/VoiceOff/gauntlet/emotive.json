@@ -1,0 +1,25 @@
+{
+  "lines": [
+    {
+      "id": "emotive-excited-reveal",
+      "class": "Emotive",
+      "register": "bubbly",
+      "text": "And guess what, the winner of this week's request vote is a song that nobody saw coming, and it is wonderful!",
+      "cues": []
+    },
+    {
+      "id": "emotive-wistful-signoff",
+      "class": "Emotive",
+      "register": "late-night",
+      "text": "That is all from me for tonight, and I will miss this hour, but the music will keep playing without me.",
+      "cues": []
+    },
+    {
+      "id": "emotive-deadpan",
+      "class": "Emotive",
+      "register": "laconic",
+      "text": "Today's weather forecast is rain, followed by more rain, and then a short break for more rain.",
+      "cues": []
+    }
+  ]
+}

@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Listening test</title>
+<style>
+:root {
+  --bg: #f6efe3; --surface: #fdf8ee; --surface-2: #efe5d2; --line: #ddd0b8;
+  --ink: #2b2320; --mute: #706256; --accent: #b94f29; --accent-ink: #fdf8ee; --accent-2: #6f632f;
+  --danger: #a63325;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1e1713; --surface: #2a211b; --surface-2: #241c16; --line: #3f342a;
+    --ink: #f0e7d8; --mute: #a89a88; --accent: #d96a3d; --accent-ink: #1e1713; --accent-2: #b3a25e;
+    --danger: #e06a55;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 1rem/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+main { max-width: 32rem; margin: 0 auto; padding: 1rem; }
+h1 { font-size: 1.35rem; margin: 1rem 0 .5rem; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 1rem; margin: .75rem 0; }
+.label { font-size: .7rem; letter-spacing: .14em; text-transform: uppercase; color: var(--accent-2); margin: 0 0 .5rem; }
+.mute { color: var(--mute); }
+.row { display: flex; gap: .5rem; margin: .5rem 0; }
+.row > button { flex: 1; }
+button, input {
+  font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line);
+  border-radius: 6px; min-height: 48px; padding: .5rem .85rem;
+}
+button { cursor: pointer; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button[aria-pressed="true"] { border: 2px solid var(--ink); background: var(--surface-2); font-weight: 600; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; width: 100%; }
+button:disabled { opacity: .5; cursor: default; }
+input { width: 100%; }
+.chips { display: flex; flex-wrap: wrap; gap: .5rem; }
+.chips button { border-radius: 3px; min-height: 44px; flex: 0 0 auto; }
+.error { color: var(--danger); font-weight: 600; margin: .5rem 0; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Listening test</h1>
+  <p id="status" class="mute" role="status"></p>
+  <p id="error" class="error" role="alert" hidden></p>
+
+  <section id="name-screen" class="card" hidden>
+    <p class="label">Your name</p>
+    <label for="name">What should we call you? You only need to say this once.</label>
+    <input id="name" type="text" maxlength="40" autocomplete="name" aria-describedby="name-rule">
+    <p id="name-rule" class="mute">Use up to 32 letters, numbers, spaces, hyphens or underscores.</p>
+    <div class="row"><button id="name-save" class="primary" type="button">Continue</button></div>
+  </section>
+
+  <section id="intro-screen" class="card" hidden>
+    <p class="label">Before you start</p>
+    <p>One session is up to 40 pairs. Each pair is two recordings of the same sentence, A and B. Listen to both as many times as you like, then say which one sounds better.</p>
+    <div class="row"><button id="start" class="primary" type="button">Start listening</button></div>
+    <div class="row"><button id="wince-open" type="button" hidden>Wince reels</button></div>
+  </section>
+
+  <section id="wince-screen" class="card" hidden>
+    <p class="label">Wince reels</p>
+    <p>Each reel is one long recording. Listen all the way through and count the times a voice made you wince. Type the count, then save it.</p>
+    <div id="reels"></div>
+    <div class="row"><button id="wince-back" type="button">Back</button></div>
+  </section>
+
+  <section id="pair-screen" class="card" hidden>
+    <p id="progress" class="label"></p>
+    <div class="row">
+      <button id="play-a" type="button">Play A</button>
+      <button id="play-b" type="button">Play B</button>
+    </div>
+    <audio id="audio-a" preload="none"></audio>
+    <audio id="audio-b" preload="none"></audio>
+    <p class="label">Which one sounds better?</p>
+    <div class="row">
+      <button id="pick-a" type="button" aria-pressed="false">A</button>
+      <button id="pick-b" type="button" aria-pressed="false">B</button>
+    </div>
+    <div class="row"><button id="pick-tie" type="button" aria-pressed="false">Same / can't tell</button></div>
+    <p class="label">What was off? (optional)</p>
+    <div id="chips" class="chips"></div>
+    <div class="row"><button id="send" class="primary" type="button" disabled>Send and next</button></div>
+  </section>
+
+  <section id="done-screen" class="card" hidden>
+    <p class="label">All done</p>
+    <p id="done-text"></p>
+  </section>
+</main>
+<script>
+(function () {
+  "use strict";
+  var TAGS = ["robotic", "pace", "pronunciation", "flat", "breathy", "glitch", "other"];
+  var NAME_RULE = "Use up to 32 letters, numbers, spaces, hyphens or underscores.";
+  var NAME_SHAPE = /^[A-Za-z0-9 _-]{1,32}$/;
+  var CLIP = /^clips\/[0-9a-f]{32}\.wav$/;
+  var params = new URLSearchParams(window.location.search);
+  var sessionId = params.get("s") || "1";
+  var state = { judge: "", pairs: [], cap: 40, index: 0, pick: null, why: null };
+
+  function el(id) { return document.getElementById(id); }
+  function show(name) {
+    ["name-screen", "intro-screen", "wince-screen", "pair-screen", "done-screen"].forEach(function (s) {
+      el(s).hidden = s !== name;
+    });
+  }
+  function fail(message) { el("error").textContent = message; el("error").hidden = false; }
+  function clearError() { el("error").hidden = true; }
+
+  function storedName() {
+    try { return window.localStorage.getItem("judge") || ""; } catch (e) { return ""; }
+  }
+  function storeName(name) {
+    try { window.localStorage.setItem("judge", name); } catch (e) { /* Private mode: ask again next time. */ }
+  }
+
+  function query() {
+    return "?s=" + encodeURIComponent(sessionId) + "&judge=" + encodeURIComponent(state.judge);
+  }
+  function getJson(path) {
+    return fetch(path + query()).then(function (r) {
+      if (!r.ok) {
+        var refused = new Error("status " + r.status);
+        refused.status = r.status;
+        throw refused;
+      }
+      return r.json();
+    });
+  }
+
+  function load() {
+    el("status").textContent = "Loading.";
+    Promise.all([getJson("/session"), getJson("/progress")]).then(function (both) {
+      var pairs = Array.isArray(both[0].pairs) ? both[0].pairs : [];
+      state.cap = typeof both[0].cap === "number" ? both[0].cap : 40;
+      state.pairs = pairs.slice(0, state.cap);
+      var done = Number.isInteger(both[1].done) ? both[1].done : 0;
+      state.index = Math.min(Math.max(done, 0), state.pairs.length);
+      el("status").textContent = "";
+      if (state.pairs.length === 0 || state.index >= state.pairs.length) { finish(); }
+      else if (state.index === 0) { show("intro-screen"); }
+      else { showPair(); }
+    }).catch(function (e) {
+      el("status").textContent = "";
+      if (e && e.status === 400) {
+        show("name-screen");
+        fail(NAME_RULE);
+        return;
+      }
+      fail("The session could not be loaded. Check the link and try again.");
+    });
+  }
+
+  function finish() {
+    el("done-text").textContent = "Thank you, " + state.judge + ". You have heard every pair in this session.";
+    show("done-screen");
+  }
+
+  function setPressed(id, on) { el(id).setAttribute("aria-pressed", on ? "true" : "false"); }
+
+  function showPair() {
+    var pair = state.pairs[state.index];
+    if (!CLIP.test(String(pair.a)) || !CLIP.test(String(pair.b))) {
+      fail("This pair could not be shown.");
+      return;
+    }
+    state.pick = null;
+    state.why = null;
+    ["audio-a", "audio-b"].forEach(function (id) { el(id).pause(); });
+    el("audio-a").src = pair.a;
+    el("audio-b").src = pair.b;
+    el("progress").textContent = "Pair " + (state.index + 1) + " of " + Math.min(state.pairs.length, state.cap);
+    ["pick-a", "pick-b", "pick-tie"].forEach(function (id) { setPressed(id, false); });
+    Array.prototype.forEach.call(el("chips").children, function (chip) { chip.setAttribute("aria-pressed", "false"); });
+    el("send").disabled = true;
+    clearError();
+    show("pair-screen");
+  }
+
+  function play(own, other) {
+    el(other).pause();
+    var audio = el(own);
+    audio.currentTime = 0;
+    var started = audio.play();
+    if (started && started.catch) {
+      started.catch(function () { fail("The recording could not be played. Try again."); });
+    }
+  }
+
+  function choose(pick, id) {
+    state.pick = pick;
+    ["pick-a", "pick-b", "pick-tie"].forEach(function (other) { setPressed(other, other === id); });
+    el("send").disabled = false;
+  }
+
+  function buildChips() {
+    TAGS.forEach(function (tag) {
+      var chip = document.createElement("button");
+      chip.type = "button";
+      chip.textContent = tag.charAt(0).toUpperCase() + tag.slice(1);
+      chip.setAttribute("aria-pressed", "false");
+      chip.addEventListener("click", function () {
+        var on = state.why !== tag;
+        state.why = on ? tag : null;
+        Array.prototype.forEach.call(el("chips").children, function (c) { c.setAttribute("aria-pressed", "false"); });
+        chip.setAttribute("aria-pressed", on ? "true" : "false");
+      });
+      el("chips").appendChild(chip);
+    });
+  }
+
+  function send() {
+    var body = { pairId: state.pairs[state.index].pairId, judge: state.judge, pick: state.pick };
+    if (state.why) { body.why = state.why; }
+    el("send").disabled = true;
+    fetch("/vote", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      .then(function (r) {
+        if (!r.ok) { throw new Error("status " + r.status); }
+        state.index += 1;
+        if (state.index >= state.pairs.length) { finish(); } else { showPair(); }
+      })
+      .catch(function () {
+        fail("Your vote did not go through. Your pick is kept. Try sending it again.");
+        el("send").disabled = false;
+      });
+  }
+
+  var REEL = /^[0-9a-f]{32}$/;
+  var reelState = [];
+
+  function loadReels() {
+    return fetch("/wince").then(function (r) {
+      if (!r.ok) { throw new Error("status " + r.status); }
+      return r.json();
+    }).then(function (body) {
+      reelState = Array.isArray(body.reels) ? body.reels.filter(function (r) { return REEL.test(String(r.reelId)); }) : [];
+      el("wince-open").hidden = reelState.length === 0;
+    }).catch(function () { reelState = []; el("wince-open").hidden = true; });
+  }
+
+  function reelRow(reel, number) {
+    var row = document.createElement("div");
+    row.className = "card";
+    var title = document.createElement("p");
+    title.className = "label";
+    title.textContent = "Reel " + number + (typeof reel.engine === "string" ? " (" + reel.engine + ")" : "");
+    var audio = document.createElement("audio");
+    audio.preload = "none";
+    audio.src = "/wince/" + reel.reelId;
+    var play = document.createElement("button");
+    play.type = "button";
+    play.textContent = "Play";
+    play.addEventListener("click", function () {
+      var started = audio.paused ? audio.play() : audio.pause();
+      if (started && started.catch) { started.catch(function () { fail("The reel could not be played. Try again."); }); }
+    });
+    var input = document.createElement("input");
+    input.type = "number";
+    input.min = "0";
+    input.max = "999";
+    input.step = "1";
+    input.setAttribute("aria-label", "Winces in reel " + number);
+    if (Number.isInteger(reel.count)) { input.value = String(reel.count); }
+    var save = document.createElement("button");
+    save.type = "button";
+    save.textContent = "Save";
+    save.addEventListener("click", function () { saveCount(reel.reelId, input.value); });
+    var inputRow = document.createElement("div");
+    inputRow.className = "row";
+    inputRow.appendChild(play);
+    inputRow.appendChild(input);
+    inputRow.appendChild(save);
+    row.appendChild(title);
+    row.appendChild(audio);
+    row.appendChild(inputRow);
+    return row;
+  }
+
+  function showReels() {
+    var holder = el("reels");
+    Array.prototype.forEach.call(holder.querySelectorAll("audio"), function (a) { a.pause(); });
+    holder.textContent = "";
+    reelState.forEach(function (reel, i) { holder.appendChild(reelRow(reel, i + 1)); });
+    clearError();
+    show("wince-screen");
+  }
+
+  function saveCount(reelId, text) {
+    var count = Number(text);
+    if (text.trim() === "" || !Number.isInteger(count) || count < 0 || count > 999) {
+      fail("Please type a whole number from 0 to 999.");
+      return;
+    }
+    fetch("/wince", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reelId: reelId, count: count }) })
+      .then(function (r) {
+        if (!r.ok) { throw new Error("status " + r.status); }
+        return loadReels();
+      })
+      .then(showReels)
+      .catch(function () { fail("Your count did not go through. Try saving it again."); });
+  }
+
+  function begin(name) {
+    state.judge = name;
+    load();
+  }
+
+  el("name-save").addEventListener("click", function () {
+    var name = el("name").value.trim();
+    if (!name) { fail("Please type a name."); return; }
+    if (!NAME_SHAPE.test(name)) { fail(NAME_RULE); return; }
+    clearError();
+    storeName(name);
+    begin(name);
+  });
+  el("start").addEventListener("click", showPair);
+  el("wince-open").addEventListener("click", showReels);
+  el("wince-back").addEventListener("click", function () { clearError(); show("intro-screen"); });
+  el("play-a").addEventListener("click", function () { play("audio-a", "audio-b"); });
+  el("play-b").addEventListener("click", function () { play("audio-b", "audio-a"); });
+  el("pick-a").addEventListener("click", function () { choose("a", "pick-a"); });
+  el("pick-b").addEventListener("click", function () { choose("b", "pick-b"); });
+  el("pick-tie").addEventListener("click", function () { choose("tie", "pick-tie"); });
+  el("send").addEventListener("click", send);
+  buildChips();
+  loadReels();
+
+  var saved = storedName();
+  if (saved) { begin(saved); } else { show("name-screen"); }
+}());
+</script>
+</body>
+</html>

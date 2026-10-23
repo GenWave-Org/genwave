@@ -88,6 +88,12 @@ internal static class LawId
     /// <c>obsolete:</c> (<c>Story443_SkipPrefixLaw</c>, scanner <see cref="SkipReasons"/>).</summary>
     public const string L11 = "L11";
 
+    /// <summary>Voice Off slug fence (SPEC F214.16, STORY-501, PLAN T619): no engine slug from
+    /// <c>tools/VoiceOff/engines/*.json</c> appears as a whole word in <c>tools/VoiceOff</c> code
+    /// (comments included), and no Dockerfile or compose file mentions VoiceOff
+    /// (<c>Story501_VoiceOffSlugFence</c>, scanner <see cref="VoiceOffSlugFence"/>).</summary>
+    public const string L12 = "L12";
+
     /// <summary>Every law id above, discovered by reflection over this type's own <c>public const
     /// string</c> fields rather than hand-listed a second time anywhere. STORY-293's carry-forward
     /// (PLAN T215): this is now the SINGLE source both Story290_DependencyLaws.cs's exemption-id

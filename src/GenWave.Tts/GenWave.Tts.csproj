@@ -17,5 +17,7 @@
     <!-- EndpointUri is internal (a small URI-join helper, not a public seam); the test project
          needs direct access to unit-test its subpath-preservation behavior (STORY-124). -->
     <InternalsVisibleTo Include="GenWave.Tts.Tests" />
+    <!-- tools/VoiceOff reuses the internal KokoroVoicesResponse / EndpointUri. -->
+    <InternalsVisibleTo Include="VoiceOff" />
   </ItemGroup>
 </Project>

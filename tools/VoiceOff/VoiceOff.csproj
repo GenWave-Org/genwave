@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- F214.17: the Voice Off comparison tool references GenWave.Tts and GenWave.Loudness only.
+       It is a developer tool; it never ships in a Dockerfile or compose file. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <RootNamespace>GenWave.VoiceOff</RootNamespace>
+    <AssemblyName>VoiceOff</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\GenWave.Tts\GenWave.Tts.csproj" />
+    <ProjectReference Include="..\..\src\GenWave.Loudness\GenWave.Loudness.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="gauntlet\**" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="engines\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The listening page is one self-contained file that pair writes next to the clips. -->
+    <EmbeddedResource Include="Listening\page.html" LogicalName="page.html" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The tool's own tests drive Cli.Run in-process. -->
+    <InternalsVisibleTo Include="GenWave.VoiceOff.Tests" />
+  </ItemGroup>
+
+</Project>

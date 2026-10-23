@@ -1,0 +1,67 @@
+{
+  "lines": [
+    {
+      "id": "leadin-bubbly-1",
+      "class": "LeadIn",
+      "register": "bubbly",
+      "text": "Oh, you are going to love this one, it is a brand new track from Juniper Hollis, and it is called Paper Lanterns.",
+      "cues": []
+    },
+    {
+      "id": "leadin-bubbly-2",
+      "class": "LeadIn",
+      "register": "bubbly",
+      "text": "Here comes a big favorite from the request list, Velvet Static by the Marlowe Twins, so turn it up!",
+      "cues": []
+    },
+    {
+      "id": "leadin-bubbly-3",
+      "class": "LeadIn",
+      "register": "bubbly",
+      "text": "Coming up next is a total summer anthem, Sunburnt Radio by Dallas Pike, and I cannot wait to play it for you.",
+      "cues": []
+    },
+    {
+      "id": "leadin-laconic-1",
+      "class": "LeadIn",
+      "register": "laconic",
+      "text": "Next up, Juniper Hollis with a new one called Paper Lanterns.",
+      "cues": []
+    },
+    {
+      "id": "leadin-laconic-2",
+      "class": "LeadIn",
+      "register": "laconic",
+      "text": "This is Velvet Static from the Marlowe Twins, and it has been in the library for years.",
+      "cues": []
+    },
+    {
+      "id": "leadin-laconic-3",
+      "class": "LeadIn",
+      "register": "laconic",
+      "text": "Here is Dallas Pike, with a song called Sunburnt Radio, off the album from two summers ago.",
+      "cues": []
+    },
+    {
+      "id": "leadin-late-night-1",
+      "class": "LeadIn",
+      "register": "late-night",
+      "text": "It is getting late, so here is something slow and warm from Juniper Hollis, called Paper Lanterns.",
+      "cues": []
+    },
+    {
+      "id": "leadin-late-night-2",
+      "class": "LeadIn",
+      "register": "late-night",
+      "text": "The streets are quiet now, and the Marlowe Twins are here with Velvet Static to keep you company.",
+      "cues": []
+    },
+    {
+      "id": "leadin-late-night-3",
+      "class": "LeadIn",
+      "register": "late-night",
+      "text": "If you are still up, this one is for you, Dallas Pike playing Sunburnt Radio, nice and low.",
+      "cues": []
+    }
+  ]
+}
