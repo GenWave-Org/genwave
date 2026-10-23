@@ -693,12 +693,33 @@ public static class FeatureTheVerdict
         }
 
         [Fact]
-        public void ItsScoredRowSaysNoPairs() =>
-            Assert.Contains("| gamma | no pairs | — | — | — | MIT |", scenario.Results(), StringComparison.Ordinal);
+        public void ItsSpeedCellSaysNotRendered() =>
+            Assert.Contains("| gamma | not rendered | — | — | — | MIT |", scenario.Results(), StringComparison.Ordinal);
+
+        [Fact]
+        public void ItsWinRateRowStillSaysNoPairs() =>
+            Assert.Contains(scenario.Results().Split('\n'), line => line.StartsWith("| gamma |", StringComparison.Ordinal) && line.EndsWith("| no pairs |", StringComparison.Ordinal));
 
         [Fact]
         public void ItsContainerGateIsMarkedFailed() =>
             Assert.Contains("| gamma | ❌ image did not start | — not run |", scenario.Results(), StringComparison.Ordinal);
+
+        public void Dispose() => scenario.Dispose();
+    }
+
+    public sealed class ScenarioAnEngineThatFailedVoiceSelect : IDisposable
+    {
+        private readonly ScoreScenario scenario = new("alpha", "beta", "gamma");
+
+        public ScenarioAnEngineThatFailedVoiceSelect()
+        {
+            scenario.AddRun().Plain("beta", Dean(1, 0)).FailedVoiceSelect("gamma", "no such voice");
+            scenario.Score();
+        }
+
+        [Fact]
+        public void ItsSpeedCellIsTheMedianRtfNotNotRendered() =>
+            Assert.Contains("| gamma | 0.15 | 0.15 | 900 | — | MIT |", scenario.Results(), StringComparison.Ordinal);
 
         public void Dispose() => scenario.Dispose();
     }

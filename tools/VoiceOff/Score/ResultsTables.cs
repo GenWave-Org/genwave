@@ -10,6 +10,7 @@ namespace GenWave.VoiceOff.Score;
 internal static class ResultsTables
 {
     private const string NoPairs = "no pairs";
+    private const string NotRendered = "not rendered";
 
     internal static IEnumerable<string> Gates(TierScore score, string baseline)
     {
@@ -32,10 +33,7 @@ internal static class ResultsTables
         foreach (GateEntry entry in OrderedGates(score.Run.Gates, profiles.Baseline.Slug))
         {
             string license = profiles.Profiles.First(p => string.Equals(p.Slug, entry.Slug, StringComparison.Ordinal)).License;
-            bool hasPairs = score.Matrix.Engines.Contains(entry.Slug, StringComparer.Ordinal) || string.Equals(entry.Slug, profiles.Baseline.Slug, StringComparison.Ordinal);
-            yield return hasPairs
-                ? ScoredRow(score, entry.Slug, license)
-                : MarkdownCell.Row([MarkdownCell.Escape(entry.Slug), NoPairs, Rate.Missing, Rate.Missing, Rate.Missing, MarkdownCell.Escape(license)]);
+            yield return ScoredRow(score, entry.Slug, license);
         }
     }
 
@@ -80,7 +78,7 @@ internal static class ResultsTables
         bool gpu = score.Run.Tier == EngineTier.Gpu;
         return MarkdownCell.Row([
             MarkdownCell.Escape(slug),
-            rtf is null ? Rate.Missing : Number(rtf.Median, "0.###"),
+            rtf is null ? NotRendered : Number(rtf.Median, "0.###"),
             rtf is null ? Rate.Missing : Number(rtf.P95, "0.###"),
             Peak(records.Select(r => r.RssMb)),
             gpu ? Peak(records.Select(r => r.VramMb)) : Rate.Missing,

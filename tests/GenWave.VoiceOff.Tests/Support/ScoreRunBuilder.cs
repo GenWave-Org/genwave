@@ -16,6 +16,7 @@ internal sealed class ScoreRunBuilder
     private readonly List<string> winceLines = [];
     private readonly List<string> engines = [];
     private readonly Dictionary<string, string> failedContainers = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> failedVoiceSelects = new(StringComparer.Ordinal);
     private readonly string baseline;
     private readonly string root;
     private readonly string runHash;
@@ -61,6 +62,13 @@ internal sealed class ScoreRunBuilder
     internal ScoreRunBuilder FailedEngine(string slug, string reason)
     {
         failedContainers[slug] = reason;
+        return Engine(slug);
+    }
+
+    /// <summary>Adds an engine that passed its container gate but failed voice select: it still renders, so it has timing records, but no pairs.</summary>
+    internal ScoreRunBuilder FailedVoiceSelect(string slug, string reason)
+    {
+        failedVoiceSelects[slug] = reason;
         return Engine(slug);
     }
 
@@ -143,7 +151,7 @@ internal sealed class ScoreRunBuilder
     private GateEntry GateFor(string slug) =>
         failedContainers.TryGetValue(slug, out string? reason)
             ? new GateEntry(slug, "MIT", true, null, GateResult.Fail(reason), null)
-            : new GateEntry(slug, "MIT", true, null, GateResult.Pass("ok"), GateResult.Pass("ok"));
+            : new GateEntry(slug, "MIT", true, null, GateResult.Pass("ok"), failedVoiceSelects.TryGetValue(slug, out string? voiceReason) ? GateResult.Fail(voiceReason) : GateResult.Pass("ok"));
 
     private void Decide(RenderLane lane, string engine, string judge, string outcome, int count)
     {
