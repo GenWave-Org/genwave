@@ -1,6 +1,7 @@
 using GenWave.VoiceOff.Pairing;
 using GenWave.VoiceOff.Render;
 using GenWave.VoiceOff.Scoring;
+using GenWave.VoiceOff.Serving;
 
 namespace GenWave.VoiceOff;
 
@@ -50,6 +51,11 @@ internal static class Cli
         if (string.Equals(verb, "score", StringComparison.Ordinal))
         {
             return await ScoreCommand.RunAsync(args[1..], output, error, ct);
+        }
+
+        if (string.Equals(verb, "serve", StringComparison.Ordinal))
+        {
+            return await ServeCommand.RunAsync(args[1..], output, error, ct);
         }
 
         if (Verbs.Any(v => string.Equals(v.Name, verb, StringComparison.Ordinal)))

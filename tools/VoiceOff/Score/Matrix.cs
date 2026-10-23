@@ -33,7 +33,7 @@ internal sealed class Matrix
     {
         ArgumentNullException.ThrowIfNull(manifest);
         ArgumentNullException.ThrowIfNull(votes);
-        Dictionary<string, Dictionary<string, VotePick>> lastVotes = LastVotes(votes);
+        Dictionary<string, Dictionary<string, VotePick>> lastVotes = EffectiveVotes.Last(votes);
         Dictionary<(string, RenderLane), Counter> total = [];
         Dictionary<(string, RenderLane, string), Counter> byJudge = [];
         HashSet<string> engines = new(StringComparer.Ordinal);
@@ -75,23 +75,6 @@ internal sealed class Matrix
         }
 
         return new Matrix(cells, engines.Order(StringComparer.Ordinal).ToArray(), judges.ToArray());
-    }
-
-    private static Dictionary<string, Dictionary<string, VotePick>> LastVotes(IReadOnlyList<Vote> votes)
-    {
-        Dictionary<string, Dictionary<string, VotePick>> byPair = new(StringComparer.Ordinal);
-        foreach (Vote vote in votes)
-        {
-            if (!byPair.TryGetValue(vote.PairId, out Dictionary<string, VotePick>? picks))
-            {
-                picks = new Dictionary<string, VotePick>(StringComparer.Ordinal);
-                byPair[vote.PairId] = picks;
-            }
-
-            picks[vote.Judge.Trim()] = vote.Pick;
-        }
-
-        return byPair;
     }
 
     private static (string Engine, VotePick Side) Challenger(ManifestPair pair, string baseline)

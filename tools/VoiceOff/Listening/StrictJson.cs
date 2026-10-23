@@ -25,6 +25,9 @@ internal static class StrictJson
     /// <summary>Indented JSON in the same shape <see cref="Read{T}"/> accepts, so what <c>pair</c> writes is what the readers take.</summary>
     internal static string Write<T>(T value) => JsonSerializer.Serialize(value, WriteOptions) + "\n";
 
+    /// <summary>One line of JSON with no trailing newline, for the append-only <c>.jsonl</c> files.</summary>
+    internal static string WriteLine<T>(T value) => JsonSerializer.Serialize(value, Options);
+
     /// <exception cref="JsonException">The text is not exactly one valid <typeparamref name="T"/>.</exception>
     internal static T Read<T>(string json)
         where T : class =>
