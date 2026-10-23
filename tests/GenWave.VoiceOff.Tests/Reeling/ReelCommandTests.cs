@@ -143,6 +143,10 @@ public static class ReelCommandTests
         public void StdoutCountsTheClipInTheSingular() => Assert.Contains("Left out 1 clip that did not render.", run.Stdout, StringComparison.Ordinal);
 
         [Fact]
+        public void StdoutSaysWhatToDoNext() => Assert.Contains(
+            $"Next: run voiceoff serve --run {run.RunId}, open the page, and choose \"Wince reels\".", run.Stdout, StringComparison.Ordinal);
+
+        [Fact]
         public void StdoutNamesNoEngine() =>
             Assert.DoesNotContain(SlugsOfTheFixture, slug => run.Stdout.Contains(slug, StringComparison.OrdinalIgnoreCase));
 

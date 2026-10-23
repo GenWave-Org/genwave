@@ -92,6 +92,7 @@ internal static class ReelCommand
         }
 
         Report(output, choice, reels.Count, leftOut, layout);
+        output.WriteLine($"Next: run voiceoff serve --run {options.RunId}, open the page, and choose \"Wince reels\".");
         return Ok;
     }
 
