@@ -20,19 +20,21 @@ internal static class ListeningRoutes
         routes.MapGet("/", () => Results.File(run.IndexPath, "text/html; charset=utf-8"));
         routes.MapGet("/clips/{name}", (string name) =>
             run.Book.TryGetClipFile(name, out string? file) ? Results.File(file, "audio/wav", enableRangeProcessing: true) : Results.NotFound());
-        routes.MapGet("/session", (HttpContext http) => Session(run, http.Request));
+        routes.MapGet("/session", (HttpContext http, CancellationToken ct) => SessionAsync(run, http.Request, ct));
         routes.MapGet("/progress", (HttpContext http, CancellationToken ct) => ProgressAsync(run, http.Request, ct));
         routes.MapPost("/vote", (HttpContext http, CancellationToken ct) => VoteAsync(run, time, http.Request, ct));
     }
 
-    private static IResult Session(ServeRun run, HttpRequest request)
+    private static async Task<IResult> SessionAsync(ServeRun run, HttpRequest request, CancellationToken ct)
     {
         if (!Resolve(run, request, out string judge, out SessionEntry session, out IResult refusal))
         {
             return refusal;
         }
 
-        return Results.Text(StrictJson.Write(new SessionReply(run.Book.CapFor(session), SessionShuffle.Order(session.Pairs, judge, session.Id))), Json);
+        IReadOnlySet<string> voted = await JudgeVotes.VotedPairsAsync(run.Votes, session, judge, ct);
+        IReadOnlyList<SessionPair> order = ResumeOrder.For(SessionShuffle.Order(session.Pairs, judge, session.Id), voted);
+        return Results.Text(StrictJson.Write(new SessionReply(run.Book.CapFor(session), order)), Json);
     }
 
     private static async Task<IResult> ProgressAsync(ServeRun run, HttpRequest request, CancellationToken ct)
@@ -42,9 +44,8 @@ internal static class ListeningRoutes
             return refusal;
         }
 
-        Dictionary<string, Dictionary<string, VotePick>> votes = await run.Votes.ReadEffectiveAsync(ct);
-        int done = session.Pairs.Select(p => p.PairId).Distinct(StringComparer.Ordinal)
-            .Count(id => votes.TryGetValue(id, out Dictionary<string, VotePick>? picks) && picks.ContainsKey(judge));
+        IReadOnlySet<string> voted = await JudgeVotes.VotedPairsAsync(run.Votes, session, judge, ct);
+        int done = voted.Count;
         return Results.Text(StrictJson.Write(new ProgressReply(done, run.Book.CapFor(session))), Json);
     }
 

@@ -51,6 +51,18 @@ internal sealed class ServeScenario : IDisposable
     /// <summary>Every byte of votes.jsonl, or nothing when no vote was ever accepted.</summary>
     internal byte[] VotesBytes() => File.Exists(VotesPath) ? File.ReadAllBytes(VotesPath) : [];
 
+    /// <summary>The pair ids appearing in the vote log, whoever voted.</summary>
+    internal IReadOnlySet<string> VotedPairIds()
+    {
+        HashSet<string> ids = [];
+        foreach (string line in VoteLines())
+        {
+            using JsonDocument doc = JsonDocument.Parse(line);
+            ids.Add(doc.RootElement.GetProperty("pairId").GetString() ?? string.Empty);
+        }
+        return ids;
+    }
+
     internal IReadOnlyList<string> VoteLines() => File.Exists(VotesPath) ? File.ReadAllLines(VotesPath) : [];
 
     /// <summary>Session 1's pair ids in the order pair wrote them.</summary>
