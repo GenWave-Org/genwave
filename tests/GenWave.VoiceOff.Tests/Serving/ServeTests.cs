@@ -42,6 +42,10 @@ public static class ServeTests
         [Fact]
         public void NamesNoServer() => Assert.False(answer.Headers.Contains("Server"));
 
+        [Fact]
+        public void StatesTheNameRule() =>
+            Assert.Contains("Use up to 32 letters, numbers, spaces, hyphens or underscores.", serve.GetText(""), StringComparison.Ordinal);
+
         public void Dispose() => serve.Dispose();
     }
 

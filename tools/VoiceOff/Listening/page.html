@@ -54,7 +54,8 @@ input { width: 100%; }
   <section id="name-screen" class="card" hidden>
     <p class="label">Your name</p>
     <label for="name">What should we call you? You only need to say this once.</label>
-    <input id="name" type="text" maxlength="40" autocomplete="name">
+    <input id="name" type="text" maxlength="40" autocomplete="name" aria-describedby="name-rule">
+    <p id="name-rule" class="mute">Use up to 32 letters, numbers, spaces, hyphens or underscores.</p>
     <div class="row"><button id="name-save" class="primary" type="button">Continue</button></div>
   </section>
 
@@ -100,6 +101,8 @@ input { width: 100%; }
 (function () {
   "use strict";
   var TAGS = ["robotic", "pace", "pronunciation", "flat", "breathy", "glitch", "other"];
+  var NAME_RULE = "Use up to 32 letters, numbers, spaces, hyphens or underscores.";
+  var NAME_SHAPE = /^[A-Za-z0-9 _-]{1,32}$/;
   var CLIP = /^clips\/[0-9a-f]{32}\.wav$/;
   var params = new URLSearchParams(window.location.search);
   var sessionId = params.get("s") || "1";
@@ -126,7 +129,11 @@ input { width: 100%; }
   }
   function getJson(path) {
     return fetch(path + query()).then(function (r) {
-      if (!r.ok) { throw new Error("status " + r.status); }
+      if (!r.ok) {
+        var refused = new Error("status " + r.status);
+        refused.status = r.status;
+        throw refused;
+      }
       return r.json();
     });
   }
@@ -143,8 +150,13 @@ input { width: 100%; }
       if (state.pairs.length === 0 || state.index >= state.pairs.length) { finish(); }
       else if (state.index === 0) { show("intro-screen"); }
       else { showPair(); }
-    }).catch(function () {
+    }).catch(function (e) {
       el("status").textContent = "";
+      if (e && e.status === 400) {
+        show("name-screen");
+        fail(NAME_RULE);
+        return;
+      }
       fail("The session could not be loaded. Check the link and try again.");
     });
   }
@@ -306,6 +318,7 @@ input { width: 100%; }
   el("name-save").addEventListener("click", function () {
     var name = el("name").value.trim();
     if (!name) { fail("Please type a name."); return; }
+    if (!NAME_SHAPE.test(name)) { fail(NAME_RULE); return; }
     clearError();
     storeName(name);
     begin(name);
