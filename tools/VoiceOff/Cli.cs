@@ -11,7 +11,7 @@ internal static class Cli
 {
     internal static readonly IReadOnlyList<VerbHelp> Verbs =
     [
-        new("render", "Render the test scripts with each voice engine.", "voiceoff render --tier cpu", "voiceoff render --tier cpu --dry-run"),
+        new("render", "Render the test scripts with each voice engine.", "voiceoff render --tier cpu [--engine <slug>] [--root <dir>] [--engines <dir>] [--gauntlet <dir>]", "voiceoff render --tier cpu --dry-run"),
         new("pair", "Build blind A/B pairs from a finished render run.", "voiceoff pair --run <run-id> [--root <dir>] [--engines <dir>] [--gauntlet <dir>] [--seed <n>]"),
         new("serve", "Serve the pairs on a local web page for listening.", "voiceoff serve --run <run-id> --port 8765"),
         new("reel", "Join a run's clips into one reel to listen through.", "voiceoff reel --run <run-id> [--root <dir>] [--engines <dir>] [--gauntlet <dir>]"),
@@ -39,6 +39,12 @@ internal static class Cli
         }
 
         string verb = args[0];
+        if (args.Length > 1 && IsHelpFlag(args[1]) && Verbs.FirstOrDefault(v => string.Equals(v.Name, verb, StringComparison.Ordinal)) is { } known)
+        {
+            WriteVerbHelp(output, known);
+            return Ok;
+        }
+
         if (string.Equals(verb, "render", StringComparison.Ordinal))
         {
             return await RenderCommand.RunAsync(args[1..], output, error, services, ct);
@@ -75,7 +81,20 @@ internal static class Cli
     }
 
     private static bool IsHelp(string arg) =>
-        arg is "--help" or "-h" or "help";
+        IsHelpFlag(arg) || arg is "help";
+
+    private static bool IsHelpFlag(string arg) =>
+        arg is "--help" or "-h";
+
+    private static void WriteVerbHelp(TextWriter output, VerbHelp verb)
+    {
+        output.WriteLine(verb.Summary);
+        output.WriteLine($"Example: {verb.Example}");
+        if (verb.SecondExample is not null)
+        {
+            output.WriteLine($"Example: {verb.SecondExample}");
+        }
+    }
 
     private static void WriteHelp(TextWriter output)
     {

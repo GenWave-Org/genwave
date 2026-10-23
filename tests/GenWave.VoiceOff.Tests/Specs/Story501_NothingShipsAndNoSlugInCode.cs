@@ -73,4 +73,38 @@ public static class FeatureNothingShipsAndNoSlugInCode
         public void EachVerbPrintsWithAnExample(string example) =>
             Assert.Contains($"Example: {example}", help, StringComparison.Ordinal);
     }
+
+    public sealed class ScenarioAVerbAnswersHelp
+    {
+        // Given a verb
+        // When  `voiceoff <verb> --help` runs
+        private readonly int exit;
+        private readonly string help;
+        private readonly string renderHelp;
+
+        public ScenarioAVerbAnswersHelp()
+        {
+            StringWriter output = new();
+            exit = Cli.Run(["pair", "--help"], output, TextWriter.Null);
+            help = output.ToString();
+            StringWriter render = new();
+            Cli.Run(["render", "-h"], render, TextWriter.Null);
+            renderHelp = render.ToString();
+        }
+
+        [Fact]
+        public void ItExitsZero() => Assert.Equal(0, exit);
+
+        [Fact]
+        public void ItPrintsThatVerbsExample() =>
+            Assert.Contains("voiceoff pair --run <run-id>", help, StringComparison.Ordinal);
+
+        [Fact]
+        public void TheShortFlagWorksToo() =>
+            Assert.Contains("voiceoff render --tier cpu", renderHelp, StringComparison.Ordinal);
+
+        [Fact]
+        public void TheRenderExampleListsTheRootFolder() =>
+            Assert.Contains("[--root <dir>]", renderHelp, StringComparison.Ordinal);
+    }
 }
