@@ -1,4 +1,5 @@
 using GenWave.VoiceOff.Pairing;
+using GenWave.VoiceOff.Reeling;
 using GenWave.VoiceOff.Render;
 using GenWave.VoiceOff.Scoring;
 using GenWave.VoiceOff.Serving;
@@ -13,7 +14,7 @@ internal static class Cli
         new("render", "Render the test scripts with each voice engine.", "voiceoff render --tier cpu", "voiceoff render --tier cpu --dry-run"),
         new("pair", "Build blind A/B pairs from a finished render run.", "voiceoff pair --run <run-id> [--root <dir>] [--engines <dir>] [--gauntlet <dir>] [--seed <n>]"),
         new("serve", "Serve the pairs on a local web page for listening.", "voiceoff serve --run <run-id> --port 8765"),
-        new("reel", "Join a run's clips into one reel to listen through.", "voiceoff reel --run <run-id>"),
+        new("reel", "Join a run's clips into one reel to listen through.", "voiceoff reel --run <run-id> [--root <dir>] [--engines <dir>] [--gauntlet <dir>]"),
         new("score", "Score the listening results of a run.", "voiceoff score --run <run-id> [--run <run-id>] [--root <dir>] [--engines <dir>] [--out <file>] [--budget-seconds <n>]"),
     ];
 
@@ -46,6 +47,11 @@ internal static class Cli
         if (string.Equals(verb, "pair", StringComparison.Ordinal))
         {
             return await PairCommand.RunAsync(args[1..], output, error, ct);
+        }
+
+        if (string.Equals(verb, "reel", StringComparison.Ordinal))
+        {
+            return await ReelCommand.RunAsync(args[1..], output, error, ct);
         }
 
         if (string.Equals(verb, "score", StringComparison.Ordinal))

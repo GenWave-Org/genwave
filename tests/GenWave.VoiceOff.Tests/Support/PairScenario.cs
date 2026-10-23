@@ -18,6 +18,7 @@ internal sealed class PairScenario : IDisposable
     private readonly EngineDirectoryFixture engineFolders = new();
     private readonly GauntletFixtureDirectory gauntletFolders = new();
     private readonly PairFixtureOptions options;
+    private readonly ToneClips tones = new();
 
     internal PairScenario(PairFixtureOptions? options = null)
     {
@@ -60,6 +61,46 @@ internal sealed class PairScenario : IDisposable
 
     internal int Pair(params string[] extraArgs) => Run(
         ["pair", "--run", RunId, "--root", Root, "--engines", EnginesDirectory, "--gauntlet", GauntletDirectory, "--seed", options.Seed.ToString(System.Globalization.CultureInfo.InvariantCulture), .. extraArgs]);
+
+    internal int Reel(params string[] extraArgs) => Run(
+        ["reel", "--run", RunId, "--root", Root, "--engines", EnginesDirectory, "--gauntlet", GauntletDirectory, .. extraArgs]);
+
+    /// <summary>Builds the reels; a fixture that cannot reel is a broken fixture, not a failed fact.</summary>
+    internal void MustReel()
+    {
+        if (Reel() != 0)
+        {
+            throw new InvalidOperationException("The fixture run did not reel: " + Stderr);
+        }
+    }
+
+    internal string ReelsDirectory => Path.Combine(SessionDirectory, "reels");
+
+    internal string ReelPath(string reelId) => Path.Combine(ReelsDirectory, reelId + ".wav");
+
+    /// <summary>The engine behind each reel, from manifest.json.</summary>
+    internal IReadOnlyList<ManifestReel> Reels() => Manifest().Reels;
+
+    /// <summary>Casts one vote per plain-lane pair of the challenger: <paramref name="wins"/> for it, then <paramref name="losses"/> for the baseline.</summary>
+    internal void VoteFor(string challenger, int wins, int losses)
+    {
+        List<string> lines = [];
+        int cast = 0;
+        foreach (ManifestPair pair in Manifest().Pairs.Where(p => p.Lane == RenderLane.Plain && (p.Truth.A == challenger || p.Truth.B == challenger)))
+        {
+            if (cast >= wins + losses)
+            {
+                break;
+            }
+
+            string challengerSide = pair.Truth.A == challenger ? "a" : "b";
+            string baselineSide = challengerSide == "a" ? "b" : "a";
+            lines.Add($$"""{"pairId":"{{pair.PairId}}","judge":"Dean","pick":"{{(cast < wins ? challengerSide : baselineSide)}}","at":"2026-10-22T12:00:00Z"}""");
+            cast++;
+        }
+
+        File.AppendAllLines(Path.Combine(RunDirectory, "votes.jsonl"), lines);
+    }
 
     internal int Run(string[] args)
     {
@@ -122,6 +163,12 @@ internal sealed class PairScenario : IDisposable
         // The engine slug and the line id ride in the LIST/INFO chunk, so a plain file copy would leak them into session/.
         byte[] tag = System.Text.Encoding.ASCII.GetBytes($"{slug} {lineId}");
         uint? listDeclared = (options.CorruptClips ?? []).Contains(key) ? uint.MaxValue : null;
+        if (options.Tones)
+        {
+            tones.CopyTo(number, path);
+            return;
+        }
+
         File.WriteAllBytes(path, WavBytes.Make(8000, DataBytes, extraChunk: "LIST", listBody: tag, listDeclared: listDeclared));
     }
 
@@ -138,6 +185,7 @@ internal sealed class PairScenario : IDisposable
 
     public void Dispose()
     {
+        tones.Dispose();
         engineFolders.Dispose();
         gauntletFolders.Dispose();
         Directory.Delete(Root, recursive: true);

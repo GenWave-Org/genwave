@@ -1,4 +1,3 @@
-using System.Net.Http.Headers;
 using System.Text.Json;
 using GenWave.VoiceOff.Listening;
 using Microsoft.AspNetCore.Builder;
@@ -7,7 +6,7 @@ using Microsoft.AspNetCore.Routing;
 
 namespace GenWave.VoiceOff.Serving;
 
-/// <summary>The routes of <c>serve</c>: <c>/</c>, <c>/clips/&lt;name&gt;</c>, <c>/session</c>, <c>/vote</c> and <c>/progress</c>. Nothing else is mapped, so everything else is a 404.</summary>
+/// <summary>The routes of <c>serve</c>: <c>/</c>, <c>/clips/&lt;name&gt;</c>, <c>/session</c>, <c>/vote</c>, <c>/progress</c>, and <c>/wince</c> with <c>/wince/&lt;reelId&gt;</c> (see <see cref="WinceRoutes"/>). Nothing else is mapped, so everything else is a 404.</summary>
 internal static class ListeningRoutes
 {
     /// <summary>The largest vote body, in bytes.</summary>
@@ -23,6 +22,7 @@ internal static class ListeningRoutes
         routes.MapGet("/session", (HttpContext http, CancellationToken ct) => SessionAsync(run, http.Request, ct));
         routes.MapGet("/progress", (HttpContext http, CancellationToken ct) => ProgressAsync(run, http.Request, ct));
         routes.MapPost("/vote", (HttpContext http, CancellationToken ct) => VoteAsync(run, time, http.Request, ct));
+        WinceRoutes.Map(routes, run, time);
     }
 
     private static async Task<IResult> SessionAsync(ServeRun run, HttpRequest request, CancellationToken ct)
@@ -51,21 +51,10 @@ internal static class ListeningRoutes
 
     private static async Task<IResult> VoteAsync(ServeRun run, TimeProvider time, HttpRequest request, CancellationToken ct)
     {
-        if (!MediaTypeHeaderValue.TryParse(request.ContentType, out MediaTypeHeaderValue? type)
-            || !string.Equals(type.MediaType, Json, StringComparison.OrdinalIgnoreCase))
-        {
-            return Results.StatusCode(StatusCodes.Status415UnsupportedMediaType);
-        }
-
-        if (request.ContentLength > MaxBodyBytes)
-        {
-            return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
-        }
-
-        string? body = await BoundedBody.ReadAsync(request.Body, MaxBodyBytes, ct);
+        (string? body, IResult? refusal) = await JsonBody.ReadAsync(request, ct);
         if (body is null)
         {
-            return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+            return refusal ?? Results.StatusCode(StatusCodes.Status400BadRequest);
         }
 
         VoteRequest? vote = Parse(body);

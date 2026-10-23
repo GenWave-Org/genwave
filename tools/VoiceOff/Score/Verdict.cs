@@ -17,13 +17,8 @@ internal sealed record Verdict(string Text)
         ArgumentNullException.ThrowIfNull(matrix);
         ArgumentNullException.ThrowIfNull(wincesByEngine);
         string name = baseline.ToUpperInvariant();
-        Cell? winner = matrix.Engines
-            .Select(engine => matrix.Find(engine, RenderLane.Plain))
-            .Where(cell => MarginRule.Evaluate(cell).Beats)
-            .OrderByDescending(cell => cell.Total.Rate)
-            .ThenByDescending(cell => cell.Total.N)
-            .ThenBy(cell => cell.Engine, StringComparer.Ordinal)
-            .FirstOrDefault();
+        Cell? winner = Ranking.Order(matrix, matrix.Engines).FirstOrDefault(cell => MarginRule.Evaluate(cell).Beats);
+
         if (winner is null)
         {
             return new Verdict($"NOBODY BEATS {name}");

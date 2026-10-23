@@ -22,7 +22,8 @@ internal sealed class ServeScenario : IDisposable
     private readonly HttpClient http;
     private readonly StringWriter output = new();
 
-    internal ServeScenario(PairFixtureOptions? fixture = null)
+    /// <param name="afterPair">Runs on the paired fixture before the server starts, e.g. to build reels or cast votes.</param>
+    internal ServeScenario(PairFixtureOptions? fixture = null, Action<PairScenario>? afterPair = null)
     {
         run = new PairScenario(fixture);
         if (run.Pair() != 0)
@@ -30,6 +31,7 @@ internal sealed class ServeScenario : IDisposable
             throw new InvalidOperationException("The fixture run did not pair: " + run.Stderr);
         }
 
+        afterPair?.Invoke(run);
         ServeOptions options = new(run.RunId, run.Root, 0, IPAddress.Any);
         NetworkCandidate[] candidates = [new("eth0", NetworkInterfaceType.Ethernet, OperationalStatus.Up, IPAddress.Parse(LanIp))];
         app = ServeHost.Build(options, new FixedClockTimeProvider(Now), output, candidates);
@@ -80,6 +82,29 @@ internal sealed class ServeScenario : IDisposable
         content.Headers.ContentType = System.Net.Http.Headers.MediaTypeHeaderValue.Parse(contentType);
         return Send(content);
     }
+
+    internal string WincesPath => Path.Combine(run.RunDirectory, "winces.jsonl");
+
+    internal HttpResponseMessage PostWince(string body, string contentType = "application/json")
+    {
+        StringContent content = new(body, Encoding.UTF8);
+        content.Headers.ContentType = System.Net.Http.Headers.MediaTypeHeaderValue.Parse(contentType);
+        return http.PostAsync("wince", content).GetAwaiter().GetResult();
+    }
+
+    internal static string WinceJson(string reelId, int count) => JsonSerializer.Serialize(new Dictionary<string, object> { ["reelId"] = reelId, ["count"] = count });
+
+    /// <summary>Enters a count that must be accepted.</summary>
+    internal void AcceptWince(string reelId, int count)
+    {
+        using HttpResponseMessage answer = PostWince(WinceJson(reelId, count));
+        if (answer.StatusCode != HttpStatusCode.NoContent)
+        {
+            throw new InvalidOperationException($"The setup count was refused with {(int)answer.StatusCode}.");
+        }
+    }
+
+    internal IReadOnlyList<string> WinceLines() => File.Exists(WincesPath) ? File.ReadAllLines(WincesPath) : [];
 
     internal HttpResponseMessage Send(HttpContent content) => http.PostAsync("vote", content).GetAwaiter().GetResult();
 

@@ -112,7 +112,7 @@ public static class ServeTests
         [InlineData("/clips/..%2f..%2fmanifest.json")]
         [InlineData("/clips/%2e%2e/%2e%2e/manifest.json")]
         [InlineData("/%2e%2e%2fmanifest.json")]
-        [InlineData("/wince")]
+        [InlineData("/winces.jsonl")]
         public void Answer404(string path) => Assert.Equal(404, serve.RawStatus(path));
 
         [Fact]

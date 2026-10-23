@@ -62,6 +62,14 @@ input { width: 100%; }
     <p class="label">Before you start</p>
     <p>One session is up to 40 pairs. Each pair is two recordings of the same sentence, A and B. Listen to both as many times as you like, then say which one sounds better.</p>
     <div class="row"><button id="start" class="primary" type="button">Start listening</button></div>
+    <div class="row"><button id="wince-open" type="button" hidden>Wince reels</button></div>
+  </section>
+
+  <section id="wince-screen" class="card" hidden>
+    <p class="label">Wince reels</p>
+    <p>Each reel is one long recording. Listen all the way through and count the times a voice made you wince. Type the count, then save it.</p>
+    <div id="reels"></div>
+    <div class="row"><button id="wince-back" type="button">Back</button></div>
   </section>
 
   <section id="pair-screen" class="card" hidden>
@@ -99,7 +107,7 @@ input { width: 100%; }
 
   function el(id) { return document.getElementById(id); }
   function show(name) {
-    ["name-screen", "intro-screen", "pair-screen", "done-screen"].forEach(function (s) {
+    ["name-screen", "intro-screen", "wince-screen", "pair-screen", "done-screen"].forEach(function (s) {
       el(s).hidden = s !== name;
     });
   }
@@ -215,6 +223,81 @@ input { width: 100%; }
       });
   }
 
+  var REEL = /^[0-9a-f]{32}$/;
+  var reelState = [];
+
+  function loadReels() {
+    return fetch("/wince").then(function (r) {
+      if (!r.ok) { throw new Error("status " + r.status); }
+      return r.json();
+    }).then(function (body) {
+      reelState = Array.isArray(body.reels) ? body.reels.filter(function (r) { return REEL.test(String(r.reelId)); }) : [];
+      el("wince-open").hidden = reelState.length === 0;
+    }).catch(function () { reelState = []; el("wince-open").hidden = true; });
+  }
+
+  function reelRow(reel, number) {
+    var row = document.createElement("div");
+    row.className = "card";
+    var title = document.createElement("p");
+    title.className = "label";
+    title.textContent = "Reel " + number + (typeof reel.engine === "string" ? " (" + reel.engine + ")" : "");
+    var audio = document.createElement("audio");
+    audio.preload = "none";
+    audio.src = "/wince/" + reel.reelId;
+    var play = document.createElement("button");
+    play.type = "button";
+    play.textContent = "Play";
+    play.addEventListener("click", function () {
+      var started = audio.paused ? audio.play() : audio.pause();
+      if (started && started.catch) { started.catch(function () { fail("The reel could not be played. Try again."); }); }
+    });
+    var input = document.createElement("input");
+    input.type = "number";
+    input.min = "0";
+    input.max = "999";
+    input.step = "1";
+    input.setAttribute("aria-label", "Winces in reel " + number);
+    if (Number.isInteger(reel.count)) { input.value = String(reel.count); }
+    var save = document.createElement("button");
+    save.type = "button";
+    save.textContent = "Save";
+    save.addEventListener("click", function () { saveCount(reel.reelId, input.value); });
+    var inputRow = document.createElement("div");
+    inputRow.className = "row";
+    inputRow.appendChild(play);
+    inputRow.appendChild(input);
+    inputRow.appendChild(save);
+    row.appendChild(title);
+    row.appendChild(audio);
+    row.appendChild(inputRow);
+    return row;
+  }
+
+  function showReels() {
+    var holder = el("reels");
+    Array.prototype.forEach.call(holder.querySelectorAll("audio"), function (a) { a.pause(); });
+    holder.textContent = "";
+    reelState.forEach(function (reel, i) { holder.appendChild(reelRow(reel, i + 1)); });
+    clearError();
+    show("wince-screen");
+  }
+
+  function saveCount(reelId, text) {
+    var count = Number(text);
+    if (text.trim() === "" || !Number.isInteger(count) || count < 0 || count > 999) {
+      fail("Please type a whole number from 0 to 999.");
+      return;
+    }
+    fetch("/wince", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reelId: reelId, count: count }) })
+      .then(function (r) {
+        if (!r.ok) { throw new Error("status " + r.status); }
+        return loadReels();
+      })
+      .then(showReels)
+      .catch(function () { fail("Your count did not go through. Try saving it again."); });
+  }
+
   function begin(name) {
     state.judge = name;
     load();
@@ -228,6 +311,8 @@ input { width: 100%; }
     begin(name);
   });
   el("start").addEventListener("click", showPair);
+  el("wince-open").addEventListener("click", showReels);
+  el("wince-back").addEventListener("click", function () { clearError(); show("intro-screen"); });
   el("play-a").addEventListener("click", function () { play("audio-a", "audio-b"); });
   el("play-b").addEventListener("click", function () { play("audio-b", "audio-a"); });
   el("pick-a").addEventListener("click", function () { choose("a", "pick-a"); });
@@ -235,6 +320,7 @@ input { width: 100%; }
   el("pick-tie").addEventListener("click", function () { choose("tie", "pick-tie"); });
   el("send").addEventListener("click", send);
   buildChips();
+  loadReels();
 
   var saved = storedName();
   if (saved) { begin(saved); } else { show("name-screen"); }
