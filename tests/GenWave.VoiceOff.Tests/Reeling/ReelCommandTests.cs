@@ -1,3 +1,6 @@
+using GenWave.VoiceOff.Listening;
+using GenWave.VoiceOff.Render;
+using GenWave.VoiceOff.Speech;
 using GenWave.VoiceOff.Tests.Support;
 
 namespace GenWave.VoiceOff.Tests.Reeling;
@@ -74,12 +77,17 @@ public static class ReelCommandTests
 
     public sealed class ScenarioNoChallengerPassedBothGates : IDisposable
     {
-        private readonly PairScenario run = new(new PairFixtureOptions(Challengers: ["wrenfox"], Tones: true, FailedContainers: ["wrenfox"]));
+        private readonly PairScenario run = new(new PairFixtureOptions(Challengers: ["wrenfox"], Tones: true));
         private readonly int exit;
 
         public ScenarioNoChallengerPassedBothGates()
         {
+            // Pair refuses a run with no passing challenger, so the gate is failed after pairing to reach the reel refusal.
             run.Pair();
+            GatesFile gates = StrictJson.Read<GatesFile>(File.ReadAllText(Path.Combine(run.RunDirectory, "gates.json")));
+            File.WriteAllText(
+                Path.Combine(run.RunDirectory, "gates.json"),
+                new GatesFile([.. gates.Engines.Select(g => g.Slug == "wrenfox" ? g with { Container = GateResult.Fail("container down") } : g)]).ToJson());
             exit = run.Reel();
         }
 
@@ -87,7 +95,7 @@ public static class ReelCommandTests
         public void ExitsWithOne() => Assert.Equal(1, exit);
 
         [Fact]
-        public void SaysNoChallengerPassed() => Assert.Contains("No challenger passed both gates", run.Stderr, StringComparison.Ordinal);
+        public void SaysNoChallengerPassed() => Assert.Contains("so there is no wince reel to build.", run.Stderr, StringComparison.Ordinal);
 
         [Fact]
         public void BuildsNoReels() => Assert.False(Directory.Exists(run.ReelsDirectory));

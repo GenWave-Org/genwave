@@ -227,10 +227,40 @@ public static class PairCommandTests
         public ScenarioARunWithNoChallengerThatPassed() => exit = scenario.Pair();
 
         [Fact]
-        public void StillWritesAnEmptyManifestSoScoreCanRun() => Assert.Equal(0, exit);
+        public void IsRefusedWithExitOne() => Assert.Equal(1, exit);
 
         [Fact]
-        public void SaysPairedZero() => Assert.Contains("Paired 0 (skipped 0 pairs with a failed clip) into 0 sessions", scenario.Stdout, StringComparison.Ordinal);
+        public void SaysThereIsNothingToPair() =>
+            Assert.Contains("No challenger passed both gates in this run, so there is nothing to pair.", scenario.Stderr, StringComparison.Ordinal);
+
+        [Fact]
+        public void WritesNoSession() => Assert.False(Directory.Exists(scenario.SessionDirectory));
+
+        [Fact]
+        public void WritesNoManifest() => Assert.False(File.Exists(Path.Combine(scenario.RunDirectory, "manifest.json")));
+
+        public void Dispose() => scenario.Dispose();
+    }
+
+    public sealed class ScenarioAChallengerThatPassedButRenderedNothing : IDisposable
+    {
+        private readonly PairScenario scenario = new(new PairFixtureOptions(Challengers: ["wrenfox"], LinesByChallenger: new Dictionary<string, int> { ["wrenfox"] = 0 }));
+        private readonly int exit;
+
+        public ScenarioAChallengerThatPassedButRenderedNothing() => exit = scenario.Pair();
+
+        [Fact]
+        public void IsRefusedWithExitOne() => Assert.Equal(1, exit);
+
+        [Fact]
+        public void SaysNoClipRendered() =>
+            Assert.Contains("every clip it needs failed to render, so there is nothing to pair.", scenario.Stderr, StringComparison.Ordinal);
+
+        [Fact]
+        public void WritesNoSession() => Assert.False(Directory.Exists(scenario.SessionDirectory));
+
+        [Fact]
+        public void WritesNoManifest() => Assert.False(File.Exists(Path.Combine(scenario.RunDirectory, "manifest.json")));
 
         public void Dispose() => scenario.Dispose();
     }

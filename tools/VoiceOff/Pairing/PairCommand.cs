@@ -12,7 +12,7 @@ namespace GenWave.VoiceOff.Pairing;
 /// <summary>
 /// <c>voiceoff pair</c> (SPEC F214.9): builds the blind A/B pairs of a finished render run, copies the clips under opaque names into
 /// <c>session/</c>, and writes the truth table to <c>manifest.json</c> only. Exit 0 when written, 2 for a usage error, 1 for missing or
-/// bad input. A run that is already paired is refused: pairing again after votes would scramble the truth.
+/// bad input or when there is nothing to pair (nothing is written then). A run that is already paired is refused: pairing again after votes would scramble the truth.
 /// </summary>
 internal static class PairCommand
 {
@@ -78,7 +78,20 @@ internal static class PairCommand
         CanonicalClips canonical = new();
         UsableClips clips = new(layout, canonical, await new TimingLog(layout.TimingPath).ReadAsync(ct));
         Random rng = new(options.Seed ?? RandomNumberGenerator.GetInt32(int.MaxValue));
-        PairPlan plan = PairPlanner.Plan(profiles.Baseline.Slug, Challengers(profiles, gates), gauntlet.Lines, clips.IsUsable, rng);
+        EngineProfile[] challengers = [.. Challengers(profiles, gates)];
+        if (challengers.Length == 0)
+        {
+            error.WriteLine("No challenger passed both gates in this run, so there is nothing to pair.");
+            return Failed;
+        }
+
+        PairPlan plan = PairPlanner.Plan(profiles.Baseline.Slug, challengers, gauntlet.Lines, clips.IsUsable, rng);
+        if (plan.Pairs.Count == 0)
+        {
+            error.WriteLine("No pair could be built because every clip it needs failed to render, so there is nothing to pair.");
+            return Failed;
+        }
+
         IReadOnlyList<IReadOnlyList<PlannedPair>> sessions = SessionCutter.Cut(plan.Pairs, rng);
 
         IReadOnlyList<ManifestPair> truth = await new SessionFolder(layout, profiles.Baseline.Slug, canonical).WriteAsync(sessions, ct);
