@@ -35,6 +35,16 @@ internal sealed class ClipFixtureDirectory : IDisposable
         return path;
     }
 
+    /// <summary>The stepped sine under a near-full-scale 3 ms click every 0.5 s: peaks ~22 dB over its loudness, so without a
+    /// limiter loudnorm cannot apply a linear gain and its dynamic fallback lands ~2.4 LU under the target.</summary>
+    internal async Task<string> PeakySineAsync(string name = "peaky.wav")
+    {
+        string path = PathFor(name);
+        await RunAsync(["-f", "lavfi", "-i",
+            "aevalsrc=sin(2*PI*440*t)*if(lt(t\\,3)\\,0.02\\,0.05)+if(lt(mod(t\\,0.5)\\,0.003)\\,0.9*sin(2*PI*2000*t)\\,0):d=6:s=44100", path]);
+        return path;
+    }
+
     /// <summary>A real wav with exactly one defect: its 12-byte RIFF header is zeroed, so it is not recognisable as audio.</summary>
     internal async Task<string> ZeroedHeaderAsync(string name)
     {

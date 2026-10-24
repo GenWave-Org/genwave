@@ -142,6 +142,38 @@ public sealed class LoudnessMatchTests
         public void TheClipMatches() => Assert.True(Result.Ok);
     }
 
+    public sealed class AVerifyMissThatTheTrimCloses : MatchScenario
+    {
+        public AVerifyMissThatTheTrimCloses() : base(new SequencedLoudnessAnalyzer(-17.4, -16.1))
+        {
+        }
+
+        protected override Task<string> InputAsync() => Clips.QuietSineAsync();
+
+        [Fact]
+        public void TheResultIsOk() => Assert.True(Result.Ok);
+
+        [Fact]
+        public void TheReVerifiedLevelIsReported() => Assert.Equal(-16.1, Result.MeasuredLufs);
+
+        [Fact]
+        public void NoTrimFileIsLeft() => Assert.Single(FilesNamedMatched());
+    }
+
+    [Fact]
+    public void TheTrimFilterGainsAndLimitsAtTheTruePeakCeiling() =>
+        Assert.Equal(
+            "aformat=sample_rates=24000:channel_layouts=mono,volume=1.40dB,alimiter=limit=0.8414:level=false:latency=true",
+            LoudnessMatch.TrimFilter(1.4));
+
+    public sealed class APeakyClip : MatchScenario
+    {
+        protected override Task<string> InputAsync() => Clips.PeakySineAsync();
+
+        [Fact]
+        public void TheLimiterLetsItMatch() => Assert.True(Result.Ok);
+    }
+
     [Fact]
     public void TheMeasureFilterTargetsMinus16WithTheStationCeilings() =>
         Assert.Equal("aformat=sample_rates=24000:channel_layouts=mono,loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json", LoudnessMatch.MeasureFilter());
@@ -149,8 +181,20 @@ public sealed class LoudnessMatchTests
     [Fact]
     public void TheApplyFilterIsLinearAndEchoesTheMeasurement() =>
         Assert.Equal(
+            "aformat=sample_rates=24000:channel_layouts=mono,volume=13.90dB,alimiter=limit=0.7079:level=false:latency=true,loudnorm=I=-16:TP=-1.5:LRA=11:measured_I=-30.10:measured_TP=-8.20:measured_LRA=0.00:measured_thresh=-40.60:offset=0.30:linear=true:print_format=json",
+            LoudnessMatch.ApplyFilter(new LoudnormMeasurement("-30.10", "-8.20", "0.00", "-40.60", "0.30"), 13.9));
+
+    [Fact]
+    public void AnUnlimitedApplyFilterIsTheFormatAndLoudnormAlone() =>
+        Assert.Equal(
             "aformat=sample_rates=24000:channel_layouts=mono,loudnorm=I=-16:TP=-1.5:LRA=11:measured_I=-30.10:measured_TP=-8.20:measured_LRA=0.00:measured_thresh=-40.60:offset=0.30:linear=true:print_format=json",
             LoudnessMatch.ApplyFilter(new LoudnormMeasurement("-30.10", "-8.20", "0.00", "-40.60", "0.30")));
+
+    [Fact]
+    public void TheLimitedMeasureFilterPutsTheGainAndLimiterAheadOfLoudnorm() =>
+        Assert.Equal(
+            "aformat=sample_rates=24000:channel_layouts=mono,volume=-2.50dB,alimiter=limit=0.7079:level=false:latency=true,loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json",
+            LoudnessMatch.MeasureFilter(-2.5));
 
     public sealed class ThePassTwoArgv
     {
