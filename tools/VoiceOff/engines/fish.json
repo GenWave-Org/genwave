@@ -1,0 +1,16 @@
+{
+  "slug": "fish",
+  "container": "voiceoff-fish",
+  "port": 8880,
+  "timeoutSeconds": 600,
+  "tiers": ["gpu"],
+  "voices": {
+    "bubbly": "ref-f1",
+    "laconic": "ref-m1",
+    "late-night": "ref-m2"
+  },
+  "voiceReason": "The engine has no stock voices, so each register clones one shared reference clip: bubbly is the female reader (ref-f1), laconic is the mid-pitched male (ref-m1) and late-night is the deepest male (ref-m2). Smoke renders came out at about 214 Hz and 96 Hz against references of 209 Hz and 89 Hz.",
+  "markup": { "pause": null, "laugh": "(laughing)", "sigh": "(sighing)", "breath": null, "um": null, "emphasis": null },
+  "license": "Code Apache-2.0 (fish-speech); weights CC-BY-NC-SA-4.0 (non-commercial, share-alike, gated download)",
+  "notes": "fishaudio/s1-mini (OpenAudio S1-mini, 0.5B) from the official gated repo, run through fish-speech pinned at commit 80db25e (the last one before the S2 rewrite). The shim encodes the reference clips once at start on the CPU, then decodes in bf16 so the model fits an 8 GB card shared with a desktop; the default fp32 codec ran out of memory. Output is 44.1 kHz. The maker's laughing and sighing markers are meant to be followed by an onomatopoeia (Ha,ha,ha), so the bare tag may be weak. Its (panting) marker is not mapped to breath. Needs HF_TOKEN at first start. One line took about 19 to 20 seconds on a 3060 Ti. GPU only: one CPU line took 154 s warm on a quiet box (16 cores, nothing else rendering, 2026-10-23)."
+}

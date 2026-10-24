@@ -1,0 +1,12 @@
+{
+  "slug": "chatterbox",
+  "container": "voiceoff-chatterbox",
+  "port": 8880,
+  "timeoutSeconds": 600,
+  "tiers": ["cpu", "gpu"],
+  "voices": { "bubbly": "ref-f1", "laconic": "ref-m1", "late-night": "ref-m2" },
+  "voiceReason": "Clone-only engine, so the voices are the shared reference clips: bubbly is ref-f1 (female, about 209 Hz), laconic is ref-m1 (male, about 127 Hz) and late-night is ref-m2 (male, about 89 Hz).",
+  "markup": { "pause": null, "laugh": "[laugh]", "sigh": null, "breath": null, "um": null, "emphasis": null },
+  "license": "Code MIT; weights MIT (ResembleAI/chatterbox-turbo). Output carries Resemble's Perth watermark.",
+  "notes": "Chatterbox Turbo 350M (chatterbox-tts 0.1.7, ResembleAI/chatterbox-turbo, about 3.8 GB of weights). The shim wraps ChatterboxTurboTTS with a fixed seed and ignores speed. Turbo also documents [chuckle] and [cough], which are not station cues. One CPU line took 17 s warm (46 s cold) on a quiet box (16 cores, nothing else rendering, 2026-10-23). The HF token on the dev box was expired; the repo downloaded without one."
+}

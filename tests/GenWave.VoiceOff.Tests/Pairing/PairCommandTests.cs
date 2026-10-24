@@ -330,7 +330,8 @@ public static class PairCommandTests
         public void NamesNoShippedEngine()
         {
             string[] slugs = [.. EngineProfileSet.Load(RealEngines.Directory).Profiles.Select(p => p.Slug)];
-            Assert.DoesNotContain(slugs, slug => html.Contains(slug, StringComparison.OrdinalIgnoreCase));
+            // Whole words, as law L12 scans: a short slug such as "dia" is also inside "media".
+            Assert.DoesNotContain(slugs, slug => Regex.IsMatch(html, @"\b" + Regex.Escape(slug) + @"\b", RegexOptions.IgnoreCase));
         }
 
         [Fact]

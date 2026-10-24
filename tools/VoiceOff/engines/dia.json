@@ -1,0 +1,16 @@
+{
+  "slug": "dia",
+  "container": "voiceoff-dia",
+  "port": 8880,
+  "timeoutSeconds": 600,
+  "tiers": ["gpu"],
+  "voices": {
+    "bubbly": "ref-f1",
+    "laconic": "ref-m1",
+    "late-night": "ref-m2"
+  },
+  "voiceReason": "Dia has no stock voices, so each voice is a shared reference clip it clones: bubbly is ref-f1 (a higher female reader), laconic is ref-m1 (a mid male reader) and late-night is ref-m2 (a low male reader).",
+  "markup": { "pause": null, "laugh": "(laughs)", "sigh": "(sighs)", "breath": "(inhales)", "um": null, "emphasis": null },
+  "license": "Code and weights: Apache-2.0.",
+  "notes": "Dia 1.6B (nari-labs/Dia-1.6B-0626, revision ef2795f) through transformers 4.57.6, in bf16 on GPU and fp32 on CPU. The shim prepends the reference transcript and sends the clip as the audio prompt, then returns only the new audio. It always speaks as [S1]. Fixed seed 1234. Speed is ignored. Native tags (laughs), (sighs) and (inhales) are non-verbal sounds. Weights are about 6 GB, with the image near 7.2 GB. One CPU line took 183 s warm on a quiet box (16 cores, nothing else rendering, 2026-10-23), so it is gpu only."
+}

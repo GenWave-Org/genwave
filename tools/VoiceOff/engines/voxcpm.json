@@ -1,0 +1,16 @@
+{
+  "slug": "voxcpm",
+  "container": "voiceoff-voxcpm",
+  "port": 8880,
+  "tiers": ["gpu"],
+  "timeoutSeconds": 600,
+  "voices": {
+    "bubbly": "ref-f1",
+    "laconic": "ref-m1",
+    "late-night": "ref-m2"
+  },
+  "voiceReason": "This engine has no stock voices, so each register clones one shared reference clip: bubbly is the bright female clip (ref-f1), laconic is the mid male clip (ref-m1) and late-night is the low male clip (ref-m2).",
+  "markup": { "pause": null, "laugh": null, "sigh": null, "breath": null, "um": null, "emphasis": null },
+  "license": "Code and weights Apache-2.0",
+  "notes": "VoxCPM1.5 (openbmb/VoxCPM1.5, pip voxcpm 1.5.0, 44.1 kHz). The shim wraps ultimate cloning (reference wav plus transcript, fixed seed). No native cue tags. One CPU line took 115 s warm on a quiet box (16 cores, nothing else rendering, 2026-10-23), so it is gpu tier only. Weights 1.9 GB. VoxCPM2 (2B) was skipped as too big for 8 GB VRAM."
+}

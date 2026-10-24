@@ -1,0 +1,16 @@
+{
+  "slug": "orpheus",
+  "container": "voiceoff-orpheus",
+  "port": 8880,
+  "timeoutSeconds": 600,
+  "tiers": ["gpu"],
+  "voices": {
+    "bubbly": "jess",
+    "laconic": "dan",
+    "late-night": "leo"
+  },
+  "voiceReason": "Three of the eight stock presets, picked from the maker's descriptions and checked only by measured pitch, not by ear: jess is the energetic young female (about 170 Hz), dan is a plain mid-range male (about 147 Hz) and leo is the lowest male (about 120 Hz). Confirm the pick on the listening pass.",
+  "markup": { "pause": null, "laugh": "<laugh>", "sigh": "<sigh>", "breath": null, "um": null, "emphasis": null },
+  "license": "Code Apache-2.0; weights Apache-2.0 (Llama 3.2 backbone, so the Llama community terms also apply)",
+  "notes": "canopylabs/orpheus-3b-0.1-ft, fetched from the ungated copy unsloth/orpheus-3b-0.1-ft, plus the SNAC 24 kHz codec (MIT). The shim runs it with transformers, 4-bit nf4 on the GPU so the 3B model fits next to a desktop in 8 GB, and decodes the audio tokens itself. Other native tags exist (chuckle, cough, gasp, groan, yawn, sniffle) but are not in the cue set. Fixed seed. One line took about 10 to 16 seconds on a 3060 Ti. GPU only: the CPU path would run in bf16 and is far too slow."
+}
