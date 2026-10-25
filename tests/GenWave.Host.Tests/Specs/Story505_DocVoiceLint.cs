@@ -24,7 +24,7 @@ public static class FeatureDocVoiceLint
 
     public static class ScenarioACitationInProseFails
     {
-        [Fact(Skip = "pending: T628")]
+        [Fact]
         public static void Exits_non_zero_and_prints_file_line_token()
         {
             // Given a doc line "See SPEC F12 for details"
@@ -39,7 +39,7 @@ public static class FeatureDocVoiceLint
 
     public static class ScenarioEveryForbiddenTokenIsCaught
     {
-        [Theory(Skip = "pending: T628")]
+        [Theory]
         [InlineData("Shipped in STORY-12.")]
         [InlineData("Tracked in gh-#34.")]
         [InlineData("Done in T123 last week.")]
@@ -56,7 +56,7 @@ public static class FeatureDocVoiceLint
 
     public static class ScenarioCodeIsExempt
     {
-        [Fact(Skip = "pending: T628")]
+        [Fact]
         public static void Tokens_in_fences_and_backtick_spans_pass()
         {
             var markdown =
@@ -71,7 +71,7 @@ public static class FeatureDocVoiceLint
 
     public static class ScenarioLookalikesPass
     {
-        [Fact(Skip = "pending: T628")]
+        [Fact]
         public static void T1000_AT123B_and_v5_pass()
         {
             var (exit, stdOut, stdErr) = Lint("The T1000 is not AT123B, and the v5 stack is fine.\n");
@@ -82,7 +82,7 @@ public static class FeatureDocVoiceLint
 
     public static class ScenarioCiRunsIt
     {
-        [Fact(Skip = "pending: T628")]
+        [Fact]
         public static void Build_test_runs_the_lint_after_the_seam_check()
         {
             var ci = File.ReadAllText(Path.Combine(

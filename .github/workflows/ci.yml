@@ -37,6 +37,8 @@ jobs:
       # red path unreachable if it ran after Test.
       - name: SEAMS.md drift check
         run: ./tools/check-seam-index.sh
+      - name: Doc voice lint
+        run: ./tools/check-doc-voice.sh
       # Test tiers (SPEC F177.1): tier 1 = this filter, every fact without Category=Integration,
       # including the fixture Postgres facts; tier 2 (nightly) = Category=Integration: Kokoro, a
       # stream capture or a full compose stack (nightly.yml); tier 3 = Skip="manual: …", checked by ear.

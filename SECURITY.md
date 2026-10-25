@@ -4,22 +4,23 @@
 
 **Please do not open a public issue for a suspected vulnerability.**
 
-Report it privately via GitHub's built-in flow: **Security → Report a vulnerability** on this repository. That opens a private advisory only the maintainer can see, with room for details, a proof of concept, and coordinated disclosure.
+Report it privately through GitHub: **Security → Report a vulnerability** on this repository. That opens a private advisory only the maintainer can see, with room for details and a proof of concept.
 
 What to expect:
 
 - An acknowledgment within **7 days**.
-- An assessment and, for confirmed issues, a fix plan with credit to you (unless you prefer otherwise).
-- Public disclosure coordinated with the fix — GenWave stations are self-hosted, so operators need a release to upgrade to before details go public.
+- An assessment and, for confirmed issues, a fix with credit to you (unless you prefer otherwise).
+- Details made public only after a fix is available.
 
 ## Supported versions
 
-GenWave Home is developed on `main`; security fixes land there and in the latest release. Older releases are not patched — upgrade to the latest release to stay covered.
+GenWave is developed on `main`. Security fixes land there and in the latest release. Older releases are not patched, so upgrade to stay covered.
 
 ## Scope notes for operators
 
-GenWave is designed for deployment on a private network or behind your own reverse proxy:
+GenWave is a station for your own network. No port is meant to face the internet.
 
-- The Liquidsoap control port (1234) is unauthenticated by design and is **never published** by the shipped compose file — do not expose it.
-- Icecast's `/admin` shares the public listener port (8000), password-protected but reachable — put a TLS reverse proxy in front before exposing it to the internet. One note here though: Given the nature of what GenWave is/does, this is not a recommended or approved use — it's essentially public broadcasting, which almost certainly infringes the rights of whoever holds copyright on your media; a personal library doesn't come with broadcast rights. So don't do this. But if you do anyway, put a reverse proxy in front of it.
-- Secrets live in `.env` (gitignored). An empty `ADMIN_PASSWORD` disables the admin auth gate entirely — local-development convenience only, never for a reachable deployment. And again, your deployment should never be publicly available anyway, right?
+- The Liquidsoap control port (1234) has no authentication by design. The shipped compose file never publishes it, so keep it that way.
+- Icecast's `/admin` shares the listener port (8000). It is password-protected but reachable by anyone on your network.
+- Secrets live in `.env`, which is gitignored. An empty `ADMIN_PASSWORD` locks the admin plane entirely. Set one to use it.
+- Broadcasting your library to the public internet is not a supported use. A personal library does not come with broadcast rights.
