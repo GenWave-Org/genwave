@@ -1,0 +1,16 @@
+{
+  "slug": "csm",
+  "container": "voiceoff-csm",
+  "port": 8880,
+  "timeoutSeconds": 600,
+  "tiers": ["gpu"],
+  "voices": {
+    "bubbly": "ref-f1",
+    "laconic": "ref-m1",
+    "late-night": "ref-m2"
+  },
+  "voiceReason": "CSM has no stock voices, so each voice is a shared reference clip given as one earlier turn of the conversation: bubbly is ref-f1 (a higher female reader), laconic is ref-m1 (a mid male reader) and late-night is ref-m2 (a low male reader).",
+  "markup": { "pause": null, "laugh": null, "sigh": null, "breath": null, "um": null, "emphasis": null },
+  "license": "Code and weights: Apache-2.0. The weights are gated on Hugging Face (accept the terms, then use a token).",
+  "notes": "Sesame CSM-1B (sesame/csm-1b, revision c92a71e) through transformers 4.57.6. The clip plus its transcript is sent as the context turn for speaker 0, and the line follows it. Fixed seed 1234. Speed is ignored. It has no native tags, so every cue is stripped. Weights are about 6.7 GB, with the image near 7.1 GB. Two smoke renders came back shorter (about 4 s) than the line suggests, so check for clipped endings. One CPU line took 89 s warm on a quiet box (16 cores, nothing else rendering, 2026-10-23), so it is gpu only."
+}

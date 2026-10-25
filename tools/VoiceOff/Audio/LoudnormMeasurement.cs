@@ -6,6 +6,12 @@ namespace GenWave.VoiceOff.Audio;
 /// <summary>The first-pass <c>loudnorm</c> JSON report, kept as ffmpeg's own strings so the second pass echoes them exactly.</summary>
 internal sealed record LoudnormMeasurement(string InputI, string InputTp, string InputLra, string InputThresh, string TargetOffset)
 {
+    /// <summary><see cref="InputI"/> as a number; <see cref="TryParse"/> only ever builds a finite one.</summary>
+    internal double IntegratedLufs => double.Parse(InputI, NumberStyles.Float, CultureInfo.InvariantCulture);
+
+    /// <summary><see cref="InputTp"/> as a number, finite by the same rule.</summary>
+    internal double TruePeakDbtp => double.Parse(InputTp, NumberStyles.Float, CultureInfo.InvariantCulture);
+
     /// <summary>Parses the last JSON block on ffmpeg's stderr; null when absent or any value is not a finite number (silence reports -inf).</summary>
     internal static LoudnormMeasurement? TryParse(string stderr)
     {

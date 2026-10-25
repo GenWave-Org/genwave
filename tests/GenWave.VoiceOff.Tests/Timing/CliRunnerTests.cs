@@ -46,13 +46,33 @@ public sealed class CliRunnerTests
                 // Expected: the cancel is what this fact arranges; the assertion is about the child.
             }
 
+            // The SIGKILL to the grandchild lands asynchronously (the wait above covers only sh), so give it up to 5 s.
             string pid = (await File.ReadAllTextAsync(pidFile)).Trim();
-            Assert.False(File.Exists($"/proc/{pid}/stat") && !(await File.ReadAllTextAsync($"/proc/{pid}/stat")).Contains(") Z ", StringComparison.Ordinal),
-                "the child process is still running");
+            bool alive = IsAlive(pid);
+            for (int i = 0; i < 500 && alive; i++)
+            {
+                await Task.Delay(10);
+                alive = IsAlive(pid);
+            }
+
+            Assert.False(alive, "the child process is still running");
         }
         finally
         {
             File.Delete(pidFile);
+        }
+    }
+
+    // Gone, or a zombie waiting to be reaped, both count as dead; stat can vanish between the two calls.
+    private static bool IsAlive(string pid)
+    {
+        try
+        {
+            return !File.ReadAllText($"/proc/{pid}/stat").Contains(") Z ", StringComparison.Ordinal);
+        }
+        catch (IOException)
+        {
+            return false;
         }
     }
 }

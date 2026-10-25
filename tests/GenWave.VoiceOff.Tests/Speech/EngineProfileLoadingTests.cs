@@ -153,8 +153,9 @@ public sealed class EngineProfileLoadingTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void BothShippedProfilesLoad() =>
-        Assert.Equal(["kokoro", "piper"], EngineProfileSet.Load(RealEngines.Directory).Profiles.Select(p => p.Slug));
+    public void EveryShippedProfileLoads() =>
+        Assert.Equal(
+            ["chatterbox", "cosyvoice", "csm", "dia", "f5", "fish", "higgs", "kokoro", "omnivoice", "orpheus", "parler", "piper", "qwen3", "spark", "styletts2", "vibevoice", "voxcpm"], EngineProfileSet.Load(RealEngines.Directory).Profiles.Select(p => p.Slug));
 
     [Fact]
     public void TheShippedBaselineGivesEachRegisterItsOwnVoice() =>

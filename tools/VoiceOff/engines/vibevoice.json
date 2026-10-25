@@ -1,0 +1,16 @@
+{
+  "slug": "vibevoice",
+  "container": "voiceoff-vibevoice",
+  "port": 8880,
+  "tiers": ["cpu", "gpu"],
+  "timeoutSeconds": 600,
+  "voices": {
+    "bubbly": "Emma",
+    "laconic": "Mike",
+    "late-night": "Frank"
+  },
+  "voiceReason": "VibeVoice-Realtime ships fixed English voice prompts and no cloning. Bubbly is Emma (the female voice), laconic is Mike and late-night is Frank. The male picks are by name only and need an ear check, because the model card does not describe the timbres.",
+  "markup": { "pause": null, "laugh": null, "sigh": null, "breath": null, "um": null, "emphasis": null },
+  "license": "Code MIT; weights MIT, but the card limits use to research and development",
+  "notes": "microsoft/VibeVoice-Realtime-0.5B at revision 6bce5f06, repo commit 16fb2cb1 (the TTS code was removed from the larger VibeVoice models, only the Realtime model works). The shim wraps the repo's own streaming inference with its prebuilt voice prompts, five denoising steps, CFG 1.5. It has no cue tags and ignores speed. Very short inputs of three words or fewer are unstable. One CPU line took 36 s warm (38 s cold) on a quiet box (16 cores, nothing else rendering, 2026-10-23), so it is in both tiers."
+}
