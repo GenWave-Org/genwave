@@ -47,6 +47,7 @@ GenWave is my radio station. It plays my music library around the clock on the h
    ./setup.sh
    ```
 3. **Listen.** Open `http://localhost:8000/stream` in any audio player, and the admin console at `http://localhost:3000`.
+4. **Expect "Please Stand By".** You may hear it at first. That is normal: the station plays it, with a short pause between repeats, until the first tracks in your library are analysed, then the music starts.
 
 Prefer a one-liner? [download.genwaveradio.com](https://download.genwaveradio.com/) fetches the same wizard.
 
