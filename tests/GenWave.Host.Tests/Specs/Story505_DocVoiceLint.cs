@@ -16,17 +16,10 @@ public static class FeatureDocVoiceLint
 
     static (int ExitCode, string StdOut, string StdErr) Lint(string markdown)
     {
-        var dir = Directory.CreateTempSubdirectory("docvoice-");
-        try
-        {
-            var file = Path.Combine(dir.FullName, "DOC.md");
-            File.WriteAllText(file, markdown);
-            return ScriptProcess.Run(Script, RealPath, args: file);
-        }
-        finally
-        {
-            dir.Delete(recursive: true);
-        }
+        using var dir = new TempDir();
+        var file = Path.Combine(dir.Path, "DOC.md");
+        File.WriteAllText(file, markdown);
+        return ScriptProcess.Run(Script, RealPath, args: file);
     }
 
     public static class ScenarioACitationInProseFails
