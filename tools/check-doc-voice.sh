@@ -18,6 +18,7 @@ DOCS=(
   SECURITY.md
   README.md
   HARDWARE.md
+  DEPLOYMENT.md
   PLUGINS.md
 )
 

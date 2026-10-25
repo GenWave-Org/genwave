@@ -570,7 +570,7 @@ interview_profiles() {
     [Nn]*) ADMIN_PROFILE="" ;;
     *) ADMIN_PROFILE="admin" ;;
   esac
-  echo "   Logging and Cloudflare Tunnel are optional add-ons — see DEPLOYMENT.md to enable them later."
+  echo "   Log shipping is an optional add-on — see DEPLOYMENT.md to enable it later."
 }
 
 # =============================================================================
