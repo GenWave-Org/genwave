@@ -248,14 +248,4 @@ public static class FeatureAFailedMigrationStopsTheLaunch
         public static void No_call_to_migrate_sh_is_swallowed_anywhere()
             => Assert.DoesNotContain("./migrate.sh --keep-going", LaunchScript.Value);
     }
-
-    public static class ScenarioTheDeploymentGuideExplainsTheRecovery
-    {
-        static readonly Lazy<string> Deployment = new(() =>
-            File.ReadAllText(Path.Combine(RepoRootLocator.Find(AppContext.BaseDirectory), "DEPLOYMENT.md")));
-
-        [Fact]
-        public static void The_guide_names_the_failed_migration_verdict()
-            => Assert.Contains("Schema migration failed", Deployment.Value);
-    }
 }

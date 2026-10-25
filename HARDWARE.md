@@ -398,8 +398,7 @@ multiple hosts in the variable.
   api at ~234% of 400%. So **9,000 tracks is ~13 h at 2, not the ~22 h a linear model predicts**
   — halving the workers does not halve throughput, because the analyzers are not purely CPU-bound
   (NFS media reads, catalog writes). ⚠️ This corrects an earlier "expect proportionally slower at
-  2" note here and a matching ~22 h estimate in DEPLOYMENT.md; `tools/check-doc-drift.sh` cannot
-  catch this class, since measured figures have no compose file to diff against.
+  2" note here and a matching ~22 h estimate in DEPLOYMENT.md.
 - 🟢 **The safe branch never engaged mid-broadcast.** Across 1 h 40 m the engine's complete switch
   history is five lines, all inside the first **nine seconds** of boot: `mksafe → safe_blank`
   (silence while the feeder warms), one `safe_lib` prefetch resolution, ~3 s on the safe branch,

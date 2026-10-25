@@ -1,8 +1,8 @@
 // STORY-174 — Reference public topology: shipped files, not just prose
 //
 // BDD specification — xUnit (SPEC F64.3). The public-station topology ships as first-class
-// repo-root files: DEPLOYMENT.md (the doc), compose.demo.yaml (the overlay), Caddyfile (the
-// front door). docs/ is private planning space and is NOT part of the public contract.
+// repo-root files: compose.demo.yaml (the overlay), Caddyfile (the front door). docs/ is private
+// planning space and is NOT part of the public contract.
 // Cleanliness contract: none of the public topology files reference the maintainer's real
 // deployment hostname — the hostname is operator config (${PUBLIC_HOST}), not repo content.
 
@@ -31,13 +31,6 @@ public static class FeaturePublicTopologyDocs
     public sealed class ScenarioTopologyShipsAsFiles
     {
         [Fact]
-        public void DeploymentDocExists()
-        {
-            Assert.True(File.Exists(Path.Combine(RepoRoot(), "DEPLOYMENT.md")),
-                "DEPLOYMENT.md is missing — the public-station reference topology has no home (F64.3).");
-        }
-
-        [Fact]
         public void ComposeOverlayExists()
         {
             Assert.True(File.Exists(Path.Combine(RepoRoot(), "compose.demo.yaml")),
@@ -52,26 +45,8 @@ public static class FeaturePublicTopologyDocs
         }
     }
 
-    public sealed class ScenarioDocCoversTheContract
+    public sealed class ScenarioOverlayAndFrontDoorCarryTheContract
     {
-        [Fact]
-        public void TopologyTargetsThePublicListener()
-        {
-            Assert.Contains("8081", ReadRootFile("DEPLOYMENT.md"), StringComparison.Ordinal);
-        }
-
-        [Fact]
-        public void StreamIsRoutedToIcecast()
-        {
-            Assert.Contains("/stream", ReadRootFile("DEPLOYMENT.md"), StringComparison.Ordinal);
-        }
-
-        [Fact]
-        public void OperatingModesDocumentComposeProfiles()
-        {
-            Assert.Contains("COMPOSE_PROFILES", ReadRootFile("DEPLOYMENT.md"), StringComparison.Ordinal);
-        }
-
         [Fact]
         public void OverlayLocksThePortsWithAnOverrideTag()
         {
@@ -90,7 +65,6 @@ public static class FeaturePublicTopologyDocs
     public sealed class ScenarioNoMaintainerHostnameInPublicTopologyFiles
     {
         [Theory]
-        [InlineData("DEPLOYMENT.md")]
         [InlineData("compose.demo.yaml")]
         [InlineData("Caddyfile")]
         public void FileDoesNotReferenceTheRealDeploymentHostname(string file)

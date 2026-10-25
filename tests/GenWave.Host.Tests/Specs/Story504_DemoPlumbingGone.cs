@@ -16,7 +16,7 @@ public static class FeatureTheDemoPlumbingIsGone
 
     public static class ScenarioTheDemoProbeIsGone
     {
-        [Fact(Skip = "pending: T627")]
+        [Fact]
         public static void The_demo_health_workflow_does_not_exist()
         {
             // Given the repo tree
@@ -25,7 +25,7 @@ public static class FeatureTheDemoPlumbingIsGone
             Assert.False(File.Exists(Path.Combine(Root, ".github", "workflows", "demo-health.yml")));
         }
 
-        [Fact(Skip = "pending: T627")]
+        [Fact]
         public static void The_readme_has_no_badge_pointing_at_it()
         {
             Assert.DoesNotContain("demo-health", Read("README.md"), StringComparison.Ordinal);
@@ -34,13 +34,13 @@ public static class FeatureTheDemoPlumbingIsGone
 
     public static class ScenarioTheDriftCheckIsGone
     {
-        [Fact(Skip = "pending: T627")]
+        [Fact]
         public static void The_drift_script_does_not_exist()
         {
             Assert.False(File.Exists(Path.Combine(Root, "tools", "check-doc-drift.sh")));
         }
 
-        [Fact(Skip = "pending: T627")]
+        [Fact]
         public static void Ci_has_no_doc_drift_job()
         {
             var ci = Read(Path.Combine(".github", "workflows", "ci.yml"));

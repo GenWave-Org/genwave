@@ -2,10 +2,9 @@
 //
 // BDD specification — xUnit. AC1–AC5 are text pins over .github/workflows/nightly.yml (Story176
 // shape); AC6–AC9 drive tools/gate/nightly_report.sh against a scripted `gh` that logs argv and
-// answers `issue list` from GATE_STUB_OPEN_ISSUE; AC10 pins the README badge block. The dispatched
-// run (AC11) is the wire task, T501.
+// answers `issue list` from GATE_STUB_OPEN_ISSUE. The dispatched run (AC11) is the wire task, T501.
 //
-// RED at plan time: nightly.yml, nightly_report.sh and the badge do not exist.
+// RED at plan time: nightly.yml and nightly_report.sh do not exist.
 
 using System.Text.RegularExpressions;
 using GenWave.Host.Tests.Support;
@@ -172,25 +171,5 @@ public static class FeatureTheNightlyKeepsOneRedIssue
         [Fact]
         public void NoIssueCommandRuns() =>
             Assert.DoesNotContain(calls, c => c.StartsWith("gh issue ", StringComparison.Ordinal) && !c.StartsWith("gh issue list", StringComparison.Ordinal));
-    }
-
-    // ---------------------------------------------------------------------
-    // HAPPY PATH — the README badge
-    // ---------------------------------------------------------------------
-
-    public sealed class ScenarioTheReadmeBadge
-    {
-        readonly string[] badges = File.ReadLines(Path.Combine(Repo, "README.md")).Take(12)
-            .Where(l => l.StartsWith("[![", StringComparison.Ordinal)).ToArray();
-
-        [Fact]
-        public void ItLinksTheNightlyBadge() =>
-            Assert.Contains(badges, b => b.Contains("actions/workflows/nightly.yml/badge.svg", StringComparison.Ordinal));
-
-        [Fact]
-        public void ItSitsBesideTheDemoBadge() =>
-            Assert.Equal(1, Math.Abs(
-                Array.FindIndex(badges, b => b.Contains("nightly.yml/badge.svg", StringComparison.Ordinal))
-                - Array.FindIndex(badges, b => b.Contains("demo-health.yml/badge.svg", StringComparison.Ordinal))));
     }
 }

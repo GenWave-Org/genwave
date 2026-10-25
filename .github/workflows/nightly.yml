@@ -16,8 +16,8 @@ name: nightly
 # already open; comments + closes it the next time both jobs are green) — see
 # tools/gate/nightly_report.sh for the four outcomes.
 #
-# NOTE: GitHub auto-disables scheduled workflows after 60 days without repo activity (same note
-# as demo-health.yml carries); any commit re-arms it.
+# NOTE: GitHub auto-disables any scheduled workflow after 60 days without repo activity; any
+# commit re-arms it.
 
 on:
   schedule:

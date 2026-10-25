@@ -4,7 +4,6 @@
 [![Release](https://badgen.net/github/release/GenWave-Org/genwave)](https://github.com/GenWave-Org/genwave/releases)
 [![NuGet](https://badgen.net/nuget/v/GenWave.Abstractions)](https://www.nuget.org/packages/GenWave.Abstractions)
 [![License](https://badgen.net/github/license/GenWave-Org/genwave)](LICENSE)
-[![Demo on-air](https://github.com/GenWave-Org/genwave/actions/workflows/demo-health.yml/badge.svg)](https://demo.genwaveradio.com/)
 [![Nightly](https://github.com/GenWave-Org/genwave/actions/workflows/nightly.yml/badge.svg)](https://github.com/GenWave-Org/genwave/actions/workflows/nightly.yml)
 
 A self-hosted internet radio station: one shared broadcast stream, **equal-power crossfades**, and **loudness level-matching** so quiet and loud tracks play back at a consistent volume. The stream stays up: a safe rotation covers any gap in the main feed — and keeps playing through an api or database outage by replaying the safe tracks the engine last fetched — and the engine's final guard keeps the mount alive even with nothing playable, at the cost of silence (logged as a degraded mode, never a crash). Deployed entirely via Docker.
@@ -125,7 +124,6 @@ The broadcast never depends on a sick dependency. **LLM failure is a mode, not a
 │  ├─ preflight.sh               # shared machine/env checks sourced by build.sh + launch.sh (gh-#19)
 │  ├─ check-compose-publish.sh   # CI guard: 0.0.0.0 host publishes allowed only for the front proxy (F67.1)
 │  ├─ check-compose-socket.sh    # CI guard: docker.sock read-only + alloy-only, every profile combo (F78.2)
-│  ├─ check-doc-drift.sh         # CI guard: DEPLOYMENT.md/HARDWARE.md values match the compose files (gh-#77)
 │  ├─ check-seam-index.sh        # CI guard: SEAMS.md matches a fresh generation byte-for-byte (F105.6)
 │  ├─ soak-check.sh              # the soak-runbook checkpoint script (HARDWARE.md)
 │  ├─ demo_hour_gate.sql         # the demo-hour acceptance query (booth log, one hour of air)
