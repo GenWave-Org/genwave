@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# tools/soak-check.sh — one-command soak checkpoint for a box under test (HARDWARE.md
-# "Hands-on test plan" step 8 and its multi-day extension). Read-only: inspects, never changes.
+# tools/soak-check.sh — one-command soak checkpoint for a box under test.
+# Read-only: inspects, never changes.
+#
+# Known-benign error lines: `mjpeg` EXIF decode on bad album art; `wav` max-data-size on TTS
+# clips; a rare one-off icecast metadata `ECONNRESET`; a log-shipper 400 "entry too far behind"
+# burst right after a reboot (duplicate re-ship, zero loss).
 #
 # Run ON the box:            ./tools/soak-check.sh
 # Or from a workstation:     ssh <box> 'bash -s' < tools/soak-check.sh
@@ -123,7 +127,7 @@ if [ -n "$API" ]; then
   [ "${drops:-0}" -eq 0 ] && pass "zero render-budget drops in 24h" || warn "${drops} render-budget drop(s) in 24h — segments were silently skipped"
 fi
 
-section "Error-line counts, last 24h (informational — see HARDWARE.md for the known-benign list)"
+section "Error-line counts, last 24h (informational — known-benign lines are listed in this script's header)"
 while read -r cid; do
   [ -n "$cid" ] || continue
   name=$(docker inspect "$cid" --format '{{.Name}}' | tr -d /)

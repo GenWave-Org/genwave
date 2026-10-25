@@ -17,6 +17,8 @@ DOCS=(
   CONTRIBUTING.md
   SECURITY.md
   README.md
+  HARDWARE.md
+  PLUGINS.md
 )
 
 if [ "$#" -gt 0 ]; then

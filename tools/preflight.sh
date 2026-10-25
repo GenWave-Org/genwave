@@ -418,7 +418,7 @@ preflight_ram_headroom() {
 }
 
 # Pi kernels ship the memory cgroup disabled — every `mem_limit` in compose.yaml is silently
-# discarded until cgroup_enable=memory is added to the boot cmdline (HARDWARE.md, gh-#307).
+# discarded until cgroup_enable=memory is added to the boot cmdline (the Pi rows in HARDWARE.md).
 # A missing cmdline file just means this isn't that kind of boot layout — nothing to check,
 # nothing recorded (keeps the summary table free of an N/A row on every non-Pi box).
 preflight_pi_cgroup_memory() {
@@ -429,7 +429,7 @@ preflight_pi_cgroup_memory() {
     preflight_record PASS "Pi memory cgroup" "cgroup_enable=memory present in ${cmdline}"
   else
     preflight_record WARN "Pi memory cgroup" \
-      "cgroup_enable=memory is missing from ${cmdline} — every mem_limit is silently discarded until you add it and reboot. See HARDWARE.md's 'Enable the memory cgroup' section."
+      "cgroup_enable=memory is missing from ${cmdline} — every mem_limit is silently discarded until you add it and reboot. See the Pi rows in HARDWARE.md."
   fi
 }
 
