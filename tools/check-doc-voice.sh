@@ -16,6 +16,7 @@ set -euo pipefail
 DOCS=(
   CONTRIBUTING.md
   SECURITY.md
+  README.md
 )
 
 if [ "$#" -gt 0 ]; then
