@@ -218,6 +218,17 @@ If you put your own reverse proxy in front of the api, set `Proxy:TrustedNetwork
 
 ## 🧯 Troubleshooting
 
+Start here. Run both from the repo folder; `launch.sh` records the compose files it used, so the bare commands match your stack.
+
+```bash
+docker compose ps          # Every service should say "healthy" (or "running" if it has no check).
+                           # A missing service, or one that says "Restarting", is your suspect.
+docker compose logs api    # Start with the API. Read the last error first.
+                           # If another service is the suspect, read its log: docker compose logs <service>
+```
+
+Then look for your symptom below.
+
 - **"Schema migration failed".** `launch.sh` stops when a migration fails, and the application is not started on a half-built schema. On the published-image flow the message adds that the stack was not restarted onto the new images. The `db` container is left up. Read why with `docker compose logs db`, fix the cause, then run `./migrate.sh` or just `./launch.sh` again. Migrations are idempotent, so repeating them is safe.
 - **The box has drifted from what `.env` and the images say.** Run `./setup.sh` for the drift report, then `./setup.sh --repair` to fix what can be fixed, one confirmed item at a time. `launch.sh` has no repair flag of its own.
 - **Preflight failed (exit `3`).** Read the printed reason; each one says how to proceed. Common causes are Docker not running, a placeholder secret still in `.env`, or a port already taken. `SKIP_PREFLIGHT=1` is the override. It also helps on a from-source relaunch where the port check fails to recognise the stack's own published ports.
