@@ -327,7 +327,7 @@ public static class FeatureRequestsArtworkGate
             // a later epic, not a regression of this epic's zero-diff promise.
             // ComposeYamlSha256 re-pinned 2026-08-02 (gh-#334): Library__EnrichmentConcurrency becomes
             // ${LIBRARY_ENRICHMENT_CONCURRENCY:-4} — same default on every existing box, now overridable.
-            // A pinned appliance box sets Admin__Enabled=false, closing PUT /api/settings, so the hardcoded
+            // A pinned box with the admin plane off sets Admin__Enabled=false, closing PUT /api/settings, so the hardcoded
             // value left the operator no lever at all while enrichment pinned all four cores of a Pi 5.
             // Config-indirection only — no service, wire, volume or healthcheck change. Another intentional
             // edit from a later epic, not a regression of this epic's zero-diff promise.

@@ -8,7 +8,7 @@
 // the failure path under test is actually reached. No daemon, no images, no stack — every
 // docker invocation is answered by a bash script in a scratch bin dir.
 //
-// The field failure this pins (Pi 5, v2.9.0): the daemon refused to start genwave-caddy-1 with
+// The field failure this pins (Pi 5, v2.9.0): the daemon refused to start a container with
 // a stale network id, and `compose ps` reported all seven OTHER containers Up/healthy under a
 // "failed part-way" verdict. The operator was told to inspect a service the output never named.
 
@@ -132,7 +132,7 @@ public static class FeaturePinnedFailurePathShowsStoppedContainers
         {
             // never-silent outranks tidiness (launch.sh's home-preset contract, gh-#19): whatever is
             // still broadcasting keeps broadcasting. A `down` here would take the station off air
-            // to tidy up a failed caddy.
+            // to tidy up a failed container.
             Assert.DoesNotContain(PartialUp.Value.DockerCalls,
                 c => c.Contains(" down", StringComparison.Ordinal));
         }

@@ -576,8 +576,8 @@ run_fresh_leg() {
     return
   fi
 
-  # Bare ./launch.sh — no --pinned, which also stacks compose.demo.yaml (Caddy, PUBLIC_HOST),
-  # wrong for a fresh-install gate; the wizard's own .env (GW_PRESET=home-piper-only) already
+  # Bare ./launch.sh — `--pinned` is retired (exits 2), and the dev flow is wrong for a
+  # fresh-install gate; the wizard's own .env (GW_PRESET=home-piper-only) already
   # picks the pinned piper-only topology, and stage_pinned_overlay_for_launch (above) already put
   # the tag's images in the file launch.sh actually reads. Same COMPOSE_PROJECT_NAME as the
   # setup.sh call above, so a real setup.sh's own internal launch and this call converge on the
@@ -750,8 +750,8 @@ run_upgrade_leg() {
   fi
 
   # The gate's own `up -d` — a raw compose call, NOT the previous worktree's own ./launch.sh: that
-  # script's --pinned would also stack compose.demo.yaml (wrong here, same reason the fresh leg
-  # never passes --pinned either), and a bare ./launch.sh from an OLDER release can't be trusted
+  # script's --pinned would also stack the older release's retired public overlay (wrong here;
+  # the fresh leg never passes --pinned either), and a bare ./launch.sh from an OLDER release can't be trusted
   # to behave like the current one. Real setup.sh --yes already launched the stack itself and
   # waited on-air as part of --yes (same as the fresh leg); this call is that same idempotent
   # re-converge.

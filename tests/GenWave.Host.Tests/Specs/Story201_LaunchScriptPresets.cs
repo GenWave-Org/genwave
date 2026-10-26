@@ -111,7 +111,7 @@ public static class FeatureLaunchScriptPresets
         static readonly Lazy<(int ExitCode, string StdOut, string StdErr)> Run =
             new(() => RunLaunch(
                 new Dictionary<string, string> { ["COMPOSE_PROFILES"] = "admin" },
-                "--with", "logging,tunnel", "--dry-run"));
+                "--with", "logging,fallback", "--dry-run"));
 
         [Fact]
         public static void Effective_profiles_keep_the_env_profiles()
@@ -127,9 +127,9 @@ public static class FeatureLaunchScriptPresets
         }
 
         [Fact]
-        public static void Effective_profiles_include_tunnel()
+        public static void Effective_profiles_include_fallback()
         {
-            Assert.Contains("tunnel", ProfilesLine(), StringComparison.Ordinal);
+            Assert.Contains("fallback", ProfilesLine(), StringComparison.Ordinal);
         }
 
         static string ProfilesLine() =>

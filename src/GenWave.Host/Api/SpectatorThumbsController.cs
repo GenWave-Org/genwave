@@ -235,8 +235,8 @@ public sealed partial class SpectatorThumbsController(
             SameSite = SameSiteMode.Lax,
             // T366 review MED-3: Secure follows Request.IsHttps, which the ForwardedHeaders
             // middleware only ever sets true from an X-Forwarded-Proto header sent by a hop inside
-            // Proxy:TrustedNetworks (Program.cs) — see that wiring's own remarks for the demo
-            // topology (cloudflared -> Caddy) this exists for.
+            // Proxy:TrustedNetworks (Program.cs) — see that wiring's own remarks for the
+            // TLS-terminating reverse proxy case this exists for.
             Secure = Request.IsHttps,
             Path = "/spectator",
             MaxAge = TimeSpan.FromDays(365),

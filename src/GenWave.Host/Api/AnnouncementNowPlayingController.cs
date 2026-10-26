@@ -12,7 +12,7 @@ namespace GenWave.Host.Api;
 /// <see cref="AnnouncementsController"/> at T351 to give it that controller's real submit/history
 /// endpoints' <see cref="AdminSurfaceAttribute"/> gate WITHOUT it: SPEC F145.6 makes this one route
 /// the family's sole exception — it answers whenever a token exists, admin plane on or off, public
-/// or private station — because the appliance topology (<c>Admin:Enabled=false</c>) still needs the
+/// or private station — because an admin-off station (<c>Admin:Enabled=false</c>) still needs the
 /// sensor's read to work; a fail-closed 401 on "no token row" already covers the privacy floor
 /// (<c>AnnounceTokenAuthenticationHandler</c>'s own fail-closed contract, unchanged by this move).
 ///
@@ -22,8 +22,8 @@ namespace GenWave.Host.Api;
 /// <see cref="SurfaceGateMiddleware"/> never 404s this route regardless of <c>Admin:Enabled</c>.
 /// Existence is unconditional; REACHABILITY still is not — the
 /// <see cref="AnnounceTokenAuthenticationDefaults.InScopeSchemes"/> authorization immediately below
-/// still fails closed with no configured token (SPEC F145.4's "no hash row" state), so a public
-/// appliance with no token ever minted answers 401, never a snapshot.
+/// still fails closed with no configured token (SPEC F145.4's "no hash row" state), so a station
+/// with no token ever minted answers 401, never a snapshot.
 /// </para>
 ///
 /// <para>

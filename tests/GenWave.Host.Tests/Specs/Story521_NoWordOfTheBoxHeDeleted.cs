@@ -2,7 +2,7 @@
 //
 // BDD specification — xUnit. The brief's acceptance grep, run from inside the suite: over the
 // named paths, case-insensitive, no hit for any of the seven words. CHANGELOG.md, docs/ and
-// .github/workflows/ are exempt (brief). Every fact is pending until T650.
+// .github/workflows/ are exempt (brief). All four facts run since T650.
 
 using System.Text.RegularExpressions;
 using GenWave.Host.Tests.Support;
@@ -27,7 +27,7 @@ public static class FeatureNoWordOfTheBoxHeDeleted
 
     static readonly Regex Pattern = new(string.Join("|", Words), RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    static readonly string[] SkippedSegments = ["bin", "obj", "node_modules", ".next"];
+    static readonly string[] SkippedSegments = ["bin", "obj", "node_modules", ".next", "TestResults"];
 
     static IEnumerable<string> RootFiles() =>
         Directory.EnumerateFiles(Root, "compose*.yaml", SearchOption.TopDirectoryOnly)
@@ -47,25 +47,25 @@ public static class FeatureNoWordOfTheBoxHeDeleted
 
     public static class ScenarioTheGrepIsEmpty
     {
-        [Fact(Skip = "pending: T650")]
+        [Fact]
         public static void Root_scripts_and_compose_files_are_clean()
         {
             Assert.Empty(Hits(RootFiles()));
         }
 
-        [Fact(Skip = "pending: T650")]
+        [Fact]
         public static void Tools_is_clean()
         {
             Assert.Empty(Hits(TreeFiles("tools")));
         }
 
-        [Fact(Skip = "pending: T650")]
+        [Fact]
         public static void Src_is_clean()
         {
             Assert.Empty(Hits(TreeFiles("src")));
         }
 
-        [Fact(Skip = "pending: T650")]
+        [Fact]
         public static void Tests_are_clean()
         {
             Assert.Empty(Hits(TreeFiles("tests")));

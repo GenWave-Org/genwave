@@ -214,7 +214,7 @@ public static class FeatureSpectatorSecurityHeaders
         [Fact]
         public async Task ARootRelativeStreamUrlIsSameOriginSoSelfSuffices()
         {
-            // "/stream" (the Caddy reference topology) parses as file:// on Unix — the http(s)
+            // "/stream" (behind a reverse proxy) parses as file:// on Unix — the http(s)
             // scheme guard drops it, and 'self' is exactly right for a same-origin stream.
             await using var factory = new SecurityHeadersWebFactory(
                 ("Station:PublicStreamUrl", "/stream"));

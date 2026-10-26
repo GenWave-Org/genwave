@@ -1,4 +1,4 @@
-// gh-#129 — public-surface limiters shared one partition: Caddy stripped XFF (no
+// gh-#129 — public-surface limiters shared one partition: a reverse proxy stripped XFF (no
 // trusted_proxies) and ForwardLimit=1 truncated the trusted-hop walk on the inner proxy.
 //
 // BDD specification — xUnit. Config-regression pins: the ForwardedHeadersOptions posture per

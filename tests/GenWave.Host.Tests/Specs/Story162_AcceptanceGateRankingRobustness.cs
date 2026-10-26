@@ -84,10 +84,7 @@ public static class FeatureAcceptanceGateRankingRobustness
         // intentional edit from a LATER epic. EngineScriptSha256 unchanged — T34 does not touch
         // engine/genwave.liq.
         //
-        // ComposeYamlSha256 re-pinned 2026-07-20 (Q3 housekeeping, "cloudflared observability",
-        // SPEC F77): a new, optional `cloudflared` service (profiles: ["tunnel"], off by default,
-        // no host ports) — versions the tunnel that previously ran outside the repo as unmanaged
-        // infrastructure, with a healthcheck/metrics contract. Another intentional edit from a
+        // ComposeYamlSha256 re-pinned 2026-07-20 (Q3 housekeeping, SPEC F77): an intentional compose edit from a
         // LATER epic, not a regression of this epic's zero-diff promise. EngineScriptSha256
         // unchanged — this task does not touch engine/genwave.liq.
         //
@@ -133,7 +130,7 @@ public static class FeatureAcceptanceGateRankingRobustness
         // a later epic, not a regression of this epic's zero-diff promise.
         // ComposeYamlSha256 re-pinned 2026-08-02 (gh-#334): Library__EnrichmentConcurrency becomes
         // ${LIBRARY_ENRICHMENT_CONCURRENCY:-4} — same default on every existing box, now overridable.
-        // A pinned appliance box sets Admin__Enabled=false, closing PUT /api/settings, so the hardcoded
+        // A pinned box with the admin plane off sets Admin__Enabled=false, closing PUT /api/settings, so the hardcoded
         // value left the operator no lever at all while enrichment pinned all four cores of a Pi 5.
         // Config-indirection only — no service, wire, volume or healthcheck change. Another intentional
         // edit from a later epic, not a regression of this epic's zero-diff promise.

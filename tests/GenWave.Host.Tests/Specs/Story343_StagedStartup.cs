@@ -185,7 +185,7 @@ public static class FeatureStagedStartup
         {
             // F136 review findings F2/F3 (live-daemon-proven): a scoped up-of-heavyweights-
             // only never reaches services that are neither depended-on nor core-listed at all
-            // (caddy, admin_ui, alloy, cloudflared, dockerproxy) — only the ORIGINAL unscoped
+            // (admin_ui, alloy, dockerproxy) — only the ORIGINAL unscoped
             // up converges the full profile-selected set.
             Assert.True(StageTwoUpIndex >= 0 && Lines[StageTwoUpIndex].TrimEnd().EndsWith("--remove-orphans", StringComparison.Ordinal),
                 $"expected the second `up -d --remove-orphans` line to be unscoped (no trailing service names); plan:\n{Run.Value.StdOut}");
@@ -196,7 +196,7 @@ public static class FeatureStagedStartup
         {
             // F136 review findings F2/F3 (live-daemon-proven): --no-recreate never recreates a
             // service whose PIN changed (only one that's entirely absent) — proven to leave
-            // admin_ui/caddy/ollama STALE across an upgrade (the gh-#93 regression class).
+            // admin_ui and other overlay services STALE across an upgrade (the gh-#93 regression class).
             Assert.True(StageTwoUpIndex >= 0 && !Lines[StageTwoUpIndex].Contains("--no-recreate", StringComparison.Ordinal),
                 $"expected the second `up -d --remove-orphans` line to NOT carry --no-recreate; plan:\n{Run.Value.StdOut}");
         }

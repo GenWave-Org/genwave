@@ -6,7 +6,7 @@
 //
 // Two defects, pinned separately below:
 //
-//   1. compose.piper-only.yaml — the overlay HARDWARE.md topology (a) prescribes — inherited base
+//   1. compose.piper-only.yaml — the overlay HARDWARE.md prescribes for a Pi piper-only box — inherited base
 //      compose's concurrency of 4. On the Pi 5 field box that meant the api sitting at 378% of
 //      400%, the SoC at 83.4°C (past the 80°C soft limit) and the 5V rail dipping into
 //      undervoltage every ~2 min. The overlay drops kokoro and the LLM pair for exactly this
@@ -107,7 +107,7 @@ public static class FeatureEnrichmentConcurrencyIsTunable
         [Trait("Category", "Integration")]
         public static void The_piper_only_stack_enriches_two_files_at_a_time()
         {
-            // ./launch.sh --piper-only — HARDWARE.md topology (a), the shape the Pi 5 field box
+            // ./launch.sh --piper-only — the piper-only shape the Pi 5 field box
             // runs. 4 pinned all four of its cores.
             Assert.Equal("2", EnrichmentConcurrency(PiperOnly.Value));
         }

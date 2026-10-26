@@ -13,7 +13,7 @@ public sealed class GardenerFileActionsOptions
 {
     /// <summary>
     /// Off ⇒ <c>GardenerController</c>'s <c>file-actions/dry-run</c>/<c>confirm</c> endpoints 404
-    /// and the Gardener page shows how to turn them on (F154.2); a shipped appliance owner opts in
+    /// and the Gardener page shows how to turn them on (F154.2); a station owner opts in
     /// explicitly. Default <see langword="false"/> — fail-closed on a stranger's NAS (Dean's
     /// standing design preference; ARCHITECTURE.md "File actions: the first jail, the purge
     /// posture, the audit"). No <c>[Range]</c>/annotation of its own: a plain bool has nothing for

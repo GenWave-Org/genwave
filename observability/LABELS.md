@@ -6,7 +6,7 @@ grafana/`, when that lands) may query only these three; anything else about a li
 not an index key.
 
 - `service` — the Docker Compose service name of the container the line came from (`api`,
-  `engine`, `icecast`, `db`, `kokoro`, `piper`, `admin_ui`, `cloudflared`, `alloy`, ...). Set
+  `engine`, `icecast`, `db`, `kokoro`, `piper`, `admin_ui`, `alloy`, ...). Set
   per-container by `observability/alloy/config.alloy`'s `discovery.relabel` rule, from Docker's
   `com.docker.compose.service` container label — no env var, it's intrinsic to which container
   emitted the line.

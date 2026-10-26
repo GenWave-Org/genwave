@@ -445,14 +445,14 @@ builder.Services.AddHealthChecks();
 // (Proxy:TrustedNetworks, env/compose-only — deferred finding from T04's review, STORY-171/T13;
 // XForwardedProto added at T366 review MED-3). Empty by default: the middleware's own
 // loopback-only KnownNetworks/KnownProxies defaults leave it inert behind a compose-network proxy
-// (e.g. Caddy, PLAN T19's reference topology) until an operator opts in — never trust either
+// (e.g. a TLS-terminating reverse proxy) until an operator opts in — never trust either
 // header from an unlisted source (a spoofed IP would dodge the per-IP spectator limiter,
 // RateLimiterPolicies.Spectator; a spoofed scheme would falsely mark a cookie Secure or, the other
 // direction, falsely withhold it). Without XForwardedProto, Request.IsHttps (and therefore every
 // CookieSecurePolicy.SameAsRequest / Request.IsHttps-conditioned cookie — the admin session cookie,
 // AdminApiServiceCollectionExtensions, and the genwave-listener cookie, SpectatorThumbsController)
-// never sees the edge's real scheme behind cloudflared -> Caddy: Kestrel itself only ever observes
-// the plain-HTTP hop from Caddy, so Secure would never be stamped on the demo box at all.
+// never sees the edge's real scheme behind a TLS-terminating reverse proxy: Kestrel itself only ever
+// observes the plain-HTTP hop from the proxy, so Secure would never be stamped at all.
 var proxyOptions = cfg.GetSection(ProxyOptions.SectionName).Get<ProxyOptions>() ?? new ProxyOptions();
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
@@ -460,9 +460,9 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
     foreach (var cidr in proxyOptions.TrustedNetworks)
         options.KnownIPNetworks.Add(System.Net.IPNetwork.Parse(cidr));
 
-    // gh-#129: the reference public topology is TWO trusted hops (cloudflared → Caddy). The
+    // gh-#129: a deployment can sit behind TWO trusted proxy hops. The
     // middleware's default ForwardLimit=1 stops the XFF walk on the inner proxy's container
-    // address, so every public visitor rate-limits (and logs) as ONE caller — observed live as
+    // address, so every visitor rate-limits (and logs) as ONE caller — observed live as
     // cross-IP 429s on the request line. With any trusted network configured, let the walk run
     // until the first UNTRUSTED address (the real client): trust is enforced by KnownIPNetworks,
     // never by hop-count truncation. No trusted networks ⇒ default limit stays — the middleware

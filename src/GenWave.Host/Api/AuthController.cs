@@ -43,7 +43,7 @@ public sealed class AuthController(
         var configured = adminOptions.Value.Password;
 
         // gh-#74: every login outcome logs who was at the door. RemoteIpAddress is already
-        // XFF-corrected for callers transiting caddy (Proxy:TrustedNetworks, T13); the two CF
+        // XFF-corrected for callers transiting a reverse proxy (Proxy:TrustedNetworks, T13); the two CF
         // headers carry the real client IP and the Access-verified identity when a Cloudflare
         // tunnel fronts the plane — both empty ("-") on LAN paths, which is itself the signal
         // that the caller bypassed Access.
