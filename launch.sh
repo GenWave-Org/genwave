@@ -21,8 +21,8 @@
 #                             ./migrate.sh (fail-fast — a failed migration stops the launch
 #                             and leaves the db up for inspection, gh-#770/STORY-436), full
 #                             up, status.
-#   ./launch.sh --pinned     demo/appliance flow, STAGED (SPEC F136, STORY-343): base +
-#                             compose.pinned.yaml + compose.demo.yaml. Pull the core images
+#   GW_PRESET=home ./launch.sh   home flow, STAGED (SPEC F136, STORY-343): base +
+#                             compose.pinned.yaml. Pull the core images
 #                             (db, icecast, engine, api, +piper when the fallback profile is
 #                             active) -> db up (--no-recreate) + health wait -> migrate.sh ->
 #                             up -d --no-deps the core -> ON AIR -> an unscoped pull (fast
@@ -39,13 +39,14 @@
 #                             absent/stopped db but never touches a running one, so an upgrade
 #                             still restarts nothing before migrations pass. See
 #                             DEPLOYMENT.md's "Starting, upgrading, stopping".
+#                             (`--pinned` is retired: it exits 2 and names this.)
 #   ./launch.sh --with a,b   merge a,b into COMPOSE_PROFILES (env var, else .env's value)
 #                             for this launch's compose invocations.
 #   ./launch.sh --piper-only low-memory/no-kokoro topology (gh-#242): merge
 #                             compose.piper-only.yaml — always LAST, so its kokoro
 #                             removal + depends_on reset win — into whichever file set
-#                             the flow uses (dev; GW_PRESET=home's pinned pair; or
-#                             --pinned's pinned+demo trio). kokoro never runs; every TTS
+#                             the flow uses (dev, or GW_PRESET=home's pinned pair).
+#                             kokoro never runs; every TTS
 #                             render routes to the piper sidecar. Combined with a pinned
 #                             overlay there are no heavyweights to stage behind, so that
 #                             flow stays unstaged (one pull, one up).
@@ -53,8 +54,8 @@
 #                             plus the effective profile set ("plan-profiles> "), then exit
 #                             0. Touches nothing — no docker/compose call is made at all.
 #
-# Presets compose, e.g. the sanctioned demo-box launch:
-#   ./launch.sh --pinned --with logging,tunnel
+# Presets compose, e.g. the home station with logging:
+#   GW_PRESET=home ./launch.sh --with logging
 #
 # Env overrides:
 #   BUILD=1 ./launch.sh      force a rebuild on the way up — dev flow only. BUILD=1 with
@@ -94,27 +95,22 @@ usage() {
   awk 'NR==1{next} /^#/{sub(/^# ?/,""); print; next} {exit}' "$0"
 }
 
-PINNED=0
 PIPER_ONLY=0
 DRY_RUN=0
 WITH=""
 # USE_PINNED_OVERLAY: whether compose.pinned.yaml joins the file set at all (SPEC F136.5).
-# --pinned always implies it (below); GW_PRESET=home*, resolved further down, sets it alone
-# — the wizard's LAN station never wants the demo overlay's Caddy/ollama/public-port
-# lockdown. Kept distinct from PINNED (which alone drives whether compose.demo.yaml joins),
-# since it, not PINNED, is what gates "never builds, pull-first" below.
+# GW_PRESET=home*, resolved further down, sets it. It gates "never builds, pull-first" below.
 USE_PINNED_OVERLAY=0
-# Tracks whether the caller passed an explicit topology flag, independently of PINNED/
-# PIPER_ONLY's final values — GW_PRESET (below, F132.5) is honored ONLY when neither was
+# Tracks whether the caller passed an explicit topology flag, independently of
+# PIPER_ONLY's final value — GW_PRESET (below, F132.5) is honored ONLY when neither was
 # given; an explicit flag always outranks whatever GW_PRESET says.
 TOPOLOGY_FLAG_GIVEN=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --pinned)
-      PINNED=1
-      TOPOLOGY_FLAG_GIVEN=1
-      shift
+      echo "launch.sh: --pinned is retired. Set GW_PRESET=home (or home-piper-only) in .env and run ./launch.sh." >&2
+      exit 2
       ;;
     --piper-only)
       PIPER_ONLY=1
@@ -149,7 +145,7 @@ done
 # --- GW_PRESET resolution (SPEC F132.5, vocabulary v2 SPEC F136.5) -----------------------
 # launch.sh is the ONLY reader of GW_PRESET in the repo: it resolves flags + preset into
 # concrete topology, so nothing else may read the key. Honored ONLY when the caller gave no
-# explicit topology flag at all — an explicit --pinned/--piper-only always wins, even a
+# explicit topology flag at all — an explicit --piper-only always wins, even a
 # lone --piper-only (dev flow) against a GW_PRESET=home in .env. Same effective-value
 # convention as COMPOSE_PROFILES below: process env wins, else the env file's last
 # assignment (GW_ENV_FILE, defaulting to .env — the preflight.sh test seam, mirrored here so
@@ -158,11 +154,8 @@ done
 # second hand-rolled reader — that used to hardcode `.env` here while this comment already
 # claimed GW_ENV_FILE parity, a split-brain a scratch GW_ENV_FILE would silently miss.
 #
-# `home`/`home-piper-only` set USE_PINNED_OVERLAY only — never PINNED, which alone adds
-# compose.demo.yaml (the public appliance stays flag-only, F136.5). The retired v1
-# spellings (`pinned`, `pinned-piper-only` — which used to mean base+demo together) fall
-# through to the `*)` default below and exit loud: a stale pre-split .env must never be
-# silently reinterpreted as either the new `home` shape or the demo shape.
+# The retired v1 spellings (`pinned`, `pinned-piper-only`) fall through to the `*)` default
+# below and exit loud: a stale pre-split .env must never be silently reinterpreted.
 GW_PRESET_VALUES="home, home-piper-only, dev, dev-piper-only"
 
 if [ "$TOPOLOGY_FLAG_GIVEN" = "0" ]; then
@@ -178,37 +171,25 @@ if [ "$TOPOLOGY_FLAG_GIVEN" = "0" ]; then
     *)
       echo "launch.sh: unrecognized GW_PRESET value '${gw_preset}' (from ${gw_preset_env_file})." >&2
       echo "  Valid values: ${GW_PRESET_VALUES}." >&2
-      echo "  Fix GW_PRESET in ${gw_preset_env_file}, or pass an explicit --pinned/--piper-only flag instead." >&2
+      echo "  Fix GW_PRESET in ${gw_preset_env_file}." >&2
       exit 2
       ;;
   esac
 fi
 
-# --pinned always brings the pins overlay along (SPEC F136.5: --pinned = base + pinned +
-# demo, three files).
-[ "$PINNED" = "1" ] && USE_PINNED_OVERLAY=1
-
-# --build never applies to a pinned-overlay flow (it only ever runs pulled images) — reject
+# --build never applies to a home preset (it only ever runs pulled images) — reject
 # the combination up front, before any docker/compose call is made.
 if [ "$USE_PINNED_OVERLAY" = "1" ] && [ "${BUILD:-0}" = "1" ]; then
-  echo "launch.sh: BUILD=1 is incompatible with --pinned/a home* GW_PRESET (neither ever builds)." >&2
+  echo "launch.sh: BUILD=1 does not work with GW_PRESET=home or home-piper-only: they run published images and never build." >&2
   exit 2
 fi
 
-# --- compose file selection: plain dev stack, +compose.pinned.yaml, +compose.demo.yaml ---
-# USE_PINNED_OVERLAY (home* or --pinned) adds the pins overlay; PINNED (only --pinned, or a
-# GW_PRESET that resolved to it — currently nothing does, the public appliance is flag-only)
-# additionally adds the demo topology overlay on top. Order matters: compose.demo.yaml must
-# follow compose.pinned.yaml so DEPLOYMENT.md's documented `-f` order matches what ships.
+# --- compose file selection: plain dev stack, or +compose.pinned.yaml (home* preset) ---
 COMPOSE_ARGS=()
 MIGRATE_ARGS=()
 if [ "$USE_PINNED_OVERLAY" = "1" ]; then
   COMPOSE_ARGS=(-f compose.yaml -f compose.pinned.yaml)
   MIGRATE_ARGS=(-f compose.yaml -f compose.pinned.yaml)
-fi
-if [ "$PINNED" = "1" ]; then
-  COMPOSE_ARGS+=(-f compose.demo.yaml)
-  MIGRATE_ARGS+=(-f compose.demo.yaml)
 fi
 # --piper-only (gh-#242): the no-kokoro overlay merges LAST so its kokoro removal +
 # depends_on reset win whatever came before. `-f` disables compose's auto-discovery, so
@@ -229,14 +210,6 @@ fi
 GW_PREFLIGHT_TOPOLOGY="full"
 [ "$PIPER_ONLY" = "1" ] && GW_PREFLIGHT_TOPOLOGY="piper-only"
 export GW_PREFLIGHT_TOPOLOGY
-
-# 1 iff compose.demo.yaml is actually in this launch's file set — PINNED is that exact
-# predicate (the only place demo.yaml gets added, above); USE_PINNED_OVERLAY alone
-# (GW_PRESET=home*) never sets it (SPEC F134.3a/F136.5: derived from the resolved file set,
-# never hardcoded to a preset name).
-GW_PREFLIGHT_DEMO="0"
-[ "$PINNED" = "1" ] && GW_PREFLIGHT_DEMO="1"
-export GW_PREFLIGHT_DEMO
 
 compose() {
   docker compose "${COMPOSE_ARGS[@]}" "$@"
@@ -379,16 +352,9 @@ UP_ARGS=(-d)
 [ "${BUILD:-0}" = "1" ] && UP_ARGS+=(--build)
 
 # HEAVYWEIGHTS_DESC / EXTRAS_DESC: the stage-2 degradation summary's naming of what MIGHT be
-# stale/missing, recomputed from the resolved file set (PINNED — compose.demo.yaml is or
-# isn't in play) rather than hardcoded — ollama/ollama-init and caddy exist ONLY in
-# compose.demo.yaml, so a GW_PRESET=home degradation report must never claim either of them
-# (SPEC F136.5).
+# stale/missing.
 HEAVYWEIGHTS_DESC="kokoro"
 EXTRAS_DESC="admin_ui, alloy, cloudflared, dockerproxy"
-if [ "$PINNED" = "1" ]; then
-  HEAVYWEIGHTS_DESC="kokoro, ollama"
-  EXTRAS_DESC="caddy, ${EXTRAS_DESC}"
-fi
 
 plan_line() { printf 'plan> %s\n' "$*"; }
 plan_profiles() { printf 'plan-profiles> %s\n' "$EFFECTIVE_PROFILES"; }
@@ -523,17 +489,14 @@ print_pinned_image_tags() {
 
 if [ "$USE_PINNED_OVERLAY" = "1" ]; then
   # --- pinned-overlay flow: pull -> db up -> migrate.sh -> up -d, never builds -----------
-  # Covers BOTH shapes that stack compose.pinned.yaml: --pinned (+ compose.demo.yaml, the
-  # public appliance) and GW_PRESET=home* (the wizard's LAN station, no demo overlay).
+  # Covers GW_PRESET=home* (the wizard's LAN station).
   #
   # Re-run hint carrying the flags this launch was actually given, not a hardcoded
-  # "--pinned" — that used to drop --piper-only/--with, steering the user into a different
-  # topology (gh-#305: kokoro included, on the 4GB box that opted out of it), and would now
-  # also wrongly promote a bare home-preset run to the demo shape. A home-preset run that
+  # string — that used to drop --piper-only/--with, steering the user into a different
+  # topology (gh-#305: kokoro included, on the 4GB box that opted out of it). A home-preset run that
   # took no explicit flags at all re-runs bare ("./launch.sh") and lets GW_PRESET resolve it
   # again next time.
   RELAUNCH="./launch.sh"
-  [ "$PINNED" = "1" ] && RELAUNCH="$RELAUNCH --pinned"
   [ "$PIPER_ONLY" = "1" ] && RELAUNCH="$RELAUNCH --piper-only"
   [ -n "$WITH" ] && RELAUNCH="$RELAUNCH --with $WITH"
 

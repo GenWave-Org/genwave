@@ -149,45 +149,48 @@ public static class FeatureComposePiperOnlyDropsTheLlm
         // bin — ScriptProcess still starts the child from its sanitized environment (gh-#776).
         static readonly string RealPath = Environment.GetEnvironmentVariable("PATH") ?? "/usr/bin:/bin";
 
-        static string DryRunPlan(params string[] args) =>
-            ScriptProcess.Run("launch.sh", RealPath, args: [.. args, "--dry-run"]).StdOut;
-
-        [Fact]
-        public static void The_appliance_flow_records_both_overlay_files()
+        static string DryRunPlan(string? preset, params string[] args)
         {
-            // gh-#309's repro: caddy and ollama survived a bare `docker compose down` because it
-            // loaded compose.yaml alone. SPEC F136.5 (T317): --pinned now stacks THREE files —
-            // compose.pinned.yaml (the GHCR image pins) joined compose.demo.yaml (the public-
-            // appliance topology) as a separate overlay.
-            Assert.Contains(
-                "record COMPOSE_FILE=compose.yaml:compose.pinned.yaml:compose.demo.yaml in .env",
-                DryRunPlan("--pinned"), StringComparison.Ordinal);
+            var envFile = preset is null ? null : Path.Combine(TempDir.CreateForProcessLifetime(), ".env");
+            if (envFile is not null) File.WriteAllText(envFile, $"GW_PRESET={preset}\n");
+            return ScriptProcess.Run("launch.sh", RealPath, envFile, args: [.. args, "--dry-run"]).StdOut;
         }
 
         [Fact]
-        public static void The_piper_only_appliance_flow_records_all_three()
+        public static void The_home_flow_records_the_pins_overlay()
         {
-            // Four, post-F136.5 — see the comment above.
+            // gh-#309's repro: caddy and ollama survived a bare `docker compose down` because it
+            // loaded compose.yaml alone. The home preset stacks compose.pinned.yaml
+            // (the GHCR image pins) on compose.yaml.
             Assert.Contains(
-                "record COMPOSE_FILE=compose.yaml:compose.pinned.yaml:compose.demo.yaml:compose.piper-only.yaml in .env",
-                DryRunPlan("--pinned", "--piper-only"), StringComparison.Ordinal);
+                "record COMPOSE_FILE=compose.yaml:compose.pinned.yaml in .env",
+                DryRunPlan("home"), StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public static void The_piper_only_home_flow_records_all_three()
+        {
+            // Three: base, pins, piper-only.
+            Assert.Contains(
+                "record COMPOSE_FILE=compose.yaml:compose.pinned.yaml:compose.piper-only.yaml in .env",
+                DryRunPlan("home-piper-only"), StringComparison.Ordinal);
         }
 
         [Fact]
         public static void The_dev_flow_records_compose_yaml_explicitly()
         {
-            // Explicitly, not empty: a previous --pinned run's value must be REPLACED, or a plain
-            // ./launch.sh leaves the box's bare commands pointing at the demo pair.
+            // Explicitly, not empty: a previous home-preset run's value must be REPLACED, or a plain
+            // ./launch.sh leaves the box's bare commands pointing at the published-image pair.
             Assert.Contains(
                 "record COMPOSE_FILE=compose.yaml in .env",
-                DryRunPlan(), StringComparison.Ordinal);
+                DryRunPlan(null), StringComparison.Ordinal);
         }
 
         [Fact]
         public static void The_record_step_lands_after_the_up_it_describes()
         {
             // Only a stack that actually came up is this box's state.
-            var plan = DryRunPlan("--pinned");
+            var plan = DryRunPlan("home");
             var lines = plan.Split('\n').Where(l => l.StartsWith("plan> ", StringComparison.Ordinal)).ToArray();
             var up = Array.FindLastIndex(lines, l => l.Contains("up -d", StringComparison.Ordinal));
             var record = Array.FindIndex(lines, l => l.Contains("record COMPOSE_FILE", StringComparison.Ordinal));

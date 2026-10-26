@@ -262,17 +262,21 @@ public static class FeatureComposePiperOnlyOverride
         // bin — ScriptProcess still starts the child from its sanitized environment (gh-#776).
         static readonly string RealPath = Environment.GetEnvironmentVariable("PATH") ?? "/usr/bin:/bin";
 
-        static (int ExitCode, string StdOut, string StdErr) RunLaunch(params string[] args) =>
-            ScriptProcess.Run("launch.sh", RealPath, args: args);
+        static (int ExitCode, string StdOut, string StdErr) RunLaunch(string? preset, params string[] args)
+        {
+            var envFile = preset is null ? null : Path.Combine(TempDir.CreateForProcessLifetime(), ".env");
+            if (envFile is not null) File.WriteAllText(envFile, $"GW_PRESET={preset}\n");
+            return ScriptProcess.Run("launch.sh", RealPath, envFile, args: args);
+        }
 
         static string[] PlanLines(string stdOut) =>
             stdOut.Split('\n').Where(l => l.StartsWith("plan> ", StringComparison.Ordinal)).ToArray();
 
         static readonly Lazy<(int ExitCode, string StdOut, string StdErr)> Dev =
-            new(() => RunLaunch("--piper-only", "--dry-run"));
+            new(() => RunLaunch(null, "--piper-only", "--dry-run"));
 
-        static readonly Lazy<(int ExitCode, string StdOut, string StdErr)> Pinned =
-            new(() => RunLaunch("--pinned", "--piper-only", "--dry-run"));
+        static readonly Lazy<(int ExitCode, string StdOut, string StdErr)> HomePiperOnly =
+            new(() => RunLaunch("home-piper-only", "--dry-run"));
 
         [Fact]
         public static void Dev_flow_merges_the_overlay_into_every_compose_command()
@@ -291,19 +295,19 @@ public static class FeatureComposePiperOnlyOverride
         }
 
         [Fact]
-        public static void Pinned_flow_merges_the_overlay_after_the_demo_overlay()
+        public static void Home_flow_merges_the_overlay_after_the_pins_overlay()
         {
-            // LAST wins the merge — the overlay must follow compose.demo.yaml on every command.
-            Assert.Equal(0, Pinned.Value.ExitCode);
-            var composeLines = PlanLines(Pinned.Value.StdOut)
+            // LAST wins the merge — the overlay must follow compose.pinned.yaml on every command.
+            Assert.Equal(0, HomePiperOnly.Value.ExitCode);
+            var composeLines = PlanLines(HomePiperOnly.Value.StdOut)
                 .Where(l => l.Contains("compose", StringComparison.Ordinal)).ToArray();
             Assert.NotEmpty(composeLines);
             Assert.All(composeLines, l =>
             {
-                var demoAt = l.IndexOf("compose.demo.yaml", StringComparison.Ordinal);
+                var pinsAt = l.IndexOf("compose.pinned.yaml", StringComparison.Ordinal);
                 var piperOnlyAt = l.IndexOf(OverlayFile, StringComparison.Ordinal);
-                Assert.True(demoAt >= 0 && piperOnlyAt > demoAt,
-                    $"expected {OverlayFile} after compose.demo.yaml in: {l}");
+                Assert.True(pinsAt >= 0 && piperOnlyAt > pinsAt,
+                    $"expected {OverlayFile} after compose.pinned.yaml in: {l}");
             });
         }
 
@@ -311,8 +315,8 @@ public static class FeatureComposePiperOnlyOverride
         public static void Plain_flows_never_mention_the_overlay()
         {
             // The default experience stays byte-identical: no --piper-only, no overlay file.
-            var dev = RunLaunch("--dry-run");
-            var pinned = RunLaunch("--pinned", "--dry-run");
+            var dev = RunLaunch(null, "--dry-run");
+            var pinned = RunLaunch("home", "--dry-run");
             Assert.DoesNotContain(PlanLines(dev.StdOut), l => l.Contains(OverlayFile, StringComparison.Ordinal));
             Assert.DoesNotContain(PlanLines(pinned.StdOut), l => l.Contains(OverlayFile, StringComparison.Ordinal));
         }

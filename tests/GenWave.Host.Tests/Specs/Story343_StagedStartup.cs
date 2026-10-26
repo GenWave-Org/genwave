@@ -125,7 +125,7 @@ public static class FeatureStagedStartup
     public sealed class ScenarioStagedDryRunPlansCoreBeforeHeavyweights
     {
         static readonly Lazy<(int ExitCode, string StdOut, string StdErr)> Run =
-            new(() => RunLaunch(null, "--pinned", "--dry-run"));
+            new(() => RunLaunch(WriteEnvFile("GW_PRESET=home"), "--dry-run"));
 
         static string[] Lines => PlanLines(Run.Value.StdOut);
 
@@ -207,7 +207,7 @@ public static class FeatureStagedStartup
     // ---------------------------------------------------------------------
 
     [Trait("Category", "Integration")]
-    public sealed class ScenarioPiperOnlyPinnedPlanStaysUnstaged
+    public sealed class ScenarioPiperOnlyHomePlanStaysUnstaged
     {
         // compose.piper-only.yaml profile-gates kokoro/ollama/ollama-init off unconditionally,
         // so this topology has nothing to stage behind — it must plan the exact pre-F136
@@ -215,7 +215,7 @@ public static class FeatureStagedStartup
         // unconditional `--no-deps` on the real invocation (F136 review finding F1) that this
         // dry-run plan never exercised — this scenario is the one that must go red against it.
         static readonly Lazy<(int ExitCode, string StdOut, string StdErr)> Run =
-            new(() => RunLaunch(null, "--pinned", "--piper-only", "--dry-run"));
+            new(() => RunLaunch(WriteEnvFile("GW_PRESET=home-piper-only"), "--dry-run"));
 
         static string[] Lines => PlanLines(Run.Value.StdOut);
 
@@ -296,7 +296,7 @@ public static class FeatureStagedStartup
     {
         // GW_ENV_FILE seam carries GW_PRESET=home; ./launch.sh --dry-run with no topology
         // flags plans base + compose.pinned.yaml — the wizard's LAN station — WITHOUT
-        // compose.demo.yaml (SPEC F136.5: the public appliance stays flag-only, --pinned).
+        // compose.demo.yaml (SPEC F136.5).
         static readonly Lazy<(int ExitCode, string StdOut, string StdErr)> Run =
             new(() => RunLaunch(WriteEnvFile("GW_PRESET=home"), "--dry-run"));
 
@@ -319,10 +319,10 @@ public static class FeatureStagedStartup
     [Trait("Category", "Integration")]
     public sealed class ScenarioExplicitFlagOverridesGwPreset
     {
-        // GW_PRESET=dev in the env file, but an explicit --pinned flag is given — the flag
-        // wins, so the plan shows the pinned+demo overlay shape, not the dev flow.
+        // GW_PRESET=home in the env file, but an explicit --piper-only flag is given — the
+        // flag wins, so the plan shows the dev piper-only shape, not the pinned home flow.
         static readonly Lazy<(int ExitCode, string StdOut, string StdErr)> Run =
-            new(() => RunLaunch(WriteEnvFile("GW_PRESET=dev"), "--pinned", "--dry-run"));
+            new(() => RunLaunch(WriteEnvFile("GW_PRESET=home"), "--piper-only", "--dry-run"));
 
         [Fact]
         public void ExitsZero()
@@ -332,9 +332,11 @@ public static class FeatureStagedStartup
         }
 
         [Fact]
-        public void PlansThePinnedDemoOverlayShapeNotTheDevFlow()
+        public void PlansThePiperOnlyDevShapeNotTheHomeFlow()
         {
-            Assert.Contains(PlanLines(Run.Value.StdOut), l => l.Contains("compose.demo.yaml", StringComparison.Ordinal));
+            var lines = PlanLines(Run.Value.StdOut);
+            Assert.Contains(lines, l => l.Contains("compose.piper-only.yaml", StringComparison.Ordinal));
+            Assert.DoesNotContain(lines, l => l.Contains("compose.pinned.yaml", StringComparison.Ordinal));
         }
     }
 

@@ -34,7 +34,7 @@ The wizard writes one layout fact into `.env`, `GW_PRESET`. `launch.sh` is its o
 | `home-piper-only` | + `compose.piper-only.yaml` | The 4 GB layout: Piper speaks, Kokoro is off |
 | `dev` / `dev-piper-only` | `compose.yaml` (+ piper-only) | Build from source |
 
-Any explicit topology flag (`--pinned`, `--piper-only`) makes `launch.sh` ignore the preset. Use `GW_PRESET` and don't pass `--pinned`: it is not the home path. An unknown value exits `2` rather than guessing.
+Any explicit topology flag (`--piper-only`) makes `launch.sh` ignore the preset, and `--pinned` is retired: set `GW_PRESET=home` and run plain `./launch.sh`. An unknown value exits `2` rather than guessing.
 
 **Existing box.** Running `./setup.sh` where a `.env` already exists never writes anything. It checks the install against the machine (secrets present, migrations applied, orphaned containers, stale images, disk) and prints a drift report. Exit `0` means no drift, `5` means drift was found. `./setup.sh --repair` walks each fixable finding, prints the exact command, warns if it will restart a container, and asks y/N. Add `--yes` to accept all of them. Findings with no safe fix (a missing `.env` key, stale image ages) stay report-only.
 

@@ -5,7 +5,7 @@
 // Contract these specs pin: launch.sh gains a `--dry-run` flag that prints the exact
 // compose command plan (one command per line, prefixed "plan> ") and exits 0 without
 // touching Docker — so every preset is assertable with no daemon, no teardown, no
-// stack. The sad path (BUILD=1 + --pinned) must error before any docker invocation,
+// stack. The sad path (BUILD=1 under GW_PRESET=home) must error before any docker invocation,
 // dry-run or not. No spec here needs the docker CLI; none carry Category=Integration.
 
 using GenWave.Host.Tests.Support;
@@ -21,6 +21,14 @@ public static class FeatureLaunchScriptPresets
     static (int ExitCode, string StdOut, string StdErr) RunLaunch(
         IReadOnlyDictionary<string, string>? extraEnv, params string[] args) =>
         ScriptProcess.Run("launch.sh", RealPath, extraEnv: extraEnv, args: args);
+
+    static (int ExitCode, string StdOut, string StdErr) RunLaunchUnderHome(
+        IReadOnlyDictionary<string, string>? extraEnv, params string[] args)
+    {
+        var envFile = Path.Combine(TempDir.CreateForProcessLifetime(), ".env");
+        File.WriteAllText(envFile, "GW_PRESET=home\n");
+        return ScriptProcess.Run("launch.sh", RealPath, envFile, extraEnv, args);
+    }
 
     static string[] PlanLines(string stdOut) =>
         stdOut.Split('\n').Where(l => l.StartsWith("plan> ", StringComparison.Ordinal)).ToArray();
@@ -65,10 +73,10 @@ public static class FeatureLaunchScriptPresets
         }
     }
 
-    public static class ScenarioPinnedFlowPlan
+    public static class ScenarioHomePresetFlowPlan
     {
         static readonly Lazy<(int ExitCode, string StdOut, string StdErr)> Run =
-            new(() => RunLaunch(null, "--pinned", "--dry-run"));
+            new(() => RunLaunchUnderHome(null, "--dry-run"));
 
         [Fact]
         public static void Plan_pulls_published_images()
@@ -77,18 +85,18 @@ public static class FeatureLaunchScriptPresets
         }
 
         [Fact]
-        public static void Plan_uses_the_demo_overlay_throughout()
+        public static void Plan_uses_the_pins_overlay_throughout()
         {
             Assert.All(
                 PlanLines(Run.Value.StdOut).Where(l => l.Contains("compose", StringComparison.Ordinal)),
-                l => Assert.Contains("compose.demo.yaml", l, StringComparison.Ordinal));
+                l => Assert.Contains("compose.pinned.yaml", l, StringComparison.Ordinal));
         }
 
         [Fact]
         public static void Plan_runs_migrate_with_the_overlay_flags()
         {
             Assert.Contains(PlanLines(Run.Value.StdOut), l =>
-                l.Contains("migrate.sh", StringComparison.Ordinal) && l.Contains("compose.demo.yaml", StringComparison.Ordinal));
+                l.Contains("migrate.sh", StringComparison.Ordinal) && l.Contains("compose.pinned.yaml", StringComparison.Ordinal));
         }
 
         [Fact]
@@ -132,27 +140,26 @@ public static class FeatureLaunchScriptPresets
     public static class ScenarioPresetsCompose
     {
         static readonly Lazy<(int ExitCode, string StdOut, string StdErr)> Run =
-            new(() => RunLaunch(null, "--pinned", "--with", "logging,tunnel", "--dry-run"));
+            new(() => RunLaunchUnderHome(null, "--with", "logging", "--dry-run"));
 
         [Fact]
-        public static void The_sanctioned_demo_launch_uses_the_overlay()
+        public static void The_home_launch_uses_the_pins_overlay()
         {
-            Assert.Contains(PlanLines(Run.Value.StdOut), l => l.Contains("compose.demo.yaml", StringComparison.Ordinal));
+            Assert.Contains(PlanLines(Run.Value.StdOut), l => l.Contains("compose.pinned.yaml", StringComparison.Ordinal));
         }
 
         [Fact]
-        public static void The_sanctioned_demo_launch_activates_both_profiles()
+        public static void The_home_launch_activates_the_logging_profile()
         {
             var profiles = Run.Value.StdOut.Split('\n').FirstOrDefault(l => l.StartsWith("plan-profiles> ", StringComparison.Ordinal)) ?? "";
-            Assert.True(profiles.Contains("logging", StringComparison.Ordinal) && profiles.Contains("tunnel", StringComparison.Ordinal),
-                $"expected logging+tunnel in: {profiles}");
+            Assert.Contains("logging", profiles, StringComparison.Ordinal);
         }
     }
 
-    public static class SadPathBuildUnderPinned
+    public static class SadPathBuildUnderHome
     {
         static readonly Lazy<(int ExitCode, string StdOut, string StdErr)> Run =
-            new(() => RunLaunch(new Dictionary<string, string> { ["BUILD"] = "1" }, "--pinned"));
+            new(() => RunLaunchUnderHome(new Dictionary<string, string> { ["BUILD"] = "1" }));
 
         [Fact]
         public static void Exits_non_zero_before_touching_the_stack()
@@ -163,7 +170,7 @@ public static class FeatureLaunchScriptPresets
         [Fact]
         public static void Names_the_conflict()
         {
-            Assert.Contains("--pinned", Run.Value.StdOut + Run.Value.StdErr, StringComparison.Ordinal);
+            Assert.Contains("GW_PRESET", Run.Value.StdOut + Run.Value.StdErr, StringComparison.Ordinal);
         }
     }
 }
