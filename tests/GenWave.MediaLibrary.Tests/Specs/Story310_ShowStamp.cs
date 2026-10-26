@@ -108,7 +108,7 @@ public static class FeatureShowStamp
             const long showId = 501;
 
             // When a kinded (tts) airing writes its track-started row — SegmentKind.StationId, the
-            // demo-hour gate's own F121.2(b) evidence...
+            // hour-mix gate's own F121.2(b) evidence...
             await DriveThroughAsync(db, showId, AKindedAiring());
 
             // Then show_id carries the snapshot's show.

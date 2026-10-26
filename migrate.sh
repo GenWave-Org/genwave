@@ -2,8 +2,8 @@
 # migrate.sh — apply the idempotent db/*-migration.sh scripts to a RUNNING db service.
 #
 # Extracted from launch.sh's migration loop (which now delegates here — see below) so a
-# box that only ever runs pulled GHCR images under compose.yaml + compose.demo.yaml (the
-# demo/appliance topology; see DEPLOYMENT.md) has a sanctioned way to pick up new
+# box that only ever runs pulled GHCR images under compose.yaml + compose.pinned.yaml (the
+# home preset; see DEPLOYMENT.md) has a sanctioned way to pick up new
 # migrations WITHOUT launch.sh's dev-stack assumptions (source build, teardown, full
 # relaunch). This script only ever talks to an already-running db service — it never
 # brings anything up or down.
@@ -24,8 +24,8 @@
 #                         compose.yaml in this directory. This is the dev-stack case;
 #                         it's what launch.sh's delegated call below relies on.
 #
-#   Demo/appliance box (compose.yaml + compose.demo.yaml, per DEPLOYMENT.md):
-#     ./migrate.sh -f compose.yaml -f compose.demo.yaml
+#   Home box (compose.yaml + compose.pinned.yaml, per DEPLOYMENT.md):
+#     ./migrate.sh -f compose.yaml -f compose.pinned.yaml
 #
 #   --dry-run     List which db/*-migration.sh scripts would run, sorted, and exit 0.
 #                 Pure local glob — touches no docker/compose state, so it works even
@@ -164,7 +164,7 @@ fi
 # gh-#618); this only matters on a box upgrading from before F211, where migrate.sh has
 # never created it yet. No dynamic data here, so no bind variables are needed. Relies on db/06
 # having already created the station_svc role and the station schema itself (the SET ROLE below
-# would fail otherwise) — true on every public box: db/06 runs as a Postgres init script on every
+# would fail otherwise) — true on every box: db/06 runs as a Postgres init script on every
 # fresh install, and this script only ever runs against an already-initialized (db/01+db/06, at
 # minimum) box in the first place.
 ensure_schema_journal() {

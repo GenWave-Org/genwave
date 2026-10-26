@@ -1,7 +1,7 @@
 # =============================================================================
 # compose.pinned.yaml — the GHCR image-pin overlay (SPEC F136.5).
 #
-#   docker compose -f compose.yaml -f compose.pinned.yaml [-f compose.demo.yaml] up -d
+#   docker compose -f compose.yaml -f compose.pinned.yaml up -d
 #
 # What it is: ONLY the pin mechanics for the five repo-built services — image: tag +
 # pull_policy: always, plus `build: !reset null` wherever the base service's `build:`
@@ -11,15 +11,13 @@
 # two releases, gh-#93).
 #
 # What it deliberately is NOT: no topology lives here — no ports, no environment, no
-# Caddy, no ollama, no admin gating. `compose.demo.yaml` owns the public-appliance
-# topology and stacks on top of this file (SPEC F136.5); `GW_PRESET=home` (launch.sh)
-# stacks base + this file alone for the wizard's LAN station — published ports, admin per
-# COMPOSE_PROFILES, no PUBLIC_HOST required.
+# admin gating. `GW_PRESET=home` (launch.sh) stacks base + this file for the wizard's LAN
+# station — published ports, admin per COMPOSE_PROFILES.
 #
 # Release pin-bumps edit THIS file only — bump all five tags together per release.
-# Deliberately carries NO zero-diff hash epoch: unlike compose.yaml/compose.demo.yaml
-# (the T85/T93 ritual re-pins those only when their CONTENT changes), this file's pins
-# change every release by design.
+# Deliberately carries NO zero-diff hash epoch: unlike compose.yaml (the T85/T93 ritual
+# re-pins that only when its CONTENT changes), this file's pins change every release by
+# design.
 # =============================================================================
 
 services:

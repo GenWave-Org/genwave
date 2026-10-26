@@ -974,13 +974,12 @@ public static class FeatureSetupLaunchClockHandoff
         [Fact]
         public void TheSetupRerunLineDoesNotOverclaimVerification()
         {
-            // T318 review LOW finding F5: "re-run any time to verify this install" promised a
-            // guided verify that setup_adoption_mode does not deliver on this branch (it is
-            // STORY-346's stub) — the line must be worded for what it actually does today and
-            // point at where the real thing lands.
+            // The old "re-run any time to verify this install" wording promised more than the
+            // line delivers; the line now says what a re-run does (read-only verify) and names
+            // the flag that fixes things.
             Assert.True(
                 !Run.Value.StdOut.Contains("re-run any time to verify this install", StringComparison.Ordinal) &&
-                Run.Value.StdOut.Contains("STORY-346", StringComparison.Ordinal),
+                Run.Value.StdOut.Contains("add --repair to fix", StringComparison.Ordinal),
                 $"expected the re-run line to be worded truthfully for this slice; stdout:\n{Run.Value.StdOut}");
         }
 
@@ -1163,28 +1162,11 @@ public static class FeatureSetupLaunchClockHandoff
         }
 
         [Fact]
-        public void TheDegradedBannerNeverNamesOllamaOrCaddy()
-        {
-            // T318 review BLOCKING finding F3 (+F11 parity): this wizard never stacks
-            // compose.demo.yaml (GW_PREFLIGHT_DEMO_VALUE is hardcoded "0" in
-            // resolve_preset_and_topology) — ollama and caddy exist only there, so a
-            // wizard-driven catch-up banner must never name either, on ANY preset. Scoped to the
-            // post-on-air section — Q3's own topology menu text mentions "kokoro", which is not
-            // this fact's concern.
-            var postOnAir = PostOnAirSection(Run.Value.StdOut);
-
-            Assert.True(
-                !postOnAir.Contains("ollama", StringComparison.Ordinal) &&
-                !postOnAir.Contains("caddy", StringComparison.Ordinal),
-                $"expected the DEGRADED banner to never name ollama/caddy; stdout:\n{Run.Value.StdOut}");
-        }
-
-        [Fact]
         public void TheDegradedBannerNamesOnlyPiperWhenTheAdminUiIsDeclinedOnAPiperOnlyPreset()
         {
             // A piper-only preset has no kokoro to catch up on at all (F3) — declining the
             // Admin UI too leaves nothing wizard-composed left to name. Scoped to the
-            // post-on-air section for the same reason as TheDegradedBannerNeverNamesOllamaOrCaddy.
+            // post-on-air section because Q3's own menu text mentions kokoro.
             var (_, stdOut) = RunDegraded(topologyAnswer: "2", adminAnswer: "n");
             var postOnAir = PostOnAirSection(stdOut);
 
@@ -1213,7 +1195,7 @@ public static class FeatureSetupLaunchClockHandoff
 
         // -------------------------------------------------------------------
         // N3 (round-3 review): heavyweights_desc/extras_desc were pinned only by NEGATIVE
-        // "never ollama/caddy" assertions above — these facts pin the exact POSITIVE joined
+        // "never names a retired service" assertions above — these facts pin the exact POSITIVE joined
         // string setup.sh derives per preset x admin combination, so any drift in that mapping
         // (vs. launch.sh's own HEAVYWEIGHTS_DESC/EXTRAS_DESC, which this script may not edit)
         // fails a fact here instead of drifting silently.

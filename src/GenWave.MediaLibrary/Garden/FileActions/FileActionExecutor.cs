@@ -205,7 +205,7 @@ sealed class FileActionExecutor(
     /// T380 review R2-3's own ruling: off Linux, an INCONCLUSIVE stat SKIPS the check (proceeds) —
     /// there is no real cross-device risk this codebase's own dev-workstation posture needs to
     /// enforce, and <see cref="IFileSystemProbe.TryGetDeviceId"/> always reports "unknown" there
-    /// anyway. On Linux (the appliance's own deploy target, ARCHITECTURE.md), an inconclusive stat
+    /// anyway. On Linux (the station's own deploy target, ARCHITECTURE.md), an inconclusive stat
     /// REFUSES instead — a stat that SHOULD have worked and didn't is itself a signal something is
     /// wrong, never a reason to silently risk a non-atomic move. Both "proved different" and "could
     /// not prove same" report the SAME <see cref="FileActionRule.CrossDevice"/> — see that member's

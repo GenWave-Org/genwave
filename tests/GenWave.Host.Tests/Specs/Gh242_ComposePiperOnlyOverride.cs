@@ -8,7 +8,7 @@
 // overlay removes kokoro and resets api's depends_on to db + piper (gh-#879/F213.1, PLAN T598: the
 // api no longer depends_on the engine on any topology; gh-#888: api still waits, required: false,
 // on piper — the topology's PRIMARY engine — so the first-boot safe-loop render has Piper's
-// model-load window before it tries); the overlay stacks cleanly on compose.demo.yaml; and
+// model-load window before it tries); and
 // launch.sh --piper-only merges the overlay file LAST in both flows.
 //
 // ⚠️ SUPERSEDED IN PART 2026-08-14 (PLAN T148, SPEC F99.2–F99.4, STORY-257) and 2026-09-29
@@ -45,12 +45,11 @@ public static class FeatureComposePiperOnlyOverride
 
     // Render + depends_on-names plumbing lives in Support.ComposeConfigRender (PLAN T598 review) —
     // shared with Story487, which needs the same `docker compose config` idiom.
-    static JsonDocument RenderConfig(bool demoOverlay, bool piperOnlyOverlay)
+    static JsonDocument RenderConfig(bool piperOnlyOverlay)
     {
         var overlays = new List<string>();
-        if (demoOverlay) overlays.Add("compose.demo.yaml");
         // The overlay always merges LAST — the same ordering launch.sh --piper-only produces —
-        // so its kokoro removal + depends_on reset win over anything the demo overlay merged.
+        // so its kokoro removal + depends_on reset win over anything merged before it.
         if (piperOnlyOverlay) overlays.Add(OverlayFile);
         return ComposeConfigRender.Render([.. overlays]);
     }
@@ -60,7 +59,7 @@ public static class FeatureComposePiperOnlyOverride
 
     public static class ScenarioDefaultExperienceUnchanged
     {
-        static readonly Lazy<JsonDocument> Base = new(() => RenderConfig(demoOverlay: false, piperOnlyOverlay: false));
+        static readonly Lazy<JsonDocument> Base = new(() => RenderConfig(piperOnlyOverlay: false));
 
         [Fact]
         [Trait("Category", "Integration")]
@@ -108,7 +107,7 @@ public static class FeatureComposePiperOnlyOverride
 
     public static class ScenarioPiperOnlyRender
     {
-        static readonly Lazy<JsonDocument> BasePiperOnly = new(() => RenderConfig(demoOverlay: false, piperOnlyOverlay: true));
+        static readonly Lazy<JsonDocument> BasePiperOnly = new(() => RenderConfig(piperOnlyOverlay: true));
 
         [Fact]
         [Trait("Category", "Integration")]
@@ -116,7 +115,7 @@ public static class FeatureComposePiperOnlyOverride
         {
             // The overlay's profile assignment ("disabled-by-piper-only", activated by nothing)
             // removes the service from config/up/pull on the default profile set. voice-seed
-            // travels with kokoro (same rule as the ollama/ollama-init pair in Gh310): nothing on
+            // travels with kokoro (a sidecar goes wherever its parent service goes): nothing on
             // this topology ever reads the `voices` volume, so a Pi-class box has no reason to
             // pull kokoro-fastapi's ~3.6GiB image just to seed it. api's own depends_on reset
             // above already drops the (required: false) reference, so the merged render stays
@@ -204,75 +203,27 @@ public static class FeatureComposePiperOnlyOverride
         }
     }
 
-    public static class ScenarioPiperOnlyStacksOnTheDemoOverlay
-    {
-        static readonly Lazy<JsonDocument> DemoPiperOnly = new(() => RenderConfig(demoOverlay: true, piperOnlyOverlay: true));
-
-        [Fact]
-        [Trait("Category", "Integration")]
-        public static void Kokoro_is_absent_after_the_demo_merge()
-        {
-            Assert.False(DemoPiperOnly.Value.RootElement.GetProperty("services").TryGetProperty("kokoro", out _));
-        }
-
-        [Fact]
-        [Trait("Category", "Integration")]
-        public static void The_depends_on_reset_holds_after_the_demo_merge()
-        {
-            // gh-#888: the piper-only overlay's db + piper depends_on reset survives the demo
-            // overlay's own merge (compose.demo.yaml never touches api's depends_on for either
-            // key) the same way the kokoro-absence pin does.
-            Assert.Equal(new[] { "db", "piper" }, DependsOnNames(DemoPiperOnly.Value, "api"));
-        }
-
-        [Fact]
-        [Trait("Category", "Integration")]
-        public static void Piper_dependency_stays_not_required_after_the_demo_merge()
-        {
-            // gh-#888: compose.demo.yaml never touches api's depends_on, so the piper-only
-            // overlay's `required: false` posture survives the demo merge untouched. See
-            // compose.piper-only.yaml's api depends_on block for the full rationale.
-            var dependsOn = DemoPiperOnly.Value.RootElement.GetProperty("services").GetProperty("api").GetProperty("depends_on");
-            Assert.False(dependsOn.GetProperty("piper").GetProperty("required").GetBoolean());
-        }
-
-        [Fact]
-        [Trait("Category", "Integration")]
-        public static void The_demo_topology_itself_is_untouched()
-        {
-            // caddy still exists and the piper-primary seed merged into the demo api env
-            // alongside (mapping-key merge) rather than replacing it.
-            //
-            // ollama used to be asserted present HERE, as part of "untouched". gh-#310 is exactly
-            // the finding that it should never have been: this overlay's whole reason for existing
-            // is that a 4GB box cannot afford kokoro's ~1.2GiB, and it was shipping an
-            // always-resident llama3.2:3b twice that size underneath. The LLM pair's absence is
-            // now pinned by FeatureComposePiperOnlyDropsTheLlm (gh-#310).
-            var services = DemoPiperOnly.Value.RootElement.GetProperty("services");
-            Assert.True(services.TryGetProperty("caddy", out _));
-            var env = services.GetProperty("api").GetProperty("environment");
-            Assert.Equal("http://piper:5000", env.GetProperty("Tts__PiperPrimaryEndpoint").GetString());
-            Assert.Equal("false", env.GetProperty("Admin__Enabled").GetString());
-        }
-    }
-
     public static class ScenarioLaunchScriptFlag
     {
         // --dry-run only, driving the real toolchain on the developer's own PATH, not a scratch
         // bin — ScriptProcess still starts the child from its sanitized environment (gh-#776).
         static readonly string RealPath = Environment.GetEnvironmentVariable("PATH") ?? "/usr/bin:/bin";
 
-        static (int ExitCode, string StdOut, string StdErr) RunLaunch(params string[] args) =>
-            ScriptProcess.Run("launch.sh", RealPath, args: args);
+        static (int ExitCode, string StdOut, string StdErr) RunLaunch(string? preset, params string[] args)
+        {
+            var envFile = preset is null ? null : Path.Combine(TempDir.CreateForProcessLifetime(), ".env");
+            if (envFile is not null) File.WriteAllText(envFile, $"GW_PRESET={preset}\n");
+            return ScriptProcess.Run("launch.sh", RealPath, envFile, args: args);
+        }
 
         static string[] PlanLines(string stdOut) =>
             stdOut.Split('\n').Where(l => l.StartsWith("plan> ", StringComparison.Ordinal)).ToArray();
 
         static readonly Lazy<(int ExitCode, string StdOut, string StdErr)> Dev =
-            new(() => RunLaunch("--piper-only", "--dry-run"));
+            new(() => RunLaunch(null, "--piper-only", "--dry-run"));
 
-        static readonly Lazy<(int ExitCode, string StdOut, string StdErr)> Pinned =
-            new(() => RunLaunch("--pinned", "--piper-only", "--dry-run"));
+        static readonly Lazy<(int ExitCode, string StdOut, string StdErr)> HomePiperOnly =
+            new(() => RunLaunch("home-piper-only", "--dry-run"));
 
         [Fact]
         public static void Dev_flow_merges_the_overlay_into_every_compose_command()
@@ -291,19 +242,19 @@ public static class FeatureComposePiperOnlyOverride
         }
 
         [Fact]
-        public static void Pinned_flow_merges_the_overlay_after_the_demo_overlay()
+        public static void Home_flow_merges_the_overlay_after_the_pins_overlay()
         {
-            // LAST wins the merge — the overlay must follow compose.demo.yaml on every command.
-            Assert.Equal(0, Pinned.Value.ExitCode);
-            var composeLines = PlanLines(Pinned.Value.StdOut)
+            // LAST wins the merge — the overlay must follow compose.pinned.yaml on every command.
+            Assert.Equal(0, HomePiperOnly.Value.ExitCode);
+            var composeLines = PlanLines(HomePiperOnly.Value.StdOut)
                 .Where(l => l.Contains("compose", StringComparison.Ordinal)).ToArray();
             Assert.NotEmpty(composeLines);
             Assert.All(composeLines, l =>
             {
-                var demoAt = l.IndexOf("compose.demo.yaml", StringComparison.Ordinal);
+                var pinsAt = l.IndexOf("compose.pinned.yaml", StringComparison.Ordinal);
                 var piperOnlyAt = l.IndexOf(OverlayFile, StringComparison.Ordinal);
-                Assert.True(demoAt >= 0 && piperOnlyAt > demoAt,
-                    $"expected {OverlayFile} after compose.demo.yaml in: {l}");
+                Assert.True(pinsAt >= 0 && piperOnlyAt > pinsAt,
+                    $"expected {OverlayFile} after compose.pinned.yaml in: {l}");
             });
         }
 
@@ -311,8 +262,8 @@ public static class FeatureComposePiperOnlyOverride
         public static void Plain_flows_never_mention_the_overlay()
         {
             // The default experience stays byte-identical: no --piper-only, no overlay file.
-            var dev = RunLaunch("--dry-run");
-            var pinned = RunLaunch("--pinned", "--dry-run");
+            var dev = RunLaunch(null, "--dry-run");
+            var pinned = RunLaunch("home", "--dry-run");
             Assert.DoesNotContain(PlanLines(dev.StdOut), l => l.Contains(OverlayFile, StringComparison.Ordinal));
             Assert.DoesNotContain(PlanLines(pinned.StdOut), l => l.Contains(OverlayFile, StringComparison.Ordinal));
         }

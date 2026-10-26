@@ -20,9 +20,11 @@ public static class FeaturePinnedFlowPrunesSupersededImages
     // scratch bin — ScriptProcess still starts the child from its sanitized environment (gh-#776).
     static readonly string RealPath = Environment.GetEnvironmentVariable("PATH") ?? "/usr/bin:/bin";
 
-    static (int ExitCode, string StdOut) RunLaunch(params string[] args)
+    static (int ExitCode, string StdOut) RunLaunch(string? preset, params string[] args)
     {
-        var result = ScriptProcess.Run("launch.sh", RealPath, args: args);
+        var envFile = preset is null ? null : Path.Combine(TempDir.CreateForProcessLifetime(), ".env");
+        if (envFile is not null) File.WriteAllText(envFile, $"GW_PRESET={preset}\n");
+        var result = ScriptProcess.Run("launch.sh", RealPath, envFile, args: args);
         return (result.ExitCode, result.StdOut);
     }
 
@@ -32,7 +34,7 @@ public static class FeaturePinnedFlowPrunesSupersededImages
     public static class ScenarioPinnedFlowPrunes
     {
         static readonly Lazy<(int ExitCode, string StdOut)> Run =
-            new(() => RunLaunch("--pinned", "--dry-run"));
+            new(() => RunLaunch("home", "--dry-run"));
 
         [Fact]
         public static void Plan_prunes_images_with_the_retention_filter()
@@ -47,7 +49,7 @@ public static class FeaturePinnedFlowPrunesSupersededImages
         [Fact]
         public static void Plan_prunes_the_builder_cache()
         {
-            // A --pinned box never builds (BUILD=1 + --pinned errors at parse time); its build
+            // A home-preset box never builds (BUILD=1 + GW_PRESET=home errors at parse time); its build
             // cache is pure waste.
             Assert.Contains(
                 PlanLines(Run.Value.StdOut),
@@ -79,7 +81,7 @@ public static class FeaturePinnedFlowPrunesSupersededImages
         {
             // The dev flow builds from source — pruning there would eat build layers and
             // dangling intermediates a developer is actively using.
-            var run = RunLaunch("--dry-run");
+            var run = RunLaunch(null, "--dry-run");
             Assert.DoesNotContain(
                 PlanLines(run.StdOut),
                 l => l.Contains("prune", StringComparison.Ordinal));

@@ -8,7 +8,7 @@
 // ONE named, dated, reasoned exception (PLAN T351, SPEC F145.6, STORY-366): `GET
 // /api/announcements/now-playing` deliberately does NOT vanish under the kill switch — it is the
 // one announcements-family route the token door answers on regardless of Admin:Enabled, so the
-// F147.3 home-automation sensor keeps working on the appliance topology. See
+// F147.3 home-automation sensor keeps working with the admin plane off. See
 // AnnouncementNowPlayingController's own remarks for why it carries no AdminSurfaceAttribute.
 // EveryApiRouteReturns404IncludingLogin below excludes exactly this one (verb, path) pair from the
 // blanket assertion, then positively asserts it — the SAME "narrow, named exemption, not a silent
@@ -148,7 +148,7 @@ public static class FeatureAdminKillSwitch
         [Theory]
         [InlineData(true, false)]  // Operator
         [InlineData(true, true)]   // Standard
-        [InlineData(false, true)]  // Appliance
+        [InlineData(false, true)]  // Admin off, spectator on
         [InlineData(false, false)] // Headless
         public async Task StartupCompletesWithoutError(bool adminEnabled, bool spectatorMode)
         {

@@ -4,9 +4,9 @@
 #
 #   docker compose -f compose.yaml -f compose.piper-only.yaml up -d
 #   ./launch.sh --piper-only              # dev flow
-#   ./launch.sh --pinned --piper-only     # appliance flow (this file merged LAST)
+#   GW_PRESET=home-piper-only ./launch.sh   # published-image flow, set in .env (this file merged LAST)
 #
-# What it does on top of compose.yaml (and, when stacked, compose.demo.yaml):
+# What it does on top of compose.yaml (and, when stacked, compose.pinned.yaml):
 #   * removes the kokoro service — its ~1.2GiB fresh baseline is the single biggest
 #     resident in the stack, and a 4GB box (Raspberry Pi 4, small VPS) can't afford it
 #   * drops api's hard `depends_on: kokoro: service_healthy` and instead makes it wait
@@ -33,12 +33,11 @@
 # this repo's v2.24+ floor (DEPLOYMENT.md/HARDWARE.md). Assigning a profile that
 # nothing ever activates uses plain, documented profile semantics instead: the service
 # is absent from `docker compose config`, `up`, and `pull` on every profile set this
-# repo runs (admin/tunnel/logging — verified: `config --services` lists no kokoro).
+# repo runs (admin/logging/fallback — verified: `config --services` lists no kokoro).
 # Never add "disabled-by-piper-only" to COMPOSE_PROFILES — activating it while this
 # overlay's depends_on reset is in force would run kokoro with nothing routing to it.
 #
-# Requires Docker Compose v2.24+ (the `!override` merge tag) — same floor as
-# compose.demo.yaml.
+# Requires Docker Compose v2.24+ (the `!override` merge tag).
 # =============================================================================
 
 services:
@@ -47,46 +46,13 @@ services:
     # profile name is deliberately self-describing and activated by nothing in this repo.
     profiles: ["disabled-by-piper-only"]
 
-  # voice-seed (SPEC F166.2) travels with kokoro by the same rule as the ollama pair below:
-  # nothing on this topology ever reads the `voices` volume (kokoro is the one process that
-  # does), so pulling its ~3.6GiB image just to seed a volume no service will use is pure
-  # waste on the small/low-memory boxes this overlay targets. api's own depends_on reset
-  # below already drops its (required: false) reference to voice-seed; this profile is the
-  # matching half for kokoro's (required, default) reference — both disabled together, same
-  # as ollama/ollama-init.
+  # voice-seed (SPEC F166.2) travels with kokoro: nothing on this topology ever reads the
+  # `voices` volume (kokoro is the one process that does), so pulling its ~3.6GiB image just
+  # to seed a volume no service will use is pure waste on the small/low-memory boxes this
+  # overlay targets. api's own depends_on reset below already drops its (required: false)
+  # reference to voice-seed; this profile is the matching half for kokoro's (required,
+  # default) reference — both disabled together.
   voice-seed:
-    profiles: ["disabled-by-piper-only"]
-
-  # gh-#310 — the LLM pair, disabled by the same mechanism. HARDWARE.md topology (a)
-  # (the RECOMMENDED Pi shape) says "playout + piper-only, NO LLM (templated patter, by
-  # design)" and prescribes this overlay, but until now the demo overlay's ollama rode
-  # along underneath it: llama3.2:3b held permanently resident (OLLAMA_KEEP_ALIVE: -1,
-  # right for the 16GB demo box, ~2-2.5GiB of RSS forever on a Pi), behind a 6144M fence
-  # LARGER than a 4GB box's entire RAM, with ollama-init pulling ~2GB of weights on first
-  # boot. This file's own header explains the overlay exists because a 4GB box cannot
-  # afford kokoro's ~1.2GiB — while shipping an always-resident model twice that size.
-  #
-  # The two MUST travel together: ollama-init's `depends_on: ollama` would name a
-  # profile-disabled service and fail the whole render, the same trap the api/kokoro
-  # comment below describes. Nothing else depends on either — api's own depends_on
-  # reset below now names db + piper (gh-#888), and never named ollama/ollama-init even
-  # before that change — so no reset is needed beyond this pair.
-  #
-  # Declaring a service that exists only in compose.demo.yaml is safe in the dev flow
-  # (compose.yaml + this file, no demo layer): an inactive profile excludes the block
-  # before Compose ever asks it for an image — verified against v5.0.2, and pinned by a
-  # gh-#310 spec that renders BOTH stacks.
-  #
-  # The api's own LLM path needs no change: Llm:Endpoint defaults to "" (LlmOptions'
-  # documented disabled state, F34.2), which short-circuits to the template writer with
-  # no HTTP attempt at all. A box that HAS saved an Llm:Endpoint settings row keeps it —
-  # a DB row overrides an env default, the same DEPLOYMENT.md Station:SpectatorMode-class
-  # gotcha the api block's own environment comments below describe — and degrades through
-  # Docker-DNS NXDOMAIN to templated patter, exactly as HARDWARE.md topology (a) describes.
-  ollama:
-    profiles: ["disabled-by-piper-only"]
-
-  ollama-init:
     profiles: ["disabled-by-piper-only"]
 
   piper:
@@ -136,20 +102,18 @@ services:
       # eighth kind — SPEC F127.1, T281 — needs no entry here for the same reason: the primary
       # serves every kind, present and future, with no per-kind map to maintain.)
       Tts__PiperPrimaryEndpoint: "http://piper:5000"
-      # gh-#334 — enrichment halved, by the same reasoning as the kokoro and LLM removals above.
+      # gh-#334 — enrichment halved, by the same reasoning as the kokoro removal above.
       # This overlay exists because a 4GB/4-core box cannot afford the default topology, and the
       # ffmpeg analyzers are the heaviest sustained load GenWave produces: base compose's 4 pins
       # every core of a Pi 5 (measured: api at 378% of 400%, SoC at 83.4°C — past the 80°C soft
       # limit — and the 5V rail dipping into undervoltage every ~2 min, one dip per analyzed file).
-      # HARDWARE.md already prescribes 2 for Pi boxes; nothing enforced it, and on a pinned box
-      # nothing could — compose.demo.yaml turns Admin:Enabled off, so PUT /api/settings (the live
-      # STORY-139 path) is unreachable there.
+      # HARDWARE.md already prescribes 2 for Pi boxes; nothing enforced it.
       #
       # Same variable as base compose, lower default: an operator who sets
       # LIBRARY_ENRICHMENT_CONCURRENCY still wins, on either stack. Enrichment is a backfill, not a
       # broadcast dependency — halving it slows first-boot catalog build and never touches playout.
       Library__EnrichmentConcurrency: ${LIBRARY_ENRICHMENT_CONCURRENCY:-2}
-      # ⚠️ Same seeding shape as compose.demo.yaml's Station__* overrides: an env
+      # ⚠️ Same seeding shape as any other env-seeded setting: an env
       # default (GET /api/settings reports source="default") that a row saved in the
       # settings DB OVERRIDES — the DEPLOYMENT.md Station:SpectatorMode gotcha, same
       # class. Tts:PiperPrimaryEndpoint is deliberately absent from StationSettingsAllowlist

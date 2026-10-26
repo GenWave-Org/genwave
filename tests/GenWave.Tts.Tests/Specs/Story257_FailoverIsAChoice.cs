@@ -113,7 +113,6 @@ public static class FeatureFailoverIsAChoice
             ["ICECAST_ADMIN_PASSWORD"] = "story257-dummy",
             ["ADMIN_PASSWORD"] = "story257-dummy",
             ["MEDIA_DIR"] = Path.GetTempPath(),
-            ["PUBLIC_HOST"] = "story257.invalid",
             // Explicit-but-empty (gh-#249 idiom) — shadows both ambient COMPOSE_PROFILES and a
             // dev box's repo-root .env value, so this render sees no active profile regardless
             // of the box it runs on.

@@ -87,7 +87,7 @@ public enum FileActionRule
     /// "could not prove same" both refuse identically. A same-device <c>File.Move</c> is an atomic
     /// rename; a cross-device one would silently become a copy+delete, which is not an atomic
     /// filesystem operation this jail is willing to perform. Off Linux (a contributor's own dev
-    /// workstation, never the appliance's own deploy target), an undetermined device SKIPS the check
+    /// workstation, never the station's own deploy target), an undetermined device SKIPS the check
     /// instead — <c>IFileSystemProbe.TryGetDeviceId</c> always reports "unknown" there, and there is
     /// no real cross-device risk this codebase's own dev posture needs to enforce.</summary>
     CrossDevice,

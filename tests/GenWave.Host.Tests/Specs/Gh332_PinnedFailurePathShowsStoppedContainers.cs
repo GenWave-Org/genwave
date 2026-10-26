@@ -1,14 +1,14 @@
-// gh-#332 — launch.sh's --pinned partial-up failure path printed `compose ps` (running-only),
+// gh-#332 — launch.sh's home-preset partial-up failure path printed `compose ps` (running-only),
 // which structurally omits the container that just failed to start.
 //
 // BDD specification — xUnit. Drives the REAL ./launch.sh via Process with a scripted `docker`
 // on PATH, the Gh019_ScriptPreflight.cs idiom extended one step further: where those scenarios
 // all exit inside tools/preflight.sh before the first docker call, these deliberately run the
-// whole --pinned flow (pull -> db up -> health poll -> migrate.sh -> up) against the stub, so
+// whole home-preset flow (pull -> db up -> health poll -> migrate.sh -> up) against the stub, so
 // the failure path under test is actually reached. No daemon, no images, no stack — every
 // docker invocation is answered by a bash script in a scratch bin dir.
 //
-// The field failure this pins (Pi 5, v2.9.0): the daemon refused to start genwave-caddy-1 with
+// The field failure this pins (Pi 5, v2.9.0): the daemon refused to start a container with
 // a stale network id, and `compose ps` reported all seven OTHER containers Up/healthy under a
 // "failed part-way" verdict. The operator was told to inspect a service the output never named.
 
@@ -18,7 +18,7 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeaturePinnedFailurePathShowsStoppedContainers
 {
-    // The stub answers every docker call the --pinned flow makes, logs each one to
+    // The stub answers every docker call the home-preset flow makes, logs each one to
     // $GW_DOCKER_LOG, and fails the FULL `up -d` the way the daemon did on the Pi. Ordering in
     // the case matters: `up -d --no-recreate db` (launch.sh's db-first step) must be matched
     // before the bare `up -d` that this spec forces to fail.
@@ -52,11 +52,11 @@ public static class FeaturePinnedFailurePathShowsStoppedContainers
         return dir;
     }
 
-    /// <summary>The six required secrets, via preflight's GW_ENV_FILE seam — never the real .env.</summary>
+    /// <summary>The six required secrets plus GW_PRESET, via preflight's GW_ENV_FILE seam — never the real .env.</summary>
     static string WriteEnvFile() =>
         WriteEnvFile([
             "POSTGRES_PASSWORD=x", "LIBRARY_DB_PASSWORD=x", "STATION_DB_PASSWORD=x",
-            "ICECAST_SOURCE_PASSWORD=x", "ICECAST_ADMIN_PASSWORD=x",
+            "GW_PRESET=home", "ICECAST_SOURCE_PASSWORD=x", "ICECAST_ADMIN_PASSWORD=x",
             $"MEDIA_DIR={Path.GetTempPath()}",
         ]);
 
@@ -76,7 +76,7 @@ public static class FeaturePinnedFailurePathShowsStoppedContainers
 
         var (exitCode, stdOut, stdErr) = ScriptProcess.Run(
             "launch.sh", bin, envFile: WriteEnvFile(),
-            extraEnv: new Dictionary<string, string> { ["GW_DOCKER_LOG"] = log }, args: "--pinned");
+            extraEnv: new Dictionary<string, string> { ["GW_DOCKER_LOG"] = log });
 
         var calls = File.Exists(log) ? File.ReadAllLines(log) : [];
         return new Run(exitCode, stdOut, stdErr, calls);
@@ -130,9 +130,9 @@ public static class FeaturePinnedFailurePathShowsStoppedContainers
         [Fact]
         public static void The_partial_stack_is_never_torn_down()
         {
-            // never-silent outranks tidiness (launch.sh's --pinned contract, gh-#19): whatever is
+            // never-silent outranks tidiness (launch.sh's home-preset contract, gh-#19): whatever is
             // still broadcasting keeps broadcasting. A `down` here would take the station off air
-            // to tidy up a failed caddy.
+            // to tidy up a failed container.
             Assert.DoesNotContain(PartialUp.Value.DockerCalls,
                 c => c.Contains(" down", StringComparison.Ordinal));
         }

@@ -10,7 +10,7 @@
 # Or from a workstation:     ssh <box> 'bash -s' < tools/soak-check.sh
 #
 # Encodes the checks (and the traps) from the 2026-08 Pi 5 runs so a Pi 4 — or any future
-# appliance — gets the IDENTICAL test:
+# box — gets the IDENTICAL test:
 #   • icecast's public status-json hides mounts BY DESIGN (F67 hardening) — "no source
 #     connected" there is NOT an outage signal. Stream truth = metadata updates in icecast's
 #     own log + an ESTABLISHED socket on :8000 (checked via /proc/net/tcp; the port is

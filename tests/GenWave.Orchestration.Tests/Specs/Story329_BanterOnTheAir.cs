@@ -366,7 +366,7 @@ public static class FeatureBanterOnTheAir
         }
 
         [Fact]
-        public static async Task The_demo_hour_instrument_counts_a_Crosstalk_row_like_any_kind()
+        public static async Task The_hour_mix_gate_counts_a_Crosstalk_row_like_any_kind()
         {
             // Given a stocked, ready exchange
             var (chain, planner, _) = BuildChain();
@@ -376,7 +376,7 @@ public static class FeatureBanterOnTheAir
             var item = await chain.Orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
 
             // Then the item carries the SAME SegmentKind stamp every other aired kind already does —
-            // tools/demo_hour_gate.sql's own has_other_non_music_kind predicate (segment_kind IS NOT
+            // tools/hour_mix_gate.sql's own has_other_non_music_kind predicate (segment_kind IS NOT
             // NULL AND NOT IN ('StationId','ContextSegment')) counts it with zero code changes (F127.12
             // — verified, not built); PlayoutFeeder/BoothLogWriter forward it unchanged, exactly like
             // every pre-F127 kind.

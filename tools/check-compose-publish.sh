@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
 # check-compose-publish.sh — SPEC F67.1 / STORY-181 guard.
 #
-# On the public (--pinned: compose.pinned.yaml + compose.demo.yaml) overlay, the merged
-# compose config must publish 0.0.0.0 host ports ONLY for the front proxy (caddy 80/443).
-# Every other service must be loopback-bound (127.0.0.1:...) or unpublished entirely. This
-# is exactly the Icecast :8000 gotcha fixed in 05303ce — this script pins it shut so it can
-# never silently recur.
+# In every render this repo deploys (base, base+pinned, base+piper-only, base+pinned+piper-only), the merged compose
+# config must publish 0.0.0.0 host ports ONLY for the LAN allowlist (icecast 8000, api
+# 8080/8081, admin_ui 3000). Every other service must be loopback-bound (127.0.0.1:...) or
+# unpublished entirely. Each file set is checked on its own, so an overlay cannot hide a
+# publish behind another set.
 #
 # Usage:
 #   tools/check-compose-publish.sh
-#     Renders the real merged config (`docker compose -f compose.yaml -f compose.pinned.yaml
-#     -f compose.demo.yaml config --format json`, from the repo root — the actual `--pinned`
-#     shape launch.sh runs, SPEC F136.5) and checks it. Requires the docker CLI. Dummy
-#     secrets are exported for the vars compose.yaml/compose.demo.yaml require (${VAR:?}) so
+#     Renders the real merged config (`docker compose -f compose.yaml [-f compose.pinned.yaml]
+#     [-f compose.piper-only.yaml] --profile '*' config --format json`, from the repo root — the actual
+#     `--pinned` / `--piper-only` shapes launch.sh runs, SPEC F136.5) for base, base+pinned,
+#     base+piper-only and base+pinned+piper-only, and checks each. Requires the docker CLI. Dummy
+#     secrets are exported for the vars compose.yaml requires (${VAR:?}) so
 #     this runs standalone, without a real .env — `config` only merges and substitutes text,
 #     it never talks to a daemon or starts a container. compose.pinned.yaml itself needs no
 #     env (static image tags only).
@@ -22,17 +23,20 @@
 #     <path> instead of invoking docker. Lets callers (tests, CI on a docker-less runner)
 #     drive fixtures without the docker CLI (STORY-181 AC3).
 #
-# Exit: 0 — only caddy publishes 0.0.0.0 on 80/443; every other publish is loopback-bound
+# Exit: 0 — 0.0.0.0 publishes are all on the allowlist; every other publish is loopback-bound
 #           or the service has no `ports:` at all.
 #       1 — at least one offending service:port is named on stdout.
-#       2 — usage/environment error (bad args, jq missing, file not found).
+#       2 — usage/environment error (bad args, jq missing, file not found) or an unusable render:
+#           docker failed to render, or the document is not JSON / has zero services (fail-closed:
+#           nothing checked is never a pass). A JSON document with a malformed services shape
+#           fails with jq's own non-zero code instead.
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-ALLOWED_SERVICE="caddy"
-ALLOWED_PORTS=(80 443)
+# service:port pairs allowed to publish on every interface (the LAN station's surface).
+ALLOWED_PUBLISHES=(icecast:8000 api:8080 api:8081 admin_ui:3000)
 
 # `network_mode: host` makes a container share the host's network namespace outright —
 # every port it listens on binds every host interface directly, with no entry in
@@ -69,7 +73,7 @@ if [ -n "$CONFIG_FILE" ]; then
 else
   command -v docker >/dev/null 2>&1 || { echo "check-compose-publish: docker is required (or pass --config-file)" >&2; exit 2; }
 
-  # Dummy values for every ${VAR:?} compose.yaml/compose.demo.yaml require — `config` only
+  # Dummy values for every ${VAR:?} compose.yaml requires — `config` only
   # renders text, so these never reach a running container. `: "${VAR:=...}"` leaves a
   # caller's real value (e.g. a sourced .env) alone and only fills the gap.
   : "${POSTGRES_PASSWORD:=check-compose-publish-dummy}"
@@ -79,27 +83,14 @@ else
   : "${ICECAST_ADMIN_PASSWORD:=check-compose-publish-dummy}"
   : "${ADMIN_PASSWORD:=check-compose-publish-dummy}"
   : "${MEDIA_DIR:=/tmp/check-compose-publish-dummy}"
-  : "${PUBLIC_HOST:=check-compose-publish.invalid}"
   export POSTGRES_PASSWORD LIBRARY_DB_PASSWORD STATION_DB_PASSWORD ICECAST_SOURCE_PASSWORD \
-         ICECAST_ADMIN_PASSWORD ADMIN_PASSWORD MEDIA_DIR PUBLIC_HOST
-
-  CONFIG_JSON="$(cd "$REPO_ROOT" && docker compose -f compose.yaml -f compose.pinned.yaml -f compose.demo.yaml config --format json)"
+         ICECAST_ADMIN_PASSWORD ADMIN_PASSWORD MEDIA_DIR
 fi
 
-# TSV rows, one per published port across every service: service, published (host) port,
-# host_ip. Compose Specification: an omitted host_ip means "every interface" (0.0.0.0) —
-# identical in effect to an explicit host_ip: 0.0.0.0, so both are treated as public.
-PUBLISHES="$(jq -r '
-  (.services // {}) | to_entries[] |
-  .key as $service |
-  ((.value.ports // [])[]) |
-  [$service, (.published // "" | tostring), (.host_ip // "")] | @tsv
-' <<<"$CONFIG_JSON")"
-
-is_allowed_port() {
-  local port="$1" candidate
-  for candidate in "${ALLOWED_PORTS[@]}"; do
-    [ "$port" = "$candidate" ] && return 0
+is_allowed_publish() {
+  local pair="$1" candidate
+  for candidate in "${ALLOWED_PUBLISHES[@]}"; do
+    [ "$pair" = "$candidate" ] && return 0
   done
   return 1
 }
@@ -115,44 +106,87 @@ is_allowed_host_network_service() {
 offenders=()
 allowed_report=()
 
-# Services running with `network_mode: host` — see ALLOWED_HOST_NETWORK_SERVICES above.
-HOST_NETWORK_SERVICES="$(jq -r '
-  (.services // {}) | to_entries[] |
-  select(.value.network_mode == "host") |
-  .key
-' <<<"$CONFIG_JSON")"
+check_render() {
+  local config_json="$1" label="$2" PUBLISHES HOST_NETWORK_SERVICES service published host_ip
+  # Fail-closed: an empty/garbage/serviceless document means nothing was checked — never a pass.
+  jq -e '(.services // {}) | type == "object" and length > 0' <<<"$config_json" >/dev/null 2>&1 \
+    || { echo "check-compose-publish: no services in render: $label" >&2; exit 2; }
+  # TSV rows, one per published port across every service: service, published (host) port,
+  # host_ip. Compose Specification: an omitted host_ip means "every interface" (0.0.0.0) —
+  # identical in effect to an explicit host_ip: 0.0.0.0, so both are treated as public.
+  PUBLISHES="$(jq -r '
+    (.services // {}) | to_entries[] |
+    .key as $service |
+    ((.value.ports // [])[]) |
+    [$service, (.published // "" | tostring), (.host_ip // "")] | @tsv
+  ' <<<"$config_json")"
 
-while IFS= read -r service; do
-  [ -n "$service" ] || continue
-  is_allowed_host_network_service "$service" && continue
-  offenders+=("$service:network_mode=host")
-done <<<"$HOST_NETWORK_SERVICES"
+  # Services running with `network_mode: host` — see ALLOWED_HOST_NETWORK_SERVICES above.
+  HOST_NETWORK_SERVICES="$(jq -r '
+    (.services // {}) | to_entries[] |
+    select(.value.network_mode == "host") |
+    .key
+  ' <<<"$config_json")"
 
-while IFS=$'\t' read -r service published host_ip; do
-  [ -n "$service" ] || continue
-  # Fail-closed: a publish is safe ONLY when host_ip is genuinely loopback. Everything
-  # else — omitted, 0.0.0.0, IPv6 wildcards ("::", "::0", and any other all-zeros
-  # expansion), or any value we don't recognize — is treated as public and subject to
-  # the caddy-80/443 allowlist below. Do not add a case here without confirming the
-  # address is loopback-only; a broad catch-all is exactly the fail-open bug this guard
-  # exists to prevent.
-  case "$host_ip" in
-    127.*|::1|::ffff:127.*) continue ;;
-  esac
-  if [ "$service" = "$ALLOWED_SERVICE" ] && is_allowed_port "$published"; then
-    allowed_report+=("$service:$published")
-    continue
-  fi
-  offenders+=("$service:$published")
-done <<<"$PUBLISHES"
+  while IFS= read -r service; do
+    [ -n "$service" ] || continue
+    is_allowed_host_network_service "$service" && continue
+    offenders+=("$service:network_mode=host [$label]")
+  done <<<"$HOST_NETWORK_SERVICES"
+
+  while IFS=$'\t' read -r service published host_ip; do
+    [ -n "$service" ] || continue
+    # Fail-closed: a publish is safe ONLY when host_ip is genuinely loopback. Everything
+    # else — omitted, 0.0.0.0, IPv6 wildcards ("::", "::0", and any other all-zeros
+    # expansion), or any value we don't recognize — is treated as public and subject to
+    # the allowlist below. Do not add a case here without confirming the
+    # address is loopback-only; a broad catch-all is exactly the fail-open bug this guard
+    # exists to prevent.
+    case "$host_ip" in
+      127.*|::1|::ffff:127.*) continue ;;
+    esac
+    if is_allowed_publish "$service:$published"; then
+      allowed_report+=("$service:$published")
+      continue
+    fi
+    offenders+=("$service:$published [$label]")
+  done <<<"$PUBLISHES"
+}
+
+if [ -n "$CONFIG_FILE" ]; then
+  check_render "$CONFIG_JSON" "$CONFIG_FILE"
+else
+  # Every file-set this repo deploys; piper-only is always merged last (launch.sh --piper-only).
+  # `--profile '*'` activates every profile (admin, logging, fallback), so opt-in services
+  # (admin_ui lives behind `admin`) are checked too; it also overrides an ambient COMPOSE_PROFILES.
+  FILE_SETS=(
+    "base:compose.yaml"
+    "base+pinned:compose.yaml compose.pinned.yaml"
+    "base+piper-only:compose.yaml compose.piper-only.yaml"
+    "base+pinned+piper-only:compose.yaml compose.pinned.yaml compose.piper-only.yaml"
+  )
+  for file_set in "${FILE_SETS[@]}"; do
+    files_label="${file_set%%:*}"
+    compose_file_args=()
+    for f in ${file_set#*:}; do compose_file_args+=(-f "$f"); done
+    # Assign first: `set -e` ignores a failed $(...) used as a function argument.
+    config_json="$(cd "$REPO_ROOT" && docker compose --profile '*' "${compose_file_args[@]}" config --format json)" \
+      || { echo "check-compose-publish: render failed: $files_label" >&2; exit 2; }
+    check_render "$config_json" "$files_label"
+  done
+fi
 
 if [ "${#offenders[@]}" -gt 0 ]; then
-  echo "check-compose-publish: FAIL — 0.0.0.0 host publish outside caddy 80/443:"
+  echo "check-compose-publish: FAIL — 0.0.0.0 host publish outside the allowlist:"
   for offender in "${offenders[@]}"; do
     echo "  $offender"
   done
   exit 1
 fi
 
-echo "check-compose-publish: OK — 0.0.0.0 publishes: ${allowed_report[*]:-(none)}"
+unique_report="(none)"
+if [ "${#allowed_report[@]}" -gt 0 ]; then
+  unique_report="$(printf '%s\n' "${allowed_report[@]}" | sort -u | paste -sd' ')"
+fi
+echo "check-compose-publish: OK — 0.0.0.0 publishes: $unique_report"
 exit 0

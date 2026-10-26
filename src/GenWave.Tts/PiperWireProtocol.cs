@@ -37,8 +37,8 @@ static class PiperWireProtocol
         //     request body: text/plain, to a fixed configured endpoint on the internal `core`
         //     network. No HTTP response, no rendering, no browser. This method returns a file
         //     path; the text becomes WAV bytes and is never echoed to any client.
-        //   * Both sources are [AdminSurface] + [Authorize(Policy = Operator)], and the appliance
-        //     topology gives the admin plane no public route at all (DEPLOYMENT.md).
+        //   * Both sources are [AdminSurface] + [Authorize(Policy = Operator)], and an admin-off
+        //     station gives the admin plane no route at all (DEPLOYMENT.md).
         //
         // Why it appeared when it did: nothing about the data path changed. gh-#161's markup work
         // routed Strip through the shared SpeechText.CollapseWhitespace, and THAT call is the

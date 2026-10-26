@@ -99,7 +99,7 @@ sealed class SpectatorSecurityHeadersMiddleware(
     /// way.</item>
     /// <item><c>media-src 'self' + PublicStreamUrl origin</c> — the audio element plays
     /// <c>Station:PublicStreamUrl</c> verbatim (about payload; app.js also reattaches it with a
-    /// reconnect query param, same origin). Root-relative (<c>/stream</c> behind Caddy) is
+    /// reconnect query param, same origin). Root-relative (<c>/stream</c> behind a reverse proxy) is
     /// same-origin; an absolute URL (direct Icecast) needs its origin pinned.</item>
     /// <item><c>connect-src 'self'</c> — fetch() only ever targets /spectator/api/*.</item>
     /// </list>

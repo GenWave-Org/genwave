@@ -83,7 +83,7 @@ public static class FeatureStagedStartup
 
     // --dry-run only, driving the real toolchain on the developer's own PATH, not a scratch
     // bin — ScriptProcess still starts the child from its sanitized environment (gh-#776),
-    // scrubbing GW_PRESET/GW_PREFLIGHT_TOPOLOGY/GW_PREFLIGHT_DEMO before every run so an
+    // scrubbing every GW_* export (GW_PRESET, GW_PREFLIGHT_TOPOLOGY) before every run so an
     // ambient shell export can never silently steer a spec's chosen topology.
     static readonly string RealPath = Environment.GetEnvironmentVariable("PATH") ?? "/usr/bin:/bin";
 
@@ -125,7 +125,7 @@ public static class FeatureStagedStartup
     public sealed class ScenarioStagedDryRunPlansCoreBeforeHeavyweights
     {
         static readonly Lazy<(int ExitCode, string StdOut, string StdErr)> Run =
-            new(() => RunLaunch(null, "--pinned", "--dry-run"));
+            new(() => RunLaunch(WriteEnvFile("GW_PRESET=home"), "--dry-run"));
 
         static string[] Lines => PlanLines(Run.Value.StdOut);
 
@@ -185,7 +185,7 @@ public static class FeatureStagedStartup
         {
             // F136 review findings F2/F3 (live-daemon-proven): a scoped up-of-heavyweights-
             // only never reaches services that are neither depended-on nor core-listed at all
-            // (caddy, admin_ui, alloy, cloudflared, dockerproxy) — only the ORIGINAL unscoped
+            // (admin_ui, alloy, dockerproxy) — only the ORIGINAL unscoped
             // up converges the full profile-selected set.
             Assert.True(StageTwoUpIndex >= 0 && Lines[StageTwoUpIndex].TrimEnd().EndsWith("--remove-orphans", StringComparison.Ordinal),
                 $"expected the second `up -d --remove-orphans` line to be unscoped (no trailing service names); plan:\n{Run.Value.StdOut}");
@@ -196,7 +196,7 @@ public static class FeatureStagedStartup
         {
             // F136 review findings F2/F3 (live-daemon-proven): --no-recreate never recreates a
             // service whose PIN changed (only one that's entirely absent) — proven to leave
-            // admin_ui/caddy/ollama STALE across an upgrade (the gh-#93 regression class).
+            // admin_ui and other overlay services STALE across an upgrade (the gh-#93 regression class).
             Assert.True(StageTwoUpIndex >= 0 && !Lines[StageTwoUpIndex].Contains("--no-recreate", StringComparison.Ordinal),
                 $"expected the second `up -d --remove-orphans` line to NOT carry --no-recreate; plan:\n{Run.Value.StdOut}");
         }
@@ -207,7 +207,7 @@ public static class FeatureStagedStartup
     // ---------------------------------------------------------------------
 
     [Trait("Category", "Integration")]
-    public sealed class ScenarioPiperOnlyPinnedPlanStaysUnstaged
+    public sealed class ScenarioPiperOnlyHomePlanStaysUnstaged
     {
         // compose.piper-only.yaml profile-gates kokoro/ollama/ollama-init off unconditionally,
         // so this topology has nothing to stage behind — it must plan the exact pre-F136
@@ -215,7 +215,7 @@ public static class FeatureStagedStartup
         // unconditional `--no-deps` on the real invocation (F136 review finding F1) that this
         // dry-run plan never exercised — this scenario is the one that must go red against it.
         static readonly Lazy<(int ExitCode, string StdOut, string StdErr)> Run =
-            new(() => RunLaunch(null, "--pinned", "--piper-only", "--dry-run"));
+            new(() => RunLaunch(WriteEnvFile("GW_PRESET=home-piper-only"), "--dry-run"));
 
         static string[] Lines => PlanLines(Run.Value.StdOut);
 
@@ -296,7 +296,7 @@ public static class FeatureStagedStartup
     {
         // GW_ENV_FILE seam carries GW_PRESET=home; ./launch.sh --dry-run with no topology
         // flags plans base + compose.pinned.yaml — the wizard's LAN station — WITHOUT
-        // compose.demo.yaml (SPEC F136.5: the public appliance stays flag-only, --pinned).
+        // the retired demo overlay (SPEC F136.5).
         static readonly Lazy<(int ExitCode, string StdOut, string StdErr)> Run =
             new(() => RunLaunch(WriteEnvFile("GW_PRESET=home"), "--dry-run"));
 
@@ -312,17 +312,17 @@ public static class FeatureStagedStartup
         {
             var lines = PlanLines(Run.Value.StdOut);
             Assert.Contains(lines, l => l.Contains("compose.pinned.yaml", StringComparison.Ordinal));
-            Assert.DoesNotContain(lines, l => l.Contains("compose.demo.yaml", StringComparison.Ordinal));
+            Assert.DoesNotContain(lines, l => l.Contains("compose." + "demo", StringComparison.Ordinal));
         }
     }
 
     [Trait("Category", "Integration")]
     public sealed class ScenarioExplicitFlagOverridesGwPreset
     {
-        // GW_PRESET=dev in the env file, but an explicit --pinned flag is given — the flag
-        // wins, so the plan shows the pinned+demo overlay shape, not the dev flow.
+        // GW_PRESET=home in the env file, but an explicit --piper-only flag is given — the
+        // flag wins, so the plan shows the dev piper-only shape, not the pinned home flow.
         static readonly Lazy<(int ExitCode, string StdOut, string StdErr)> Run =
-            new(() => RunLaunch(WriteEnvFile("GW_PRESET=dev"), "--pinned", "--dry-run"));
+            new(() => RunLaunch(WriteEnvFile("GW_PRESET=home"), "--piper-only", "--dry-run"));
 
         [Fact]
         public void ExitsZero()
@@ -332,9 +332,11 @@ public static class FeatureStagedStartup
         }
 
         [Fact]
-        public void PlansThePinnedDemoOverlayShapeNotTheDevFlow()
+        public void PlansThePiperOnlyDevShapeNotTheHomeFlow()
         {
-            Assert.Contains(PlanLines(Run.Value.StdOut), l => l.Contains("compose.demo.yaml", StringComparison.Ordinal));
+            var lines = PlanLines(Run.Value.StdOut);
+            Assert.Contains(lines, l => l.Contains("compose.piper-only.yaml", StringComparison.Ordinal));
+            Assert.DoesNotContain(lines, l => l.Contains("compose.pinned.yaml", StringComparison.Ordinal));
         }
     }
 

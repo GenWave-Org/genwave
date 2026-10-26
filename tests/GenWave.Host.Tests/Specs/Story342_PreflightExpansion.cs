@@ -99,7 +99,7 @@ public static class FeaturePreflightExpansion
         [Fact]
         public void EmptyAdminPasswordPasses()
         {
-            // Empty = the documented appliance posture — exit code stays success.
+            // Empty = the documented streams-only setup — exit code stays success.
             var envFile = CompleteEnvFile(MakeMediaDir(flacCount: 1));
 
             var (exitCode, _, _) = RunPreflight(HealthyDockerBin(), envFile);

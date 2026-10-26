@@ -22,16 +22,14 @@
 # Topology awareness (F134.3/F134.4) is a CALLER CONTRACT, not something this script derives
 # itself. SPEC F132.5 (amended 2026-08-18) makes `launch.sh` the ONLY reader of GW_PRESET in
 # the whole repo — it alone resolves flags + preset into concrete topology. This script takes
-# that resolution as two explicit inputs instead of reading GW_PRESET (or any preset) itself:
+# that resolution as an explicit input instead of reading GW_PRESET (or any preset) itself:
 #   * GW_PREFLIGHT_TOPOLOGY — `full` or `piper-only` (default `full` when unset) — selects the
 #     disk-headroom constant.
-#   * GW_PREFLIGHT_DEMO     — `0` or `1` (default `0`) — `1` adds the demo overlay's 80/443 to
-#     the port check.
 #   * COMPOSE_PROFILES — unchanged, the existing compose mechanism; an "admin" entry still adds
 #     port 3000 to the port check (rides the same env-value convention as MEDIA_DIR below:
 #     process env wins, else the last assignment in GW_ENV_FILE).
-# launch.sh wires GW_PREFLIGHT_TOPOLOGY/GW_PREFLIGHT_DEMO at T316; until then both default to
-# the base stack, which is the honest state of the world today.
+# Both callers (launch.sh and setup.sh) export GW_PREFLIGHT_TOPOLOGY; an unset value
+# defaults to `full`.
 #
 # Test seams (preflight-only; each defaults to the real path/command; a probe tool missing
 # from PATH degrades its check to a WARN naming what went unchecked, it never hard-fails):
@@ -171,9 +169,10 @@ preflight_docker() {
 }
 
 # ---- compose version floor (F134.2) ------------------------------------------------------
-# v2.24 is the floor the demo overlay's `!override`/`!reset` merge tags need (HARDWARE.md's
-# compatibility table). Unparseable output (a stub, an unexpected banner) WARNs instead of
-# failing — a version we can't read is not proof it's too old.
+# v2.24 is the floor the `!override`/`!reset` merge tags in compose.pinned.yaml and
+# compose.piper-only.yaml need (HARDWARE.md's compatibility table). Unparseable output (a
+# stub, an unexpected banner) WARNs instead of failing — a version we can't read is not
+# proof it's too old.
 GW_PREFLIGHT_COMPOSE_MIN_MAJOR=2
 GW_PREFLIGHT_COMPOSE_MIN_MINOR=24
 
@@ -198,7 +197,7 @@ preflight_compose_version() {
     return 0
   fi
 
-  preflight_fail "Docker Compose v${major}.${minor} is older than the v${GW_PREFLIGHT_COMPOSE_MIN_MAJOR}.${GW_PREFLIGHT_COMPOSE_MIN_MINOR} floor this stack requires (the demo overlay's override/reset merge tags depend on it)." \
+  preflight_fail "Docker Compose v${major}.${minor} is older than the v${GW_PREFLIGHT_COMPOSE_MIN_MAJOR}.${GW_PREFLIGHT_COMPOSE_MIN_MINOR} this stack needs: compose.pinned.yaml and compose.piper-only.yaml use merge tags it added." \
     "Upgrade the Compose plugin: https://docs.docker.com/compose/install/linux/" \
     "Check it: docker compose version" \
     "Then re-run this script."
@@ -222,16 +221,15 @@ preflight_admin_profile_selected() {
 
 # ---- port availability (F134.3) -----------------------------------------------------------
 # Base ports are always published (icecast + api, see compose.yaml); 3000 (admin_ui) only
-# when the "admin" profile is active; 80/443 (caddy) only under the demo overlay
-# (GW_PREFLIGHT_DEMO — see the header's caller-contract note; this script never reads GW_PRESET).
+# when the "admin" profile is active.
 GW_PREFLIGHT_BASE_PORTS=(8000 8080 8081)
 GW_PREFLIGHT_ADMIN_PORT=3000
-GW_PREFLIGHT_DEMO_PORTS=(80 443)
 
 # ---- port ownership (F134.3b) -------------------------------------------------------------
-# `./launch.sh` IS the restart command and `--pinned` IS the upgrade path — a port already held
-# by THIS stack's own containers (icecast/api/admin_ui on a broadcasting box) is a PASS, not a
-# conflict. Precise ownership would mean replicating compose's project-name resolution
+# `./launch.sh` IS the restart command and the upgrade path (GW_PRESET=home, then
+# ./launch.sh) — a port already held by THIS stack's own containers (icecast/api/admin_ui on
+# a broadcasting box) is a PASS, not a conflict. Precise ownership would mean replicating
+# compose's project-name resolution
 # (COMPOSE_PROJECT_NAME override, else the working directory's basename) purely to filter
 # `docker ps --filter label=com.docker.compose.project=<name>` — fragile exactly where it
 # matters most: get the project name wrong (this runs before COMPOSE_FILE resolution in some
@@ -266,9 +264,6 @@ preflight_port_is_docker_owned() {
 preflight_ports() {
   local ports=("${GW_PREFLIGHT_BASE_PORTS[@]}")
   preflight_admin_profile_selected && ports+=("$GW_PREFLIGHT_ADMIN_PORT")
-  if [ "${GW_PREFLIGHT_DEMO:-0}" = "1" ]; then
-    ports+=("${GW_PREFLIGHT_DEMO_PORTS[@]}")
-  fi
 
   local ss_cmd="${GW_SS_CMD:-ss}"
   if ! command -v "$ss_cmd" >/dev/null 2>&1; then
@@ -534,8 +529,8 @@ preflight_env_secrets() {
 
 # ---- ADMIN_PASSWORD posture (F134.1) ------------------------------------------------------
 # Unlike the six required secrets above, ADMIN_PASSWORD is legitimately optional: compose.yaml
-# defaults it to empty (`${ADMIN_PASSWORD:-}`), and empty is the documented headless/appliance
-# posture (DEPLOYMENT.md: "empty = admin locked entirely, fail-closed") — so empty WARNs
+# defaults it to empty (`${ADMIN_PASSWORD:-}`), and empty is the documented streams-only
+# setup (DEPLOYMENT.md: "empty = admin locked entirely, fail-closed") — so empty WARNs
 # instead of failing. A surviving change-me* placeholder is never intentional, so that still
 # hard-fails exactly like the six required vars above.
 #
@@ -560,7 +555,7 @@ preflight_admin_password() {
 
   if [ -z "$value" ]; then
     preflight_record WARN "ADMIN_PASSWORD" \
-      "Empty — the admin UI stays locked entirely (fail-closed); this is the documented appliance posture. Set one in ${env_file} to enable admin sign-in."
+      "Empty — the admin UI stays locked entirely (fail-closed); this is the documented streams-only setup. Set one in ${env_file} to enable admin sign-in."
     return
   fi
 

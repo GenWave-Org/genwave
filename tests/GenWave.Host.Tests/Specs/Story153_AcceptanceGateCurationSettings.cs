@@ -80,10 +80,7 @@ public static class FeatureAcceptanceGateCurationSettings
         // intentional edit from a LATER epic, not a regression of F52–F56 touching neither file.
         // EngineScriptSha256 unchanged.
         //
-        // ComposeYamlSha256 re-pinned 2026-07-20 (Q3 housekeeping, "cloudflared observability",
-        // SPEC F77): a new, optional `cloudflared` service (profiles: ["tunnel"], off by default,
-        // no host ports) — versions the tunnel that previously ran outside the repo as unmanaged
-        // infrastructure, with a healthcheck/metrics contract. Another intentional edit from a
+        // ComposeYamlSha256 re-pinned 2026-07-20 (Q3 housekeeping, SPEC F77): an intentional compose edit from a
         // LATER epic, not a regression of F52–F56 touching neither file. EngineScriptSha256
         // unchanged — this task does not touch engine/genwave.liq.
         //
@@ -129,7 +126,7 @@ public static class FeatureAcceptanceGateCurationSettings
         // a later epic, not a regression of this epic's zero-diff promise.
         // ComposeYamlSha256 re-pinned 2026-08-02 (gh-#334): Library__EnrichmentConcurrency becomes
         // ${LIBRARY_ENRICHMENT_CONCURRENCY:-4} — same default on every existing box, now overridable.
-        // A pinned appliance box sets Admin__Enabled=false, closing PUT /api/settings, so the hardcoded
+        // A pinned box with the admin plane off sets Admin__Enabled=false, closing PUT /api/settings, so the hardcoded
         // value left the operator no lever at all while enrichment pinned all four cores of a Pi 5.
         // Config-indirection only — no service, wire, volume or healthcheck change. Another intentional
         // edit from a later epic, not a regression of this epic's zero-diff promise.
@@ -162,7 +159,12 @@ public static class FeatureAcceptanceGateCurationSettings
         // in parallel) and the engine healthcheck gains start_period: 45s; the engine service's
         // own comment block was rewritten to state the truth post-change. EngineScriptSha256
         // unchanged — this task does not touch engine/genwave.liq.
-        const string ComposeYamlSha256  = "c7e1828aa16edb18081078478751006a01ccad26697b0927aa8c54749c9ee9b4";
+        // ComposeYamlSha256 re-pinned 2026-10-26 (PLAN T645/T646, SPEC F216, STORY-517): the optional
+        // tunnel service and its `tunnel` profile are removed, and the comments that described
+        // them are reworded for a home station; T646 then drops the "ollama" mention from the
+        // kokoro comment (comment-only). No other service's behaviour changed. EngineScriptSha256
+        // unchanged — this task does not touch engine/genwave.liq.
+        const string ComposeYamlSha256  = "6db461ebe5a2183005f206ce358cfaf54967861824dfb9bc367519ebfc74fc52";
 
         [Fact]
         public void EngineScriptByteMatchesMain()

@@ -17,8 +17,8 @@
 // interface, never the concrete KokoroTtsSynthesizer — so that one registration is the only hand-off
 // any of them can reach.
 //
-// AC3 reads the demo settings seed (compose.demo.yaml) for the MacLeod rule and proves
-// TtsCorrectionsOptions itself carries no baked-in default — the seed is data, not code.
+// AC3 proves TtsCorrectionsOptions itself carries no baked-in default — corrections are data,
+// not code.
 
 using System.Net;
 using System.Net.Http.Json;
@@ -278,23 +278,13 @@ public static class FeatureCorrectionsLiveWiring
         }
     }
 
-    public sealed class ScenarioDemoSeed
+    public sealed class ScenarioNoBuiltInDefault
     {
-        [Fact]
-        public void MacLeodRuleIsSeededInComposeDemoYamlAsSettingsData()
-        {
-            var text = File.ReadAllText(Path.Combine(RepoRoot, "compose.demo.yaml"));
-
-            Assert.Contains("Tts__Corrections:", text, StringComparison.Ordinal);
-            Assert.Contains("\"from\":\"MacLeod\"", text, StringComparison.Ordinal);
-            Assert.Contains("\"to\":\"Muh-cloud\"", text, StringComparison.Ordinal);
-        }
-
         [Fact]
         public void TtsCorrectionsOptionsCarriesNoBuiltInDefault()
         {
-            // The demo seed is the ONLY place the MacLeod rule lives — TtsCorrectionsOptions
-            // itself must yield no corrections at all when unconfigured (F68.8).
+            // TtsCorrectionsOptions itself must yield no corrections at all when unconfigured
+            // (F68.8).
             var unconfigured = new TtsCorrectionsOptions();
 
             Assert.Null(unconfigured.Corrections);

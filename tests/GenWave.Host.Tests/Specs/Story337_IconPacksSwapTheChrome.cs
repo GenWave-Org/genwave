@@ -760,7 +760,7 @@ public static class FeatureIconPacksSwapTheChrome
         public async Task TheActiveResolutionAnswersTheHouseSetAfterUninstall()
         {
             // Given a pack installed AND activated (Station:IconPack env-seeded — mirrors
-            // Story265_ThemeSelectionAndPersistence.cs's own ApplianceModeWebFactory idiom for proving
+            // Story265_ThemeSelectionAndPersistence.cs's own AdminOffWebFactory idiom for proving
             // a config-layer claim with no live database),
             await using var factory = new IconPackInstallWebFactory(activeIconPack: IconPackInstallFixtures.PackSlug);
             var client = await IconPackInstallWebFactory.LoggedInClientAsync(factory);
@@ -812,7 +812,7 @@ file sealed class IconPackInstallWebFactory(
         builder.UseSetting("Community:CatalogIndexUrl", catalogIndexUrl);
 
         // Station:IconPack env-seeded (mirrors Story265_ThemeSelectionAndPersistence.cs's own
-        // ApplianceModeWebFactory idiom) — this is a config-layer concern, no live settings-overlay
+        // AdminOffWebFactory idiom) — this is a config-layer concern, no live settings-overlay
         // database needed to prove Active's own resolution.
         if (activeIconPack is not null)
             builder.UseSetting("Station:IconPack", activeIconPack);

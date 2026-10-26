@@ -27,7 +27,7 @@ it does not re-interview the project.
    docs. Build a short drift list (claimed but absent, present but
    undocumented, contradictions).
 3. For `DEPLOYMENT.md` specifically: cross-check every concrete value it
-   states against its source of truth in `compose.yaml` / `compose.demo.yaml`
+   states against its source of truth in `compose.yaml` / `compose.pinned.yaml`
    — resource fences (cpus/memory), pinned image tags, model names, ports,
    env var names. Pin-bump commits touch only the compose files, so these
    drift silently (gh-#77 tracks the CI enforcement layer; this is the

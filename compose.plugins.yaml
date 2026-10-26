@@ -6,7 +6,7 @@
 #
 # What it is: ONLY the api service's own read-only bind mount at /plugins — Plugins:Root's own
 # default (env Plugins__Root, unset = /plugins). Nothing else about the api service, or any other
-# service, is touched. Stack this on top of compose.yaml (and compose.pinned.yaml/compose.demo.yaml,
+# service, is touched. Stack this on top of compose.yaml (and compose.pinned.yaml,
 # in either order) whenever an operator has ALSO set Plugins__Enabled=true (default off, F156.1's
 # own fail-closed posture) — the two knobs are independent: Plugins__Enabled=true alone (this file
 # NOT stacked) finds nothing under the unmounted default directory and logs one INFO line naming the

@@ -1,11 +1,11 @@
-// STORY-366 — My sensor works on the appliance with the admin plane off (SPEC F145.6 · PLAN T351)
+// STORY-366 — My sensor works on a station with the admin plane off (SPEC F145.6 · PLAN T351)
 //
 // BDD specification — xUnit. WIRED T351. Entry-point discipline: every fact drives the REAL
 // production binary (WebApplicationFactory<Program>, the Story345 factory idiom over an ephemeral
 // Postgres — see SensorGateStationDatabase/SensorGateWebFactory at the bottom of this file, mirroring
 // PaWireProofWebFactory's own ConnectionStrings/UseSetting shape) — two factories on the SAME station
 // db: one with Admin:Enabled=true to mint the token through POST /api/announcements/token
-// (reveal-once), then one with Admin:Enabled=false (the compose.demo.yaml posture) driven with ONLY
+// (reveal-once), then one with Admin:Enabled=false (the admin-off posture) driven with ONLY
 // that Bearer. F145.6: the token-authed now-playing read answers with the admin plane off; submit and
 // the token endpoints stay admin-surface (404).
 //
@@ -96,7 +96,7 @@ public sealed class ScenarioTheReadStillWorksWithTheAdminPlaneOn(HappyPathArc ar
 public sealed class ScenarioTheReadAnswersWithAdminOffAndSpectatorModeOn(HappyPathArc arc)
 {
     // F145.6's "public or private station" half: given Admin:Enabled=false AND
-    // Station:SpectatorMode=true (the public-appliance posture) and a minted token, When
+    // Station:SpectatorMode=true (the admin-off + spectator-on posture) and a minted token, When
     // GET /api/announcements/now-playing — the token door's own fail-closed contract is the
     // privacy floor here, never a SpectatorMode check the read would otherwise have to duplicate.
     [Fact]
@@ -187,7 +187,7 @@ public sealed class HappyPathArc : IAsyncLifetime
         PostTokenStatusAdminOff = (await bearerOnlyClient.PostAsync("/api/announcements/token", content: null)).StatusCode;
         DeleteTokenStatusAdminOff = (await bearerOnlyClient.DeleteAsync("/api/announcements/token")).StatusCode;
 
-        // ── Admin plane OFF AND Station:SpectatorMode ON (the PUBLIC-appliance posture, F145.6's
+        // ── Admin plane OFF AND Station:SpectatorMode ON (the admin-off + spectator-on posture, F145.6's
         // "public or private station" half) — same station db, same Bearer token; a separate
         // container instance again needs its own NowPlayingService seed.
         await using var adminOffSpectatorFactory = new SensorGateWebFactory(db, adminEnabled: false, spectatorMode: true);

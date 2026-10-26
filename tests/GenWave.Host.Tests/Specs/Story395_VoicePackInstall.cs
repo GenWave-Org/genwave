@@ -84,7 +84,6 @@ public static class FeatureVoicePackInstallGoesLiveWithoutARestart
             ["ICECAST_ADMIN_PASSWORD"] = "story395-dummy",
             ["ADMIN_PASSWORD"] = "story395-dummy",
             ["MEDIA_DIR"] = Path.GetTempPath(),
-            ["PUBLIC_HOST"] = "story395.invalid",
             // gh-#249: explicit-but-empty shadows BOTH ambient COMPOSE_PROFILES and a dev
             // box's repo-root .env value, so the render sees the same profile set (none)
             // CI does. Overlay/flag-selected profiles are unaffected — a --profile flag
@@ -329,7 +328,7 @@ public static class FeatureVoicePackInstallGoesLiveWithoutARestart
         {
             // Finding 1 (fail-loud regression guard): a `for`/`||` loop's own exit status is
             // whichever iteration ran LAST — without `set -e`, an early `cp` failure (ENOSPC/EIO
-            // on a small appliance is the realistic trigger) would be masked by a later successful
+            // on a small box is the realistic trigger) would be masked by a later successful
             // iteration, and the container would exit 0 on a partially seeded volume.
             //
             // On a volume that starts COMPLETELY empty this fact can't tell the two apart: every

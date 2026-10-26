@@ -23,7 +23,7 @@
 // itself never distinguishes the two; it only ever sees ONE already-merged station value.
 //
 // T165 (this task) resolves the two PENDING facts differently, per their own shape:
-//   - AC7 (appliance mode) needs no live database — Admin:Enabled and an env-seeded Station:Theme
+//   - AC7 (admin-off mode) needs no live database — Admin:Enabled and an env-seeded Station:Theme
 //     are both config-layer concerns, exactly like Story166/Story170's own env-seeded facts — so it
 //     is now a real, always-run WebApplicationFactory fact.
 //   - AC5 (the live setting) genuinely needs the real Postgres-backed settings overlay AND, because
@@ -59,7 +59,7 @@ using GenWave.Tts;
 
 namespace GenWave.Host.Tests.Specs;
 
-/// <summary>AC7's rig — an appliance-mode stack, compose.demo.yaml's own shape (<c>Admin__Enabled:
+/// <summary>AC7's rig — an admin-off stack, the retired public overlay's shape (<c>Admin__Enabled:
 /// "false"</c> plus a <c>Station__*</c> env seed): mirrors Story166's <c>KillSwitchWebFactory</c> and
 /// Story170's <c>SpectatorAboutWebFactory</c>, the SAME <c>UseSetting</c> idiom both already use for
 /// this exact class of claim ("an env-seeded value reaches the served page"). The
@@ -67,7 +67,7 @@ namespace GenWave.Host.Tests.Specs;
 /// — a TEST FIXTURE, not the shipped shelf (Ship 1 ships exactly one theme) — so the env-seeded slug
 /// resolves to a theme whose composed CSS is provably distinct, not coincidentally identical to the
 /// shipped default.</summary>
-file sealed class ApplianceModeWebFactory : WebApplicationFactory<Program>
+file sealed class AdminOffWebFactory : WebApplicationFactory<Program>
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -197,7 +197,7 @@ public static class FeatureThemeSelectionAndPersistence
             "(a) RESOLVED (T183): StationSettingsAllowlist/SettingValidator now source Station:Theme's " +
             "choices/acceptance from the DI-registered ThemeCatalog at request time (not a frozen " +
             "shipped-only snapshot), so a WebApplicationFactory test swapping the DI ThemeCatalog " +
-            "singleton for ThemeSelectionFixtures.TwoThemeCatalog() (as ApplianceModeWebFactory " +
+            "singleton for ThemeSelectionFixtures.TwoThemeCatalog() (as AdminOffWebFactory " +
             "already does) can PUT the fixture's alternate slug and have it validate — no real " +
             "second SHIPPED theme is needed to prove this half. (b) STILL PERMANENT, absent new " +
             "test infrastructure: the real Postgres-backed settings overlay, because AC5 asserts a " +
@@ -311,10 +311,10 @@ public static class FeatureThemeSelectionAndPersistence
         public async Task TheEnvSeededThemeIsServedWithNoAdminSurfaceReachable()
         {
             // Arrange: a station running with Admin:Enabled=false and an env-seeded Station:Theme —
-            //          ApplianceModeWebFactory's own UseSetting calls mirror the compose.demo.yaml
+            //          AdminOffWebFactory's own UseSetting calls mirror the retired public overlay
             //          Station__*/Admin__Enabled env pattern exactly (Story166/Story170's own
             //          idiom for this class of claim, no live database needed).
-            await using var factory = new ApplianceModeWebFactory();
+            await using var factory = new AdminOffWebFactory();
             var client = factory.CreateClient();
 
             // Act: serve the spectator surface's composed stylesheet.

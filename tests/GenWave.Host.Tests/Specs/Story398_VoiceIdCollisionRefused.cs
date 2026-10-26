@@ -7,7 +7,7 @@
 // awaits both the store lookup and the stock lister unconditionally, SPEC F166.4), so this file's
 // fake Kokoro-voices route is DYNAMIC: it lists whatever .pt files the test's own temp voices root
 // actually holds at request time, unioned with a fixed stock roster — the same "kokoro rescans, no
-// restart" contract the real appliance relies on (SPEC F166.3), which is exactly what AC4's own fact
+// restart" contract a real station relies on (SPEC F166.3), which is exactly what AC4's own fact
 // below (a rename installs, then GET /api/voices proves BOTH ids live) is here to prove end to end.
 
 using System.Net;

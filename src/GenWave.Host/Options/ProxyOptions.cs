@@ -16,7 +16,7 @@ public sealed class ProxyOptions
     /// CIDR ranges (e.g. <c>"172.20.0.0/16"</c>) of reverse proxies trusted to set
     /// <c>X-Forwarded-For</c>. Empty by default, which leaves the forwarded-headers middleware
     /// registered but effectively inert: its own default known-networks/known-proxies trust only
-    /// loopback, and a compose-network proxy (e.g. Caddy, see PLAN T19's reference topology) is
+    /// loopback, and a compose-network proxy (e.g. a TLS-terminating reverse proxy) is
     /// never loopback. Never widen this to trust an unlisted network — a spoofed
     /// <c>X-Forwarded-For</c> header from an untrusted source would let a client dodge the
     /// per-IP spectator rate limiter (<see cref="RateLimiterPolicies.Spectator"/>).
