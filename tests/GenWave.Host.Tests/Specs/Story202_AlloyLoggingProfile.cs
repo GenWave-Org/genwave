@@ -22,7 +22,7 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureAlloyLoggingProfile
 {
-    static JsonDocument RenderConfig(bool loggingProfile, bool demoOverlay)
+    static JsonDocument RenderConfig(bool loggingProfile)
     {
         var startInfo = new ProcessStartInfo("docker")
         {
@@ -32,7 +32,6 @@ public static class FeatureAlloyLoggingProfile
             UseShellExecute = false,
         };
         var args = new List<string> { "compose", "-f", "compose.yaml" };
-        if (demoOverlay) { args.Add("-f"); args.Add("compose.demo.yaml"); }
         if (loggingProfile) { args.Add("--profile"); args.Add("logging"); }
         args.AddRange(new[] { "config", "--format", "json" });
         foreach (var arg in args) startInfo.ArgumentList.Add(arg);
@@ -47,7 +46,6 @@ public static class FeatureAlloyLoggingProfile
             ["ICECAST_ADMIN_PASSWORD"] = "story202-dummy",
             ["ADMIN_PASSWORD"] = "story202-dummy",
             ["MEDIA_DIR"] = Path.GetTempPath(),
-            ["PUBLIC_HOST"] = "story202.invalid",
             // Deliberately NO LOKI_* here — F78.4: rendering must succeed with them unset.
             // gh-#249: pin the profile set empty — shadows ambient COMPOSE_PROFILES and a
             // dev box's .env (COMPOSE_PROFILES=logging there would fail Alloy_is_absent_
@@ -72,8 +70,8 @@ public static class FeatureAlloyLoggingProfile
 
     public static class ScenarioProfilePosture
     {
-        static readonly Lazy<JsonDocument> WithLogging = new(() => RenderConfig(loggingProfile: true, demoOverlay: false));
-        static readonly Lazy<JsonDocument> WithoutLogging = new(() => RenderConfig(loggingProfile: false, demoOverlay: false));
+        static readonly Lazy<JsonDocument> WithLogging = new(() => RenderConfig(loggingProfile: true));
+        static readonly Lazy<JsonDocument> WithoutLogging = new(() => RenderConfig(loggingProfile: false));
 
         [Fact]
         [Trait("Category", "Integration")]
@@ -152,10 +150,10 @@ public static class FeatureAlloyLoggingProfile
         [Trait("Category", "Integration")]
         public static void Publish_guard_exits_zero_with_logging_profile_active()
         {
-            // Given the base+demo render with the logging profile
+            // Given the base render with the logging profile
             // When  fed to tools/check-compose-publish.sh --config-file
             // Then  exit 0 — activating logging can never introduce a publish (F78.1)
-            using var render = RenderConfig(loggingProfile: true, demoOverlay: true);
+            using var render = RenderConfig(loggingProfile: true);
             var fixturePath = Path.Combine(Path.GetTempPath(), $"story202-publish-{Guid.NewGuid():N}.json");
             File.WriteAllText(fixturePath, render.RootElement.GetRawText());
             try

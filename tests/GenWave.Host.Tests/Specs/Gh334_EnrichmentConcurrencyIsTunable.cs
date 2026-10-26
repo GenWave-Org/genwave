@@ -1,4 +1,4 @@
-// gh-#334 — enrichment saturated every core of a 4-core box, and a pinned appliance box had no
+// gh-#334 — enrichment saturated every core of a 4-core box, and a pinned box had no
 // lever to lower it.
 //
 // BDD specification — xUnit, the Gh310_PiperOnlyDropsTheLlm.cs render idiom (Category=Integration:
@@ -12,11 +12,8 @@
 //      undervoltage every ~2 min. The overlay drops kokoro and the LLM pair for exactly this
 //      "a 4GB box cannot afford it" reason; enrichment was the one that got away.
 //
-//   2. The value was hardcoded, so there was no `.env` lever — and compose.demo.yaml sets
-//      Admin__Enabled=false, so PUT /api/settings (the live STORY-139 path this setting was built
-//      for) is unreachable on a pinned box too. Neither route worked: an operator on an appliance
-//      box could not change it at all without hand-writing an override outside the sanctioned
-//      file set.
+//   2. The value was hardcoded, so there was no `.env` lever: an operator could not change it
+//      without hand-writing an override outside the sanctioned file set.
 
 using System.Diagnostics;
 using System.Text.Json;
@@ -42,7 +39,7 @@ public static class FeatureEnrichmentConcurrencyIsTunable
     /// seeds LIBRARY_ENRICHMENT_CONCURRENCY in the child environment; null leaves it unset so the
     /// compose-file default is what gets exercised.
     /// </summary>
-    static JsonDocument RenderConfig(bool demoOverlay, bool piperOnlyOverlay, string? concurrency = null)
+    static JsonDocument RenderConfig(bool piperOnlyOverlay, string? concurrency = null)
     {
         var startInfo = new ProcessStartInfo("docker")
         {
@@ -52,7 +49,6 @@ public static class FeatureEnrichmentConcurrencyIsTunable
             UseShellExecute = false,
         };
         var args = new List<string> { "compose", "-f", "compose.yaml" };
-        if (demoOverlay) { args.Add("-f"); args.Add("compose.demo.yaml"); }
         if (piperOnlyOverlay) { args.Add("-f"); args.Add("compose.piper-only.yaml"); }
         args.AddRange(["config", "--format", "json"]);
         foreach (var arg in args) startInfo.ArgumentList.Add(arg);
@@ -66,7 +62,6 @@ public static class FeatureEnrichmentConcurrencyIsTunable
             ["ICECAST_ADMIN_PASSWORD"] = "gh334-dummy",
             ["ADMIN_PASSWORD"] = "gh334-dummy",
             ["MEDIA_DIR"] = Path.GetTempPath(),
-            ["PUBLIC_HOST"] = "gh334.invalid",
             // Same hermeticity shims as gh-#310's render: a dev box's own .env must not sway these.
             ["COMPOSE_PROFILES"] = "",
             ["COMPOSE_FILE"] = "",
@@ -105,28 +100,16 @@ public static class FeatureEnrichmentConcurrencyIsTunable
 
     public static class ScenarioThePiperOnlyOverlayLowersTheDefault
     {
-        static readonly Lazy<JsonDocument> Appliance =
-            new(() => RenderConfig(demoOverlay: true, piperOnlyOverlay: true));
-
-        static readonly Lazy<JsonDocument> Dev =
-            new(() => RenderConfig(demoOverlay: false, piperOnlyOverlay: true));
+        static readonly Lazy<JsonDocument> PiperOnly =
+            new(() => RenderConfig(piperOnlyOverlay: true));
 
         [Fact]
         [Trait("Category", "Integration")]
-        public static void The_appliance_stack_enriches_two_files_at_a_time()
+        public static void The_piper_only_stack_enriches_two_files_at_a_time()
         {
-            // ./launch.sh --pinned --piper-only — HARDWARE.md topology (a), the shape the Pi 5
-            // field box runs. 4 pinned all four of its cores.
-            Assert.Equal("2", EnrichmentConcurrency(Appliance.Value));
-        }
-
-        [Fact]
-        [Trait("Category", "Integration")]
-        public static void The_dev_piper_only_stack_lowers_it_too()
-        {
-            // ./launch.sh --piper-only, no demo layer. The overlay's reason for existing — a small
-            // box — does not depend on which stack it is merged into.
-            Assert.Equal("2", EnrichmentConcurrency(Dev.Value));
+            // ./launch.sh --piper-only — HARDWARE.md topology (a), the shape the Pi 5 field box
+            // runs. 4 pinned all four of its cores.
+            Assert.Equal("2", EnrichmentConcurrency(PiperOnly.Value));
         }
     }
 
@@ -142,15 +125,7 @@ public static class FeatureEnrichmentConcurrencyIsTunable
         {
             // Making the value a variable must not move any existing box off its current setting.
             Assert.Equal("4",
-                EnrichmentConcurrency(RenderConfig(demoOverlay: false, piperOnlyOverlay: false)));
-        }
-
-        [Fact]
-        [Trait("Category", "Integration")]
-        public static void The_demo_stack_without_the_overlay_still_enriches_four_at_a_time()
-        {
-            Assert.Equal("4",
-                EnrichmentConcurrency(RenderConfig(demoOverlay: true, piperOnlyOverlay: false)));
+                EnrichmentConcurrency(RenderConfig(piperOnlyOverlay: false)));
         }
     }
 
@@ -165,7 +140,7 @@ public static class FeatureEnrichmentConcurrencyIsTunable
         public static void The_variable_overrides_the_base_default()
         {
             Assert.Equal("1",
-                EnrichmentConcurrency(RenderConfig(demoOverlay: true, piperOnlyOverlay: false, concurrency: "1")));
+                EnrichmentConcurrency(RenderConfig(piperOnlyOverlay: false, concurrency: "1")));
         }
 
         [Fact]
@@ -173,25 +148,10 @@ public static class FeatureEnrichmentConcurrencyIsTunable
         public static void The_variable_overrides_the_piper_only_default_upward_too()
         {
             // The overlay lowers the DEFAULT, it does not impose a ceiling. A Pi 5 on a proven
-            // supply with active cooling may want its cores back — and on a pinned box this env
-            // var is the only route, since compose.demo.yaml's Admin__Enabled=false closes
-            // PUT /api/settings.
+            // supply with active cooling may want its cores back — this env
+            // var is the lever for an operator who keeps compose.yaml's file set untouched.
             Assert.Equal("4",
-                EnrichmentConcurrency(RenderConfig(demoOverlay: true, piperOnlyOverlay: true, concurrency: "4")));
-        }
-
-        [Fact]
-        [Trait("Category", "Integration")]
-        public static void The_appliance_stack_really_does_close_the_live_settings_path()
-        {
-            // Pins the premise the env lever exists FOR. If this ever flips to true, the
-            // hardcoded-value defect stops being unreachable-by-design and this whole scenario
-            // should be revisited rather than silently kept.
-            var admin = RenderConfig(demoOverlay: true, piperOnlyOverlay: true).RootElement
-                .GetProperty("services").GetProperty("api")
-                .GetProperty("environment").GetProperty("Admin__Enabled").GetString();
-
-            Assert.Equal("false", admin);
+                EnrichmentConcurrency(RenderConfig(piperOnlyOverlay: true, concurrency: "4")));
         }
     }
 }

@@ -2,8 +2,7 @@
 // trusted_proxies) and ForwardLimit=1 truncated the trusted-hop walk on the inner proxy.
 //
 // BDD specification — xUnit. Config-regression pins: the ForwardedHeadersOptions posture per
-// Proxy:TrustedNetworks presence, and the reference Caddyfile's trusted_proxies directive
-// (Story221's file-content-guard idiom). The live two-hop resolution is verified at deploy
+// Proxy:TrustedNetworks presence. The live two-hop resolution is verified at deploy
 // (gh-#74's login line shows the resolved caller IP).
 
 using Microsoft.AspNetCore.Builder;
@@ -84,19 +83,6 @@ public static class FeatureForwardedHeadersTrustedHopWalk
             var options = factory.Services.GetRequiredService<IOptions<ForwardedHeadersOptions>>().Value;
 
             Assert.Equal(1, options.ForwardLimit);
-        }
-    }
-
-    public sealed class ScenarioCaddyfileTrustsItsHop
-    {
-        [Fact]
-        public void TheReferenceCaddyfileDeclaresTrustedProxies()
-        {
-            // Without this directive Caddy v2.5+ strips the inbound X-Forwarded-For and the
-            // real client IP never reaches the api at all (gh-#129's other half).
-            var caddyfile = File.ReadAllText(Path.Combine(RepoRoot(), "Caddyfile"));
-
-            Assert.Contains("trusted_proxies", caddyfile);
         }
     }
 }

@@ -1,18 +1,16 @@
 #!/usr/bin/env bash
 # check-compose-publish.sh — SPEC F67.1 / STORY-181 guard.
 #
-# On the public (--pinned: compose.pinned.yaml + compose.demo.yaml) overlay, the merged
-# compose config must publish 0.0.0.0 host ports ONLY for the front proxy (caddy 80/443).
-# Every other service must be loopback-bound (127.0.0.1:...) or unpublished entirely. This
-# is exactly the Icecast :8000 gotcha fixed in 05303ce — this script pins it shut so it can
-# never silently recur.
+# On the home (--pinned: compose.pinned.yaml) stack, the merged compose config must publish
+# 0.0.0.0 host ports ONLY for the LAN allowlist (icecast 8000, api 8080/8081, admin_ui 3000).
+# Every other service must be loopback-bound (127.0.0.1:...) or unpublished entirely.
 #
 # Usage:
 #   tools/check-compose-publish.sh
 #     Renders the real merged config (`docker compose -f compose.yaml -f compose.pinned.yaml
-#     -f compose.demo.yaml config --format json`, from the repo root — the actual `--pinned`
+#     config --format json`, from the repo root — the actual `--pinned`
 #     shape launch.sh runs, SPEC F136.5) and checks it. Requires the docker CLI. Dummy
-#     secrets are exported for the vars compose.yaml/compose.demo.yaml require (${VAR:?}) so
+#     secrets are exported for the vars compose.yaml requires (${VAR:?}) so
 #     this runs standalone, without a real .env — `config` only merges and substitutes text,
 #     it never talks to a daemon or starts a container. compose.pinned.yaml itself needs no
 #     env (static image tags only).
@@ -22,7 +20,7 @@
 #     <path> instead of invoking docker. Lets callers (tests, CI on a docker-less runner)
 #     drive fixtures without the docker CLI (STORY-181 AC3).
 #
-# Exit: 0 — only caddy publishes 0.0.0.0 on 80/443; every other publish is loopback-bound
+# Exit: 0 — 0.0.0.0 publishes are all on the allowlist; every other publish is loopback-bound
 #           or the service has no `ports:` at all.
 #       1 — at least one offending service:port is named on stdout.
 #       2 — usage/environment error (bad args, jq missing, file not found).
@@ -31,8 +29,8 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-ALLOWED_SERVICE="caddy"
-ALLOWED_PORTS=(80 443)
+# service:port pairs allowed to publish on every interface (the LAN station's surface).
+ALLOWED_PUBLISHES=(icecast:8000 api:8080 api:8081 admin_ui:3000)
 
 # `network_mode: host` makes a container share the host's network namespace outright —
 # every port it listens on binds every host interface directly, with no entry in
@@ -69,7 +67,7 @@ if [ -n "$CONFIG_FILE" ]; then
 else
   command -v docker >/dev/null 2>&1 || { echo "check-compose-publish: docker is required (or pass --config-file)" >&2; exit 2; }
 
-  # Dummy values for every ${VAR:?} compose.yaml/compose.demo.yaml require — `config` only
+  # Dummy values for every ${VAR:?} compose.yaml requires — `config` only
   # renders text, so these never reach a running container. `: "${VAR:=...}"` leaves a
   # caller's real value (e.g. a sourced .env) alone and only fills the gap.
   : "${POSTGRES_PASSWORD:=check-compose-publish-dummy}"
@@ -79,11 +77,10 @@ else
   : "${ICECAST_ADMIN_PASSWORD:=check-compose-publish-dummy}"
   : "${ADMIN_PASSWORD:=check-compose-publish-dummy}"
   : "${MEDIA_DIR:=/tmp/check-compose-publish-dummy}"
-  : "${PUBLIC_HOST:=check-compose-publish.invalid}"
   export POSTGRES_PASSWORD LIBRARY_DB_PASSWORD STATION_DB_PASSWORD ICECAST_SOURCE_PASSWORD \
-         ICECAST_ADMIN_PASSWORD ADMIN_PASSWORD MEDIA_DIR PUBLIC_HOST
+         ICECAST_ADMIN_PASSWORD ADMIN_PASSWORD MEDIA_DIR
 
-  CONFIG_JSON="$(cd "$REPO_ROOT" && docker compose -f compose.yaml -f compose.pinned.yaml -f compose.demo.yaml config --format json)"
+  CONFIG_JSON="$(cd "$REPO_ROOT" && docker compose -f compose.yaml -f compose.pinned.yaml config --format json)"
 fi
 
 # TSV rows, one per published port across every service: service, published (host) port,
@@ -96,10 +93,10 @@ PUBLISHES="$(jq -r '
   [$service, (.published // "" | tostring), (.host_ip // "")] | @tsv
 ' <<<"$CONFIG_JSON")"
 
-is_allowed_port() {
-  local port="$1" candidate
-  for candidate in "${ALLOWED_PORTS[@]}"; do
-    [ "$port" = "$candidate" ] && return 0
+is_allowed_publish() {
+  local pair="$1" candidate
+  for candidate in "${ALLOWED_PUBLISHES[@]}"; do
+    [ "$pair" = "$candidate" ] && return 0
   done
   return 1
 }
@@ -133,13 +130,13 @@ while IFS=$'\t' read -r service published host_ip; do
   # Fail-closed: a publish is safe ONLY when host_ip is genuinely loopback. Everything
   # else — omitted, 0.0.0.0, IPv6 wildcards ("::", "::0", and any other all-zeros
   # expansion), or any value we don't recognize — is treated as public and subject to
-  # the caddy-80/443 allowlist below. Do not add a case here without confirming the
+  # the allowlist below. Do not add a case here without confirming the
   # address is loopback-only; a broad catch-all is exactly the fail-open bug this guard
   # exists to prevent.
   case "$host_ip" in
     127.*|::1|::ffff:127.*) continue ;;
   esac
-  if [ "$service" = "$ALLOWED_SERVICE" ] && is_allowed_port "$published"; then
+  if is_allowed_publish "$service:$published"; then
     allowed_report+=("$service:$published")
     continue
   fi
@@ -147,7 +144,7 @@ while IFS=$'\t' read -r service published host_ip; do
 done <<<"$PUBLISHES"
 
 if [ "${#offenders[@]}" -gt 0 ]; then
-  echo "check-compose-publish: FAIL — 0.0.0.0 host publish outside caddy 80/443:"
+  echo "check-compose-publish: FAIL — 0.0.0.0 host publish outside the allowlist:"
   for offender in "${offenders[@]}"; do
     echo "  $offender"
   done

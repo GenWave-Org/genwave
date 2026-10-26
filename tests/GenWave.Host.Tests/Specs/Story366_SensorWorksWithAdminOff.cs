@@ -5,7 +5,7 @@
 // Postgres — see SensorGateStationDatabase/SensorGateWebFactory at the bottom of this file, mirroring
 // PaWireProofWebFactory's own ConnectionStrings/UseSetting shape) — two factories on the SAME station
 // db: one with Admin:Enabled=true to mint the token through POST /api/announcements/token
-// (reveal-once), then one with Admin:Enabled=false (the compose.demo.yaml posture) driven with ONLY
+// (reveal-once), then one with Admin:Enabled=false (the admin-off posture) driven with ONLY
 // that Bearer. F145.6: the token-authed now-playing read answers with the admin plane off; submit and
 // the token endpoints stay admin-surface (404).
 //

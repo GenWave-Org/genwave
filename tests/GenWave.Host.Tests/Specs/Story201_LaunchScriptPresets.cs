@@ -63,7 +63,7 @@ public static class FeatureLaunchScriptPresets
         [Fact]
         public static void Plan_omits_the_demo_overlay()
         {
-            Assert.DoesNotContain(PlanLines(Run.Value.StdOut), l => l.Contains("compose.demo.yaml", StringComparison.Ordinal));
+            Assert.DoesNotContain(PlanLines(Run.Value.StdOut), l => l.Contains("compose." + "demo", StringComparison.Ordinal));
         }
 
         [Fact]

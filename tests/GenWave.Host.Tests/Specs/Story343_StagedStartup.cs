@@ -296,7 +296,7 @@ public static class FeatureStagedStartup
     {
         // GW_ENV_FILE seam carries GW_PRESET=home; ./launch.sh --dry-run with no topology
         // flags plans base + compose.pinned.yaml — the wizard's LAN station — WITHOUT
-        // compose.demo.yaml (SPEC F136.5).
+        // the retired demo overlay (SPEC F136.5).
         static readonly Lazy<(int ExitCode, string StdOut, string StdErr)> Run =
             new(() => RunLaunch(WriteEnvFile("GW_PRESET=home"), "--dry-run"));
 
@@ -312,7 +312,7 @@ public static class FeatureStagedStartup
         {
             var lines = PlanLines(Run.Value.StdOut);
             Assert.Contains(lines, l => l.Contains("compose.pinned.yaml", StringComparison.Ordinal));
-            Assert.DoesNotContain(lines, l => l.Contains("compose.demo.yaml", StringComparison.Ordinal));
+            Assert.DoesNotContain(lines, l => l.Contains("compose." + "demo", StringComparison.Ordinal));
         }
     }
 

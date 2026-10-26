@@ -4,7 +4,7 @@
 // (tools/check-compose-socket.sh) via Process — Story181 idiom throughout: real renders
 // carry Category=Integration; hand-built --config-file fixtures run in the ordinary suite.
 //
-// Invariant under guard: across base and base+demo renders, any profile combination,
+// Invariant under guard: across the base and base+piper-only renders, any profile combination,
 // /var/run/docker.sock is bind-mounted read-only into `alloy` and `dockerproxy` (the second
 // carve-out, gh-#148 — its own pins live in Gh148_ComposeStatsSidecar.cs) and into nothing
 // else. The guard lands (T48) BEFORE the carve-out exists (T49) — it first passes proving the
@@ -37,7 +37,7 @@ public static class FeatureComposeSocketGuard
         [Trait("Category", "Integration")]
         public static void Guard_exits_zero_across_all_profile_combinations()
         {
-            // Given the real compose files (the guard renders base and base+demo itself,
+            // Given the real compose files (the guard renders base and base+piper-only itself,
             //       with every profile combination — its default mode, like the publish guard)
             // When  the guard runs with no arguments
             // Then  it exits 0: no service beyond alloy touches docker.sock, alloy (once it

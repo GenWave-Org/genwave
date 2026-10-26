@@ -1,8 +1,8 @@
 // STORY-518 — the demo overlay and the proxy config are gone (F216 · PLAN T647)
 //
 // BDD specification — xUnit. Absence facts over the repo tree and every spec under tests/. AC3
-// (the retargeted specs stay green) is the PR tier itself — no fact here. Every fact is pending
-// until T647.
+// (the retargeted specs stay green) is the PR tier itself — no fact here. Every fact is
+// green.
 
 using GenWave.Host.Tests.Support;
 
@@ -18,13 +18,13 @@ public static class FeatureTheDemoOverlayIsGone
 
     public static class ScenarioTheFilesAreGone
     {
-        [Fact(Skip = "pending: T647")]
+        [Fact]
         public static void The_demo_overlay_does_not_exist()
         {
             Assert.False(File.Exists(Path.Combine(Root, DemoOverlay)));
         }
 
-        [Fact(Skip = "pending: T647")]
+        [Fact]
         public static void The_proxy_config_does_not_exist()
         {
             Assert.False(File.Exists(Path.Combine(Root, ProxyConfig)));
@@ -41,13 +41,13 @@ public static class FeatureTheDemoOverlayIsGone
         static string[] Naming(string word) =>
             SpecFiles().Where(f => File.ReadAllText(f).Contains(word, StringComparison.Ordinal)).Select(f => Path.GetFileName(f)).ToArray();
 
-        [Fact(Skip = "pending: T647")]
+        [Fact]
         public static void No_spec_names_the_demo_overlay()
         {
             Assert.Empty(Naming(DemoOverlay));
         }
 
-        [Fact(Skip = "pending: T647")]
+        [Fact]
         public static void No_spec_names_the_proxy_config()
         {
             Assert.Empty(Naming(ProxyConfig));

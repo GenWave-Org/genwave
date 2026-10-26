@@ -80,7 +80,6 @@ internal static class ComposeConfigRender
         ["ICECAST_ADMIN_PASSWORD"] = "compose-render-dummy",
         ["ADMIN_PASSWORD"] = "compose-render-dummy",
         ["MEDIA_DIR"] = Path.GetTempPath(),
-        ["PUBLIC_HOST"] = "compose-render.invalid",
         // gh-#249: explicit-but-empty shadows both ambient COMPOSE_PROFILES and a dev box's
         // repo-root .env value, so the render sees the same profile set (none) CI does.
         ["COMPOSE_PROFILES"] = "",

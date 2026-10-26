@@ -84,7 +84,6 @@ public static class FeatureVoicePackInstallGoesLiveWithoutARestart
             ["ICECAST_ADMIN_PASSWORD"] = "story395-dummy",
             ["ADMIN_PASSWORD"] = "story395-dummy",
             ["MEDIA_DIR"] = Path.GetTempPath(),
-            ["PUBLIC_HOST"] = "story395.invalid",
             // gh-#249: explicit-but-empty shadows BOTH ambient COMPOSE_PROFILES and a dev
             // box's repo-root .env value, so the render sees the same profile set (none)
             // CI does. Overlay/flag-selected profiles are unaffected — a --profile flag

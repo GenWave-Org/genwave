@@ -59,7 +59,7 @@ using GenWave.Tts;
 
 namespace GenWave.Host.Tests.Specs;
 
-/// <summary>AC7's rig — an appliance-mode stack, compose.demo.yaml's own shape (<c>Admin__Enabled:
+/// <summary>AC7's rig — an appliance-mode stack, the retired public overlay's shape (<c>Admin__Enabled:
 /// "false"</c> plus a <c>Station__*</c> env seed): mirrors Story166's <c>KillSwitchWebFactory</c> and
 /// Story170's <c>SpectatorAboutWebFactory</c>, the SAME <c>UseSetting</c> idiom both already use for
 /// this exact class of claim ("an env-seeded value reaches the served page"). The
@@ -311,7 +311,7 @@ public static class FeatureThemeSelectionAndPersistence
         public async Task TheEnvSeededThemeIsServedWithNoAdminSurfaceReachable()
         {
             // Arrange: a station running with Admin:Enabled=false and an env-seeded Station:Theme —
-            //          ApplianceModeWebFactory's own UseSetting calls mirror the compose.demo.yaml
+            //          ApplianceModeWebFactory's own UseSetting calls mirror the retired public overlay
             //          Station__*/Admin__Enabled env pattern exactly (Story166/Story170's own
             //          idiom for this class of claim, no live database needed).
             await using var factory = new ApplianceModeWebFactory();

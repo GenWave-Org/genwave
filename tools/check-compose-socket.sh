@@ -5,8 +5,8 @@
 # every other container (and, transitively, the host). Exactly two services may ever bind-mount
 # it, both read-only: the `alloy` metrics/log collector (PLAN T49) and the `dockerproxy`
 # allowlisting socket proxy behind the Health page's container stats (gh-#148). This guard pins
-# that invariant shut across every render this repo produces: base (compose.yaml), base+demo
-# (compose.yaml+compose.demo.yaml), and both with the compose.piper-only.yaml overlay (gh-#242),
+# that invariant shut across every render this repo produces: base (compose.yaml) and base with the
+# compose.piper-only.yaml overlay (gh-#242),
 # under every profile combination (none, admin, tunnel, logging, admin+tunnel+logging).
 #
 # The socket is matched by basename pattern (any source/target path ending in `docker.sock`),
@@ -23,8 +23,8 @@
 #   tools/check-compose-socket.sh
 #     Renders the real merged config itself (`docker compose ... config --format json`, from
 #     the repo root) for every file-set x profile-combination below and checks each one.
-#     Requires the docker CLI. Dummy secrets are exported for the vars compose.yaml/
-#     compose.demo.yaml require (${VAR:?}) so this runs standalone, without a real .env —
+#     Requires the docker CLI. Dummy secrets are exported for the vars compose.yaml
+#     requires (${VAR:?}) so this runs standalone, without a real .env —
 #     `config` only merges and substitutes text, it never talks to a daemon or starts a
 #     container. Same idiom as tools/check-compose-publish.sh.
 #
@@ -146,7 +146,7 @@ if [ -n "$CONFIG_FILE" ]; then
 else
   command -v docker >/dev/null 2>&1 || { echo "check-compose-socket: docker is required (or pass --config-file)" >&2; exit 2; }
 
-  # Dummy values for every ${VAR:?} compose.yaml/compose.demo.yaml require — `config` only
+  # Dummy values for every ${VAR:?} compose.yaml requires — `config` only
   # renders text, so these never reach a running container. `: "${VAR:=...}"` leaves a
   # caller's real value (e.g. a sourced .env) alone and only fills the gap.
   : "${POSTGRES_PASSWORD:=check-compose-socket-dummy}"
@@ -156,19 +156,15 @@ else
   : "${ICECAST_ADMIN_PASSWORD:=check-compose-socket-dummy}"
   : "${ADMIN_PASSWORD:=check-compose-socket-dummy}"
   : "${MEDIA_DIR:=/tmp/check-compose-socket-dummy}"
-  : "${PUBLIC_HOST:=check-compose-socket.invalid}"
   export POSTGRES_PASSWORD LIBRARY_DB_PASSWORD STATION_DB_PASSWORD ICECAST_SOURCE_PASSWORD \
-         ICECAST_ADMIN_PASSWORD ADMIN_PASSWORD MEDIA_DIR PUBLIC_HOST
+         ICECAST_ADMIN_PASSWORD ADMIN_PASSWORD MEDIA_DIR
 
-  # Every file-set this repo actually deploys: the base stack on its own, base+demo (the
-  # public-station overlay), and the piper-only low-memory overlay on both (gh-#242 —
-  # always merged last, matching launch.sh --piper-only). Add a new overlay here the day
+  # Every file-set this repo actually deploys: the base stack on its own and the piper-only
+  # low-memory overlay on it (gh-#242 — always merged last, matching launch.sh --piper-only). Add a new overlay here the day
   # one ships.
   FILE_SETS=(
     "base:compose.yaml"
-    "base+demo:compose.yaml compose.demo.yaml"
     "base+piper-only:compose.yaml compose.piper-only.yaml"
-    "base+demo+piper-only:compose.yaml compose.demo.yaml compose.piper-only.yaml"
   )
 
   # Every profile combination that changes which services exist. "admin" gates admin_ui,
