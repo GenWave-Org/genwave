@@ -34,9 +34,9 @@
 #
 # Exit: 0 — every render checked: only `alloy`/`dockerproxy` mount docker.sock, and only read-only.
 #       1 — at least one offending service:render is named on stdout.
-#       2 — usage/environment error (bad args, jq missing, file not found).
-#       A failed `docker compose config` render exits with docker's own non-zero code (usually
-#       1), with docker's error on stderr and no offender printed.
+#       2 — usage/environment error (bad args, jq missing, file not found), a failed
+#           `docker compose config` render, or a document with zero services. Fail-closed:
+#           nothing checked is never a pass.
 
 set -euo pipefail
 
@@ -110,10 +110,15 @@ VOLUME_ROWS_FILTER='
 '
 
 # Checks one rendered config (a JSON document, already in $1) for socket-mount offenders.
-# Appends "label: offender" strings to the global `offenders` array; does not exit.
+# Exits 2 on a render with no services; otherwise appends "label: offender" strings to the
+# global `offenders` array and returns.
 check_render() {
   local label="$1" config_json="$2"
   local rows service source target read_only
+
+  # Fail closed: a render with no services (empty, `{}`, `{"services":{}}`) checked nothing.
+  jq -e '(.services // {}) | type == "object" and length > 0' <<<"$config_json" >/dev/null 2>&1 \
+    || { echo "check-compose-socket: no services in render: $label" >&2; exit 2; }
 
   rows="$(jq -r "$VOLUME_ROWS_FILTER" <<<"$config_json")"
 
@@ -198,7 +203,9 @@ else
       fi
 
       render_label="$files_label (profiles: $combo_label)"
-      config_json="$(cd "$REPO_ROOT" && docker compose "${compose_profile_args[@]}" "${compose_file_args[@]}" config --format json)"
+      # Fail closed with exit 2 and the render label, not docker's own exit code.
+      config_json="$(cd "$REPO_ROOT" && docker compose "${compose_profile_args[@]}" "${compose_file_args[@]}" config --format json)" \
+        || { echo "check-compose-socket: render failed: $render_label" >&2; exit 2; }
       check_render "$render_label" "$config_json"
     done
   done
