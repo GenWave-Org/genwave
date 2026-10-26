@@ -38,6 +38,8 @@ GenWave is my radio station. It plays my music library around the clock on the h
 
 ## 🚀 Getting started
 
+You need Docker with Compose v2.24 or newer and a folder of `.mp3` or `.flac` files. [HARDWARE.md](HARDWARE.md) lists the boxes it runs on.
+
 1. **Get the code.**
    ```bash
    git clone https://github.com/GenWave-Org/genwave.git && cd genwave
@@ -46,12 +48,10 @@ GenWave is my radio station. It plays my music library around the clock on the h
    ```bash
    ./setup.sh
    ```
-3. **Listen.** Open `http://localhost:8000/stream` in any audio player, and the admin console at `http://localhost:3000`.
+3. **Listen.** Open `http://localhost:8000/stream` in any audio player, and the admin console at `http://localhost:3000`. Sign in with the admin password the wizard printed (it is also `ADMIN_PASSWORD` in `.env`).
 4. **Expect "Please Stand By".** You may hear it at first. That is normal: the station plays it, with a short pause between repeats, until the first tracks in your library are analysed, then the music starts.
 
 Prefer a one-liner? [download.genwaveradio.com](https://download.genwaveradio.com/) fetches the same wizard.
-
-You need Docker with Compose v2.24 or newer and a folder of `.mp3` or `.flac` files. [HARDWARE.md](HARDWARE.md) lists the boxes it runs on.
 
 ## 💡 Why GenWave
 
