@@ -86,8 +86,33 @@ cd "$(dirname "$0")"
 
 . tools/preflight.sh
 
+# usage — prints the short plain help for -h/--help (and after a bad option).
 usage() {
-  awk 'NR==1{next} /^#/{sub(/^# ?/,""); print; next} {exit}' "$0"
+  cat <<'EOF'
+Usage: ./launch.sh [--with a,b] [--piper-only] [--dry-run]
+
+Starts or restarts the GenWave stack. Run ./build.sh to rebuild images after a code change.
+
+  ./launch.sh                  Build-from-source flow: restart, run database migrations,
+                               start everything.
+  GW_PRESET=home ./launch.sh   Published images only, never builds.
+                               Set GW_PRESET in .env to keep it.
+  --with a,b                   Turn on optional services for this launch (admin, logging, fallback).
+  --piper-only                 Low-memory mode: no Kokoro, the Piper voice does all speech.
+  --dry-run                    Print the commands it would run, then exit. Changes nothing.
+  -h, --help                   Show this help.
+
+Environment:
+  GW_PRESET         home, home-piper-only, dev or dev-piper-only (default dev).
+  BUILD=1           Rebuild images on the way up (dev flow only).
+  SKIP_PREFLIGHT=1  Skip the machine checks.
+
+Exit codes:
+  0  Running.
+  2  Bad option, bad GW_PRESET, or BUILD=1 with a home preset.
+  3  A machine check or the start failed.
+  4  Playing, but some services didn't update. The message names the command to retry.
+EOF
 }
 
 PIPER_ONLY=0

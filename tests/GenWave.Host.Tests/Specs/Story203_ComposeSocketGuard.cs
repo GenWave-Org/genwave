@@ -121,6 +121,22 @@ public static class FeatureComposeSocketGuard
                 $"expected failure naming 'api' (exit {exitCode}):\n{output}");
         }
 
+        [Theory]
+        [InlineData("")]
+        [InlineData("{}")]
+        [InlineData("""{"services":{}}""")]
+        public static void A_render_with_no_services_fails_closed(string fixtureJson)
+        {
+            // Given a render with no services at all (empty file, `{}`, or an empty services map)
+            // When  the guard runs in --config-file mode
+            // Then  it exits 2 saying so and prints no OK line — nothing checked is never a pass
+            var (exitCode, output) = RunAgainstFixture(fixtureJson);
+
+            Assert.True(exitCode == 2 && output.Contains("no services in render", StringComparison.Ordinal)
+                        && !output.Contains("OK", StringComparison.Ordinal),
+                $"expected exit 2 'no services in render' and no OK (exit {exitCode}):\n{output}");
+        }
+
         [Fact]
         public static void A_writable_alloy_socket_mount_fails()
         {
