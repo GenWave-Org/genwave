@@ -4,6 +4,7 @@
 // named paths, case-insensitive, no hit for any of the seven words. CHANGELOG.md, docs/ and
 // .github/workflows/ are exempt (brief). All four facts run since T650.
 
+using System.Diagnostics;
 using System.Text.RegularExpressions;
 using GenWave.Host.Tests.Support;
 
@@ -27,16 +28,55 @@ public static class FeatureNoWordOfTheBoxHeDeleted
 
     static readonly Regex Pattern = new(string.Join("|", Words), RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    static readonly string[] SkippedSegments = ["bin", "obj", "node_modules", ".next", "TestResults"];
+    // Repo files git doesn't ignore: tracked plus untracked-but-not-ignored (git ls-files from the repo
+    // root), so a new un-added file is scanned while gitignored local output (TestResults, bin, obj,
+    // node_modules, .next) can never turn this red. An empty or failed listing fails loudly.
+    static readonly Lazy<string[]> RepoFiles = new(ListRepoFiles);
 
-    static IEnumerable<string> RootFiles() =>
-        Directory.EnumerateFiles(Root, "compose*.yaml", SearchOption.TopDirectoryOnly)
-            .Concat(new[] { ".env.example", "launch.sh", "setup.sh", "migrate.sh", Path.Combine("observability", "LABELS.md") }
-                .Select(f => Path.Combine(Root, f)));
+    static string[] ListRepoFiles()
+    {
+        var info = new ProcessStartInfo("git")
+        {
+            WorkingDirectory = Root,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        info.ArgumentList.Add("ls-files");
+        info.ArgumentList.Add("-z");
+        info.ArgumentList.Add("--cached");
+        info.ArgumentList.Add("--others");
+        info.ArgumentList.Add("--exclude-standard");
 
-    static IEnumerable<string> TreeFiles(string dir) =>
-        Directory.EnumerateFiles(Path.Combine(Root, dir), "*", SearchOption.AllDirectories)
-            .Where(f => !f.Split(Path.DirectorySeparatorChar).Any(seg => SkippedSegments.Contains(seg, StringComparer.Ordinal)));
+        using var git = Process.Start(info)
+            ?? throw new InvalidOperationException("git ls-files did not start.");
+        var stdout = git.StandardOutput.ReadToEndAsync();
+        var stderr = git.StandardError.ReadToEndAsync();
+        git.WaitForExit();
+        if (git.ExitCode != 0)
+            throw new InvalidOperationException($"git ls-files failed ({git.ExitCode}): {stderr.Result}");
+
+        var files = stdout.Result.Split('\0', StringSplitOptions.RemoveEmptyEntries);
+        Assert.NotEmpty(files);
+        return files;
+    }
+
+    static readonly string[] RootNames = [".env.example", "launch.sh", "setup.sh", "migrate.sh", "observability/LABELS.md"];
+
+    // A scope that matches no files would pass vacuously, so each scope asserts it found some.
+    static string[] Scope(IEnumerable<string> relativePaths)
+    {
+        var files = relativePaths.Select(f => Path.Combine(Root, f)).ToArray();
+        Assert.NotEmpty(files);
+        return files;
+    }
+
+    static string[] RootFiles() =>
+        Scope(RepoFiles.Value
+            .Where(f => RootNames.Contains(f, StringComparer.Ordinal)
+                || (!f.Contains('/') && f.StartsWith("compose", StringComparison.Ordinal) && f.EndsWith(".yaml", StringComparison.Ordinal))));
+
+    static string[] TreeFiles(string dir) =>
+        Scope(RepoFiles.Value.Where(f => f.StartsWith(dir + "/", StringComparison.Ordinal)));
 
     static string[] Hits(IEnumerable<string> files) =>
         files.Where(File.Exists)
