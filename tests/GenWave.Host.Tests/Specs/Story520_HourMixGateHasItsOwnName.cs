@@ -2,7 +2,7 @@
 //
 // BDD specification — xUnit. Existence/absence facts over tools/ plus a reader sweep over tests/
 // and tools/. Story304 (MediaLibrary.Tests, Integration) executing the renamed file is that
-// spec's own job. Every fact is pending until T649.
+// spec's own job.
 
 using GenWave.Host.Tests.Support;
 
@@ -17,13 +17,13 @@ public static class FeatureHourMixGateHasItsOwnName
 
     public static class ScenarioTheFileIsRenamed
     {
-        [Fact(Skip = "pending: T649")]
+        [Fact]
         public static void Hour_mix_gate_exists()
         {
             Assert.True(File.Exists(Path.Combine(Root, "tools", "hour_mix_gate.sql")));
         }
 
-        [Fact(Skip = "pending: T649")]
+        [Fact]
         public static void The_old_file_does_not_exist()
         {
             Assert.False(File.Exists(Path.Combine(Root, "tools", OldName + ".sql")));
@@ -39,13 +39,13 @@ public static class FeatureHourMixGateHasItsOwnName
                 .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
                          && !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal));
 
-        [Fact(Skip = "pending: T649")]
+        [Fact]
         public static void No_reader_names_the_old_file()
         {
             Assert.Empty(Readers().Where(f => File.ReadAllText(f).Contains(OldName, StringComparison.Ordinal)).Select(f => Path.GetFileName(f)));
         }
 
-        [Fact(Skip = "pending: T649")]
+        [Fact]
         public static void Story304_executes_the_new_file()
         {
             var story304 = File.ReadAllText(Path.Combine(Root, "tests", "GenWave.MediaLibrary.Tests", "Specs", "Story304_AiredKindStamp.cs"));

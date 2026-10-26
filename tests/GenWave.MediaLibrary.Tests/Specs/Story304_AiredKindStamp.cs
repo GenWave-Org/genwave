@@ -128,10 +128,10 @@ public static class FeatureAiredKindStamp
     }
 
     /// <summary>Inserts one raw <c>station.booth_log</c> row with an explicit <c>occurred_at</c> — the
-    /// demo-hour gate facts below need hour-bucket control the real writer/drain pipeline (which
+    /// hour-mix gate facts below need hour-bucket control the real writer/drain pipeline (which
     /// always stamps <c>now()</c>) cannot give them, and need a <c>segment_kind</c> value
     /// (<c>ContextSegment</c>) that has no <see cref="SegmentKind"/> enum member yet (see this file's
-    /// header and <c>tools/demo_hour_gate.sql</c>'s own remarks) so <see cref="TrackAired"/> cannot
+    /// header and <c>tools/hour_mix_gate.sql</c>'s own remarks) so <see cref="TrackAired"/> cannot
     /// carry it either.</summary>
     static async Task InsertBoothLogRowAsync(
         DatabaseFixture db, DateTimeOffset occurredAt, string kind, string? segmentKind)
@@ -145,7 +145,7 @@ public static class FeatureAiredKindStamp
             new { occurredAt, kind, summary = $"{kind} row", segmentKind });
     }
 
-    /// <summary>The top of an arbitrary, fixed UTC hour — the demo-hour gate facts' "qualifying"
+    /// <summary>The top of an arbitrary, fixed UTC hour — the hour-mix gate facts' "qualifying"
     /// broadcast hour. A fixed instant (not <c>DateTimeOffset.UtcNow</c>) keeps every seeded row's
     /// hour bucket deterministic regardless of when the suite runs.</summary>
     static readonly DateTimeOffset QualifyingHour = new(2026, 3, 10, 14, 0, 0, TimeSpan.Zero);
@@ -154,10 +154,10 @@ public static class FeatureAiredKindStamp
     /// <see cref="QualifyingHour"/> so no seeded row's minute offset can ever cross into it.</summary>
     static readonly DateTimeOffset NonQualifyingHour = QualifyingHour.AddHours(3);
 
-    /// <summary>Dapper's row shape for <c>tools/demo_hour_gate.sql</c>'s own SELECT list, in column
+    /// <summary>Dapper's row shape for <c>tools/hour_mix_gate.sql</c>'s own SELECT list, in column
     /// order — mirrors <see cref="QueryColumnAsync"/>'s own tuple-projection convention.</summary>
     static async Task<List<(DateTime BroadcastHour, bool HasStationId, bool HasContextSegment,
-        bool HasOtherNonMusicKind, long MusicRowCount, long KindedRowCount)>> RunDemoHourGateOverTwoHoursAsync(
+        bool HasOtherNonMusicKind, long MusicRowCount, long KindedRowCount)>> RunHourMixGateOverTwoHoursAsync(
             DatabaseFixture db)
     {
         // Given two candidate broadcast hours: QualifyingHour carries a StationId ident, a
@@ -180,7 +180,7 @@ public static class FeatureAiredKindStamp
 
         // When the shipped gate (SPEC F113.2, PLAN T220) runs against them — the real file, executed
         // through Npgsql, never merely read as text.
-        var sql = await File.ReadAllTextAsync(Path.Combine(db.RepoRoot, "tools", "demo_hour_gate.sql"));
+        var sql = await File.ReadAllTextAsync(Path.Combine(db.RepoRoot, "tools", "hour_mix_gate.sql"));
 
         await using var conn = await db.StationDataSource.OpenConnectionAsync();
         var rows = await conn.QueryAsync<(DateTime BroadcastHour, bool HasStationId, bool HasContextSegment,
@@ -270,16 +270,16 @@ public static class FeatureAiredKindStamp
             // When it flows through the real writer/drain pipeline...
             await DriveThroughAsync(db, musicAiring);
 
-            // Then the persisted row's segment_kind stays NULL — the demo-hour gate's non-music
+            // Then the persisted row's segment_kind stays NULL — the hour-mix gate's non-music
             // predicate (segment_kind IS NOT NULL) never counts a music row.
             var kinds = await TrackStartedSegmentKindsAsync(db);
             Assert.Equal([null], kinds);
         }
 
         [Fact]
-        public async Task TheDemoHourGateReturnsOnlyTheQualifyingHour()
+        public async Task TheHourMixGateReturnsOnlyTheQualifyingHour()
         {
-            var rows = await RunDemoHourGateOverTwoHoursAsync(db);
+            var rows = await RunHourMixGateOverTwoHoursAsync(db);
 
             // Then only the hour with a StationId, a ContextSegment, AND a further non-music kind
             // survives the gate's HAVING predicate — the non-qualifying hour (missing ContextSegment)
@@ -288,9 +288,9 @@ public static class FeatureAiredKindStamp
         }
 
         [Fact]
-        public async Task TheDemoHourGateCountsKindedRowsFromSegmentKindAlone()
+        public async Task TheHourMixGateCountsKindedRowsFromSegmentKindAlone()
         {
-            var rows = await RunDemoHourGateOverTwoHoursAsync(db);
+            var rows = await RunHourMixGateOverTwoHoursAsync(db);
 
             // Three track-started rows carry a non-null segment_kind (StationId, ContextSegment,
             // LeadIn) — the patter-aired row's own segment_kind='StationId' never counts, proving
@@ -300,9 +300,9 @@ public static class FeatureAiredKindStamp
         }
 
         [Fact]
-        public async Task TheDemoHourGateCountsMusicRowsSeparatelyFromKindedRows()
+        public async Task TheHourMixGateCountsMusicRowsSeparatelyFromKindedRows()
         {
-            var rows = await RunDemoHourGateOverTwoHoursAsync(db);
+            var rows = await RunHourMixGateOverTwoHoursAsync(db);
 
             // Exactly the one segment_kind IS NULL track-started row in the qualifying hour — the
             // gate's music_row_count and kinded_row_count are a partition, never overlapping.

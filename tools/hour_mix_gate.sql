@@ -1,7 +1,8 @@
--- demo_hour_gate.sql — the F113.2 demo-hour instrument (SPEC F113, STORY-304, PLAN T220).
+-- hour_mix_gate.sql — the F113.2 hour-mix check (SPEC F113, STORY-304, PLAN T220).
 --
--- MANUAL gate, not CI (run at epic close-out, the T150 pattern): proves one hour of broadcast
--- produced the full narrative mix — at least one StationId ident, at least one ContextSegment
+-- MANUAL check, not CI: run it on any station to list the hours of airtime that had the full mix
+-- (an hour that is missing from the output did not have the full mix):
+-- at least one StationId (station name) clip, at least one ContextSegment
 -- (weather/history, once the F110/F111 context epic ships its own SegmentKind token), and at least
 -- one further non-music kind — counted from station.booth_log's air-time-only `segment_kind` column
 -- ALONE, never a substring scan over `summary` prose. That distinction is the entire point of F113.1: a
@@ -18,10 +19,10 @@
 -- narrative one) — verify it separately, e.g. via tools/onair_gate.sh or the Loki fleet-error
 -- baseline, for the same window this query reports.
 --
--- Run against the running stack's db container (production topology, compose.yaml's `db` service).
--- `-f tools/demo_hour_gate.sql` resolves INSIDE the container, where tools/ is not mounted — pipe the
+-- Run it against your station's db container (the `db` service in compose.yaml).
+-- `-f tools/hour_mix_gate.sql` resolves INSIDE the container, where tools/ is not mounted — pipe the
 -- file over stdin instead:
---   docker compose exec -T db psql -U genwave -d genwave < tools/demo_hour_gate.sql
+--   docker compose exec -T db psql -U genwave -d genwave < tools/hour_mix_gate.sql
 --
 -- Narrow to a specific broadcast window by adding a `where occurred_at >= ... and occurred_at < ...`
 -- predicate inside the hourly_kind_counts CTE below — that shape rides station.booth_log's existing
