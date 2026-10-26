@@ -97,13 +97,13 @@ public static class FeatureComposeFilesDescribeAHomeStation
     {
         static readonly Lazy<string> EnvExample = new(() => File.ReadAllText(Path.Combine(Root, ".env.example")));
 
-        [Fact(Skip = "pending: T646")]
+        [Fact]
         public static void No_hostname_key()
         {
             Assert.DoesNotContain("PUBLIC_" + "HOST", EnvExample.Value, StringComparison.Ordinal);
         }
 
-        [Fact(Skip = "pending: T646")]
+        [Fact]
         public static void No_token_key()
         {
             Assert.DoesNotContain("TUNNEL_" + "TOKEN", EnvExample.Value, StringComparison.Ordinal);

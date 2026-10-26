@@ -111,7 +111,7 @@ public static class FeatureAdoptionVerifyRepair
 
     static string ScratchEnvPath() => Path.Combine(ScratchEnvDir(), ".env");
 
-    /// <summary>Every key .env.example sets UNCOMMENTED by default (F137.1's own ".env
+    /// <summary>Every key .env.example sets UNCOMMENTED by default (the ".env
     /// completeness" scope — a commented-by-default key like #STATION_NAME documents an OPTIONAL
     /// setting, its absence is normal, not drift), each given a real, non-placeholder value —
     /// the "adopted box has everything preflight/verify would ever want" baseline every scenario
@@ -126,9 +126,7 @@ public static class FeatureAdoptionVerifyRepair
         ["STATION_DB_PASSWORD"] = "a-real-station-secret-0123456789",
         ["ICECAST_SOURCE_PASSWORD"] = "a-real-icecast-source-0123456789",
         ["ICECAST_ADMIN_PASSWORD"] = "a-real-icecast-admin-0123456789",
-        ["PUBLIC_HOST"] = "radio.example.com",
         ["ADMIN_PASSWORD"] = "a-real-admin-ui-secret-0123456789",
-        ["TUNNEL_TOKEN"] = "",
     };
 
     static void WriteEnvFile(string path, IReadOnlyDictionary<string, string> values)
@@ -482,11 +480,8 @@ public static class FeatureAdoptionVerifyRepair
         [Fact]
         public void AMissingEnvKeyVsEnvExampleIsReported()
         {
-            // COMPOSE_PROFILES, not PUBLIC_HOST (round-2 review B3 moved PUBLIC_HOST/TUNNEL_TOKEN
-            // to the overlay-gated set — see ScenarioOverlayGatedKeysAreNeverFalseFindings below
-            // for that half of the fix): COMPOSE_PROFILES is never gated, so its absence is
-            // "missing" on every box regardless of topology — this fact keeps proving the
-            // ordinary case.
+            // COMPOSE_PROFILES is never gated, so its absence is "missing" on every box
+            // regardless of topology.
             var envFile = ScratchEnvPath();
             var values = HealthyEnvValues(Path.GetTempPath(), "compose.yaml");
             values.Remove("COMPOSE_PROFILES");
@@ -541,7 +536,7 @@ public static class FeatureAdoptionVerifyRepair
         }
 
         [Fact]
-        public void StaleBuiltImagesReportTheGh351AgeSkew()
+        public void StaleBuiltImagesReportTheAgeSkew()
         {
             var envFile = ScratchEnvPath();
             WriteEnvFile(envFile, HealthyEnvValues(Path.GetTempPath(), "compose.yaml"));
@@ -552,7 +547,7 @@ public static class FeatureAdoptionVerifyRepair
 
             var (_, stdOut, _) = RunSetup(ScriptProcess.MakeBinDir(), envFile, "", new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
 
-            Assert.Contains("gh-#351", stdOut, StringComparison.Ordinal);
+            Assert.Contains("never auto-rebuilt", stdOut, StringComparison.Ordinal);
         }
 
         [Fact]
@@ -581,51 +576,20 @@ public static class FeatureAdoptionVerifyRepair
         }
 
         [Fact]
-        public void AnOldVintageBoxStackingOnlyTheDemoOverlayStillGetsThePinnedReadout()
-        {
-            // T321 wire finding 1 (live evidence: run-2 on the Pi 4 printed "Built image ages ...
-            // Run ./build.sh" over a healthy, published-image appliance). This box's own
-            // persisted COMPOSE_FILE — written before the F136.5 pins/topology split — names
-            // compose.demo.yaml but never compose.pinned.yaml, which did not exist yet for that
-            // launch to have named: compose.demo.yaml ALONE used to carry the published-GHCR-
-            // image mechanics compose.pinned.yaml owns today, so this box is still a pinned
-            // appliance and must get the SAME pinned-tags readout as
-            // APinnedBoxGetsThePinnedTagsReadoutNeverTheBuildAdvice above — never the dev-flow
-            // advice, which a box this shape could never act on (launch.sh's own pinned flow
-            // rejects BUILD=1 outright at parse time).
-            var envFile = ScratchEnvPath();
-            WriteEnvFile(envFile, HealthyEnvValues(Path.GetTempPath(), "compose.yaml:compose.demo.yaml:compose.piper-only.yaml"));
-            var docker = WriteDockerStub(
-                composeArgs: "-f compose.yaml -f compose.demo.yaml -f compose.piper-only.yaml",
-                composeConfigBody: "services:\n  api:\n    build: .\n    image: ghcr.io/genwave-org/genwave:home-v5.2.1\n",
-                pinnedImageTags: ["ghcr.io/genwave-org/genwave:home-v5.2.1"]);
-
-            var (_, stdOut, _) = RunSetup(ScriptProcess.MakeBinDir(), envFile, "",
-                new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
-
-            Assert.True(
-                stdOut.Contains("Pinned image tags", StringComparison.Ordinal) &&
-                stdOut.Contains("ghcr.io/genwave-org/genwave:home-v5.2.1", StringComparison.Ordinal) &&
-                !stdOut.Contains("Run ./build.sh", StringComparison.Ordinal) &&
-                !stdOut.Contains("Built image ages", StringComparison.Ordinal),
-                $"expected the pinned-tags readout on an old-vintage demo-without-pinned box, never the dev-flow build advice; stdout:\n{stdOut}");
-        }
-
-        [Fact]
         public void AnAbsolutePathComposeFileStillClassifiesByBasename()
         {
             // T321 wire finding 1 follow-up (reviewer): the Pi 4's OWN persisted COMPOSE_FILE is
             // path-qualified — /home/dmills/genwave/compose.yaml:/home/dmills/genwave/compose.
-            // demo.yaml:... — never bare filenames. verify_compose_file_is_stacked's exact-
+            // pinned.yaml:... — never bare filenames. verify_compose_file_is_stacked's exact-
             // basename comparison must still classify this exact shape as pinned; a comparison
             // against the FULL element (rather than its basename) would silently stop matching
             // the instant a real box's COMPOSE_FILE is path-qualified like this one.
             var envFile = ScratchEnvPath();
             const string dir = "/home/dmills/genwave/";
             WriteEnvFile(envFile, HealthyEnvValues(Path.GetTempPath(),
-                $"{dir}compose.yaml:{dir}compose.demo.yaml:{dir}compose.piper-only.yaml"));
+                $"{dir}compose.yaml:{dir}compose.pinned.yaml:{dir}compose.piper-only.yaml"));
             var docker = WriteDockerStub(
-                composeArgs: $"-f {dir}compose.yaml -f {dir}compose.demo.yaml -f {dir}compose.piper-only.yaml",
+                composeArgs: $"-f {dir}compose.yaml -f {dir}compose.pinned.yaml -f {dir}compose.piper-only.yaml",
                 composeConfigBody: "services:\n  api:\n    build: .\n    image: ghcr.io/genwave-org/genwave:home-v5.2.1\n",
                 pinnedImageTags: ["ghcr.io/genwave-org/genwave:home-v5.2.1"]);
 
@@ -644,25 +608,23 @@ public static class FeatureAdoptionVerifyRepair
         {
             // T321 wire finding 1 follow-up (reviewer-proven mutant, live): a plain substring
             // test against the whole COMPOSE_FILE string used to false-positive on
-            // compose.demo.yaml.bak, overlays/compose.demo.yaml.local, and my-compose.demo.yaml —
+            // compose.pinned.yaml.bak, overlays/compose.pinned.yaml.local, and my-compose.pinned.yaml —
             // none of which stack the real overlay this repo ships.
             // verify_compose_file_is_stacked's exact-basename comparison must reject all three.
             var envFile = ScratchEnvPath();
             var values = HealthyEnvValues(Path.GetTempPath(),
-                "compose.yaml:compose.demo.yaml.bak:overlays/compose.demo.yaml.local:my-compose.demo.yaml");
-            values.Remove("PUBLIC_HOST");
+                "compose.yaml:compose.pinned.yaml.bak:overlays/compose.pinned.yaml.local:my-compose.pinned.yaml");
             WriteEnvFile(envFile, values);
             var docker = WriteDockerStub(
-                composeArgs: "-f compose.yaml -f compose.demo.yaml.bak -f overlays/compose.demo.yaml.local -f my-compose.demo.yaml");
+                composeArgs: "-f compose.yaml -f compose.pinned.yaml.bak -f overlays/compose.pinned.yaml.local -f my-compose.pinned.yaml");
 
             var (_, stdOut, _) = RunSetup(ScriptProcess.MakeBinDir(), envFile, "",
                 new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
 
             Assert.True(
                 !stdOut.Contains("Pinned image tags", StringComparison.Ordinal) &&
-                !stdOut.Contains("PUBLIC_HOST", StringComparison.Ordinal) &&
                 stdOut.Contains("No locally-built services", StringComparison.Ordinal),
-                $"expected lookalike compose file names to never count as the real demo/pinned overlay; stdout:\n{stdOut}");
+                $"expected lookalike compose file names to never count as a real overlay; stdout:\n{stdOut}");
         }
 
         [Fact]
@@ -685,25 +647,21 @@ public static class FeatureAdoptionVerifyRepair
     }
 
     // ---------------------------------------------------------------------
-    // SAD PATH — overlay-gated .env keys are never false findings (B3, round-2 review)
+    // HAPPY PATH — a wizard-written .env verifies green with zero missing keys (T642)
     // ---------------------------------------------------------------------
 
     [Trait("Category", "Integration")]
-    public sealed class ScenarioOverlayGatedKeysAreNeverFalseFindings
+    public sealed class ScenarioAWizardWrittenEnvVerifiesGreen
     {
         [Fact]
-        public void AWizardWrittenEnvVerifiesGreenNeverRecommendingThePublicApplianceKeys()
+        public void AWizardWrittenEnvVerifiesGreenWithZeroMissingKeys()
         {
-            // B3's own MUST-PASS proof: a .env byte-for-byte as build_env_content emits (SPEC
-            // F132.2-.5 — PUBLIC_HOST/TUNNEL_TOKEN written COMMENTED, per F136.5's split-overlays
-            // ruling) plus COMPOSE_FILE the way launch.sh's own persist_compose_file (gh-#309)
-            // adds it after a successful launch — must verify GREEN, exit 0, and never recommend
-            // PUBLIC_HOST/TUNNEL_TOKEN at all. Before this fix, verify on exactly this box printed
-            // WARN + exit 5 + "add each with a real value" — steering a home operator toward the
-            // exact public-appliance value F136.5 removed.
+            // A .env byte-for-byte as build_env_content emits it, plus COMPOSE_FILE the way
+            // launch.sh's own persist_compose_file adds it after a successful launch, must
+            // verify GREEN: exit 0, the completeness probe passing, no key reported missing.
             var envFile = ScratchEnvPath();
             var content = string.Join("\n",
-                "# .env — written by setup.sh (SPEC F132.2-.5).",
+                "# .env — written by setup.sh.",
                 "",
                 "COMPOSE_PROFILES=admin",
                 $"MEDIA_DIR={Path.GetTempPath()}",
@@ -715,15 +673,9 @@ public static class FeatureAdoptionVerifyRepair
                 "ICECAST_ADMIN_PASSWORD=a-real-icecast-admin-0123456789",
                 "ADMIN_PASSWORD=a-real-admin-ui-secret-0123456789",
                 "",
-                "# for the public appliance — see DEPLOYMENT.md",
-                "#PUBLIC_HOST=",
-                "# for the public appliance — see DEPLOYMENT.md",
-                "#TUNNEL_TOKEN=",
-                "",
-                "# Written by setup.sh (SPEC F132.5).",
                 "GW_PRESET=dev",
                 "",
-                "# persisted by launch.sh's own persist_compose_file (gh-#309)",
+                "# persisted by launch.sh's own persist_compose_file",
                 "COMPOSE_FILE=compose.yaml") + "\n";
             File.WriteAllText(envFile, content);
             var docker = WriteDockerStub();
@@ -733,30 +685,9 @@ public static class FeatureAdoptionVerifyRepair
 
             Assert.True(
                 exitCode == 0 &&
-                !stdOut.Contains("PUBLIC_HOST", StringComparison.Ordinal) &&
-                !stdOut.Contains("TUNNEL_TOKEN", StringComparison.Ordinal),
-                $"expected a wizard-written .env to verify green, never naming PUBLIC_HOST/TUNNEL_TOKEN; exit={exitCode} stdout:\n{stdOut}");
-        }
-
-        [Fact]
-        public void PublicHostIsReportedMissingOnceTheDemoOverlayIsActuallyStacked()
-        {
-            // The other half of B3: PUBLIC_HOST becomes a genuine finding the MOMENT this box's
-            // own COMPOSE_FILE actually stacks compose.demo.yaml — the gate tracks what the
-            // stack REQUIRES, not a blanket exemption.
-            var envFile = ScratchEnvPath();
-            var values = HealthyEnvValues(Path.GetTempPath(), "compose.yaml:compose.demo.yaml");
-            values.Remove("PUBLIC_HOST");
-            WriteEnvFile(envFile, values);
-            var docker = WriteDockerStub(composeArgs: "-f compose.yaml -f compose.demo.yaml");
-
-            var (_, stdOut, _) = RunSetup(ScriptProcess.MakeBinDir(), envFile, "",
-                new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
-
-            Assert.True(
-                stdOut.Contains(".env completeness", StringComparison.Ordinal) &&
-                stdOut.Contains("PUBLIC_HOST", StringComparison.Ordinal),
-                $"expected PUBLIC_HOST reported missing once compose.demo.yaml is actually stacked; stdout:\n{stdOut}");
+                stdOut.Contains("Every key .env.example sets by default is present", StringComparison.Ordinal) &&
+                !stdOut.Contains("missing", StringComparison.OrdinalIgnoreCase),
+                $"expected a wizard-written .env to verify green with zero missing keys; exit={exitCode} stdout:\n{stdOut}");
         }
     }
 
@@ -840,106 +771,6 @@ public static class FeatureAdoptionVerifyRepair
                 stdOut.Contains("No locally-built services in this box's compose config", StringComparison.Ordinal) &&
                 stdOut.Contains("None found for project 'genwave'", StringComparison.Ordinal),
                 $"expected the migrations/image-ages/orphans probes to reach their normal (non-UNKNOWN) branches; exit={exitCode} stdout:\n{stdOut}");
-        }
-    }
-
-    // ---------------------------------------------------------------------
-    // SAD PATH — the overlay-gated exemption map is pinned to what the overlays actually
-    // reference (F3, round-3 review)
-    //
-    // B3's gate (verify_env_key_is_needed) is a hand-maintained map: PUBLIC_HOST gated on
-    // compose.demo.yaml, TUNNEL_TOKEN gated on COMPOSE_PROFILES containing "tunnel" — correct
-    // only for as long as those two keys stay referenced exactly where the map assumes. This
-    // pins the TWO drifts these facts can actually prove: an added or removed case arm reddens
-    // TheGatedKeySetIsExactlyPublicHostAndTunnelToken, and a PUBLIC_HOST reference leaking into
-    // compose.yaml itself (or vanishing from compose.demo.yaml) reddens
-    // PublicHostIsStillOnlyReferencedByTheDemoOverlay.
-    //
-    // What this does NOT catch (round-3 delta review, mutation-proven): a brand-new
-    // overlay-gated key — some future `${NEW_KEY:?}` landing in an overlay with no matching
-    // case arm at all — leaves both facts above green. That is still the SAFE direction, not a
-    // silent hole: setup.sh's own wildcard `*) return 0 ;;` arm treats any ungated key as
-    // "needed" by default, so the failure mode for an unmapped key is a noisy false "missing
-    // from .env" finding on every box, never a false green — just not something this cheap pin
-    // detects. Full derivation of the gated set from rendered compose config stays out of
-    // scope — this is the cheap pin, not that.
-    // ---------------------------------------------------------------------
-
-    public sealed class ScenarioOverlayGatedKeyMapIsPinnedToWhatTheOverlaysReference
-    {
-        /// <summary>The exact key names verify_env_key_is_needed's own `case "$key" in` block
-        /// gates — parsed straight out of setup.sh's own source rather than hand-copied a
-        /// second time here, so this fact can never itself drift from the map it exists to pin.
-        /// Matches only a bare 4-space-indented `KEY)` case arm; the wildcard `*)` default and
-        /// any nested `case` inside an arm's own body are deliberately excluded. A pipe-joined
-        /// arm (`KEY|OTHER)` — a shape setup.sh doesn't use today) is NOT matched either, but
-        /// that is a loud gap, not a silent one: such a key would simply vanish from the parsed
-        /// set entirely, and immediately redden
-        /// <see cref="TheGatedKeySetIsExactlyPublicHostAndTunnelToken"/> below rather than pass
-        /// unnoticed.</summary>
-        static HashSet<string> ParseGatedKeysFromSetupSh(string setupShSource)
-        {
-            var function = Regex.Match(setupShSource, @"verify_env_key_is_needed\(\)\s*\{.*?\n\}", RegexOptions.Singleline);
-            if (!function.Success)
-                throw new InvalidOperationException("verify_env_key_is_needed not found in setup.sh — has it been renamed?");
-
-            return Regex.Matches(function.Value, @"^ {4}([A-Z][A-Z0-9_]*)\)", RegexOptions.Multiline)
-                .Select(m => m.Groups[1].Value)
-                .ToHashSet(StringComparer.Ordinal);
-        }
-
-        /// <summary>Every compose*.yaml at repo root that literally references
-        /// <paramref name="envVarName"/> as a compose variable substitution (${NAME...).</summary>
-        static HashSet<string> ComposeFilesReferencing(string repoRoot, string envVarName)
-        {
-            var pattern = new Regex(@"\$\{" + Regex.Escape(envVarName) + @"\b");
-            var referencing = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var path in Directory.EnumerateFiles(repoRoot, "compose*.yaml", SearchOption.TopDirectoryOnly))
-            {
-                if (pattern.IsMatch(File.ReadAllText(path)))
-                    referencing.Add(Path.GetFileName(path));
-            }
-            return referencing;
-        }
-
-        [Fact]
-        public void TheGatedKeySetIsExactlyPublicHostAndTunnelToken()
-        {
-            var setupSh = File.ReadAllText(Path.Combine(RepoRootLocator.Find(AppContext.BaseDirectory), "setup.sh"));
-            var gatedKeys = ParseGatedKeysFromSetupSh(setupSh);
-
-            Assert.True(
-                gatedKeys.SetEquals(["PUBLIC_HOST", "TUNNEL_TOKEN"]),
-                $"expected setup.sh's own overlay-gated key set to be exactly {{PUBLIC_HOST, TUNNEL_TOKEN}}; found: {string.Join(", ", gatedKeys)}");
-        }
-
-        [Fact]
-        public void PublicHostIsStillOnlyReferencedByTheDemoOverlay()
-        {
-            // verify_demo_from_compose_file's own gate (compose.demo.yaml stacked) is correct
-            // only while PUBLIC_HOST stays exactly that overlay's own concern — if a future
-            // change moved the reference into compose.yaml itself, or dropped it from
-            // compose.demo.yaml entirely, the gate would silently stop matching what actually
-            // needs the key.
-            var referencing = ComposeFilesReferencing(RepoRootLocator.Find(AppContext.BaseDirectory), "PUBLIC_HOST");
-
-            Assert.True(
-                referencing.SetEquals(["compose.demo.yaml"]),
-                $"expected PUBLIC_HOST referenced by compose.demo.yaml alone; found: {string.Join(", ", referencing)}");
-        }
-
-        [Fact]
-        public void TunnelTokenIsStillReferencedByTheBaseComposeFile()
-        {
-            // verify_env_key_is_needed's own TUNNEL_TOKEN arm gates on COMPOSE_PROFILES
-            // containing "tunnel", never on any overlay file — correct only while the
-            // cloudflared service (and its TUNNEL_TOKEN reference) stays in the BASE
-            // compose.yaml, profile-selected rather than overlay-selected. If that reference
-            // ever moved into a new overlay file instead, the profile-based gate would need to
-            // become a file-based one, and this is what would catch the mismatch.
-            var referencing = ComposeFilesReferencing(RepoRootLocator.Find(AppContext.BaseDirectory), "TUNNEL_TOKEN");
-
-            Assert.Contains("compose.yaml", referencing);
         }
     }
 

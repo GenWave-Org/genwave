@@ -2,7 +2,7 @@
 //
 // BDD specification — xUnit. AC1 drives the real first-run interview (Story344's three-answer
 // idiom: music path, topology, admin) and reads the .env it writes. AC2/AC3 drive adoption mode
-// through HomeSetupHarness (scripted docker, no daemon). Every fact is pending until T642.
+// through HomeSetupHarness (scripted docker, no daemon).
 
 using System.Text.RegularExpressions;
 using GenWave.Host.Tests.Support;
@@ -39,19 +39,19 @@ public static partial class FeatureSetupWritesAHomeEnv
             return File.ReadAllText(envFile);
         });
 
-        [Fact(Skip = "pending: T642")]
+        [Fact]
         public static void No_hostname_line()
         {
             Assert.DoesNotContain(PublicHost, EnvContent.Value, StringComparison.Ordinal);
         }
 
-        [Fact(Skip = "pending: T642")]
+        [Fact]
         public static void No_token_line()
         {
             Assert.DoesNotContain(TunnelToken, EnvContent.Value, StringComparison.Ordinal);
         }
 
-        [Fact(Skip = "pending: T642")]
+        [Fact]
         public static void No_public_station_wording()
         {
             Assert.DoesNotContain(PublicStationWording, EnvContent.Value, StringComparison.OrdinalIgnoreCase);
@@ -74,13 +74,13 @@ public static partial class FeatureSetupWritesAHomeEnv
 
         static readonly Lazy<(int ExitCode, string StdOut, string StdErr)> Repair = new(() => RunHealthy("--repair", "--yes"));
 
-        [Fact(Skip = "pending: T642")]
+        [Fact]
         public static void Verify_output_has_no_ids()
         {
             Assert.False(PlanningIds().IsMatch(Verify.Value.StdOut + Verify.Value.StdErr), Verify.Value.StdOut);
         }
 
-        [Fact(Skip = "pending: T642")]
+        [Fact]
         public static void Repair_output_has_no_ids()
         {
             Assert.False(PlanningIds().IsMatch(Repair.Value.StdOut + Repair.Value.StdErr), Repair.Value.StdOut);
@@ -97,19 +97,19 @@ public static partial class FeatureSetupWritesAHomeEnv
             return HomeSetupHarness.RunSetup(envFile, docker, "");
         });
 
-        [Fact(Skip = "pending: T642")]
+        [Fact]
         public static void Exits_zero()
         {
             Assert.True(Run.Value.ExitCode == 0, $"exit {Run.Value.ExitCode}\n{Run.Value.StdOut}\n{Run.Value.StdErr}");
         }
 
-        [Fact(Skip = "pending: T642")]
+        [Fact]
         public static void Never_names_the_hostname_key()
         {
             Assert.DoesNotContain(PublicHost, Run.Value.StdOut, StringComparison.Ordinal);
         }
 
-        [Fact(Skip = "pending: T642")]
+        [Fact]
         public static void Never_names_the_token_key()
         {
             Assert.DoesNotContain(TunnelToken, Run.Value.StdOut, StringComparison.Ordinal);

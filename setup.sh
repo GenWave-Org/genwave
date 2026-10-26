@@ -129,9 +129,8 @@
 # caller's ADMIN_PASSWORD instead of the one actually written to .env), the persona-shelf deep
 # link, what's still arriving in the background (derived from GW_PRESET + ADMIN_PROFILE — never
 # hardcoded to one topology's services, and never a service this wizard could not possibly have
-# composed — T318 review F3), and the exact next-run commands (T318 review F5: ./setup.sh's own
-# line is worded for what it actually does on this branch — routes to a stub — not a verify
-# promise STORY-346 hasn't shipped yet).
+# composed — T318 review F3), and the exact next-run commands (./setup.sh's own line promises
+# what a re-run does: a read-only verify, with --repair to fix).
 #
 # tools/preflight.sh's own EXIT trap (F134.6's pass/warn summary table) fires after all of the
 # above, on any exit path — see the trap setup right below the source line for why this script
@@ -186,13 +185,8 @@ SECRET_LENGTH=40   # comfortably over F132.3's >=32-char floor
 # .env key configures — there is no seam to derive it from. 8000 is also the port launch.sh's
 # own access-points printout already names for the same mount.
 #
-# The one overlay that DOES override this — compose.demo.yaml's `icecast: ports: !override []`
-# (unpublishes 8000 entirely; Caddy reaches icecast over the internal `core` network instead,
-# right for the public-appliance box that overlay is for) — is unreachable from this wizard: the
-# public appliance stays flag-only (`--pinned`, SPEC F136.5), never something this interview can
-# select, and resolve_preset_and_topology hardcodes GW_PREFLIGHT_DEMO_VALUE="0" for exactly that
-# reason (this wizard has no path to compose.demo.yaml at all). 8000 is therefore not just a
-# fallback guess for the runs this script can actually produce — it's the fact.
+# No overlay this wizard can select overrides it, so 8000 is not just a fallback guess for the
+# runs this script can actually produce — it's the fact.
 GW_STREAM_PORT_DEFAULT=8000
 
 # GW_API_PORT_DEFAULT — install_first_beds's own fallback for GW_API_URL (SPEC F165.7, PLAN
@@ -585,7 +579,6 @@ SECRET_ICECAST_ADMIN=""
 SECRET_ADMIN_UI=""
 GW_PRESET=""
 GW_PREFLIGHT_TOPOLOGY_VALUE=""
-GW_PREFLIGHT_DEMO_VALUE=""
 
 apply_generate_secrets() {
   SECRET_POSTGRES="$(gen_secret)"
@@ -597,20 +590,15 @@ apply_generate_secrets() {
 }
 
 # resolve_preset_and_topology — the ONE function both the .env write (GW_PRESET) and the
-# preflight inputs (GW_PREFLIGHT_TOPOLOGY/GW_PREFLIGHT_DEMO, exported in main) read their
+# preflight input (GW_PREFLIGHT_TOPOLOGY, exported in main) read their
 # values from — the T316 one-source lesson: two independent readers deriving "what did the
 # interview choose" is exactly the split-brain that bit launch.sh there (a hardcoded `.env`
-# reader beside a GW_ENV_FILE-aware comment claiming parity it didn't have). SPEC F132.5's
-# closed vocabulary v2 (re-amended 2026-08-18 at the T317 review, Dean's split-overlays
-# ruling, SPEC F136.5): home | home-piper-only | dev | dev-piper-only. launch.sh is the ONLY
+# reader beside a GW_ENV_FILE-aware comment claiming parity it didn't have). Closed
+# vocabulary: home | home-piper-only | dev | dev-piper-only. launch.sh is the ONLY
 # reader of GW_PRESET in the whole repo. `home*` stacks base + compose.pinned.yaml (published
-# GHCR images, the wizard's LAN station) — never compose.demo.yaml, which stays flag-only
-# (`--pinned`) for the public appliance; GW_PREFLIGHT_DEMO_VALUE is therefore always "0" here
-# (F134.3a: preflight's demo input is caller-resolved, never a hardcoded guess) — this
-# wizard's interview has no path to the demo/public-appliance shape at all.
+# GHCR images, the wizard's LAN station).
 resolve_preset_and_topology() {
   GW_PREFLIGHT_TOPOLOGY_VALUE="$TOPOLOGY"
-  GW_PREFLIGHT_DEMO_VALUE="0"
   case "${IMAGES_MODE}:${TOPOLOGY}" in
     pinned:full) GW_PRESET="home" ;;
     pinned:piper-only) GW_PRESET="home-piper-only" ;;
@@ -625,19 +613,15 @@ resolve_preset_and_topology() {
 
 # build_env_content — an ALLOWLIST (T317 review findings B1/B2), not a .env.example
 # template pass: emits ONLY the six generated secrets, MEDIA_DIR, COMPOSE_PROFILES, and
-# GW_PRESET, plus two commented pointers (#PUBLIC_HOST=, #TUNNEL_TOKEN=) for the public-
-# appliance overlay. Nothing else from .env.example is copied — STATION_NAME,
+# GW_PRESET. Nothing else from .env.example is copied — STATION_NAME,
 # LIBRARY_ENRICHMENT_CONCURRENCY, and every other optional/documentation line stay OUT: this
 # wizard has no answer for them (their C#/compose defaults already cover the wizard's target,
 # a LAN station), and copying them anyway would mean fabricating values it was never asked
-# about. PUBLIC_HOST/TUNNEL_TOKEN are written blank and COMMENTED — never a fabricated value —
-# so compose.demo.yaml's `${VAR:?}` guards stay armed until an operator deliberately opts into
-# that overlay (SPEC F136.5: the public appliance stays flag-only, `--pinned`) and fills them
-# in themselves. Written CLEAN per the T316 rider: unquoted values, LF line endings, no
+# about. Written CLEAN per the T316 rider: unquoted values, LF line endings, no
 # trailing whitespace — a quoted or CRLF GW_PRESET makes launch.sh exit 2 with the \r
 # invisible in its own error message.
 build_env_content() {
-  printf '# .env — written by setup.sh (SPEC F132.2-.5). See .env.example for the full set of\n'
+  printf '# .env — written by setup.sh. See .env.example for the full set of\n'
   printf '# variables this stack understands and what each one does; re-running setup.sh never\n'
   printf '# overwrites this file (see the header above) -- edit it directly for anything beyond\n'
   printf '# these four questions.\n'
@@ -652,12 +636,7 @@ build_env_content() {
   printf '%s\n' "ICECAST_ADMIN_PASSWORD=${SECRET_ICECAST_ADMIN}"
   printf '%s\n' "ADMIN_PASSWORD=${SECRET_ADMIN_UI}"
   printf '\n'
-  printf '# for the public appliance — see DEPLOYMENT.md\n'
-  printf '#PUBLIC_HOST=\n'
-  printf '# for the public appliance — see DEPLOYMENT.md\n'
-  printf '#TUNNEL_TOKEN=\n'
-  printf '\n'
-  printf '# Written by setup.sh (SPEC F132.5) — launch.sh is the ONLY reader of this key in the\n'
+  printf '# Written by setup.sh — launch.sh is the ONLY reader of this key in the\n'
   printf '# whole repo. Closed vocabulary: home | home-piper-only | dev | dev-piper-only.\n'
   printf 'GW_PRESET=%s\n' "$GW_PRESET"
 }
@@ -755,7 +734,7 @@ verify_add_finding() {
 verify_print_report() {
   [ "${#GW_VERIFY_ROW_STATUS[@]}" -gt 0 ] || return 0
   echo
-  echo "==> Verify: existing-install drift report (SPEC F137)"
+  echo "==> Verify: existing-install drift report"
   local i status label message symbol
   for i in "${!GW_VERIFY_ROW_STATUS[@]}"; do
     status="${GW_VERIFY_ROW_STATUS[$i]}"
@@ -792,7 +771,7 @@ GW_VERIFY_COMPOSE_FILE_VALUE=""
 # T321 wire finding 2: also carries `--env-file "$ENV_FILE"`, ahead of the `-f` pairs, once
 # COMPOSE_FILE resolves — every `docker compose` call in this file goes through this ONE array
 # (never a per-call-site flag), so every render/ps/exec now interpolates `${VAR:?}`-class
-# compose refs (compose.demo.yaml's PUBLIC_HOST, etc.) from the SAME file setup.sh's own reads
+# compose refs (the required-variable guards in the compose files) from the SAME file setup.sh's own reads
 # already honor via GW_ENV_FILE — not compose's own default of `.env` in $PWD, which a caller
 # running this script from outside the checkout (T321 run 1: GW_ENV_FILE pointed elsewhere,
 # no .env in cwd at all) leaves silently unset, degrading three probes to UNKNOWN even though
@@ -828,17 +807,17 @@ verify_resolve_env_facts() {
 # verify_compose_file_is_stacked <basename> — true iff this box's own COMPOSE_FILE names a file
 # whose OWN BASENAME is exactly <basename> (T321 wire finding 1 follow-up, reviewer-proven):
 # every derivation below used to test `case ":${GW_VERIFY_COMPOSE_FILE_VALUE}:" in
-# *"compose.demo.yaml"*)` — a plain SUBSTRING test against the whole colon-joined string — which
-# false-positives on compose.demo.yaml.bak, overlays/compose.demo.yaml.local, or
-# my-compose.demo.yaml: none of those stack the actual overlay this repo ships, yet the old
+# *"compose.pinned.yaml"*)` — a plain SUBSTRING test against the whole colon-joined string — which
+# false-positives on compose.pinned.yaml.bak, overlays/compose.pinned.yaml.local, or
+# my-compose.pinned.yaml: none of those stack the actual overlay this repo ships, yet the old
 # substring test called every one of them a match. Fixed by scanning GW_VERIFY_COMPOSE_ARGS'
 # own `-f` pairs (the same scan verify_compose_overrides already uses) and comparing each
 # element's BASENAME, not its full value, against <basename> exactly — deliberately basename,
 # not the whole element, because the Pi 4's own persisted COMPOSE_FILE is PATH-QUALIFIED
-# (`/home/dmills/genwave/compose.demo.yaml`, the box's real, live shape: launch.sh's own
+# (`/home/dmills/genwave/compose.pinned.yaml`, the box's real, live shape: launch.sh's own
 # compose_file_value records whatever `-f` argument that launch actually ran with, and this
 # box's own launches always ran from its checkout's own absolute path) — basename comparison
-# classifies that box exactly the same as one that persisted a bare `compose.demo.yaml`, one
+# classifies that box exactly the same as one that persisted a bare `compose.pinned.yaml`, one
 # rule for both shapes. This repo has never shipped two different compose*.yaml files under
 # different directories sharing one basename, so a basename collision is not a risk this
 # comparison has to guard against. MUST run after verify_resolve_env_facts (every caller in
@@ -853,8 +832,8 @@ verify_compose_file_is_stacked() {
   return 1
 }
 
-# verify_topology_from_compose_file / verify_demo_from_compose_file — the F134.3a preflight
-# inputs, derived from the SAME cached COMPOSE_FILE value above rather than GW_PRESET (same
+# verify_topology_from_compose_file — the F134.3a preflight
+# input, derived from the SAME cached COMPOSE_FILE value above rather than GW_PRESET (same
 # single-reader reasoning) — this is what lets adoption mode still run "the F134 preflight" (its
 # own F137.1 contract) with a topology-aware disk/port check, on a box this script never
 # interviewed.
@@ -863,14 +842,6 @@ verify_topology_from_compose_file() {
     printf 'piper-only'
   else
     printf 'full'
-  fi
-}
-
-verify_demo_from_compose_file() {
-  if verify_compose_file_is_stacked "compose.demo.yaml"; then
-    printf '1'
-  else
-    printf '0'
   fi
 }
 
@@ -955,34 +926,6 @@ verify_env_file_value() {
   grep -E "^${name}=" "$ENV_FILE" | tail -n1 | cut -d= -f2- || true
 }
 
-# verify_env_key_is_needed <key> — B3 fix (round-2 review): true for every .env.example key
-# except the handful .env.example itself documents as overlay/profile-gated — PUBLIC_HOST (only
-# read under compose.demo.yaml) and TUNNEL_TOKEN (only read once COMPOSE_PROFILES=tunnel is
-# active) — and even then only when THIS box's own COMPOSE_FILE/COMPOSE_PROFILES don't actually
-# stack that overlay. Reviewer-proven bug this closes: T317's build_env_content deliberately
-# writes both COMMENTED (F136.5's split-overlays ruling — the wizard never fabricates
-# PUBLIC_HOST), so the old unconditional scope flagged every wizard-written box as "missing"
-# and steered a home operator toward the exact public-appliance value that ruling removed.
-# Never keys off GW_PRESET (F132.5: adoption mode reads COMPOSE_FILE, this box's own
-# last-launched fact, not the interview's).
-verify_env_key_is_needed() {
-  local key="$1"
-  case "$key" in
-    PUBLIC_HOST)
-      [ "$(verify_demo_from_compose_file)" = "1" ]
-      ;;
-    TUNNEL_TOKEN)
-      case ",$(preflight_env_value COMPOSE_PROFILES)," in
-        *,tunnel,*) return 0 ;;
-        *)          return 1 ;;
-      esac
-      ;;
-    *)
-      return 0
-      ;;
-  esac
-}
-
 # --- probe 1: .env completeness vs .env.example (F137.1) ----------------------------------
 # Reports KEY NAMES ONLY — never a value (hard rule: an operator pasting verify output into an
 # issue must never leak a secret). Scoped to .env.example's own UNCOMMENTED keys — a commented
@@ -1006,7 +949,7 @@ verify_env_completeness() {
       value="$(verify_env_file_value "$key")"
       preflight_is_placeholder "$value" && placeholder+=("$key")
     else
-      verify_env_key_is_needed "$key" && missing+=("$key")
+      missing+=("$key")
     fi
   done < <(grep -oE '^[A-Z_][A-Z0-9_]*=' "$example" | sed 's/=$//')
 
@@ -1179,25 +1122,9 @@ GW_VERIFY_IMAGE_AGE_WARN_SECONDS=3600   # matches launch.sh's own "> 1h behind t
 
 # verify_pinned_from_compose_file — true once compose.pinned.yaml (SPEC F136.5) is stacked,
 # same derivation shape (and the same verify_compose_file_is_stacked basename comparison, T321
-# wire finding 1 follow-up) as verify_topology_from_compose_file/verify_demo_from_compose_file.
-#
-# T321 wire finding 1: also true for a COMPOSE_FILE naming compose.demo.yaml WITHOUT
-# compose.pinned.yaml — an old-vintage box (adopted before the F136.5 pins/topology split)
-# persisted its own COMPOSE_FILE back when compose.demo.yaml alone carried the published-
-# GHCR-image mechanics that live in compose.pinned.yaml today; compose.pinned.yaml did not
-# exist yet for that launch to have named it. That box is still a pinned appliance — it has
-# never once built an image and never will (the demo overlay's own `image:`/`pull_policy:
-# always` directives, unchanged by the split, are still exactly what's running) — so it must
-# still get the pinned-tags readout below, never verify_built_image_ages' "Run ./build.sh"
-# advice, which launch.sh's own pinned/home* flow rejects outright at parse time (N1, above)
-# and a box this shape could never act on anyway (live evidence: T321 run-2 on the Pi 4
-# printed that exact advice over a healthy, published-image appliance). A CURRENT-vintage box
-# stacking compose.demo.yaml always also stacks compose.pinned.yaml (`--pinned` implies both,
-# launch.sh's own USE_PINNED_OVERLAY/PINNED split) — this OR never fires against a genuinely
-# locally-built box.
+# wire finding 1 follow-up) as verify_topology_from_compose_file.
 verify_pinned_from_compose_file() {
   verify_compose_file_is_stacked "compose.pinned.yaml" && return 0
-  verify_compose_file_is_stacked "compose.demo.yaml" && return 0
   return 1
 }
 
@@ -1224,7 +1151,7 @@ verify_pinned_image_tags() {
     [ -n "$tag" ] || continue
     if [ -z "$joined" ]; then joined="$tag"; else joined="${joined}, ${tag}"; fi
   done <<< "$tags"
-  verify_record INFO "Pinned image tags" "This box is running (gh-#351): ${joined}"
+  verify_record INFO "Pinned image tags" "This box is running: ${joined}"
 }
 
 # Dev-flow readout (mirrors launch.sh's own built_services/print_built_image_ages).
@@ -1288,7 +1215,7 @@ verify_built_image_ages() {
   joined="${parts[0]}"
   for part in "${parts[@]:1}"; do joined="${joined}, ${part}"; done
   verify_record INFO "Built image ages" \
-    "Informational only (gh-#351 — never auto-rebuilt): ${joined}. Run ./build.sh or BUILD=1 ./launch.sh to refresh."
+    "Informational only (never auto-rebuilt): ${joined}. Run ./build.sh or BUILD=1 ./launch.sh to refresh."
 }
 
 # --- probe 4: orphaned profile containers (F137.1) -----------------------------------------
@@ -1396,7 +1323,7 @@ verify_prune_advice() {
   fi
 
   verify_record INFO "Disk (docker images)" \
-    "${reclaimable} reclaimable from superseded/dangling images (docker system df) — advice, not a finding (F137.1); this is normal after any upgrade. Prune by hand if you want it back: ${docker_cmd} image prune -af --filter until=${GW_VERIFY_PRUNE_UNTIL_HOURS}h — removes every unused image on this machine older than 7 days, not just GenWave's, including rollback targets you may still want."
+    "${reclaimable} reclaimable from superseded/dangling images (docker system df) — advice, not a finding; this is normal after any upgrade. Prune by hand if you want it back: ${docker_cmd} image prune -af --filter until=${GW_VERIFY_PRUNE_UNTIL_HOURS}h — removes every unused image on this machine older than 7 days, not just GenWave's, including rollback targets you may still want."
 }
 
 # --- deliberate divergences: INFO only, never a finding (F137.2/AC3) -----------------------
@@ -1490,7 +1417,7 @@ verify_run_repair() {
     echo "   ${message}"
     printf '   Fix: %s\n' "${cmdref[*]}"
     if [ "$restarts" = "1" ]; then
-      echo "   ⚠️  this will stop/restart a running container — printed before the confirm, never a surprise (F137.3)."
+      echo "   ⚠️  this will stop/restart a running container — printed before the confirm, never a surprise."
     fi
 
     local proceed="$SETUP_YES"
@@ -1539,19 +1466,18 @@ setup_adoption_mode() {
   # this line only ever reports the virgin-vs-existing signal (F132.4) that routed here.
   echo "==> A .env already exists here (${ENV_FILE})."
   if [ "$SETUP_REPAIR" = "1" ]; then
-    echo "    Repairing (SPEC F137, STORY-346) — verifying first; nothing changes until you confirm."
+    echo "    Repairing — verifying first; nothing changes until you confirm."
   else
-    echo "    Verifying (SPEC F137, STORY-346) — read-only; nothing here is changed."
+    echo "    Verifying — read-only; nothing here is changed."
   fi
 
   # N6 (round-2 review): COMPOSE_FILE read exactly once here, ahead of everything else that
-  # derives from it — GW_PREFLIGHT_TOPOLOGY/GW_PREFLIGHT_DEMO below, GW_VERIFY_COMPOSE_ARGS, and
-  # every probe's own topology/demo/override check, all now read the one cached copy.
+  # derives from it — GW_PREFLIGHT_TOPOLOGY below, GW_VERIFY_COMPOSE_ARGS, and
+  # every probe's own topology/override check, all now read the one cached copy.
   verify_resolve_env_facts
 
-  export GW_PREFLIGHT_TOPOLOGY GW_PREFLIGHT_DEMO
+  export GW_PREFLIGHT_TOPOLOGY
   GW_PREFLIGHT_TOPOLOGY="$(verify_topology_from_compose_file)"
-  GW_PREFLIGHT_DEMO="$(verify_demo_from_compose_file)"
   preflight_docker
   preflight_env_secrets
 
@@ -1757,18 +1683,16 @@ append_setup_log() {
 # banner's list of services that MIGHT still be stale/missing, derived from GW_PRESET +
 # ADMIN_PROFILE — never hardcoded (the previous copy claimed "kokoro/ollama, plus
 # admin_ui/alloy/etc. when selected" unconditionally, which is wrong on two counts this wizard
-# can actually produce: ollama exists only in compose.demo.yaml, which no wizard preset ever
-# stacks — GW_PREFLIGHT_DEMO_VALUE is hardcoded "0" in resolve_preset_and_topology precisely
-# because this wizard has no path to that overlay at all — and a piper-only preset has no
+# can actually produce: a piper-only preset has no
 # kokoro to catch up on in the first place). Mirrors the SHAPE of launch.sh's own
 # HEAVYWEIGHTS_DESC/EXTRAS_DESC derivation (that script owns those, this one may not edit it —
 # F11: a spec fact pins per-preset parity between the two instead of a shared function).
 #
 # admin_ui is the only profile-gated extra named here (unlike launch.sh's own EXTRAS_DESC,
-# which also lists alloy/cloudflared/dockerproxy): Q4 is this wizard's ONLY profile question,
+# which also lists further extras): Q4 is this wizard's ONLY profile question,
 # and it only ever writes COMPOSE_PROFILES=admin or empty (interview_profiles) — logging/tunnel
 # are DEPLOYMENT.md pointers, never wizard-settable (F132.2), so a wizard-generated .env can
-# never select alloy/cloudflared/dockerproxy in the first place.
+# never select those extras in the first place.
 heavyweights_desc() {
   case "$GW_PRESET" in
     *-piper-only) printf '%s' "" ;;
@@ -2023,7 +1947,7 @@ print_handoff() {
   echo "    Next runs:"
   echo "      ./launch.sh    restart/relaunch as-is (GW_PRESET=${GW_PRESET} in ${ENV_FILE})"
   echo "      ./setup.sh     re-run any time — verifies this install (read-only); add --repair to fix"
-  echo "                     drift it finds (SPEC F137, STORY-346)"
+  echo "                     drift it finds"
 }
 
 # install_first_beds — SPEC F165.7, STORY-405 AC2, PLAN T428: the wizard's very last step of
@@ -2205,7 +2129,6 @@ main() {
   # output (above), the same source GW_PRESET itself was just written from — never a second,
   # independently-hardcoded read of the interview's answer (the T316 one-source lesson).
   export GW_PREFLIGHT_TOPOLOGY="$GW_PREFLIGHT_TOPOLOGY_VALUE"
-  export GW_PREFLIGHT_DEMO="$GW_PREFLIGHT_DEMO_VALUE"
   preflight_docker
   preflight_env_secrets
   # Finding 5 (post-v5.3.0 gate run): rendered explicitly HERE, right after the checks that
