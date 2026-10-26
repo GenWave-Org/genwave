@@ -1,4 +1,4 @@
-// STORY-524 — Same text in: normalised, cue-mapped, words law (gh-#614 · SPEC F217 · PLAN T662)
+// STORY-524 — Same text in: raw, cue-mapped, words law (gh-#614 · SPEC F217 · PLAN T662)
 //
 // BDD specification — xUnit. Every fact is pending at plan time (2026-10-26); the named task
 // activates its facts, watches them fail, then makes them pass.
@@ -11,14 +11,20 @@ public static class FeatureSameTextIn
     // HAPPY PATH
     // ---------------------------------------------------------------------
 
-    // AC1 — the phone paragraph is normalised
-    public sealed class ScenarioThePhoneParagraphIsNormalised
+    // AC1 — a best-effort card keeps the script verbatim
+    public sealed class ScenarioABestEffortCardKeepsTheScriptVerbatim
     {
-        // Given the paragraph with 1-800-555-0199 and a card with no overrides
+        // Given the paragraph with 1-800-555-0199 and a best-effort card with no overrides
         // When  the card text is prepared
 
         [Fact(Skip = "pending: T662 — see docs/PLAN.md")]
-        public void NoASCIIDigitRemainsInTheText() => Assert.Fail("pending: T662 — no ASCII digit remains in the text");
+        public void ThePhoneNumberIsStillInTheText() => Assert.Fail("pending: T662 — 1-800-555-0199 is still in the text");
+
+        [Fact(Skip = "pending: T662 — see docs/PLAN.md")]
+        public void TheParagraphsCapitalsAreKept() => Assert.Fail("pending: T662 — the paragraph's capitals are kept");
+
+        [Fact(Skip = "pending: T662 — see docs/PLAN.md")]
+        public void TheParagraphsEllipsisIsKept() => Assert.Fail("pending: T662 — the paragraph's ellipsis is kept");
     }
 
     // AC2 — a cue becomes the card's tag
@@ -78,6 +84,9 @@ public static class FeatureSameTextIn
 
         [Fact(Skip = "pending: T662 — see docs/PLAN.md")]
         public void TheTextEqualsKokoroSpeechMarkupOverTheNormalisedCueStrippedParagraph() => Assert.Fail("pending: T662 — the text equals KokoroSpeechMarkup over the normalised cue-stripped paragraph");
+
+        [Fact(Skip = "pending: T662 — see docs/PLAN.md")]
+        public void ThePhoneParagraphHasNoRawPhoneNumberLeft() => Assert.Fail("pending: T662 — the phone paragraph has no 1-800-555-0199 left");
     }
 
     // AC7 — the words law passes for tags and punctuation
