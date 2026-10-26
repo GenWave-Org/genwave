@@ -156,8 +156,6 @@
 #                               scriptable fix (env completeness, stale-image ages) stays
 #                               report-only in both modes; the operator edits/rebuilds by hand.
 #   ./setup.sh --offline         first-run only — skip the background-music pack install
-#                               (F5, round-2 review: this line is what makes -h/--help actually
-#                               name the flag, matching the unknown-argument arm further down).
 #
 # Exit codes (adoption mode only — the interview path's own vocabulary, above, is unaffected):
 #   0   verify: no drift found (deliberate divergences, if any, are INFO-only — F137.4's
@@ -208,9 +206,33 @@ SETUP_YES=0
 # install_first_beds's own first branch on the virgin/interview path.
 SETUP_OFFLINE=0
 
-# usage — dumps this file's own header comment (the launch.sh idiom), for -h/--help.
+# usage — prints the short plain help for -h/--help.
 usage() {
-  awk 'NR==1{next} /^#/{sub(/^# ?/,""); print; next} {exit}' "$0"
+  cat <<'EOF'
+Usage: ./setup.sh [--repair [--yes]] [--offline]
+
+First run (no .env yet): asks a few questions, writes .env with generated passwords,
+then starts the station.
+Existing install: checks .env and the running stack and reports anything out of line.
+Changes nothing.
+
+  --repair      Fix what the check finds, asking before each fix.
+  --yes         With --repair, fix everything without asking.
+  --offline     First run only: skip downloading the background music pack.
+  -h, --help    Show this help.
+
+Environment:
+  GW_ENV_FILE               The .env file to use (default .env).
+  GW_ONAIR_TIMEOUT_SECONDS  Seconds to wait for the stream to start playing (default 900).
+
+Exit codes:
+  0  No problems found, or every fix was applied.
+  1  First run: the stream never started playing in time, or setup stopped early.
+  2  Bad option.
+  3  A machine check failed.
+  5  The check found problems, or some are still unfixed after --repair.
+Otherwise, a first run passes on launch.sh's exit code (see ./launch.sh --help).
+EOF
 }
 
 # T318/F132.7 — the on-air timing log: a plain file beside ENV_FILE (gitignored, never the

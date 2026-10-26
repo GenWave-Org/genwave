@@ -156,6 +156,20 @@ public static class FeatureLaunchScriptPresets
         }
     }
 
+    public static class ScenarioHelpIsPlain
+    {
+        static readonly Lazy<(int ExitCode, string StdOut, string StdErr)> Run =
+            new(() => RunLaunch(null, "--help"));
+
+        [Fact]
+        public static void Help_is_plain_usage_with_no_dev_ids()
+        {
+            Assert.Equal(0, Run.Value.ExitCode);
+            Assert.Contains("Usage:", Run.Value.StdOut, StringComparison.Ordinal);
+            Assert.DoesNotMatch(@"SPEC F|STORY-|gh-#|\bT\d{3}\b|(?i:topology)", Run.Value.StdOut);
+        }
+    }
+
     public static class SadPathBuildUnderHome
     {
         static readonly Lazy<(int ExitCode, string StdOut, string StdErr)> Run =

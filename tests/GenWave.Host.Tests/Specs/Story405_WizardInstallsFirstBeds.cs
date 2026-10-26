@@ -684,22 +684,29 @@ public static class FeatureTheWizardInstallsTheFirstBeds
     // SAD PATH (j) — round-2 review F5: -h/--help actually names --offline
     // ---------------------------------------------------------------------
 
-    [Trait("Category", "Integration")]
     public sealed class ScenarioHelpOutput
     {
         [Fact]
         public void NamesTheOfflineFlag()
         {
-            // usage() only dumps this file's own leading comment block; --offline used to live
-            // outside it (only in the unknown-argument arm), so `--help` never named a flag
-            // `--bogus` did. -h/--help exits main() before any interview/launch machinery runs,
-            // so no launch stub, media dir, or api stub is needed here at all.
+            // --help must name every flag the unknown-argument message names (--offline once went missing).
             var (exitCode, stdOut, _) = RunSetup(
                 ScriptProcess.MakeBinDir(), ScratchEnvPath(), "", new Dictionary<string, string>(), "--help");
 
             Assert.True(
                 exitCode == 0 && stdOut.Contains("--offline", StringComparison.Ordinal),
                 $"expected ./setup.sh --help to name --offline; exit={exitCode} stdout:\n{stdOut}");
+        }
+
+        [Fact]
+        public void IsPlainHelpWithNoDevIds()
+        {
+            var (exitCode, stdOut, _) = RunSetup(
+                ScriptProcess.MakeBinDir(), ScratchEnvPath(), "", new Dictionary<string, string>(), "--help");
+
+            Assert.True(exitCode == 0 && stdOut.Contains("Usage:", StringComparison.Ordinal),
+                $"expected exit 0 and a Usage: line; exit={exitCode} stdout:\n{stdOut}");
+            Assert.DoesNotMatch(@"SPEC F|STORY-|gh-#|\bT\d{3}\b|(?i:topology)", stdOut);
         }
     }
 }
