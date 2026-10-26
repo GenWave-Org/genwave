@@ -38,7 +38,7 @@
 #                             (gh-#305) AND as the upgrade path: --no-recreate starts an
 #                             absent/stopped db but never touches a running one, so an upgrade
 #                             still restarts nothing before migrations pass. See
-#                             DEPLOYMENT.md's "Applying migrations".
+#                             DEPLOYMENT.md's "Starting, upgrading, stopping".
 #   ./launch.sh --with a,b   merge a,b into COMPOSE_PROFILES (env var, else .env's value)
 #                             for this launch's compose invocations.
 #   ./launch.sh --piper-only low-memory/no-kokoro topology (gh-#242): merge

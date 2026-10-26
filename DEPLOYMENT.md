@@ -1,938 +1,242 @@
-# 📡 GenWave Deployment — Reference Public-Station Topology
+# 📡 Deployment
 
-> ℹ️ **Since v5.3:** the GHCR image pins moved out of `compose.demo.yaml` into their own
-> overlay, `compose.pinned.yaml` (SPEC F136.5). Every pinned/appliance command below is
-> now **three** `-f` files — `compose.yaml` + `compose.pinned.yaml` + `compose.demo.yaml`,
-> in that order. The old two-file `compose.yaml` + `compose.demo.yaml` form still runs,
-> but it silently **source-builds** instead of pulling published images — don't use it.
+How to run GenWave on the box in your house: what it needs, how to start it, what runs, how to upgrade it, and what to check when something looks wrong. One deployment is one station. For hardware sizing see [HARDWARE.md](HARDWARE.md); for plugins see [PLUGINS.md](PLUGINS.md).
 
-One deployment == one station (`compose.yaml`'s own rule). This doc covers the four
-operating modes a single deployment can run in, and the reference topology for the
-"public station" case: a demo/appliance box reachable from the open internet. The
-topology itself ships as **`compose.demo.yaml`** + **`Caddyfile`** in this repo, stacked
-on the **`compose.pinned.yaml`** image-pin overlay (SPEC F136.5):
+---
+
+## 📋 What you need
+
+- Linux with Docker Engine, and Docker Compose v2.24 or newer (the compose files use the `!override` merge tag).
+- x86-64 or arm64. A 4 GB box can run the low-memory layout (`--piper-only`, below).
+- The .NET 10 SDK, but only if you build from source. Prebuilt images need no SDK.
+- A music library of `.flac` or `.mp3` files in a folder the box can read. With no audio files the station starts silent.
+- A few free ports: `8000` (stream), `8080` (admin API), `8081` (spectator page), `3000` (admin UI).
+
+`./build.sh` needs none of the above except the SDK, Docker and Compose. It builds images with placeholder secrets, so no `.env` or music is needed to build.
+
+---
+
+## 🧙 First run: the wizard
 
 ```bash
-# .env: set PUBLIC_HOST=radio.example.com (plus the usual secrets), clear COMPOSE_PROFILES
-docker compose -f compose.yaml -f compose.pinned.yaml -f compose.demo.yaml up -d
+./setup.sh
 ```
 
----
+Four questions: prebuilt images or build from source, where the music lives, which layout, and whether the admin UI is on. Then it generates every secret, writes `.env` in one atomic step (a cancelled run leaves nothing behind), and starts the station with `launch.sh`. After the station is on air, it installs a starter background-music pack. `./setup.sh --offline` skips that one step.
 
-## 🗺️ The four operating modes
+If you skip the wizard, copy `.env.example` to `.env` and fill it in. Values must be unquoted, even with spaces in them.
 
-Two independent flags decide what exists; every combination is a valid, supported mode.
-
-| `Admin:Enabled` | `Station:SpectatorMode` | Mode | What runs |
-|---|---|---|---|
-| `true` | `false` | **Operator** (default) | Admin UI + API; no public spectator surface |
-| `true` | `true` | **Standard** | Admin UI + API, *plus* `:8081` for LAN/kiosk viewers |
-| `false` | `true` | **Appliance** | Public spectator surface only; admin plane 404s everywhere |
-| `false` | `false` | **Headless** | Stream only; zero web surface beyond `/health` |
-
-How each flag is set:
-
-- **`Admin:Enabled`** — env/compose-only, never a live setting (no API can read or write
-  it). Set via `Admin__Enabled` in the `api` service's `environment:` block. Flipping it
-  requires a container recreate — by specification, not limitation.
-- **`Station:SpectatorMode`** — a *live* allowlisted setting: `PUT` it through the admin
-  settings API/UI while `Admin:Enabled=true`, or seed it at boot via the
-  `Station__SpectatorMode` env var (useful when Admin will be disabled before anyone can
-  PUT anything). ⚠️ A value saved in the settings DB **overrides** the env var — if the
-  surface won't come up despite the env being set, check for a stale DB row.
-- **`COMPOSE_PROFILES`** — decides whether the `admin_ui` Next.js container runs at all
-  (`admin_ui` carries `profiles: ["admin"]`). `.env.example` defaults to
-  `COMPOSE_PROFILES=admin` (Operator/Standard); appliance/headless boxes clear it. The
-  api-side 404 (`Admin:Enabled=false`) is the fail-safe even if `admin_ui` runs anyway.
-
----
-
-## 🎨 Station theme (`Station:Theme`)
-
-A *live* allowlisted setting naming the station's visual theme by **slug**. Set it through
-Settings in the Admin UI (a closed dropdown — a typo cannot produce an unresolvable slug),
-or seed it at boot via the `Station__Theme` env var.
-
-⚠️ **The env-seeded path is the only one on an appliance box.** With `Admin:Enabled=false`,
-`PUT /api/settings` is closed, so `Station__Theme` in the `api` service's `environment:` block
-is how a pinned box gets its look — exactly like `Station__SpectatorMode`.
-
-⚠️ **Same DB-overrides-env trap.** A value saved in the settings DB **outranks** the env var
-forever. A box whose theme "won't change" despite the env being set has a stale DB row, not a
-bad env — `GET /api/settings` reports `source: "override"` when a row is winning and
-`"default"` when it is not, which is how you tell the two apart.
-
-**Blank is a legitimate value, and it is the default.** There is deliberately no seed in
-`appsettings.json`: the precedence chain terminates at the shipped default structurally, so
-seeding a literal would duplicate a value nothing enforces. Resolution order, highest first:
-
-1. the visitor's own `genwave-theme` cookie (their personal choice — set via the switcher on
-   either surface: the admin `ThemeSwitcher` control, the spectator `switcher.js`, both shipped
-   v3.0.0)
-2. the `Station:Theme` settings row
-3. the `Station:Theme` env default
-4. the shipped default
-
-An unrecognised slug at **any** level falls through to the next rather than erroring, so a
-bad value degrades to the shipped default rather than an unstyled page.
-
-> ℹ️ **The dropdown is no longer one option.** GenWave embeds two themes (*Cat's Whisker* +
-> *Test Pattern* — the offline floor that resolves with no DB and no catalog), the Community
-> Catalog adds more to install, and an owner can mix-and-save their own remix in the theme
-> editor (`/editor`) — so setting `Station:Theme` visibly changes the look, on both the admin
-> console and the spectator page.
-
-⚠️ Not to be confused with the **`genwave-mode`** cookie, which carries light/dark. Theme and
-mode are independent axes: a visitor who chose dark keeps dark when the station's theme
-changes under them.
-
----
-
-## 📡 Reference public topology
-
-One public hostname, fronted by Caddy, that can only ever reach two things — the
-spectator surface and the stream:
-
-```
-                         ${PUBLIC_HOST} (TLS, Caddy)
-                                    │
-                 ┌──────────────────┴──────────────────┐
-                 │                                      │
-            /stream* ─────────────────────────►  icecast:8000/stream
-                 │
-                /*  ───────────────────────────►  api:8081  (SpectatorSurface + /health ONLY)
-                                                       │
-                                          (SurfaceGateMiddleware 404s everything
-                                           else on :8081, regardless of flags)
-
-  api:8080 (admin API) ── 127.0.0.1 only (ports: !override), SSH tunnel to reach it
-  api:8081             ── NO host publish at all; Caddy reaches it over the `core` network
-  admin_ui:3000        ── 127.0.0.1 only, and only runs when COMPOSE_PROFILES=admin
-  dockerproxy:2375     ── NO host publish; dedicated `stats` network (api ↔ dockerproxy
-                          only — caddy/cloudflared/admin_ui have no route). docker.sock
-                          mounted read-only behind a CONTAINERS-only allowlist (gh-#148):
-                          the api can enumerate containers and read stats, nothing else.
-```
-
-`api:8081` is the *only* public spectator listener — admin, `/media/*`, `/internal/*`
-structurally do not exist on it no matter what Caddy sends its way. That's why routing
-`/*` straight at `:8081` is safe: the second listener is the real safety boundary,
-Caddy's path split is belt-and-braces on top of it.
-
-### ⚠️ Verify the ports merge — every box, every time
-
-`compose.yaml`'s base `api` service publishes `8080` **and** `8081` on `0.0.0.0`
-(Operator/Standard want LAN reachability). Compose merges list-type keys across `-f`
-files by **appending** — a naive `ports:` override would leave the `0.0.0.0` publishes
-right alongside it, exposing the anonymous `/media/*` and `/internal/*` groups (whose
-only boundary is network isolation) to the internet. `compose.demo.yaml` uses the
-`!override` merge tag to *replace* the list. Trust nothing until you've seen the merge:
-
-```bash
-docker compose -f compose.yaml -f compose.pinned.yaml -f compose.demo.yaml config
-# api.ports must resolve to exactly one entry: host_ip 127.0.0.1, target 8080.
-# No 0.0.0.0, no 8081. Then confirm on the host after `up`:
-ss -ltn     # 127.0.0.1:8080, plus caddy on 0.0.0.0:80/:443 — and nothing else. 127.0.0.1:3000
-            # appears only while COMPOSE_PROFILES=admin (the temporary-admin path below);
-            # never 0.0.0.0:8080/:8081/:3000
-```
-
-If your Compose predates the `!override` tag (needs v2.24+), upgrade — don't ship a
-public box on an unverified merge.
-
-### Proxy trust: XFF **and** scheme, both real since v5.5.0
-
-`Proxy:TrustedNetworks` configures **both** `ForwardedHeaders.XForwardedFor` **and**
-`ForwardedHeaders.XForwardedProto` (`Program.cs`, T366 review MED-3) — trusting a hop's
-`X-Forwarded-For` now also trusts its `X-Forwarded-Proto`, so `Request.Scheme` reflects the
-edge's real scheme instead of the plain-HTTP hop Kestrel itself sees behind
-cloudflared → Caddy. That is what makes `Secure` real on every scheme-conditioned cookie —
-the admin session cookie and the spectator `genwave-listener` cookie both stamp `Secure`
-only when the edge was actually TLS; without `XForwardedProto`, `Secure` would never be set
-at all on a box behind a plain-HTTP internal hop (or, the other direction, could be falsely
-withheld). Empty by default: the middleware's own loopback-only known-networks/known-proxies
-trust leaves it inert until an operator sets this.
-
-**Both halves of the chain must trust their hop (gh-#129).** The chain is up to two
-proxies deep (cloudflared → Caddy when the optional tunnel fronts the public hostname;
-Caddy alone when DNS points straight at the box), and each layer defaults to distrust: Caddy
-v2.5+ *strips* inbound `X-Forwarded-For` unless the `Caddyfile` declares
-`trusted_proxies` (the shipped one does), and the api's forwarded-headers walk stops
-after ONE hop unless `Proxy:TrustedNetworks` is set (which also lifts the hop limit —
-the walk then runs to the first untrusted address, the real client). Miss either half
-and every public visitor resolves to a container IP: per-IP rate limits (the request
-line, the spectator 120/min, the Gardener's own thumbs) collapse into one shared
-partition — observed live as cross-IP 429s the day requests launched. Verify after deploy:
-a login line's `remote:` must show a real public IP, never `172.x`.
-
-**This is also what makes per-IP partitioning real for the thumb/request lines specifically.**
-`Requests`' and the Gardener's `Thumbs` rate-limiter policies both key on
-`HttpContext.Connection.RemoteIpAddress` — the same address `Proxy:TrustedNetworks` corrects.
-`compose.demo.yaml` sets it (`Proxy__TrustedNetworks__0: "172.28.20.0/24"`, the pinned `core`
-subnet); a self-hoster fronting their own box with a proxy and never setting this collapses
-every listener's thumbs and requests into ONE shared per-IP partition — a station-wide budget
-in practice, not a per-caller one. Concretely: the request line's per-IP daily cap defaults
-to 20 (`Requests:PerIpDailyCap`), and the Gardener's thumbs carry their own daily cap
-(`Gardener:ThumbDailyCap`, below) — either budget shared by a whole audience instead of one
-visitor throttles far sooner than intended, and looks like a broken control, not a busy one.
-
----
-
-## 🧠 The DJ brain (ollama) on a shared box
-
-`compose.demo.yaml` runs ollama pinned, fenced, and resident — all three matter:
-
-- **Fence (1 CPU / 6GB):** Liquidsoap is a real-time audio process; an unfenced LLM
-  generation will starve it and cause audible dropouts. Copywriting is render-ahead and
-  cached — the DJ doesn't need speed, playout needs headroom.
-- **`OLLAMA_KEEP_ALIVE=-1`:** by default ollama unloads idle models after ~5 minutes, so
-  every DJ segment paid a cold model load — which on a fenced CPU blows straight through
-  `Llm:TimeoutSeconds`. Resident model = warm generations only.
-- **`Llm:TimeoutSeconds`:** even warm, a full persona prompt on one fenced core takes
-  ~25–30s. Set the (live) setting to `60` — latency is free, renders are ahead of air.
-- The `ollama-init` one-shot pulls `llama3.2:3b` — keep it in lockstep with the
-  `Llm:Model` setting, and size the model to the memory fence.
-- **`Llm:ReasoningEffort`** (live, default `none`): thinking-capable models (gemma4, qwen3,
-  deepseek-r1, magistral) otherwise spend the whole copy budget on chain-of-thought and return
-  empty lines — every break falls back to a template while the tile flaps (gh-#620). `none` makes
-  them answer directly; `low`/`medium`/`high` let them think; `omit` sends no field at all, for a
-  third-party OpenAI-compatible backend that rejects it. Ordinary models ignore the field.
-
----
-
-## 🔒 What the fail-safe actually guarantees
-
-Two independent layers, both load-bearing:
-
-1. **Reachability** (Caddy + the port lockdown) — a Caddy misconfiguration can at worst
-   route a request to `api:8081`. It cannot reach `api:8080`, `admin_ui:3000`, or the
-   engine's control port — those have no public network path, **provided the
-   `ports: !override` merge actually took effect** (verify above; that's an operator
-   check, not a structural guarantee).
-2. **Existence** (`SurfaceGateMiddleware`) — even a request that *does* land on `:8081`
-   for something other than the spectator surface gets a bare **404**, indistinguishable
-   from an unmapped route. `Admin:Enabled=false` doesn't just deny admin requests, it
-   removes the login form itself — a misrouted `/api/auth/login` 404s, it never shows a
-   password prompt.
-
-Either layer alone would be a real boundary; both together is why a single Caddy typo is
-not an incident.
-
-On top of both, the spectator surface itself ships hardened (gh-#180): every spectator
-page/asset/API response carries a strict Content-Security-Policy (`default-src 'none'`,
-no inline anything; `img-src`/`media-src` follow `Station:PublicBaseUrl` /
-`Station:PublicStreamUrl` live, collapsing to `'self'` on empty or invalid config),
-plus `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, and
-`nosniff`. Non-spectator surfaces are untouched, and a gated surface's bare 404 stays
-header-identical to an unmapped route.
-
----
-
-## 🧙 The wizard and `GW_PRESET` — how a box picks its topology
-
-`./setup.sh` (v5.3.0, SPEC F132) is the first-run path: four questions — prebuilt images or
-build from source, where the music lives, which topology, admin on or off — then it generates
-every secret, writes `.env` in one atomic step, and hands off to `launch.sh`. On a box that
-already has a `.env` it never writes: it verifies the install against the machine (a drift
-report) and `--repair` fixes what it can. A successful first run also installs a starter
-background-music pack once the station confirms on air; `--offline` skips that one step for
-offline builds and tests. The one topology fact it persists is
-**`GW_PRESET`** in `.env`, a closed set:
+The wizard writes one layout fact into `.env`, `GW_PRESET`. `launch.sh` is its only reader:
 
 | `GW_PRESET` | Files | Shape |
 |---|---|---|
-| `home` | `compose.yaml` + `compose.pinned.yaml` | published images, LAN station — no demo overlay, no `PUBLIC_HOST` |
-| `home-piper-only` | + `compose.piper-only.yaml` | the 4 GB-class topology (Piper primary; kokoro, voice-seed, ollama and ollama-init disabled) |
-| `dev` / `dev-piper-only` | `compose.yaml` (+ piper-only) | the from-source flow |
+| `home` | `compose.yaml` + `compose.pinned.yaml` | Published images, full stack |
+| `home-piper-only` | + `compose.piper-only.yaml` | The 4 GB layout: Piper speaks, Kokoro is off |
+| `dev` / `dev-piper-only` | `compose.yaml` (+ piper-only) | Build from source |
 
-`launch.sh` is the only reader of the key; an explicit `--pinned` / `--piper-only` flag always
-wins over it, and an unrecognised or retired value (`pinned`, `pinned-piper-only`) exits `2`
-loudly rather than silently remapping. The **public appliance is flag-only** — `./launch.sh
---pinned` adds `compose.demo.yaml`; no preset does. `GW_PRESET` is not in `.env.example`
-(the wizard writes it); set it by hand only if you skip the wizard.
+Any explicit topology flag (`--pinned`, `--piper-only`) makes `launch.sh` ignore the preset. Use `GW_PRESET` and don't pass `--pinned`: it is not the home path. An unknown value exits `2` rather than guessing.
+
+**Existing box.** Running `./setup.sh` where a `.env` already exists never writes anything. It checks the install against the machine (secrets present, migrations applied, orphaned containers, stale images, disk) and prints a drift report. Exit `0` means no drift, `5` means drift was found. `./setup.sh --repair` walks each fixable finding, prints the exact command, warns if it will restart a container, and asks y/N. Add `--yes` to accept all of them. Findings with no safe fix (a missing `.env` key, stale image ages) stay report-only.
 
 ---
 
-## 🧯 Appliance checklist & temporary admin access
+## 🗺️ The three operating modes
 
-Appliance boot (`compose.demo.yaml` defaults):
+Two flags decide what exists. Every combination is valid.
 
-- `.env`: `PUBLIC_HOST` set, strong `ADMIN_PASSWORD` (empty = admin locked entirely,
-  fail-closed) and `ICECAST_ADMIN_PASSWORD` (also guards the listener-stats poll),
-  `COMPOSE_PROFILES=` cleared.
-- `docker compose -f compose.yaml -f compose.pinned.yaml -f compose.demo.yaml up -d`, then
-  run the `config` + `ss -ltn` verification above.
-- From a private browser: the page renders at `https://${PUBLIC_HOST}/`, the stream
-  plays at `/stream`, and `/api/status`, `/api/auth/login`, `/internal/engine-config`,
-  `/media/random` all return **404**.
+| `Admin:Enabled` | `Station:SpectatorMode` | Mode | What runs |
+|---|---|---|---|
+| `true` | `false` | **Operator** (default) | Admin UI and API. No spectator page |
+| `true` | `true` | **Standard** | Admin UI and API, plus `:8081` for viewers on your network (a kitchen tablet, a kiosk) |
+| `false` | `false` | **Headless** | The stream only. No web surface beyond `/health` |
 
-**Applying migrations** (first boot of a fresh box, or upgrading an already-running
-demo box — new images/compose files pulled, schema didn't come along automatically):
-use `launch.sh`'s `--pinned` preset (STORY-201), which is exactly this topology's
-sanctioned launch/upgrade path — `launch.sh` bare assumes the source-build dev stack,
-`--pinned` doesn't:
+How each is set:
 
-```bash
-./launch.sh --pinned
-```
+- **`Admin:Enabled`** is env-only and never a live setting: set `Admin__Enabled` in the `api` service's `environment:` block. Changing it needs a container recreate, by design.
+- **`Station:SpectatorMode`** is a live setting. Change it in the admin settings, or seed it at boot with `Station__SpectatorMode`. ⚠️ A value saved in the settings database **overrides** the env var. If the page won't appear although the env is set, there is a stale database row.
+- **`COMPOSE_PROFILES`** decides whether the `admin_ui` container runs at all. `.env.example` ships `COMPOSE_PROFILES=admin`. A Headless box clears it.
 
-Under the hood `--pinned` runs, against `compose.yaml` + `compose.pinned.yaml` +
-`compose.demo.yaml`, never builds, and is **staged** (SPEC F136): the on-air core comes up
-first, the heavyweights and profile extras converge afterwards. `./launch.sh --pinned --dry-run`
-prints the full plan for your file set — its heart is:
+For Standard mode, set `Station__SpectatorMode: "true"` and point a browser at `http://<host>:8081/`. `compose.yaml` already publishes `8081`.
 
-```bash
-C="docker compose -f compose.yaml -f compose.pinned.yaml -f compose.demo.yaml"
-$C pull db icecast engine api            # stage 1: the core only (+ piper when the fallback profile is active)
-$C up -d --no-recreate db                # + poll the db healthcheck (up to 60 s)
-./migrate.sh -f compose.yaml -f compose.pinned.yaml -f compose.demo.yaml
-$C up -d --remove-orphans --no-deps db icecast engine api   # ── ON AIR ──
-$C pull                                  # stage 2: everything else (fast no-op for the core layers)
-$C up -d --remove-orphans                # converge every remaining pin + profile-gated extra
-docker image prune -af --filter "until=168h"   # success-path hygiene (gh-#441)
-docker builder prune -af
-```
+---
 
-(The dry-run also shows the bookkeeping between these lines: the db healthcheck poll, the
-`COMPOSE_FILE` record into `.env` (gh-#309), a final `ps`, and the pinned-tag report.)
+## 🧩 What runs
 
-(`--piper-only` runs the flat, unstaged form of the same steps — there are no heavyweights
-left to defer.) Exit codes: `0` fully converged · `2` bad invocation · `3` preflight/stage-1
-failure, the stack left exactly as it was · `4` stage 2 failed **after** the core went on air
-— the printed degradation summary names the catch-up command.
+| Service | In one line |
+|---|---|
+| `db` | Postgres: library catalog, station settings, history. Only the api can see it |
+| `icecast` | Fans the stream out to listeners on `:8000` |
+| `engine` | Liquidsoap: mixing, crossfade, loudness, encoding. Its control port is never published |
+| `api` | The control plane: scanning, picking, patter, settings, health. `:8080` is the admin API, `:8081` is the spectator page |
+| `admin_ui` | The Admin UI on `:3000`. Runs only under the `admin` profile |
+| `kokoro` | The main voice. Voice files come from the `voices` volume |
+| `voice-seed` | One-shot: copies Kokoro's stock voices into the `voices` volume on first start |
+| `piper` | Backup or (in `--piper-only`) primary voice. Runs under the `fallback` profile or `--piper-only` |
+| `dockerproxy` | Read-only view of container stats for the Health page. Never published |
+| `alloy` | Optional log shipper under the `logging` profile; needs `LOKI_PUSH_URL` |
 
-The final prune runs **only after a successful `up`** (a failed upgrade leaves the
-previous images untouched — they're what is still running) and keeps everything in use
-plus roughly the last week of releases for instant rollback. Without it, superseded
-release tags accumulate ~1.5 GB per release forever — 46 GB of dead tags filled the demo
-box's disk mid-deploy on 2026-08-09, and an SD-card box hits that wall far sooner.
+Named volumes: `pgdata` (database), `tts` (rendered speech), `authored` (generated segments and jingle packs), `voices` (voice files), `piper_models`, `dp_keys` (keeps your admin login across restarts), `alloy_data`. Your music is bound read-only at `/media`.
 
-The `up -d --no-recreate db` step (gh-#305) is what makes a **first** boot work — before
-it, `migrate.sh` (which never starts anything by design) had no db to talk to on a fresh
-box and the launch deadlocked. On an upgrade it changes nothing: `--no-recreate` leaves a
-running db completely untouched, so nothing restarts onto the new images before
-migrations pass.
+The language model is any OpenAI-compatible endpoint you set live as `Llm:Endpoint` and `Llm:Model`. Without one the station still talks, using template patter. `Llm:TimeoutSeconds` defaults to `10`; raise it for a slow model. `Llm:ReasoningEffort` defaults to `none`, which stops thinking-style models from spending the whole budget on reasoning and returning empty lines. Use `omit` for a backend that rejects the field.
 
-Every `db/*-migration.sh` is an idempotent in-place upgrade (`ADD COLUMN IF NOT EXISTS`
-and the like), so running it with nothing new to apply is a safe no-op. `--dry-run`
-prints the exact command plan without touching anything — `./launch.sh --pinned --dry-run`
-or, for just the migration step, `./migrate.sh --dry-run` (`--keep-going` applies the rest
-after one script fails; `--help` for the flags).
+---
 
-db/46 (the sponsors migration, v5.8.0) is the first migration here to drop or rename an
-existing column — it runs inside one transaction, and drops `ad_brief.brand` while renaming
-`ad_spot.brand` to `sponsor_name` after backfilling `sponsor_id` from it; `migrate.sh` applies
-it on the way up like every other migration, so back up the database first, as with any
-upgrade that rewrites existing data.
-
-Since gh-#19, `launch.sh` **preflights before touching the stack** (Docker running,
-compose plugin, `.env` secrets present and non-placeholder) and every failure exit says
-how to proceed. On the pinned flow a failed pull or migration explicitly leaves the
-running stack alone (exit `3`), and a part-way stage-2 `up` is *not* rolled back — whatever is
-still broadcasting keeps broadcasting and the run exits `4` with the converge command named.
-`SKIP_PREFLIGHT=1` bypasses the checks in both `launch.sh` and `build.sh` — needed on dev
-relaunches until gh-#631 lands (the port check doesn't recognise the stack's own published
-ports when docker collapses them into a range). It never touches tests: `SKIP_TESTS=1` is
-the separate knob that skips `build.sh`'s pre-image test run.
-
-On the plain dev flow (bare `./launch.sh`, no `--pinned`), a failed migration stops the
-launch with the verdict "Schema migration failed" (gh-#770/STORY-436) — the application is
-never started against the incomplete schema. The db container is left up for inspection
-(`docker compose logs db`); migrations are idempotent, so fix the cause and re-run
-`./migrate.sh` (or simply `./launch.sh` again).
-
-**Build.** `./build.sh` needs no `.env`, no music library and no free station ports. It
-checks only the .NET 10 SDK, Docker, the compose plugin and the compose version floor, and exports
-placeholders for the compose secrets in its own process so image builds render (`build-only`
-for the five passwords, `/build-only` for `MEDIA_DIR` — a bind-mount source, so it needs a
-leading slash or compose reads it as a named volume) — a value already set in the shell or
-in `.env` always wins.
-
-Combine with `--with` to also activate compose profiles (e.g. `logging`, `tunnel`) on the
-same launch: `./launch.sh --pinned --with logging,tunnel` merges them into whatever
-`COMPOSE_PROFILES` is already set (env or `.env`).
-
-### After a launch, bare `docker compose` matches it (gh-#309)
-
-`--pinned` runs against `compose.yaml` **+** `compose.pinned.yaml` **+**
-`compose.demo.yaml`, but a bare `docker compose down` in this directory loads only
-`compose.yaml` — so every service that exists solely in an overlay (`caddy`, `ollama`,
-`ollama-init`) was invisible to it, survived the teardown, and was left running.
-
-`launch.sh` now records the file stack it used as `COMPOSE_FILE` in `.env` after a
-successful `up`. Compose reads that from the project directory automatically, so
-`down`/`ps`/`logs` all target what was actually launched, with no flags to remember:
+## 🚀 Starting, upgrading, stopping
 
 ```bash
-./launch.sh --pinned          # writes e.g. COMPOSE_FILE=compose.yaml:compose.pinned.yaml:compose.demo.yaml
-docker compose down           # now tears down caddy + ollama too
+./launch.sh                     # teardown, db up, migrate, full up
+./launch.sh --piper-only        # from-source low-memory layout (see below)
+./launch.sh --with logging      # also turn on profiles for this launch
+./launch.sh --dry-run           # print the exact plan and touch nothing
+BUILD=1 ./launch.sh             # force a rebuild (from-source flow only)
 ```
 
-Explicit `-f` flags still outrank the variable, so the fully-spelled commands elsewhere in
-this doc behave exactly as written.
+With `GW_PRESET=home` in `.env` (the wizard's prebuilt choice), `./launch.sh` uses published images and never builds. That is also the upgrade path. Without a preset it builds from source. `--piper-only` on its own is the from-source low-memory layout; a prebuilt-image box uses `GW_PRESET=home-piper-only` instead.
 
-⚠️ **Profiles are a separate axis.** `COMPOSE_PROFILES` is deliberately *not* persisted —
-`--with` is per-launch by design — so a bare `down` can still leave profile-gated
-containers (`admin_ui`, `piper`, `cloudflared`, `alloy`) behind. Use `--remove-orphans`, or set a
-standing `COMPOSE_PROFILES` in `.env` (which `launch.sh` already reads as the base for
-`--with`).
+**What a published-image run does (`GW_PRESET=home*`).** It is staged so the station gets on air first:
 
-### TTS failover: opt-in (SPEC F99.2/F99.3, STORY-257)
+1. Pull the core images (`db`, `icecast`, `engine`, `api`).
+2. Start `db` without recreating it, and wait until it is healthy.
+3. Apply migrations with `./migrate.sh`.
+4. Start the core. The station is on air.
+5. Pull everything else and converge it.
 
-The shipped default runs **no** Piper fallback sidecar and configures **no** fallback
-chain — a Kokoro failure drops the affected break rather than substituting a different
-voice (right voice or no speech, SPEC F99.1). `piper` sits behind
-`profiles: ["fallback"]` in `compose.yaml`, off by default same as `admin`/`tunnel`/`logging`.
+A box on a fresh install and a box being upgraded take the same path. A running `db` is never restarted before migrations pass. After a successful run it prunes images older than about a week, so old release tags don't fill the disk.
 
-Opting in needs both halves:
+**Exit codes.** `0` fully converged. `2` bad invocation. `3` preflight or stage-1 failure; on the published-image flow the running stack is left exactly as it was. `4` the core is on air but the second stage failed; the printed summary names the catch-up command. Whatever is broadcasting keeps broadcasting.
+
+**Preflight.** Before touching anything, `launch.sh` checks that Docker is running, the compose plugin exists, and `.env` holds real (non-placeholder) secrets. Every failure says how to proceed. `SKIP_PREFLIGHT=1` bypasses the checks in `launch.sh` and `build.sh`. `SKIP_TESTS=1` is separate and skips the tests in `build.sh`.
+
+**Migrations.** Every `db/*-migration.sh` is an idempotent in-place upgrade, so running with nothing new is a safe no-op. `./migrate.sh --dry-run` lists them; `--keep-going` applies the rest after one fails. Back up the database before an upgrade that rewrites existing data; the sponsors migration drops and renames columns on the ad tables.
+
+**Stopping.** After a successful launch, `launch.sh` records the file set it used as `COMPOSE_FILE` in `.env`, so a bare `docker compose down`, `ps` or `logs` targets what you actually launched. Profiles are not recorded. A bare `down` can leave profile containers (`admin_ui`, `piper`, `alloy`) running, so add `--remove-orphans` or set a standing `COMPOSE_PROFILES` in `.env`.
+
+⚠️ **Dropping a profile leaves its container running.** Removing `fallback` from `--with` (or switching `--piper-only` on or off) does not stop the old container, because Compose only removes services that are no longer defined. Stop it once by hand: `docker compose rm -fs piper` (or `kokoro`).
+
+### 🪶 Low-memory layout: `--piper-only`
+
+For a 4 GB box (a Raspberry Pi, a small VPS):
 
 ```bash
-./launch.sh --with fallback          # or COMPOSE_PROFILES=fallback in .env — starts piper
+GW_PRESET=home-piper-only   # in .env, or answer the wizard's layout question
+./launch.sh
 ```
 
-then a live `PUT /api/settings` for `Tts:Fallback:Endpoint` (`http://piper:5000` on this
-stack) — no restart needed, `FallbackTtsSynthesizer` reads it per render. This applies to
-every install, including existing ones (see ARCHITECTURE.md "The deleted default" for the
-ruling and its recorded expiry).
+On a from-source box, `./launch.sh --piper-only` gives the same layout but builds locally.
 
-The piper-only topology below is unrelated to this mechanism: there Piper is the PRIMARY
-engine (SPEC F99.4), not an opt-in fallback, and always runs.
-
-> ⚠️ **Deselecting `fallback` on `--pinned` leaves the old `piper` container running —
-> stop it by hand, once.** `./launch.sh --pinned` now passes `--remove-orphans` to its
-> `up -d` (T148 review finding F6), but that flag only removes containers for services no
-> longer **defined** in the file stack at all — verified empirically (`docker-linux-ops`,
-> live daemon): a service that is still defined but merely profile-gated OFF (`piper`
-> dropping out of `--with fallback`/`COMPOSE_PROFILES`) is **not** an "orphan" to Compose,
-> so a previously-opted-in `piper` container survives every subsequent `--pinned` launch
-> untouched, still running, still (harmlessly) idle. The same is true switching topology
-> the other way (`--piper-only` on ↔ off) for `kokoro`/`ollama`/`ollama-init`. One-time fix
-> after any such change: `docker compose rm -fs piper` (`-s` stops it first, `-f` skips the
-> confirmation) — or the equivalent service name for the topology switch you made.
-
-### Low-memory topology: `--piper-only` (gh-#242, gh-#310)
-
-For a 4GB-class box (Raspberry Pi, small VPS), `--piper-only` merges
-`compose.piper-only.yaml` last onto whichever file set the flow uses:
+It removes `kokoro` and its `voice-seed`, and sends every spoken break to Piper. It also halves `Library:EnrichmentConcurrency` to `2`. Override on any layout in `.env`:
 
 ```bash
-./launch.sh --pinned --piper-only
+LIBRARY_ENRICHMENT_CONCURRENCY=1   # lower still, or raise to get the library built sooner
 ```
 
-It removes **kokoro** (its ~1.2GiB resident baseline is the single biggest tenant) and,
-as of gh-#310, the **`ollama` + `ollama-init` pair** as well — the demo overlay held
-`llama3.2:3b` permanently resident behind a fence larger than a 4GB box's entire RAM.
-Every TTS render routes to the piper sidecar; the LLM path degrades to templated patter,
-which is exactly what [HARDWARE.md](HARDWARE.md)'s topology (a) describes. See that file
-for the ranked hardware topologies.
+Measured on a 4 GB Pi 5: about 800 tracks an hour at concurrency 4 and about 700 at 2, so 9,000 tracks take roughly 11 and 13 hours. The station is on air the whole time. [HARDWARE.md](HARDWARE.md) has the Raspberry Pi specifics.
 
-> ⚠️ **Expected on every piper-only box — not a broken install.** The api logs
-> `kokoro health probe failed (Name or service not known (kokoro:8880)) — 2 consecutive
-> failures, cached verdict is now unhealthy`, with a stack trace, and then goes quiet
-> (gh-#338 made the warning edge-triggered). `Tts:Endpoint` **deliberately** stays pointed
-> at the absent kokoro host: it cannot point at piper (kokoro-fastapi speaks
-> `POST /v1/audio/speech`, piper's server speaks `POST text/plain → /`) and it cannot be
-> emptied (`TtsOptions.Endpoint` is `[Required]`). The dead hostname is the mechanism, not
-> the fault — it is fully quarantined to Kokoro's own health probe / voice lister now (SPEC
-> F99.4, STORY-257): **Piper is the topology's PRIMARY engine directly** via
-> `Tts:PiperPrimaryEndpoint`, so every render — kind-carrying or not — goes straight to
-> Piper with no NXDOMAIN dance and no fallback chain involved at all. `GET /api/voices`
-> still returns a 502 (Kokoro's own voice list, unreachable) for the same reason. The
-> broadcast never depends on any of it. Full rationale lives in `compose.piper-only.yaml`.
+⚠️ **Expected on every piper-only box, not a broken install.** The api logs `kokoro health probe failed (Name or service not known (kokoro:8880))` once, then goes quiet. `Tts:Endpoint` deliberately keeps pointing at the absent Kokoro host, and `GET /api/voices` returns a 502 for the same reason. Piper is reached directly through `Tts:PiperPrimaryEndpoint`, and the broadcast never depends on the dead hostname.
 
-As of gh-#334 it also halves **`Library:EnrichmentConcurrency` to 2**. Enrichment is the
-heaviest sustained load GenWave produces — the ffmpeg analyzers use every core they are
-given — and the base default of 4 pins all four cores of a small box for the whole
-first-boot catalog build. Override on either stack with the env var:
+### 🔁 Backup voice: opt-in
+
+By default there is no backup voice: if Kokoro fails, that break is dropped rather than read in a different voice. To opt in, start Piper and tell the api where it is:
 
 ```bash
-LIBRARY_ENRICHMENT_CONCURRENCY=1   # in .env — lower still, or raise to reclaim throughput
+./launch.sh --with fallback        # or COMPOSE_PROFILES=fallback in .env
 ```
 
-**Not proportional** — both rates measured on the same 4GB Pi 5: **~800 tracks/hour at 4**
-and **~700 at 2**. A 9,000-track library is therefore ~11h at 4 and **~13h at 2 — not the
-~22h a linear model predicts**. Halving concurrency costs far less throughput than it
-looks like it should; the analyzers are not purely CPU-bound (NFS media reads, catalog
-writes), so two workers still keep the box busy. The concurrency-2 figure is a 9-hour
-sustained run, 2026-08-03: 6,303 tracks at a flat ~700/hour with no gaps.
-Enrichment is a backfill, not a broadcast dependency — the
-station is on air throughout, so this trades catalog-build time for headroom, nothing more.
+Then set `Tts:Fallback:Endpoint` to `http://piper:5000` in the admin settings. No restart is needed.
 
-> ⚠️ **On a pinned appliance box the env var is the only lever.** `compose.demo.yaml` sets
-> `Admin__Enabled: "false"`, which closes `PUT /api/settings` — so the live settings path
-> this knob otherwise supports (it is an allowlisted live setting, no restart needed) is
-> unreachable there. Set it in `.env` and re-`up` the api.
+---
 
-**Temporary admin access** (settings, personas, catalog curation on the public box):
+## ⚙️ Settings that live only in the environment
 
-1. Edit `compose.demo.yaml`'s `api` env: `Admin__Enabled: "true"`.
-2. `COMPOSE_PROFILES=admin docker compose -f compose.yaml -f compose.pinned.yaml -f compose.demo.yaml up -d`
-   — recreates `api`, starts `admin_ui` on loopback only.
-3. Tunnel in: `ssh -L 3000:127.0.0.1:3000 you@your-box` → `http://localhost:3000`. If
-   Cloudflare Access is fronting this box (see "Zero Trust Access (optional)" below),
-   prefer that route for routine admin — this SSH tunnel stays as break-glass only.
-   **Home Assistant users: mint (or rotate) the announce token now**, on the Announcements
-   page — it is the only credential that survives the plane going back off (see "The House
-   Voice" below).
-4. When done, revert the flag and re-`up` without the profile. The public surface is
-   unaffected throughout — spectators never notice.
+Most settings are live: change them in the admin UI and they apply on the next use. The ones below are read once at boot, so they cannot be changed from the UI.
 
-**Standard mode / LAN kiosk note:** for `:8081` on the local network only (no public
-internet, no Caddy), none of this file applies — leave `Admin__Enabled` at its default
-`true`, set `Station__SpectatorMode: "true"`, and point a kiosk browser at
-`http://<host>:8081/` (compose.yaml already publishes 8081 for exactly this).
-
-### Shared voice files: the `voices` volume (SPEC F166)
-
-Kokoro's voice files live in a named Docker volume (`voices`), not baked into the
-container image. On the very first `docker compose up`, a one-shot `voice-seed`
-container copies Kokoro's stock voice files into that volume before Kokoro starts
-— a fresh install ends up with Kokoro's full built-in voice set, ready to speak,
-with no extra step. The api does not wait for it: `./launch.sh` starts the core
-with `--no-deps` before the seed runs at all, and a seed that never runs or
-fails can't block or fail api's own startup (`required: false`); it only needs
-the volume when you install a voice pack, which is always after boot.
-A second `up` does nothing further: the seed only ever adds a file it doesn't
-already find in the volume.
-
-That also means a later Kokoro image upgrade does not overwrite or remove anything
-already in the volume. Any voice file a newer image ships that isn't already
-present gets added on the next `up`; nothing already there — including a voice
-pack you've installed — is ever touched or replaced.
-
-The api writes new voice-pack files into this same volume, read-write, at
-`/voices`. Kokoro reads from it read-only and rescans it on every request, so an
-installed voice pack goes live with no restart.
-
-`--piper-only` boxes skip all of this: Kokoro (and therefore `voice-seed`) is
-disabled on that topology, and Piper needs no voice files of its own.
-
-### Jingle-pack and voice-pack roots (SPEC F164–F170, gh-#709)
-
-Four more env/compose-only knobs, never a live setting — the same posture as `Plugins__*`
-in the "Plugins" section below:
+⚠️ **The root `.env` file does not reach containers by itself.** `compose.yaml` passes through only the variables it names. Set a key below in the `api` service's `environment:` block, usually in a small `compose.local.yaml` you write and stack last (`-f compose.yaml -f compose.pinned.yaml -f compose.local.yaml`). It does not ship.
 
 | Key | Default | What it does |
 |---|:---:|---|
-| `Packs__JingleRoot` | `/authored/jingle-packs` | Where installed jingle-pack assets land, under the `authored` volume |
-| `Packs__VoicesRoot` | `/voices` | Where installed voice-pack `.pt` files land — the shared `voices` volume described just above |
-| `Packs__PreviewMaxBytes` | 153600 | Maximum accepted size, in bytes, of a single voice-pack preview clip |
-| `Packs__JingleAssetMaxBytes` | 5242880 | Maximum accepted size, in bytes, of a single jingle-pack asset file |
+| `Admin__Enabled` | `true` | The admin plane on or off (see the modes above) |
+| `Station__SpectatorMode` | `false` | Seeds the spectator page at boot. A saved database value wins |
+| `Station__Theme` | blank | Seeds the look by theme slug. A saved value wins, and a visitor's own `genwave-theme` cookie beats both. An unknown slug falls through to the next level, ending at the shipped default |
+| `Plugins__Enabled` | `false` | Turns on plugin loading. Must be exactly `true` or `false` |
+| `Plugins__Root` | `/plugins` | Where plugins are read from |
+| `Announcements__MessageMaxChars` | 280 | A longer announcement is a 400 |
+| `Announcements__AcceptedPerMinute` | 6 | Station-wide announcement rate |
+| `Announcements__PendingDepthCap` | 12 | Pending announcements held; deeper is a 429 |
+| `Gardener__IntervalMinutes` | 60 | How often the library Gardener runs |
+| `Gardener__FileActions__Enabled` | `false` | Lets the Gardener retag, rename and move files (below) |
+| `Ads__WorkerIntervalMinutes` | 10 | How often the ad worker renders |
+| `Ads__RetiredAudioRetentionDays` | 30 | How long retired ad audio is kept before the hourly sweep deletes it |
+| `Packs__JingleRoot` | `/authored/jingle-packs` | Where jingle packs install |
+| `Packs__VoicesRoot` | `/voices` | Where voice packs install |
+| `Packs__PreviewMaxBytes` | 153600 | Largest accepted voice-pack preview clip |
+| `Packs__JingleAssetMaxBytes` | 5242880 | Largest accepted jingle asset |
+| `Llm__ApiKey` | blank | Bearer token for the language-model endpoint. Never stored in or returned by the settings API; `compose.yaml` doesn't pass it through, so set it in your `compose.local.yaml` |
+| `LIBRARY_ENRICHMENT_CONCURRENCY` | 4 (2 piper-only) | Analyzer workers; this one is read from `.env` |
 
----
+The remaining `Gardener__*` and `Ads__*` tuning keys are boot-validated: an out-of-range value stops the api from starting, and the error names the key.
 
-## 🏠 The House Voice — announcements and the announce token (v5.4.0/v5.4.1, SPEC F143–F147)
+**`Plugins__Enabled` crashes the api on any value but `true` or `false`.** That includes an empty string, and a map entry interpolated from an unset variable also becomes an empty string. A bare valueless entry (`Plugins__Enabled:` with nothing after the colon) is dropped and defaults to `false`. Plugins load once at boot, so adding or updating one is a restart. Turn them on with `docker compose -f compose.yaml -f compose.plugins.yaml up`; see [PLUGINS.md](PLUGINS.md).
 
-Owner announcements let the DJ work a line into the next break (in character, or read
-**verbatim** — and always verbatim when the in-character copy fails the truth gate). They are
-a durable unit of content (`station.announcement`, db/40) with a visible lifecycle; nothing the
-pipeline touches is ever deleted.
-
-**Deploy knobs — env/compose only, not live settings** (`Announcements__*`, boot-validated).
-⚠️ *Env/compose-only* here (and for every `Gardener__*` knob below) means the **`api`
-service's `environment:` block** — on a pinned appliance, a small local overlay file. The
-root `.env` alone never reaches a container unless `compose.yaml` interpolates that exact
-variable, and none of these are interpolated:
-
-| Key | Default | What it bounds |
-|---|:---:|---|
-| `Announcements__MessageMaxChars` | 280 | a longer message is a 400 |
-| `Announcements__AcceptedPerMinute` | 6 | station-wide, across both doors (cookie and token); a refusal never spends it |
-| `Announcements__PendingDepthCap` | 12 | pending + claimed rows; deeper is a 429 |
-
-**The announce token** — for automations (Home Assistant) that must not hold the admin cookie:
-
-- Mint on the Announcements page, or `POST /api/announcements/token` (cookie session only).
-  **Reveal-once**: the plaintext is returned exactly once; only its SHA-256 lands in the
-  settings row `Announcements:TokenHash` (machine-written, never listed by the settings API).
-  `POST` again to rotate, `DELETE` to revoke — a revoked token is refused on the very next
-  request (fresh read per call, no cache). `GET /api/announcements/token/status` reports
-  whether one exists and `Announcements:TokenLastUsedAt`.
-- The token is a `Bearer` on **`/api/announcements` only** (submit, history, and the
-  token-authed now-playing read the sensor uses); a fitness law fences the scheme to exactly
-  those two controllers, so it can never promote to the admin planes.
-- ⚠️ **Reachability — read before wiring HA (ruled v5.4.1, SPEC F145.6).** Submit, history
-  and the token endpoints are admin-surface: with `Admin__Enabled: "false"` (the reference
-  public topology's default) they 404. **The token-authed now-playing read is the one
-  exception** — it answers whenever a token exists, admin plane on or off, public or private,
-  so the Home Assistant sensor works on a shipped appliance; `genwave.announce` does not until
-  the plane is on (the call fails with "Not Found" in the automation trace, no reauth). Mint the
-  token during the temporary-admin window (step 3 above) before turning the plane back off. The
-  read is not a spectator route: point the integration at the **api port** (`:8080`), never the
-  public listener port, or it 404s. The api itself must be reachable from the HA box — on the
-  reference topology it binds to `127.0.0.1:8080`, so a same-host HA or a deliberate LAN bind is
-  the operator's call.
-- ⚠️ **Transport.** The token's guarantee equals the admin cookie's (F145.7): on the
-  Operator/Standard modes the api listens on `0.0.0.0:8080` over plain HTTP, so the token
-  crosses your LAN in the clear — keep it on a trusted network, or front the api with TLS
-  (Caddy) before pointing an integration at it from anywhere else.
-- **A public station never carries the house's events**: while `Station:SpectatorMode` is
-  on, submissions are refused with a 403 and pending rows are declined at the flip — the
-  demo station can never demo this by design.
-
-**Home Assistant**: the companion [`genwave-homeassistant`](https://github.com/GenWave-Org/genwave-homeassistant)
-integration (HACS custom repository, MIT; HA 2025.3.0+) takes the station URL and the token,
-and provides the `genwave.announce` service (`message`, `verbatim`, `ttl_seconds`, `voice`), a
-`notify` entity, `sensor.now_playing` (title, artist, DJ), and a blueprint gallery — dinner
-bell, laundry done, morning ramp. Gated live 2026-08-28: a blueprint ring reached the air in
-one break cycle.
-
----
-
-## 📚 The library scan — a moved root is quarantined, not fed to the engine (gh-#611/#612)
-
-A catalog row whose path lies outside the current `Library:MediaRoot` can never be
-re-verified by the scan (the classic cause: the library was once scanned under a different
-mount, so every file exists twice and half the picks point nowhere). Since v5.4.0 such rows
-are **quarantined** (`state = unavailable`, out of rotation) after `Library:Scan:MissThreshold`
-consecutive scans (default 2 — the same miss grace a vanished file gets, SPEC F58), and
-resurrect through normal discovery if the root moves back. Roots that legitimately live
-outside `MediaRoot` are exempt via `Library:Scan:QuarantineExemptRoots` (default `/authored`,
-the authored-segments volume) — a deployment that relocates that volume must update this and
-`Station:Safe:AuthoredRoot` together. Independently, every push now checks the file exists
-first and declines with a WARN if not, and a chain that was pushed but never aired is surfaced
-rather than silent. Per-service memory fences for every container (kokoro 4 GB, piper 768 MB,
-alloy 256 MB, cloudflared 128 MB, dockerproxy 64 MB, and — demo overlay only — ollama 1 CPU /
-6 GB) live in HARDWARE.md's "What each service needs" table — one source, not two.
-
----
-
-## 🌱 The Library Gardener (v5.5.0, SPEC F150–F155, gh-#529)
-
-The Gardener is a housekeeping `BackgroundService` that tends the catalog on a timer:
-five rot passes (`dead_file` / `near_duplicate` / `stale_metadata` / `shelf_dust` /
-`unreachable`) reconcile findings into a queue an operator works from the Gardener page
-(since v5.5.1: five badged kind tabs, server-paged `?tab=&page=&limit=` — default 25,
-picker 25/50/100/250, near-duplicates always paged by whole cluster), and a
-listener-thumbs signal nudges rotation toward what actually gets played. Schema is
-**db/41** (`library.media_rotation`, `media_thumb`, `rot_finding`, `file_action` + the
-`rot_kind`/`rot_state` enums) — `migrate.sh` applies it on the way up, so a `--pinned`
-upgrade runs one migration here. Every knob below is `Gardener__*` — env/compose-only
-(the api `environment:` block, per the House Voice note above), never a live setting —
-**except**
-`Station:Thumbs:Enabled`, the one Live switch (see below). The ten top-level knobs are
-boot-validated (`ValidateDataAnnotations()`): an out-of-range value refuses to start. The
-two `FileActions__*` rows are NOT — `DataAnnotations` validation doesn't recurse into a
-nested options class, so `Enabled` (a plain bool) is just read, and an out-of-range
-`GateTimeoutSeconds` is silently clamped to 1–300 at use rather than rejected at boot; the
-range column for those two rows is documentation only.
-
-| Key | Default | Range | What it bounds |
-|---|:---:|:---:|---|
-| `Gardener__IntervalMinutes` | 60 | 1–1440 | Minutes between `GardenerService` ticks (thumb sweep + every registered pass) |
-| `Gardener__BatchSize` | 500 | 1–10,000 | Reserved — no shipped pass consults it yet. Every pass today reconciles set-based in SQL; only a future *iterative* pass would ever read this |
-| `Gardener__NudgeGain` | 0.5 | 0–2 | Multiplies the rotation nudge into the persona ranker's rung-0 score term; 0 disables the rotation signal outright |
-| `Gardener__HalfLifeDays` | 30 | 1–365 | Exponential half-life, in days, for a single thumb's contribution to the nudge |
-| `Gardener__Saturation` | 5 | 1–100 | Divisor that normalizes the age-decayed thumb sum into the nudge's clamped [-1, 1] range |
-| `Gardener__ThumbCooldownSeconds` | 30 | 1–3600 | Per-IP cooldown on the `thumbs` route rate limiter |
-| `Gardener__ThumbDailyCap` | 60 | 1–10,000 | Per-IP **and** per-listener daily cap on accepted thumb posts |
-| `Gardener__ThumbRetentionDays` | 90 | 1–3650 | Age past which `library.media_thumb` rows are swept; the lifetime up/down counters and the computed nudge survive the sweep |
-| `Gardener__ShelfDustDays` | 90 | 1–3650 | Days since discovery, with zero plays, before a playable row is flagged `shelf_dust` |
-| `Gardener__DuplicateToleranceMs` | 2000 | 0–60,000 | Duration tolerance for the `near_duplicate` grouping, anchored to the group's shortest member |
-| `Gardener__FileActions__Enabled` | `false` | — | The file-actions opt-in (see below) |
-| `Gardener__FileActions__GateTimeoutSeconds` | 30 | 1–300 | How long a file action waits to enter the shared scan gate before reporting Busy |
-
-**`Station:Thumbs:Enabled`** — a *live* allowlisted setting: `PUT` it through the settings
-API/UI, or seed it at boot via `Station__Thumbs__Enabled` in the api service's
-`environment:` block. Default off — disabled means
-`POST /spectator/api/thumbs` 404s and the spectator page shows no thumbs controls at all,
-never a distinguishable "thumbs are closed" response. Takes effect on the very next
-request, no `api` restart.
-
-### File actions: opt-in, and the only feature that writes to media
-
-File actions (retag / rename / move — **there is no delete verb**) are OFF by default
-(`Gardener__FileActions__Enabled`, F154.2's fail-closed posture on a stranger's NAS).
-Opting in needs both halves:
+**File actions are the only feature that writes to your music folder.** Retag, rename and move exist; there is no delete. They are off by default and need two things:
 
 ```bash
-# knob 1 — the setting, in the api service's environment: block (the root .env alone
-#          never reaches the container — on a pinned box use a small local overlay you
-#          write yourself; `compose.local.yaml` below is that file, it does not ship):
-#          services: { api: { environment: { Gardener__FileActions__Enabled: "true" } } }
-# knob 2 — the mount, via the shipped overlay:
-docker compose -f compose.yaml -f compose.pinned.yaml -f compose.demo.yaml \
-  -f compose.local.yaml -f compose.fileactions.yaml up -d
+# 1. Gardener__FileActions__Enabled: "true" in the api environment: block
+# 2. Make the music bind writable with the shipped overlay:
+docker compose -f compose.yaml -f compose.pinned.yaml -f compose.local.yaml -f compose.fileactions.yaml up -d
 ```
 
-`launch.sh` has no flag for extra compose files today — run the full `-f` chain above
-directly, or launch normally first and append `:compose.fileactions.yaml` to `COMPOSE_FILE`
-in `.env` (the gh-#309 mechanism above), so every later bare `docker compose` picks it up
-too. `compose.fileactions.yaml` stacks in either order relative to the pin/demo overlays,
-and touches only the `api` service's own `/media` mount — widened to `:rw` (see its own
-header for the mechanism).
+`launch.sh` takes no extra compose files, and it rewrites the `COMPOSE_FILE=` line in `.env` on every launch, so re-append `:compose.fileactions.yaml` after each run. Symptom of a missing half: with the folder still read-only a confirmed action fails at execution; with the overlay but the switch off, the endpoints 404. Writes stay inside `Library:MediaRoot`, never overwrite an existing path, and a retag swaps in behind a `.gwbak` backup that is deleted on success. If a revert itself fails the `.gwbak` stays beside the file and blocks further retags of it. Restore with `mv 'track.mp3.<suffix>.gwbak' 'track.mp3'`, or delete the `.gwbak` once the current file is the one you want.
 
-Both knobs are independent, and missing one is diagnosable: with the mount still `:ro`
-(this file not stacked), `dry-run` still plans to a 200 — the planner never touches disk —
-but `confirm` always fails at execution instead of completing (the OS refuses the write
-before anything is written, so the outcome is `failed`, never `reverted` — there's nothing
-to revert — and never a clean `done`). With the compose file stacked but `Enabled` left
-off, the endpoints just 404, mount notwithstanding.
+**Library scan.** A catalog row whose path lies outside the current `Library:MediaRoot` is taken out of rotation after `Library:Scan:MissThreshold` missed scans (default 2), and comes back if the root moves back. `Library:Scan:QuarantineExemptRoots` (default `/authored`) lists roots exempt from this. If you relocate the `authored` volume, update it and `Station:Safe:AuthoredRoot` together.
 
-⚠️ **`launch.sh` does not remember this overlay.** It rewrites the whole `COMPOSE_FILE=`
-line in `.env` on its own next successful `up` (the gh-#309 mechanism above), so a manually
-appended `:compose.fileactions.yaml` is silently dropped and the mount quietly reverts to
-`:ro` — re-append it after every `launch.sh` run. The confirm-fails-at-execution signature
-above is how you notice.
-
-Every write is jailed under `Library:MediaRoot`, never overwrites an existing path, and a
-retag never touches the live file directly: the original is copied to a same-directory
-temp file, tagged, then swapped in behind a same-directory `.gwbak` backup of the original.
-On success the backup is deleted. **If a revert itself fails** (the backup can't be moved
-back over a failed write), the `.gwbak` is left beside the file as the only surviving
-original — every further retag on that file refuses (`LeftoverBackup`) until an operator
-resolves it manually. Resolving it by hand: `mv 'track.mp3.<suffix>.gwbak' 'track.mp3'`
-restores the pre-retag original over whatever the failed attempt left behind; once you've
-confirmed the current file is the one you want, deleting the `.gwbak` instead is enough —
-either way, the next retag on that file proceeds the moment no `.gwbak` sibling remains.
+**Announcements and Home Assistant.** An announcement token lets a home-automation system speak on air without the admin cookie. Mint it on the Announcements page (shown once; only its hash is stored), rotate by minting again, and revoke by deleting; a revoked token fails on the next request. It works as a `Bearer` on `/api/announcements` only. Point integrations at the api port `:8080`, never `:8081`. With `Admin__Enabled: "false"`, submitting 404s and only the token-authed now-playing read still answers, so mint the token while admin is on. The token travels over plain HTTP on your network, so keep it on a trusted network. While spectator mode is on, submissions are refused with a 403. The companion [`genwave-homeassistant`](https://github.com/GenWave-Org/genwave-homeassistant) integration provides the `genwave.announce` service and a now-playing sensor.
 
 ---
 
-## 🔌 Plugins (v5.6.0, SPEC F156–F157, gh-#380)
+## 🎙️ Voices and packs
 
-Third-party code loads in-process through one narrow door — see [PLUGINS.md](PLUGINS.md)
-for the licensing posture and the how-to. Both knobs below are env/compose-only, never a
-live setting:
+Kokoro's voice files live in the named `voices` volume, not in the image. On the first `up`, `voice-seed` copies Kokoro's stock voices in, so a new install can speak with no extra step. It only ever adds files it doesn't find, so a newer Kokoro image never overwrites or removes anything, including a voice pack you installed. The api does not wait for the seed, and a failed seed can't stop the api starting.
 
-| Key | Default | What it does |
-|---|:---:|---|
-| `Plugins__Enabled` | `false` | The opt-in flag. `false` (or unset) means the loader never runs — F156.1's fail-closed posture |
-| `Plugins__Root` | `/plugins` | Where the loader looks for one `<slug>/plugin.json` directory per plugin |
+The api writes voice-pack files into the same volume at `/voices`. Kokoro reads it read-only and rescans on every request, so a new voice pack is live with no restart. A `--piper-only` box skips all of this.
 
-⚠️ **`Plugins__Enabled` only accepts exactly `true` or `false` (case-insensitive) — a
-malformed *value* fails the boot, it does not degrade to closed.** This is `.NET`'s own
-`IConfiguration.GetValue<bool>`, called before the host finishes composing: `"yes"`, `"1"`,
-`"0"`, and an **empty string** all throw `InvalidOperationException` and crash the `api`
-container at startup. The subtlety is which compose shapes actually *produce* that empty
-string versus which ones never reach the container at all (verified against real
-`docker compose config`/`run` output, not assumed):
-- **Crashes** — anything that resolves to a literal empty string: the list form
-  `- Plugins__Enabled=` (nothing after `=`), or a map entry interpolated from a variable
-  that IS defined but empty **or undefined** (`Plugins__Enabled: "${SOME_VAR}"` with
-  `SOME_VAR=` in `.env`/the shell, or `SOME_VAR` never set at all — both interpolate to
-  `""`). All of these land inside the container as `Plugins__Enabled=` — present, empty,
-  fatal.
-- **No crash** — a bare, **valueless** map entry (`Plugins__Enabled:` with nothing after
-  the colon and no same-named shell variable to pass through) is **omitted from the
-  container entirely**, not set to empty; `GetValue<bool>` then sees an absent key and
-  defaults quietly to `false`, same as the key never appearing at all.
-
-Only an entirely absent/omitted key defaults quietly to `false`; any key that reaches the
-container carrying a non-`true`/`false` value — empty string included — is a boot failure,
-not a closed door.
-
-Both knobs must be true or the door stays closed, with one INFO line naming whichever half
-is missing. `compose.plugins.yaml` mounts `./plugins` read-only at `Plugins__Root`'s own
-default:
-
-```bash
-docker compose -f compose.yaml -f compose.plugins.yaml up
-```
-
-As with `compose.fileactions.yaml` above, the `.env` file itself never reaches a container
-un-interpolated — `Plugins__Enabled` belongs in a service's own `environment:` block (a
-local `compose.local.yaml` stacked last), not `.env`. There is no live toggle: the plugin
-set loads once, at boot; adding, removing, or updating a plugin under `./plugins` is a
-restart. Load outcomes surface on `GET /api/status`'s `plugins[]` array, the admin
-dashboard's Plugins tile (shown once at least one plugin has been discovered — loaded or
-skipped; an unopened door or a mount with zero valid plugins shows no tile at all), and one
-booth-log row per plugin at boot.
+Jingle packs install under the `authored` volume. Both roots are in the table above.
 
 ---
 
-## 📻 Ads (v5.6.0 → v5.8.0, SPEC F158–F163 + F171–F176, gh-#380 / gh-#714)
+## 🔒 What the fail-safe guarantees
 
-The station authors and airs its own ad spots — a `GenWave.Ads.AdsOptions` env/compose-only
-knob set (`Ads__*`, boot-validated via `ValidateDataAnnotations()`) plus nine `Station:Ads:*`
-Live settings (allowlisted, PUT-able through the settings API/UI, no `api` restart needed).
+- **The admin plane can be removed, not just locked.** With `Admin__Enabled: "false"` the login form itself is gone: a stray `/api/auth/login` returns 404, never a password prompt. An empty `ADMIN_PASSWORD` fails closed too: every admin endpoint denies and login can never succeed.
+- **`:8081` serves the spectator page and `/health` only.** Everything else on it, including admin routes, `/media/*` and `/internal/*`, returns a bare 404 that is indistinguishable from an unmapped route, whatever the flags say.
+- **The engine's control port is never published.** It has no password, and Docker's network isolation is its only firewall. To debug it, `docker compose exec engine bash` and talk to `localhost:1234` from inside.
+- **The database and the Docker socket have no route from outside.** Postgres is on a private network shared with the api alone. The api sees container stats only through `dockerproxy`, read-only and limited to containers.
+- **Spectator responses are hardened.** They carry a strict Content-Security-Policy, `X-Frame-Options: DENY`, `nosniff` and a strict referrer policy.
+- **The stream does not stop for software trouble.** If music, speech or the language model fails, the engine falls back to safe-loop segments and keeps broadcasting. A failed migration stops a launch before the new code runs, and a failed upgrade leaves the on-air core alone.
 
-| Key | Default | Range | What it bounds |
-|---|:---:|:---:|---|
-| `Ads__DurationToleranceRatio` | 0.4 | 0.0–2.0 | Allowed fractional deviation between a script's estimated read time and its target duration before the validator refuses it as over |
-| `Ads__WorkerIntervalMinutes` | 10 | 1–1440 | How often `AdSpotWorker`'s render tick runs |
-| `Ads__LibraryName` | `ads` | — | Display name of the seeded ads library `AdsLibrarySeeder` creates if absent at boot |
-| `Ads__RenderBudgetSeconds` | 180 | 10–1800 | Wall-clock budget the worker gives one render attempt before cancelling it |
-| `Ads__PreviewRetentionDays` | 7 | 1–90 | How many days a rendered sponsor preview is kept before the retention sweep deletes it |
-| `Ads__RetiredAudioRetentionDays` | 30 | 1–365 | How many days a retired or replaced ad's audio is kept before the hourly sweep deletes its file and library row (ads only — safe segments and jingle packs are never auto-deleted) |
-| `Ads__JobQueueCapacity` | 8 | 1–64 | How many queued render jobs the sponsor job queue holds before new requests are refused |
-
-| Key | Default | Range | What it bounds |
-|---|:---:|:---:|---|
-| `Station:Ads:EveryNUnits` | 0 (disabled) | 0–1000 | Units between ad triggers — the `Station:Cadence:StationIdEveryNUnits` twin; `0` disables the trigger entirely |
-| `Station:Ads:TargetCount` | 12 | 0–100 | How many generated spots (llm/pack, `draft` through `ready`) the stock pass keeps in the pipeline; owner spots never count |
-| `Station:Ads:RefreshDays` | 30 | 1–365 | Age, in days, past which a `ready` spot is retired and re-drafted |
-| `Station:Ads:AutoApprove` | `false` | — | Whether a freshly drafted spot skips the operator approval step |
-| `Station:Ads:AntiRepeatWindow` | 5 | 0–50 | How many recently aired sponsors `LibraryAdSpotSource` excludes from its next pick |
-| `Station:Ads:AnnouncerVoice` | `` (empty) | — | Kokoro voice id cast as an ad's announcer; empty uses the station's own voice (`Station:Voice`) |
-| `Station:Ads:CastVoices` | `af_nova,am_michael,bf_alice,am_onyx` | 1–16 ids | Comma-separated pool of Kokoro voice ids an ad may cast for its other speaking roles |
-| `Station:Ads:BedFadeMs` | 300 | 100–1000 | How long the background music takes to fade out at the end of a generated ad, as the voice ends, in milliseconds |
-| `Station:Ads:BedDuckDb` | -12 | -60–0 | How far below the voice the background music sits in a generated ad, in dB, measured against the voice (so -12 means -12 whatever the music's own level); 0 = no ducking, -60 = effectively silent. Was the env-only `Ads__BedDuckDb` before gh-#746; that env var is now ignored |
-
-No compose overlay is needed to turn ads on — the seam is always registered; `Station:Ads:EveryNUnits=0`
-is what keeps it silent on every existing station until an operator opts in. The Admin UI's
-Ads page (`/ads`) is where spots are drafted, approved, retried, retired, and previewed; a
-first-party ad pack installs like any other catalog pack (the `ad-pack` kind) and seeds
-`station.ad_brief` rows the worker drafts scripts from.
-
-Sponsors are the customer behind every ad (v5.8.0): every brief and spot belongs to a
-`station.sponsor` row, pausing a sponsor silences their spots on the next pick, and the
-anti-repeat window above now counts sponsors rather than rendered files. The guided "New
-spot…" path renders previews one at a time through a job queue: the preview retention knob
-above bounds how long a rendered preview is kept, and the job-queue capacity knob above
-bounds how many render requests may wait behind the one currently running — both
-env/compose-only, boot-validated, and refused on the live settings PUT.
+If you put your own reverse proxy in front of the api, set `Proxy:TrustedNetworks` to the proxy's network so the api sees real client addresses. Left empty, every visitor looks like one address and per-visitor rate limits (requests, thumbs) become one shared budget.
 
 ---
 
-## ☁️ Cloudflare tunnel (optional)
+## 🧯 Troubleshooting
 
-An alternative to the Caddy topology above: instead of publishing anything on the host at
-all, a [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)
-connector reaches out from inside the `core` network to Cloudflare's edge, which then
-routes your public hostname back to it. This used to run **outside the repo** as
-hand-maintained, unversioned infrastructure with no observability; it's now the optional
-`cloudflared` service in `compose.yaml`, off by default.
-
-### Enabling it
-
-1. In the Cloudflare Zero Trust dashboard: **Networks → Tunnels → Create a tunnel**
-   (remote-managed). Add a public hostname pointing at whichever service you want exposed
-   (e.g. `api:8081` for the spectator surface, `icecast:8000` for the raw stream).
-2. Copy the connector token from **Configure → Install and run a connector** into `.env`:
-   `TUNNEL_TOKEN=...`.
-3. Add `tunnel` to `COMPOSE_PROFILES` (e.g. `COMPOSE_PROFILES=admin,tunnel`, or just
-   `tunnel` on a headless box) and `docker compose up -d cloudflared` (or a full `up -d`
-   — every other service is unaffected).
-
-`TUNNEL_TOKEN` is deliberately NOT `${TUNNEL_TOKEN:?}` like this file's other secrets —
-that form breaks `docker compose config` even with the profile inactive (compose
-interpolates every service's environment before filtering by profile). Leaving it blank
-is safe when the profile is off; the container itself refuses to run and exits
-immediately with a clear log line if the profile is active with a blank or invalid token.
-
-### What `/ready` and `/metrics` give you
-
-cloudflared's own metrics server (bound to `2000` inside the `core` network, never
-published on the host) exposes:
-
-- **`/ready`** — JSON readiness: HTTP 200 plus the number of active edge connections once
-  the tunnel has registered at least one. This is what the container healthcheck uses
-  (`cloudflared tunnel --metrics 127.0.0.1:2000 ready`, cloudflared's own readiness
-  subcommand — the image is distroless with no shell, so there's no `curl`/`wget` to
-  reach for here).
-- **`/metrics`** — Prometheus text format: connection counts, request/response stats,
-  build info, and more.
-
-### Checking health
+Start here. Run both from the repo folder; `launch.sh` records the compose files it used, so the bare commands match your stack.
 
 ```bash
-docker compose ps cloudflared          # healthy / unhealthy / starting, same as any other service
-docker compose logs cloudflared        # connector registration, edge location, any errors
+docker compose ps          # Every service should say "healthy" (or "running" if it has no check).
+                           # A missing service, or one that says "Restarting", is your suspect.
+docker compose logs api    # Start with the API. Read the last error first.
+                           # If another service is the suspect, read its log: docker compose logs <service>
 ```
 
-To probe the endpoints directly from another container on the `core` network (there's no
-host port to hit from outside):
+Then look for your symptom below.
 
-```bash
-docker compose exec cloudflared cloudflared tunnel --metrics 127.0.0.1:2000 ready
-docker compose exec api curl -fsS http://cloudflared:2000/metrics | head
-```
-
-Opting into a host-side probe is a deliberate, local-only change — never commit it:
-```yaml
-    ports: ["127.0.0.1:2000:2000"]   # loopback only; add locally if you want to curl from the host
-```
-
-### Restart posture
-
-`restart: unless-stopped`, same as every other service — same posture, no independent
-supervision. A crashed connector (bad token, network blip) restarts automatically;
-`docker compose logs cloudflared` shows why it crashed if it keeps doing so.
-
-### Alerting — an honest note
-
-Nothing in this repo pages you on tunnel failure today. Two ways to close that gap
-yourself, in increasing order of effort:
-
-- **Scrape `/metrics`** with your own Prometheus (or any metrics collector) pointed at
-  `cloudflared:2000` from inside the `core` network, and alert on it there.
-- **Probe the public hostname from outside**, the same way `.github/workflows/
-  demo-health.yml` polls the demo station's `/health` on a schedule and lets GitHub
-  Actions email the org on failure — point an equivalent scheduled probe at whatever
-  route the tunnel exposes publicly (e.g. `/health` if it's fronting the api).
-
-Either is a few lines to wire up; neither ships by default, so silence from this stack
-does not by itself mean the tunnel is up.
-
-### Zero Trust Access (optional)
-
-Cloudflare Access can front a tunnel's public hostnames with authentication before a
-request ever reaches a service — same tunnel, an extra gate in front of it. Generic
-pattern only (SPEC F78.11): no real hostnames, zones, or tokens belong in this repo;
-concrete apps/policies/hostnames live in the operator's private infra repo, never here.
-
-Two Access application shapes cover this stack's two audiences:
-
-- **Human app** (admin UI / Grafana) — tunnel public hostname (e.g.
-  `admin.radio.example.com`) → service (`admin_ui:3000`; same shape for a Grafana
-  hostname pointed at `grafana:3000` in the observability stack). Access self-hosted app
-  on that hostname, allow policy = an email allowlist, login methods **Google** (primary)
-  **+ One-Time PIN** (fallback). Both matter: a single login method means an IdP
-  hiccup — Google outage, misconfigured SSO — is a lockout, not an inconvenience; the PIN
-  fallback keeps the door open.
-- **Machine app** (Loki push) — tunnel public hostname (e.g.
-  `loki.homelab.example.com`) → `loki:3100`. Access policy = **Service Auth**
-  (non-identity), backed by a service token. The client authenticates by sending
-  `CF-Access-Client-Id` / `CF-Access-Client-Secret` headers with every push request —
-  exactly what the `alloy` logging profile does, sourced from the `LOKI_ACCESS_CLIENT_ID`
-  / `LOKI_ACCESS_CLIENT_SECRET` env vars — alongside **`LOKI_PUSH_URL`** (the push target;
-  alloy refuses to start, exit 1, while it is empty — SPEC F78.4) and the label pair
-  `ALLOY_STATION_LABEL` / `ALLOY_ENV_LABEL` (`compose.yaml`'s `alloy` service; none of the
-  five are in `.env.example` — add them to `.env` when you enable the profile; header
-  attachment lives in `observability/alloy/config.alloy`; label contract in
-  `observability/LABELS.md`).
-
-Verification recipes (curl-able — these are the observable contracts, SPEC F78.6/F78.7):
-
-```bash
-# Human app: unauthenticated GET redirects to the Access login, never app bytes
-curl -sI https://admin.radio.example.com/ | grep -i '^location:'
-# -> 302 to https://<team>.cloudflareaccess.com/... (never a 200 with page markup)
-
-# Machine app: push without token headers is rejected at the edge, before Loki sees it
-curl -sI -X POST https://loki.homelab.example.com/loki/api/v1/push
-# -> 403
-
-# Machine app: push with valid token headers succeeds
-curl -sI -X POST https://loki.homelab.example.com/loki/api/v1/push \
-  -H "CF-Access-Client-Id: <CF_ACCESS_CLIENT_ID>" \
-  -H "CF-Access-Client-Secret: <CF_ACCESS_CLIENT_SECRET>"
-# -> 204
-```
-
-With Access in front, routine admin work (settings, personas, catalog curation) needs no
-SSH tunnel at all — hit the Access-gated hostname directly instead. Plain SSH (see
-"Temporary admin access" above) stays the **break-glass** route when Access itself is
-unreachable: `api:8080` remains loopback-published either way, unaffected by whether
-Access fronts anything.
-
-### Limits of the Access gate — an honest note
-
-Access is enforced **at Cloudflare's edge, on the tunnel hostname only**. Two consequences
-worth stating plainly:
-
-- **The origin trusts topology, not tokens.** Nothing in the api validates the
-  `Cf-Access-Jwt-Assertion` JWT Access attaches to authenticated requests. A caller that
-  reaches Caddy/api over the LAN gets the real login form with Access never consulted, and
-  a misrouted tunnel hostname or deleted Access app silently drops the gate. The admin
-  password is therefore still load-bearing on every non-edge path — treat it accordingly.
-  Origin-side JWT validation (config-gated, fail-closed) is
-  [gh-#75](https://github.com/GenWave-Org/genwave/issues/75).
-- **Failed logins DO log who was at the door** (gh-#74, shipped v2.3.1): every login
-  outcome records the caller's remote IP (XFF-corrected behind a trusted proxy) and the
-  `Cf-Access-Authenticated-User-Email` header when Access forwarded one — so "was that
-  the operator or an intruder?" is answerable from the api's own logs. Note the Access
-  identity is logged, not validated (the first bullet still applies).
-
-Record-keeping: concrete apps, policies, and hostnames live in the operator's private
-infra repo, never in this one (SPEC F78.11).
+- **"Schema migration failed".** `launch.sh` stops when a migration fails, and the application is not started on a half-built schema. On the published-image flow the message adds that the stack was not restarted onto the new images. The `db` container is left up. Read why with `docker compose logs db`, fix the cause, then run `./migrate.sh` or just `./launch.sh` again. Migrations are idempotent, so repeating them is safe.
+- **The box has drifted from what `.env` and the images say.** Run `./setup.sh` for the drift report, then `./setup.sh --repair` to fix what can be fixed, one confirmed item at a time. `launch.sh` has no repair flag of its own.
+- **Preflight failed (exit `3`).** Read the printed reason; each one says how to proceed. Common causes are Docker not running, a placeholder secret still in `.env`, or a port already taken. `SKIP_PREFLIGHT=1` is the override. It also helps on a from-source relaunch where the port check fails to recognise the stack's own published ports.
+- **Exit `4` after launching.** The core is on air, but a non-core service or profile extra did not converge. Run the catch-up command the summary printed.
+- **A setting won't change.** A saved database value outranks the env var. `GET /api/settings` reports `source: "override"` when a stored row is winning and `"default"` when it is not.
+- **The spectator page won't appear.** Check `Admin__Enabled`, `Station:SpectatorMode` and that `:8081` is published. See the stale-row note under the modes.
+- **Silence at first start.** `MEDIA_DIR` has no `.flac` or `.mp3` files (the extension match is case-insensitive), or the first scan is still running. The station starts silent until music is found.
+- **The first catalog build is slow.** Expected on a small box. See the figures under `--piper-only`.
+- **Kokoro health probe errors on a `--piper-only` box.** Expected; see above.
+- **A container from a dropped profile is still running.** `docker compose rm -fs <service>`.
+- **Plugins won't load or the api won't boot after editing `environment:`.** Check `Plugins__Enabled` is exactly `true` or `false`, with no empty value.

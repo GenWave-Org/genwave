@@ -4,16 +4,16 @@ Thanks for wanting to make GenWave better. Bug reports, fixes, and features are 
 
 ## 🏛️ Architecture governance
 
-Twelve laws, thirteen ids (L4 has two halves), enforced as fitness tests in `tests/GenWave.Architecture.Tests` (they run inside the normal `dotnet test GenWave.sln` — no separate CI lane). Full rationale for each: the per-law XML doc comments in that project (start at `Support/LawId.cs`) — the maintainer's own design notes cover the same ground (gh-#398) but live outside this shipped repo (`docs/` is gitignored).
+Twelve laws, thirteen ids (L4 has two halves), enforced as fitness tests in `tests/GenWave.Architecture.Tests` (they run inside the normal `dotnet test GenWave.sln` — no separate CI lane). Full rationale for each: the per-law XML doc comments in that project (start at `Support/LawId.cs`) — the maintainer's own design notes (the governance issue, `gh-#398`) cover the same ground but live outside this repo.
 
 | Law | Rule | Why |
 |---|---|---|
 | `L1` | Inner projects (`Core`, `Orchestration`, `Tts`, `Loudness`, `Context`) reference no ASP.NET, Npgsql, or Dapper | Keeps the hexagon's inner logic host-agnostic and unit-testable without infrastructure |
-| `L2` | Npgsql/Dapper appear only in `MediaLibrary`'s repository layer — composition-root construction is the *designed* exemption, and since the gh-#406 burn-down it is the baseline's only kind of entry | One place owns SQL; connection-per-query safety stays auditable |
+| `L2` | Npgsql/Dapper appear only in `MediaLibrary`'s repository layer — composition-root construction is the *designed* exemption, and since the early debts were burned down it is the baseline's only kind of entry | One place owns SQL; connection-per-query safety stays auditable |
 | `L3` | `HttpClient` (and the handler family it can be built from) is constructed **or acquired** (injected, factory-resolved) only at designated client seams | SSRF surface control — every outbound origin is enumerable |
 | `L4-references` | `GenWave.Abstractions` references nothing beyond the BCL | The MIT NuGet contract is a product boundary; accidental deps become semver pain |
 | `L4-immutability` | Every public type in `GenWave.Abstractions` carries no mutable public state (`init`-only properties and `readonly`/`const` fields are fine) | Same contract boundary — a settable property is an accidental behavior promise |
-| `L5` | `GenWave.Host` contains no namespace from the reserved/graduated subsystem list | The Host graduation rule's tripwire (gh-#399) — a forgotten graduation is a red test, not a review catch |
+| `L5` | `GenWave.Host` contains no namespace from the reserved/graduated subsystem list | The Host graduation rule's tripwire: a forgotten graduation is a red test, not a review catch |
 | `L6` | `GenWave.Abstractions` never references `GenWave.Core` | Misplaced seams are accidental API commitments |
 | `L7` | No production type outside the two named relays (`NormalizingTtsSynthesizer`, `FallbackTtsSynthesizer`) references `ITtsSynthesizer`'s context-less `SynthesizeAsync(string, string, CancellationToken)` overload directly | Every other caller must carry kind/rules/pace through `TtsRenderContext`, never silently drop them |
 | `L8` | Outside `GenWave.Tts`, no production code calls `PronunciationRuleSet.Merge`/`MergeWithProvenance` or `PronunciationRuleProvider.BuildMerged` directly — `PronunciationsController`'s own `MergeWithProvenance` call (its display-only rules-table projection, never a render) is the one *designed* exemption | `PronunciationRuleResolver.ResolveForRender` is the one resolve seam for air and audition — parity is structural, not a coincidence two call sites agree on today |
@@ -22,15 +22,15 @@ Twelve laws, thirteen ids (L4 has two halves), enforced as fitness tests in `tes
 | `L11` | Every `Skip=` string under `tests/` starts with `pending: T<n>`, `manual:`, `gate:` or `obsolete:` (`Story443_SkipPrefixLaw`) | The skip count then means pending, manual, or gated — never forgotten |
 | `L12` | No engine slug from `tools/VoiceOff/engines/*.json` appears as a whole word in `tools/VoiceOff` code, comments included, and no Dockerfile or root `compose*.yaml` mentions VoiceOff (`Story501_VoiceOffSlugFence`) | A new engine is one JSON profile and one shim, with no C# change |
 
-Adoption is honest: violations that predate a law are named and dated in the suite's exemption baseline and the laws fail on NEW violations only — never add a baseline entry to make your own change green. (The five debt entries that shipped with adoption were burned down via gh-#406 on 2026-08-13; only designed exemptions remain.)
+Adoption is honest: violations that predate a law are named and dated in the suite's exemption baseline and the laws fail on NEW violations only — never add a baseline entry to make your own change green. (The five debt entries that shipped with adoption were burned down on 2026-08-13; only designed exemptions remain.)
 
-**Seam placement** (gh-#400): "Does a third-party module need to implement or consume this? → `GenWave.Abstractions`. Else → `GenWave.Core/Abstractions`." Need means *demonstrated* need — a plausible future module is not a demonstrated need. Promotion on demonstrated need is cheap; demotion is a breaking change.
+**Seam placement** (issue `gh-#400`): "Does a third-party module need to implement or consume this? → `GenWave.Abstractions`. Else → `GenWave.Core/Abstractions`." Need means *demonstrated* need — a plausible future module is not a demonstrated need. Promotion on demonstrated need is cheap; demotion is a breaking change.
 
 L3's designated seams are a named constant, not a list here: `HttpClientSeams.DesignatedSeams`. Likewise L7's relays and L8's exemption: `TtsSynthesizeContextSeam.DesignatedRelays` and `PronunciationResolveSeam.DesignatedExemptions`.
 
 The station-table text pins ride beside L10 in the Architecture suite, not inside it: `Story405_L10PackTables` (db/45) pins its three create-table lines, the role-boundary ordering, and the L10 root-list sweep, while `Story431_L10Sponsor` (db/46) pins the create-table line, the unique-constraint clause, all three FK clauses, the db/06 mirror, the role boundary, and the L10 root-list sweep — so renaming or loosening one of those assertions without touching its pin goes red. A new station table added by a migration owes the same pin in the same pull request.
 
-**Check `SEAMS.md`** before adding a new seam — extend or decorate an existing port over minting a near-duplicate; regenerate with `dotnet run --project tools/SeamIndexGenerator --configuration Release` (CI byte-diffs it against committed, SPEC F105.6 — Release, same configuration the CI drift check builds, gh-#413).
+**Check `SEAMS.md`** before adding a new seam — extend or decorate an existing port over minting a near-duplicate; regenerate with `dotnet run --project tools/SeamIndexGenerator --configuration Release` (CI byte-diffs it against the committed file, building in Release like the drift check does).
 
 **Nothing on the feeder push path may throw on artwork resolution.** `ArtworkUrlResolver.ResolveAsync` composes the ICY `url=` annotation for every track/segment push; a thrown exception there is a dead-air bug, not merely a bad annotation. The discipline is now three-component: the resolver itself, `PersonaAvatarTokenCache` (dj faces), and `StationImageCache` (the station image) — each of the two caches degrades a store fault to an honest "nothing to offer" (no face / no customization) rather than propagating, the same never-throws contract `DurationRehydrator` (Playout) carries for its own catalog read. Extend this list, don't grow a fourth independent throw-suppressing wrapper, if a future artwork source joins the push path.
 
@@ -73,4 +73,4 @@ See the [README](README.md) for prerequisites and how to run the full stack.
 
 ## 🔐 Security issues
 
-Please do not open public issues for suspected vulnerabilities — report them privately to the maintainer.
+Please do not open public issues for suspected vulnerabilities — report them privately to the maintainer as described in [SECURITY.md](SECURITY.md).

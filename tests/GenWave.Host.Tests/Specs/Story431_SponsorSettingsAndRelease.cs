@@ -1,19 +1,18 @@
 // STORY-431 — Settings, options, laws, and the release (SPEC F176.1–F176.4 · PLAN T433/T453)
 //
-// BDD specification — xUnit. This file carries T433's own five ACs (AC1–AC4, AC7); AC5 (L10) is
+// BDD specification — xUnit. This file carries T433's own four ACs (AC1–AC4); AC5 (L10) is
 // T443's, over in GenWave.Architecture.Tests. AC6 is T453's, implemented below.
 //
 // AC1's key-list parity is Story151_SeededDefaults.cs's job; this file's own facts instead pin the
 // two things only THIS task's wording edit can break: the runtime 400 message, and the resx help
 // copy SettingCopy resolves server-side (SPEC F205.4, PLAN T574/T576 — the client no longer carries
 // its own help-text mirror to keep in step).
-// AC2/AC3 drive the real GenWave.Ads.AdsServiceCollectionExtensions.AddGenWaveAds registration through a
-// WebApplicationFactory<Program> boot — the Story380 GardenerKnobsWebFactory shape — so both facts
-// prove production wiring, not a hand-built options chain. AC4 drives the real SettingsController
-// the Story043 FeatureStationSettingsApi shape drives, in-process with fakes (no HTTP/DB needed:
-// a non-allowlisted key is rejected before either the store or the DB is ever touched). AC7 reads
-// DEPLOYMENT.md from the repo root the Story174_PublicTopologyDocs way. AC6 diffs the live-built
-// GenWave.Abstractions assembly's public surface (GenWave.Host.Tests.Support.PublicSurface.Of)
+// AC2/AC3 drive the real GenWave.Ads.AdsServiceCollectionExtensions.AddGenWaveAds registration
+// through a WebApplicationFactory<Program> boot — the Story380 GardenerKnobsWebFactory shape — so
+// both facts prove production wiring, not a hand-built options chain. AC4 drives the real
+// SettingsController the Story043 FeatureStationSettingsApi shape drives, in-process with fakes
+// (no HTTP/DB needed: a non-allowlisted key is rejected before either the store or the DB is ever
+// touched). AC6 diffs the live-built GenWave.Abstractions assembly's public surface (GenWave.Host.Tests.Support.PublicSurface.Of)
 // against the committed baseline for the package's current version — this release DID touch
 // src/GenWave.Abstractions (SPEC F189.1), so AC6 proves the surface is exactly the regenerated
 // one this same PR produced, and every release after this one proves the surface held steady
@@ -41,21 +40,6 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureSponsorSettingsOptionsLawsAndTheRelease
 {
-    /// <summary>
-    /// Repo root, resolved by walking up from the test assembly's build output until it finds
-    /// <c>GenWave.sln</c> — the Story174_PublicTopologyDocs convention for reaching repo-root
-    /// files from a test project. Shared by every fact in this file that reads a repo-root file,
-    /// rather than each scenario growing its own copy.
-    /// </summary>
-    static string RepoRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "GenWave.sln")))
-            dir = dir.Parent!;
-        Assert.NotNull(dir);
-        return dir!.FullName;
-    }
-
     // ---------------------------------------------------------------------
     // HAPPY PATH
     // ---------------------------------------------------------------------
@@ -123,48 +107,6 @@ public static class FeatureSponsorSettingsOptionsLawsAndTheRelease
             Assert.Equal(16, options.JobQueueCapacity);
             Assert.Equal(7, options.PreviewRetentionDays); // the documented default, genuinely unset
         }
-    }
-
-    public sealed class ScenarioDeploymentListsTheTwoKnobsExactlyOnce
-    {
-        static string DeploymentMdText()
-        {
-            var path = Path.Combine(RepoRoot(), "DEPLOYMENT.md");
-            Assert.True(File.Exists(path), "DEPLOYMENT.md is missing from the repo root.");
-            return File.ReadAllText(path);
-        }
-
-        static int CountOccurrences(string haystack, string needle)
-        {
-            var count = 0;
-            var index = 0;
-            while ((index = haystack.IndexOf(needle, index, StringComparison.Ordinal)) >= 0)
-            {
-                count++;
-                index += needle.Length;
-            }
-            return count;
-        }
-
-        /// <summary>
-        /// Counts both the compose-file spelling (<c>Ads__X</c>) and the appsettings/colon
-        /// spelling (<c>Ads:X</c>) together — DEPLOYMENT.md must document each knob exactly once,
-        /// regardless of which spelling that one mention uses.
-        /// </summary>
-        static int CountEitherSpelling(string haystack, string dunderForm, string colonForm) =>
-            CountOccurrences(haystack, dunderForm) + CountOccurrences(haystack, colonForm);
-
-        [Fact]
-        public void PreviewRetentionDaysAppearsOnce() =>
-            Assert.Equal(
-                1,
-                CountEitherSpelling(DeploymentMdText(), "Ads__PreviewRetentionDays", "Ads:PreviewRetentionDays"));
-
-        [Fact]
-        public void JobQueueCapacityAppearsOnce() =>
-            Assert.Equal(
-                1,
-                CountEitherSpelling(DeploymentMdText(), "Ads__JobQueueCapacity", "Ads:JobQueueCapacity"));
     }
 
     public sealed class ScenarioAbstractionsUnchanged

@@ -1,6 +1,6 @@
 # GenWave
 
-Self-hosted internet radio station for a small private community. A C# .NET 10 control plane orchestrates [Liquidsoap](https://www.liquidsoap.info/) (real-time mixing, crossfade, encode) and [Icecast](https://icecast.org/) (fan-out), backed by Postgres. The point: **loudness-matched, crossfaded broadcast that never stops** end-to-end on Docker.
+Dean's private internet radio station, open source for anyone who wants to run their own at home. Not a public-facing station and not a product. A C# .NET 10 control plane orchestrates [Liquidsoap](https://www.liquidsoap.info/) (real-time mixing, crossfade, encode) and [Icecast](https://icecast.org/) (fan-out), backed by Postgres. The point: **loudness-matched, crossfaded broadcast that never stops** end-to-end on Docker.
 
 ## Rules
 

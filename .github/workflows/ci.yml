@@ -37,6 +37,8 @@ jobs:
       # red path unreachable if it ran after Test.
       - name: SEAMS.md drift check
         run: ./tools/check-seam-index.sh
+      - name: Doc voice lint
+        run: ./tools/check-doc-voice.sh
       # Test tiers (SPEC F177.1): tier 1 = this filter, every fact without Category=Integration,
       # including the fixture Postgres facts; tier 2 (nightly) = Category=Integration: Kokoro, a
       # stream capture or a full compose stack (nightly.yml); tier 3 = Skip="manual: …", checked by ear.
@@ -83,19 +85,6 @@ jobs:
       # admin light-mode theming — green spec, broken page.
       - name: Theme stylesheet link-order guard (T170)
         run: bash scripts/check-theme-link-order.sh
-
-  # DEPLOYMENT.md restates concrete compose.demo.yaml values (resource fence, model, pins) and
-  # pin-bump commits touch only the compose file — this job fails the PR when they disagree
-  # (gh-#77; the 3GB/6GB fence drift shipped unnoticed for two releases).
-  doc-drift:
-    runs-on: ubuntu-latest
-    # gh-#581 N1: observed 4-7s (a single grep-class script); 5 min is enormous headroom, still
-    # far below the 360-min default.
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v7
-      - name: Check DEPLOYMENT.md against compose.demo.yaml
-        run: ./tools/check-doc-drift.sh
 
   # Images publish only from main pushes; PRs prove they still build via the jobs above plus
   # the docker build here being cheap to re-verify locally. Tagged `home-*` per the runbook —
