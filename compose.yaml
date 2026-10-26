@@ -313,7 +313,7 @@ services:
     #
     # profiles (SPEC F99.3, STORY-257): off by default — a station with no fallback configured
     # does not run this container. Same documented-profile-gate idiom compose.piper-only.yaml's
-    # own header explains for kokoro/ollama (plain profile assignment over a service-removal merge
+    # own header explains for kokoro (plain profile assignment over a service-removal merge
     # tag, since only attribute-level `!override`/`!reset` is trusted at this repo's Compose
     # floor). Enable with `--with fallback` (or COMPOSE_PROFILES=fallback) — see the api service's
     # Tts__Fallback__Endpoint comment above for the second, config half of opting in. The

@@ -166,11 +166,12 @@ public static class FeatureAcceptanceGateRankingRobustness
         // in parallel) and the engine healthcheck gains start_period: 45s; the engine service's
         // own comment block was rewritten to state the truth post-change. EngineScriptSha256
         // unchanged — this task does not touch engine/genwave.liq.
-        // ComposeYamlSha256 re-pinned 2026-10-26 (PLAN T645, SPEC F216, STORY-517): the optional
+        // ComposeYamlSha256 re-pinned 2026-10-26 (PLAN T645/T646, SPEC F216, STORY-517): the optional
         // tunnel service and its `tunnel` profile are removed, and the comments that described
-        // them are reworded for a home station. No other service's behaviour changed. EngineScriptSha256
+        // them are reworded for a home station; T646 then drops the "ollama" mention from the
+        // kokoro comment (comment-only). No other service's behaviour changed. EngineScriptSha256
         // unchanged — this task does not touch engine/genwave.liq.
-        const string ComposeYamlSha256  = "1b498c6aa0484fb149f28c12b2c2ad34ee7e0ba4ca0b3937594421cde0c5a20a";
+        const string ComposeYamlSha256  = "6db461ebe5a2183005f206ce358cfaf54967861824dfb9bc367519ebfc74fc52";
 
         [Fact]
         public void EngineScriptByteMatchesMain()

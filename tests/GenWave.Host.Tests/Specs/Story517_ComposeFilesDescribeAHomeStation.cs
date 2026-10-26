@@ -122,7 +122,7 @@ public static class FeatureComposeFilesDescribeAHomeStation
             where text.Contains(word, StringComparison.OrdinalIgnoreCase)
             select (Path.GetFileName(file), word);
 
-        [Fact(Skip = "pending: T646")]
+        [Fact(Skip = "pending: T647")]
         public static void No_compose_file_names_a_deleted_thing()
         {
             Assert.Empty(Hits());

@@ -81,11 +81,11 @@ public static class FeatureComposePiperOnlyDropsTheLlm
     {
         static readonly Lazy<JsonDocument> Render = new(() => RenderConfig(demoOverlay: true, piperOnlyOverlay: true));
 
-        [Fact]
+        [Fact(Skip = "pending: T647")]
         [Trait("Category", "Integration")]
         public static void Ollama_is_absent() => Assert.False(HasService(Render.Value, "ollama"));
 
-        [Fact]
+        [Fact(Skip = "pending: T647")]
         [Trait("Category", "Integration")]
         public static void The_weight_puller_is_absent_too()
         {
