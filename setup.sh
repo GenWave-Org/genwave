@@ -534,7 +534,7 @@ TOPOLOGY="full"
 # Q3 — topology preset, recommended from detected RAM/arch; the owner may override.
 interview_topology() {
   echo
-  echo "3) Topology preset"
+  echo "3) Voice engine"
   local ram_gib arch recommended default_choice answer
   ram_gib="$(detect_ram_gib || true)"
   arch="$(detect_arch)"
@@ -623,8 +623,7 @@ resolve_preset_and_topology() {
 build_env_content() {
   printf '# .env — written by setup.sh. See .env.example for the full set of\n'
   printf '# variables this stack understands and what each one does; re-running setup.sh never\n'
-  printf '# overwrites this file (see the header above) -- edit it directly for anything beyond\n'
-  printf '# these four questions.\n'
+  printf '# overwrites this file -- edit it directly for anything beyond these four questions.\n'
   printf '\n'
   printf '%s\n' "COMPOSE_PROFILES=${ADMIN_PROFILE}"
   printf '%s\n' "MEDIA_DIR=${MEDIA_DIR_ANSWER}"
@@ -1170,7 +1169,7 @@ verify_pinned_image_tags() {
   local docker_cmd="$1" tags tag joined=""
   tags="$("$docker_cmd" compose "${GW_VERIFY_COMPOSE_ARGS[@]}" config --images 2>/dev/null | grep '^ghcr\.io/genwave-org/' | sort -u)" || tags=""
   if [ -z "$tags" ]; then
-    verify_record UNKNOWN "Pinned image tags" "Could not render this box's compose configuration — skipped."
+    verify_record UNKNOWN "Pinned image tags" "Could not render this box's compose configuration — skipped$(verify_stale_compose_file_note)."
     return
   fi
   while IFS= read -r tag; do
@@ -1185,7 +1184,7 @@ verify_built_image_ages() {
   local docker_cmd="$1" rendered
   rendered="$("$docker_cmd" compose "${GW_VERIFY_COMPOSE_ARGS[@]}" config 2>/dev/null)" || rendered=""
   if [ -z "$rendered" ]; then
-    verify_record UNKNOWN "Built image ages" "Could not render this box's compose configuration — skipped."
+    verify_record UNKNOWN "Built image ages" "Could not render this box's compose configuration — skipped$(verify_stale_compose_file_note)."
     return
   fi
 
@@ -1273,7 +1272,7 @@ verify_orphaned_containers() {
   local expected
   expected="$("$docker_cmd" compose "${GW_VERIFY_COMPOSE_ARGS[@]}" config --services 2>/dev/null)" || expected=""
   if [ -z "$expected" ]; then
-    verify_record UNKNOWN "Orphaned containers" "Could not render this box's compose configuration — skipped."
+    verify_record UNKNOWN "Orphaned containers" "Could not render this box's compose configuration — skipped$(verify_stale_compose_file_note)."
     return
   fi
 
@@ -1379,30 +1378,47 @@ verify_retired_overlay_name() {
   printf '%s' "compose.""demo.yaml"
 }
 
+# Predicate: does the FILE's COMPOSE_FILE name the retired overlay? Decided from the FILE
+# (verify_env_file_value), not the process-env-first cached value: the repair rewrites the file,
+# so what it rewrites is what must be detected. Returns 0 when named, 1 otherwise; prints nothing.
+verify_file_names_retired_overlay() {
+  local element retired_overlay
+  local -a parts=()
+  retired_overlay="$(verify_retired_overlay_name)"
+  IFS=':' read -ra parts <<< "$(verify_env_file_value COMPOSE_FILE)"
+  for element in "${parts[@]}"; do
+    if verify_compose_element_is "$element" "$retired_overlay"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Suffix for the "Could not render this box's compose configuration" rows: says why when the
+# cause is a COMPOSE_FILE (in the file) still naming the retired overlay; empty otherwise.
+verify_stale_compose_file_note() {
+  if verify_file_names_retired_overlay; then
+    printf '%s' " (COMPOSE_FILE names a retired file, see below)"
+  fi
+  return 0
+}
+
 # Set to 1 by verify_compose_retired_overlay when the FILE's COMPOSE_FILE names the retired overlay,
 # so verify_compose_overrides leaves it out of the INFO row only when the finding covers it.
 GW_VERIFY_RETIRED_OVERLAY_FOUND=0
 
 # verify_compose_retired_overlay — drift even while a stale copy of the file still sits in the
-# checkout. Decided from the FILE (verify_env_file_value), not the process-env-first cached value:
-# the repair rewrites the file, so what it rewrites is what must be detected.
+# checkout.
 verify_compose_retired_overlay() {
-  local retired_overlay file_value element
-  local -a file_parts=()
+  local retired_overlay
+  verify_file_names_retired_overlay || return 0
   retired_overlay="$(verify_retired_overlay_name)"
-  file_value="$(verify_env_file_value COMPOSE_FILE)"
-  IFS=':' read -ra file_parts <<< "$file_value"
-  for element in "${file_parts[@]}"; do
-    if verify_compose_element_is "$element" "$retired_overlay"; then
-      GW_VERIFY_RETIRED_OVERLAY_FOUND=1
-      verify_add_finding "compose-file:retired" "Compose file list" \
-        "COMPOSE_FILE in ${ENV_FILE} still names ${retired_overlay}, which is no longer part of GenWave. Plain docker compose commands will fail once it is removed." \
-        0 \
-        verify_drop_compose_file_element "$retired_overlay"
-      verify_describe_last_fix "Remove ${retired_overlay} from COMPOSE_FILE in ${ENV_FILE}"
-      break
-    fi
-  done
+  GW_VERIFY_RETIRED_OVERLAY_FOUND=1
+  verify_add_finding "compose-file:retired" "Compose file list" \
+    "COMPOSE_FILE in ${ENV_FILE} still names ${retired_overlay}, which GenWave no longer ships. Plain docker compose commands fail until it is removed." \
+    0 \
+    verify_drop_compose_file_element "$retired_overlay"
+  verify_describe_last_fix "Remove ${retired_overlay} from COMPOSE_FILE in ${ENV_FILE}"
 }
 
 # An operator COMPOSE_FILE customization: any file COMPOSE_FILE names beyond this repo's own

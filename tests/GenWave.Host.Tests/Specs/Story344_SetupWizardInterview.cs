@@ -240,7 +240,7 @@ public static class FeatureSetupWizardInterview
 
             var imagesIdx = stdOut.IndexOf("1) How should GenWave run?", StringComparison.Ordinal);
             var musicIdx = stdOut.IndexOf("2) Where is your music library?", StringComparison.Ordinal);
-            var topologyIdx = stdOut.IndexOf("3) Topology preset", StringComparison.Ordinal);
+            var topologyIdx = stdOut.IndexOf("3) Voice engine", StringComparison.Ordinal);
             var profilesIdx = stdOut.IndexOf("4) Optional profiles", StringComparison.Ordinal);
 
             Assert.True(
@@ -400,7 +400,7 @@ public static class FeatureSetupWizardInterview
 
             Assert.DoesNotContain("Jamendo", stdOut);
             Assert.Contains("Could not verify the audio file count", stdOut, StringComparison.Ordinal);
-            Assert.Contains("3) Topology preset", stdOut, StringComparison.Ordinal);
+            Assert.Contains("3) Voice engine", stdOut, StringComparison.Ordinal);
         }
     }
 
@@ -715,7 +715,7 @@ public static class FeatureSetupWizardInterview
             File.WriteAllText(Path.Combine(mediaDir, "late.flac"), "");
             await Send("1");
 
-            await WaitForOutput("Topology preset");
+            await WaitForOutput("Voice engine");
             await Send("1");
 
             await WaitForOutput("Admin UI");
