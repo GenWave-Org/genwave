@@ -121,7 +121,8 @@ public static class FeatureSeededDefaults
     /// <see cref="TtsCorrectionsOptions.Corrections"/>) — empty is their honest disabled/unset
     /// state (F34.2 for the LLM pair; F62.8 for PublicStreamUrl, where empty means the spectator
     /// "about" panel hides the player; F68.5/F68.8 for Tts:Corrections, where empty means no
-    /// operator corrections are configured; they are settings data, never a C# default), not a bug the F55.1 seeding contract covers.
+    /// operator corrections are configured; they are settings data, never a C# default), not a
+    /// bug the F55.1 seeding contract covers.
     /// Tts:EngineByKind (SPEC F70.3, STORY-191) joins this set on the identical rationale: empty is
     /// its spec'd default (F70.3, "Default: empty map") — every kind falls through to the existing
     /// F70.1 health-based routing, and no compose topology needs to pin one. Tts:Pronunciations

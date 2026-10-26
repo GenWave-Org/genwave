@@ -83,7 +83,7 @@ public static class FeatureStagedStartup
 
     // --dry-run only, driving the real toolchain on the developer's own PATH, not a scratch
     // bin — ScriptProcess still starts the child from its sanitized environment (gh-#776),
-    // scrubbing GW_PRESET/GW_PREFLIGHT_TOPOLOGY/GW_PREFLIGHT_DEMO before every run so an
+    // scrubbing every GW_* export (GW_PRESET, GW_PREFLIGHT_TOPOLOGY) before every run so an
     // ambient shell export can never silently steer a spec's chosen topology.
     static readonly string RealPath = Environment.GetEnvironmentVariable("PATH") ?? "/usr/bin:/bin";
 

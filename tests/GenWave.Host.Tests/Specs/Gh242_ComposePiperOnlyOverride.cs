@@ -115,7 +115,7 @@ public static class FeatureComposePiperOnlyOverride
         {
             // The overlay's profile assignment ("disabled-by-piper-only", activated by nothing)
             // removes the service from config/up/pull on the default profile set. voice-seed
-            // travels with kokoro (same rule as the ollama/ollama-init pair in Gh310): nothing on
+            // travels with kokoro (a sidecar goes wherever its parent service goes): nothing on
             // this topology ever reads the `voices` volume, so a Pi-class box has no reason to
             // pull kokoro-fastapi's ~3.6GiB image just to seed it. api's own depends_on reset
             // above already drops the (required: false) reference, so the merged render stays
