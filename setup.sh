@@ -650,12 +650,22 @@ build_env_content() {
 # MEDIUM finding: stranded temp secrets). Named `.env.setup.*` so it matches the .gitignore
 # entry that keeps a leftover from ever being staged by accident.
 apply_env_write() {
-  local dir
+  atomic_env_write build_env_content
+}
+
+# atomic_env_write <content-function> [args...] — the shared temp-then-rename write: the content
+# function's stdout becomes the complete new ENV_FILE. A failing content function (or a failing
+# redirect) removes the temp file and returns 1 with ENV_FILE untouched — the rename only ever runs
+# after a fully successful write. The replacement is always mktemp's mode 600 — .env holds secrets.
+atomic_env_write() {
+  local content_fn="$1" dir tmp
+  shift
   dir="$(dirname "$ENV_FILE")"
   [ -d "$dir" ] || mkdir -p "$dir"
-  SETUP_TMP_ENV_FILE="$(mktemp "${dir}/.env.setup.XXXXXX")"
-  build_env_content > "$SETUP_TMP_ENV_FILE"
-  mv -f "$SETUP_TMP_ENV_FILE" "$ENV_FILE"
+  tmp="$(mktemp "${dir}/.env.setup.XXXXXX")" || return 1
+  SETUP_TMP_ENV_FILE="$tmp"
+  "$content_fn" "$@" > "$tmp" || { rm -f "$tmp"; SETUP_TMP_ENV_FILE=""; return 1; }
+  mv -f "$tmp" "$ENV_FILE" || { rm -f "$tmp"; SETUP_TMP_ENV_FILE=""; return 1; }
   SETUP_TMP_ENV_FILE=""
 }
 
@@ -695,6 +705,7 @@ GW_VERIFY_FINDING_ID=()
 GW_VERIFY_FINDING_LABEL=()
 GW_VERIFY_FINDING_MESSAGE=()
 GW_VERIFY_FINDING_RESTARTS=()
+GW_VERIFY_FINDING_FIXTEXT=()
 GW_VERIFY_FINDING_COUNT=0
 
 # verify_add_finding <id> <label> <message> <restarts:0|1> <command...>
@@ -710,6 +721,7 @@ verify_add_finding() {
   GW_VERIFY_FINDING_LABEL+=("$label")
   GW_VERIFY_FINDING_MESSAGE+=("$message")
   GW_VERIFY_FINDING_RESTARTS+=("$restarts")
+  GW_VERIFY_FINDING_FIXTEXT+=("")
   # Dynamic array naming is the only way bash stores a per-index ARRAY (not a scalar) without a
   # second, parallel, string-joined copy of the same command — exactly the plan/real divergence
   # class T316 closed off for launch.sh's own UP1_ARGS. "$@" is expanded INSIDE the eval'd array
@@ -719,6 +731,13 @@ verify_add_finding() {
   eval "GW_VERIFY_FINDING_CMD_${idx}=(\"\$@\")"
   GW_VERIFY_FINDING_COUNT=$((GW_VERIFY_FINDING_COUNT + 1))
   verify_record WARN "$label" "$message"
+}
+
+# verify_describe_last_fix <text> — for a finding whose command is an in-script function, not a
+# shell command an operator could paste: the Fix: line prints this plain-English text instead of
+# the function's name. The executed argv is unchanged. Call right after verify_add_finding.
+verify_describe_last_fix() {
+  GW_VERIFY_FINDING_FIXTEXT[$((GW_VERIFY_FINDING_COUNT - 1))]="$1"
 }
 
 # verify_print_report — one line per recorded row, emoji-marked by status (PASS/INFO/UNKNOWN vs
@@ -804,6 +823,13 @@ verify_resolve_env_facts() {
   fi
 }
 
+# verify_compose_element_is <element> <basename> — the ONE rule for "does this COMPOSE_FILE
+# element name that file": compare BASENAMES, so a path-qualified element
+# (/home/x/genwave/compose.pinned.yaml) classifies the same as a bare one. See the comment below.
+verify_compose_element_is() {
+  [ "${1##*/}" = "$2" ]
+}
+
 # verify_compose_file_is_stacked <basename> — true iff this box's own COMPOSE_FILE names a file
 # whose OWN BASENAME is exactly <basename> (T321 wire finding 1 follow-up, reviewer-proven):
 # every derivation below used to test `case ":${GW_VERIFY_COMPOSE_FILE_VALUE}:" in
@@ -827,7 +853,7 @@ verify_compose_file_is_stacked() {
   for ((i = 0; i < ${#GW_VERIFY_COMPOSE_ARGS[@]}; i++)); do
     [ "${GW_VERIFY_COMPOSE_ARGS[$i]}" = "-f" ] || continue
     f="${GW_VERIFY_COMPOSE_ARGS[$((i + 1))]}"
-    [ "${f##*/}" = "$want" ] && return 0
+    verify_compose_element_is "$f" "$want" && return 0
   done
   return 1
 }
@@ -1347,6 +1373,38 @@ verify_db_settings_overrides() {
     "The database has an operator-set override ('${value}', via the Admin UI) — this wins over any STATION_NAME in ${ENV_FILE} for the running station; not drift, never offered as a fix."
 }
 
+# The one retired overlay that is drift, not customization. Assembled at runtime so this file
+# never trips the tree-wide ban on the retired name.
+verify_retired_overlay_name() {
+  printf '%s' "compose.""demo.yaml"
+}
+
+# Set to 1 by verify_compose_retired_overlay when the FILE's COMPOSE_FILE names the retired overlay,
+# so verify_compose_overrides leaves it out of the INFO row only when the finding covers it.
+GW_VERIFY_RETIRED_OVERLAY_FOUND=0
+
+# verify_compose_retired_overlay — drift even while a stale copy of the file still sits in the
+# checkout. Decided from the FILE (verify_env_file_value), not the process-env-first cached value:
+# the repair rewrites the file, so what it rewrites is what must be detected.
+verify_compose_retired_overlay() {
+  local retired_overlay file_value element
+  local -a file_parts=()
+  retired_overlay="$(verify_retired_overlay_name)"
+  file_value="$(verify_env_file_value COMPOSE_FILE)"
+  IFS=':' read -ra file_parts <<< "$file_value"
+  for element in "${file_parts[@]}"; do
+    if verify_compose_element_is "$element" "$retired_overlay"; then
+      GW_VERIFY_RETIRED_OVERLAY_FOUND=1
+      verify_add_finding "compose-file:retired" "Compose file list" \
+        "COMPOSE_FILE in ${ENV_FILE} still names ${retired_overlay}, which is no longer part of GenWave. Plain docker compose commands will fail once it is removed." \
+        0 \
+        verify_drop_compose_file_element "$retired_overlay"
+      verify_describe_last_fix "Remove ${retired_overlay} from COMPOSE_FILE in ${ENV_FILE}"
+      break
+    fi
+  done
+}
+
 # An operator COMPOSE_FILE customization: any file COMPOSE_FILE names beyond this repo's own
 # shipped compose*.yaml set (derived by listing the checkout itself, never a hardcoded filename
 # array) is a deliberate operator overlay — gh-#309's own documented mechanism for exactly this.
@@ -1382,6 +1440,13 @@ verify_compose_overrides() {
   local -a extra=()
   local s known
   for f in "${files[@]}"; do
+    # The retired overlay is never "shipped", even while a stale copy sits in the checkout: when
+    # the file-based finding covers it, leave it out; when only the process environment names it,
+    # it is reported here as an ordinary override.
+    if verify_compose_element_is "$f" "$(verify_retired_overlay_name)"; then
+      [ "$GW_VERIFY_RETIRED_OVERLAY_FOUND" = "1" ] || extra+=("$f")
+      continue
+    fi
     known=0
     for s in "${shipped[@]}"; do
       [ "$f" = "$s" ] && { known=1; break; }
@@ -1393,6 +1458,34 @@ verify_compose_overrides() {
     verify_record INFO "Compose file overrides" \
       "COMPOSE_FILE in ${ENV_FILE} names a file this repo doesn't ship (${extra[*]}) — a deliberate operator customization; not drift, never offered as a fix."
   fi
+}
+
+# verify_drop_compose_file_element <basename> — rewrites ENV_FILE's COMPOSE_FILE line without every
+# element whose basename matches, all other elements kept in order; a list left empty removes the
+# key. Every other line is copied through untouched. Written via atomic_env_write.
+verify_drop_compose_file_element() {
+  atomic_env_write verify_compose_file_without "$1"
+}
+
+# verify_compose_file_without <basename> — stdout: ENV_FILE with the matching elements dropped.
+verify_compose_file_without() {
+  local drop="$1" line value kept element
+  local -a parts=()
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      COMPOSE_FILE=*)
+        value="${line#COMPOSE_FILE=}"
+        IFS=':' read -ra parts <<< "$value"
+        kept=""
+        for element in "${parts[@]}"; do
+          verify_compose_element_is "$element" "$drop" && continue
+          kept="${kept:+${kept}:}${element}"
+        done
+        if [ -n "$kept" ]; then printf 'COMPOSE_FILE=%s\n' "$kept"; fi
+        ;;
+      *) printf '%s\n' "$line" ;;
+    esac
+  done < "$ENV_FILE"
 }
 
 # --- repair: per-item confirm, --yes for bulk (F137.2/F137.3) -------------------------------
@@ -1415,7 +1508,11 @@ verify_run_repair() {
     echo
     echo "-- ${label}"
     echo "   ${message}"
-    printf '   Fix: %s\n' "${cmdref[*]}"
+    if [ -n "${GW_VERIFY_FINDING_FIXTEXT[$i]:-}" ]; then
+      printf '   Fix: %s\n' "${GW_VERIFY_FINDING_FIXTEXT[$i]}"
+    else
+      printf '   Fix: %s\n' "${cmdref[*]}"
+    fi
     if [ "$restarts" = "1" ]; then
       echo "   ⚠️  this will stop/restart a running container — printed before the confirm, never a surprise."
     fi
@@ -1487,6 +1584,7 @@ setup_adoption_mode() {
   verify_orphaned_containers
   verify_prune_advice
   verify_db_settings_overrides
+  verify_compose_retired_overlay
   verify_compose_overrides
 
   verify_print_report

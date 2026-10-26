@@ -68,7 +68,14 @@ internal static class HomeSetupHarness
     /// <paramref name="stdinAnswers"/> spooled to stdin, SKIP_PREFLIGHT=1 and the given docker
     /// stub on GW_DOCKER_CMD.</summary>
     public static (int ExitCode, string StdOut, string StdErr) RunSetup(
-        string envFile, string dockerStub, string stdinAnswers, params string[] args)
+        string envFile, string dockerStub, string stdinAnswers, params string[] args) =>
+        RunSetup(envFile, dockerStub, stdinAnswers, new Dictionary<string, string>(), args);
+
+    /// <summary>As above, with <paramref name="extraEnv"/> merged over the default environment
+    /// (an entry here wins over SKIP_PREFLIGHT / GW_DOCKER_CMD).</summary>
+    public static (int ExitCode, string StdOut, string StdErr) RunSetup(
+        string envFile, string dockerStub, string stdinAnswers,
+        IReadOnlyDictionary<string, string> extraEnv, params string[] args)
     {
         var scratchDir = TempDir.CreateForProcessLifetime();
         var answersPath = Path.Combine(scratchDir, "answers.txt");
@@ -78,11 +85,13 @@ internal static class HomeSetupHarness
         var wrapperPath = Path.Combine(scratchDir, "run-setup.sh");
         File.WriteAllText(wrapperPath, $"exec bash \"{scriptPath}\" \"$@\" < \"{answersPath}\"\n");
 
-        var extraEnv = new Dictionary<string, string>
+        var env = new Dictionary<string, string>
         {
             ["SKIP_PREFLIGHT"] = "1",
             ["GW_DOCKER_CMD"] = dockerStub,
         };
-        return ScriptProcess.Run(wrapperPath, ScriptProcess.MakeBinDir(), envFile, extraEnv, args);
+        foreach (var (key, value) in extraEnv)
+            env[key] = value;
+        return ScriptProcess.Run(wrapperPath, ScriptProcess.MakeBinDir(), envFile, env, args);
     }
 }
