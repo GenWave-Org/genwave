@@ -64,19 +64,19 @@ public static class FeatureComposeFilesDescribeAHomeStation
         static readonly Lazy<IReadOnlySet<string>> Pinned = new(() => RenderServices(null, "compose.pinned.yaml"));
         static readonly Lazy<IReadOnlySet<string>> PiperOnly = new(() => RenderServices(null, "compose.piper-only.yaml"));
 
-        [Fact(Skip = "pending: T645")]
+        [Fact]
         public static void Base_has_none()
         {
             Assert.Empty(Base.Value.Intersect(DeletedServices));
         }
 
-        [Fact(Skip = "pending: T645")]
+        [Fact]
         public static void Base_plus_pinned_has_none()
         {
             Assert.Empty(Pinned.Value.Intersect(DeletedServices));
         }
 
-        [Fact(Skip = "pending: T645")]
+        [Fact]
         public static void Base_plus_piper_only_has_none()
         {
             Assert.Empty(PiperOnly.Value.Intersect(DeletedServices));
@@ -86,7 +86,7 @@ public static class FeatureComposeFilesDescribeAHomeStation
     [Trait("Category", "Integration")]
     public static class ScenarioTheTunnelProfileIsInert
     {
-        [Fact(Skip = "pending: T645")]
+        [Fact]
         public static void Same_services_with_and_without_the_profile()
         {
             Assert.Equal(RenderServices(null).Order(), RenderServices("tunnel").Order());

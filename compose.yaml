@@ -4,12 +4,9 @@
 #
 # Networks:
 #   core  : api <-> engine <-> icecast <-> kokoro, and admin_ui -> api (app traffic).
-#           cloudflared (profile "tunnel", off by default) also lives here so it can reach
-#           api:8080/api:8081/admin_ui:3000 as tunnel ingress targets.
 #   data  : api <-> db only (Postgres is invisible to engine/icecast/kokoro)
 #   stats : api <-> dockerproxy only (gh-#148) — the Docker-socket proxy is invisible to every
-#           other service, including everything on the public path (caddy/cloudflared/admin_ui);
-#           same isolation idiom as `data` above.
+#           other service, including admin_ui; same isolation idiom as `data` above.
 #
 # Security-critical rule: the engine's Liquidsoap control port (1234) is UNAUTHENTICATED.
 # It is reachable inside the container network but is NEVER given a `ports:` mapping — Docker's
@@ -127,10 +124,8 @@ services:
     networks: [core, data, stats]               # core -> engine, data -> db, stats -> dockerproxy
     ports:
       - "8080:8080"                             # control-plane API, direct on localhost
-      - "8081:8081"                             # public spectator listener (SPEC F64.1/F64.2, STORY-172) —
-                                                 # Standard mode wants LAN reachability, same as 8080; the
-                                                 # demo/appliance topology (PLAN T19) instead reaches it only
-                                                 # via Caddy on the core network.
+      - "8081:8081"                             # spectator listener (SPEC F64.1/F64.2, STORY-172) —
+                                                 # reachable on the LAN, same as 8080.
     depends_on:
       db:
         condition: service_healthy              # schema must exist before first query
@@ -180,9 +175,9 @@ services:
       Library__MediaRoot: "/media"
       Library__ScanIntervalSeconds: "60"
       # How many files the ffmpeg analyzers enrich at once. The default is unchanged, but it is
-      # now a variable (gh-#334): on a pinned appliance box compose.demo.yaml turns the admin
-      # surface off, so PUT /api/settings — the live path this setting was built for (STORY-139)
-      # — is unreachable, and a hardcoded value left an operator with no lever at all. The
+      # now a variable (gh-#334): a box with the admin surface turned off cannot reach
+      # PUT /api/settings — the live path this setting was built for (STORY-139) — and a
+      # hardcoded value would leave no lever at all. The
       # piper-only overlay lowers the default; see its own note.
       Library__EnrichmentConcurrency: ${LIBRARY_ENRICHMENT_CONCURRENCY:-4}
       # Station identity (StationOptions — validated at startup)
@@ -270,7 +265,7 @@ services:
   # idempotent forever: a second run, or a later kokoro image bump, only ever ADDS files that
   # aren't there yet — it never overwrites a voice-pack install's `.pt` (T413) or a file a
   # previous seed already wrote. Same image pin as `kokoro` (duplicated literal, not a YAML
-  # anchor — matches compose.demo.yaml's ollama/ollama-init pin idiom) so the copied files
+  # anchor) so the copied files
   # always match what that container will actually scan.
   # NOT redundant with Docker's own empty-volume auto-populate (the local driver copies an
   # image's mount-target directory into a brand-new volume on first mount, unless `nocopy` is
@@ -303,8 +298,7 @@ services:
                                                   # it forever under launch.sh's stage-2 unscoped
                                                   # `up` (SPEC F136)
     labels:
-      # gh-#283: utility container — excluded from the Health page's dockerproxy stats, same
-      # as compose.demo.yaml's ollama-init.
+      # gh-#283: utility container — excluded from the Health page's dockerproxy stats.
       genwave.role: utility
 
   piper:
@@ -314,8 +308,8 @@ services:
     # piper1-gpl line) behind a stdlib HTTP wrapper that preserves the artibex wire shape exactly:
     # POST text/plain -> / -> WAV bytes (PiperTtsSynthesizer), OPTIONS answered quietly (gh-#64,
     # PiperHealthProbe), same MODEL_DOWNLOAD_LINK/SPEAKER env contract, same port 5000. Published
-    # multi-arch per release as ghcr.io/genwave-org/genwave-piper (gh-#240 matrix); the demo
-    # overlay pins that image like every other repo-built service (gh-#93 posture).
+    # multi-arch per release as ghcr.io/genwave-org/genwave-piper (gh-#240 matrix); the pinned
+    # overlay (compose.pinned.yaml) pins that image like every other repo-built service (gh-#93).
     #
     # profiles (SPEC F99.3, STORY-257): off by default — a station with no fallback configured
     # does not run this container. Same documented-profile-gate idiom compose.piper-only.yaml's
@@ -357,7 +351,7 @@ services:
   admin_ui:
     build:
       context: ./admin-ui
-    profiles: ["admin"]                           # F61.4/STORY-166: Appliance/Headless boxes clear
+    profiles: ["admin"]                           # F61.4/STORY-166: Headless boxes clear
                                                    # COMPOSE_PROFILES in .env so no Node runtime runs;
                                                    # Operator/Standard's default .env keeps it enabled.
     networks: [core]                             # reaches the api over the core network
@@ -379,50 +373,6 @@ services:
       start_period: 10s
     restart: unless-stopped
 
-  cloudflared:
-    # OPTIONAL, versioned Cloudflare Tunnel (Q3 housekeeping: this previously ran OUTSIDE the
-    # repo as unmanaged infrastructure with zero observability). Off by default — profiles:
-    # ["tunnel"] — enable with COMPOSE_PROFILES=admin,tunnel (or just `tunnel` on a headless
-    # box) once TUNNEL_TOKEN is set. See DEPLOYMENT.md "Cloudflare tunnel (optional)" for setup
-    # (creating the tunnel/token in the Cloudflare dashboard) and the observability contract
-    # (readiness, metrics, alerting posture).
-    image: cloudflare/cloudflared:2026.7.2   # PIN — `docker manifest inspect` verified 2026-07-20
-    profiles: ["tunnel"]
-    networks: [core]                          # reaches api:8080/api:8081/admin_ui:3000 as ingress targets
-    command: ["tunnel", "--no-autoupdate", "--metrics", "0.0.0.0:2000", "run"]
-    environment:
-      # Every other secret in this file uses `${VAR:?}` (fail loudly at render time) — that idiom
-      # does NOT work here: compose interpolates every service's environment unconditionally
-      # before filtering by profile, so a `:?` on this line breaks `docker compose config`
-      # even with the "tunnel" profile inactive (verified: `error while interpolating
-      # services.cloudflared.environment.TUNNEL_TOKEN: required variable ... is missing a
-      # value`, thrown on the default profile-off render with no --profile flag at all). So this
-      # stays `:-` (empty default), and the fail-closed behaviour instead comes from cloudflared
-      # itself: an empty or invalid TUNNEL_TOKEN makes the container exit immediately with a
-      # clear log line ("cloudflared tunnel run" requires the ID or name of the tunnel... /
-      # "Provided Tunnel token is not valid.") — verified empirically against this pinned image.
-      # `restart: unless-stopped` then crash-loops it visibly in `docker compose ps`/`logs`
-      # rather than silently running without a tunnel.
-      TUNNEL_TOKEN: "${TUNNEL_TOKEN:-}"
-    # No `ports:` — /ready and /metrics stay network-internal, same posture as the engine's
-    # control port above. To probe from the host for ad-hoc debugging, opt in locally (never
-    # commit this): add `ports: ["127.0.0.1:2000:2000"]`.
-    healthcheck:
-      # This image is distroless — no shell, no wget/curl (`docker run --rm --entrypoint sh
-      # cloudflare/cloudflared:2026.7.2` fails with "executable file not found in $PATH",
-      # verified against this pinned tag). cloudflared ships its own readiness probe instead:
-      # `cloudflared tunnel ready` calls the local metrics server's /ready endpoint and returns
-      # the matching exit code, so exec form (CMD, not CMD-SHELL) needs no shell either. Verified
-      # live against this image: exits 1 before the tunnel registers a connection, exits 0 once
-      # /ready reports a connected tunnel (readyConnections >= 1).
-      test: ["CMD", "cloudflared", "tunnel", "--metrics", "127.0.0.1:2000", "ready"]
-      interval: 10s
-      timeout: 5s
-      retries: 6
-      start_period: 20s
-    mem_limit: 128m   # real footprint is ~20-30MiB idle; generous headroom, same backstop idiom as above
-    restart: unless-stopped
-
   alloy:
     # OPTIONAL log shipper (SPEC F78.1/F78.3/F78.4/F78.5, STORY-202, PLAN T49) — tails every
     # genwave container's stdout/stderr and pushes to Loki (observability/alloy/config.alloy
@@ -442,7 +392,7 @@ services:
       - alloy_data:/var/lib/alloy/data   # WAL + Docker-tailing positions file
     environment:
       # Every other secret in this file uses `${VAR:?}` (fail loudly at render time) — that
-      # idiom does NOT work here, same F77.4/cloudflared TUNNEL_TOKEN rationale: compose
+      # idiom does NOT work here: compose
       # interpolates every service's environment unconditionally before filtering by profile,
       # so a `:?` on any of these would break `docker compose config` even with the "logging"
       # profile inactive. So these stay `:-` (empty default); the fail-closed guarantee instead
@@ -483,8 +433,7 @@ services:
       # This image ships bash + sh but no curl/wget (`docker run --rm --entrypoint sh
       # grafana/alloy:v1.18.0 -c 'command -v curl wget'` finds neither, verified against this
       # pinned tag — F77.3 precedent: never assume a shell has an HTTP client). Alloy's own
-      # readiness endpoint is plain HTTP with no dedicated CLI probe subcommand (unlike
-      # cloudflared's `tunnel ready`), so bash's `/dev/tcp` pseudo-device stands in as the HTTP
+      # readiness endpoint is plain HTTP with no dedicated CLI probe subcommand, so bash's `/dev/tcp` pseudo-device stands in as the HTTP
       # client: open the socket, write a raw GET, grep the response body for Alloy's exact ready
       # phrase. This image's /-/ready DOES have a real not-ready window: 503 "Alloy is not
       # ready." before the HTTP server's internal readiness flips, then 200 "Alloy is ready."
@@ -511,8 +460,8 @@ services:
     image: tecnativa/docker-socket-proxy:v0.4.2   # PIN — pulled + allowlist probed live 2026-07-29.
                                                    # v0.5.0 was pushed 2 days before this pin; not
                                                    # soaked — re-verify and bump deliberately.
-    networks: [stats]                              # api <-> dockerproxy ONLY. Not on core: nothing
-                                                   # on the public path (caddy/cloudflared/admin_ui)
+    networks: [stats]                              # api <-> dockerproxy ONLY. Not on core: no other
+                                                   # service, admin_ui included,
                                                    # has a route to it — same posture as db on `data`.
     environment:
       # The ONLY grant: the /containers section (list, inspect, one-shot stats). Everything else
@@ -535,5 +484,5 @@ services:
       timeout: 5s
       retries: 6
       start_period: 5s
-    mem_limit: 64m   # one HAProxy process; same backstop idiom as cloudflared/alloy above
+    mem_limit: 64m   # one HAProxy process; same backstop idiom as alloy above
     restart: unless-stopped
