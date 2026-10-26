@@ -5,19 +5,18 @@
 # every other container (and, transitively, the host). Exactly two services may ever bind-mount
 # it, both read-only: the `alloy` metrics/log collector (PLAN T49) and the `dockerproxy`
 # allowlisting socket proxy behind the Health page's container stats (gh-#148). This guard pins
-# that invariant shut across every render this repo produces: base (compose.yaml) and base with the
-# compose.piper-only.yaml overlay (gh-#242),
-# under every profile combination (none, admin, tunnel, logging, admin+tunnel+logging).
+# that invariant shut across every render this repo produces: base (compose.yaml), base+pinned
+# (compose.pinned.yaml), base+piper-only (compose.piper-only.yaml, gh-#242) and base+pinned+
+# piper-only, under every profile combination (none, admin, logging, fallback, admin+logging+fallback).
 #
 # The socket is matched by basename pattern (any source/target path ending in `docker.sock`),
 # not an exact `/var/run/docker.sock` string — `/var/run` is a symlink to `/run` on modern
 # Linux, so `source: /run/docker.sock` mounts the same host daemon socket and must be caught
 # too.
 #
-# This guard lands BEFORE alloy exists (T48, ahead of T49) — today it passes by proving the
-# trivial case: no service anywhere mounts docker.sock at all. Once T49 adds alloy with a
-# read-only mount, the guard keeps passing; if alloy's mount ever loses `read_only: true`, or
-# any other service picks up the socket, it fails naming the offender.
+# Today `dockerproxy` mounts it in every render and `alloy` under the `logging` profile, both
+# read-only. The guard fails naming the offender if either loses `read_only: true`, or if any
+# other service picks up the socket.
 #
 # Usage:
 #   tools/check-compose-socket.sh
@@ -36,6 +35,8 @@
 # Exit: 0 — every render checked: only `alloy`/`dockerproxy` mount docker.sock, and only read-only.
 #       1 — at least one offending service:render is named on stdout.
 #       2 — usage/environment error (bad args, jq missing, file not found).
+#       A failed `docker compose config` render exits with docker's own non-zero code (usually
+#       1), with docker's error on stderr and no offender printed.
 
 set -euo pipefail
 
@@ -159,25 +160,26 @@ else
   export POSTGRES_PASSWORD LIBRARY_DB_PASSWORD STATION_DB_PASSWORD ICECAST_SOURCE_PASSWORD \
          ICECAST_ADMIN_PASSWORD ADMIN_PASSWORD MEDIA_DIR
 
-  # Every file-set this repo actually deploys: the base stack on its own and the piper-only
-  # low-memory overlay on it (gh-#242 — always merged last, matching launch.sh --piper-only). Add a new overlay here the day
-  # one ships.
+  # Every file-set this repo actually deploys: the base stack, the --pinned published-image
+  # pins, and the piper-only low-memory overlay on each (gh-#242 — always merged last,
+  # matching launch.sh --piper-only). Add a new overlay here the day one ships.
   FILE_SETS=(
     "base:compose.yaml"
+    "base+pinned:compose.yaml compose.pinned.yaml"
     "base+piper-only:compose.yaml compose.piper-only.yaml"
+    "base+pinned+piper-only:compose.yaml compose.pinned.yaml compose.piper-only.yaml"
   )
 
   # Every profile combination that changes which services exist. "admin" gates admin_ui,
-  # "tunnel" gates cloudflared, "logging" gates alloy once T49 lands it — checked ahead of time
-  # so this guard doesn't need a follow-up edit the day that profile starts meaning something.
+  # "fallback" gates the piper fallback voice, "logging" gates alloy (and its socket mount).
   # An unknown profile name is not an error to `docker compose config` (verified) — it just
   # filters out services that don't opt in, exactly like a real one.
   PROFILE_COMBOS=(
     "none:"
     "admin:admin"
-    "tunnel:tunnel"
     "logging:logging"
-    "admin+tunnel+logging:admin,tunnel,logging"
+    "fallback:fallback"
+    "admin+logging+fallback:admin,logging,fallback"
   )
 
   for file_set in "${FILE_SETS[@]}"; do

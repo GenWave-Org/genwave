@@ -28,10 +28,9 @@ public static class FeatureComposeHostPublishGuard
     static (int ExitCode, string StdOut, string StdErr) RunGuardScript(params string[] args) =>
         ScriptProcess.Run(
             "tools/check-compose-publish.sh", RealPath,
-            // gh-#249: the guard's default mode renders compose itself with no --profile flags,
-            // inheriting this process's environment — pin the profile set empty so ambient
-            // COMPOSE_PROFILES / a dev box's .env (e.g. admin -> admin_ui 3000:3000 on the base
-            // file) can never leak extra services into the render it checks.
+            // The guard's default mode renders compose itself with `--profile '*'` (every profile
+            // active, so opt-in services are checked), which overrides an ambient COMPOSE_PROFILES
+            // (gh-#249); the empty value here is belt-and-braces for the inherited environment.
             extraEnv: new Dictionary<string, string> { ["COMPOSE_PROFILES"] = "" },
             args: args);
 
@@ -41,7 +40,7 @@ public static class FeatureComposeHostPublishGuard
         [Trait("Category", "Integration")]
         public static void Guard_exits_zero_reporting_only_the_lan_allowlist_published()
         {
-            // Given the merged config of compose.yaml + compose.pinned.yaml
+            // Given the merged config of every deployed file set
             // When  the guard script runs
             // Then  it exits 0, reporting 0.0.0.0 publishes only for the LAN allowlist (F67.1)
             var (exitCode, stdOut, stdErr) = RunGuardScript();
@@ -95,6 +94,31 @@ public static class FeatureComposeHostPublishGuard
                 Assert.NotEqual(0, exitCode);
                 Assert.Contains("db", combinedOutput, StringComparison.Ordinal);
                 Assert.Contains("5432", combinedOutput, StringComparison.Ordinal);
+            }
+            finally
+            {
+                File.Delete(fixturePath);
+            }
+        }
+
+        [Theory]
+        [InlineData("")]
+        [InlineData("not json at all {")]
+        [InlineData("{}")]
+        [InlineData("{\"services\": {}}")]
+        public static void Unusable_or_serviceless_render_fails_closed_not_ok(string fixtureContent)
+        {
+            // Given a render that is empty, not JSON, or lists zero services
+            // When  the guard script runs against it
+            // Then  it exits non-zero (2) — nothing checked is never a pass
+            var fixturePath = Path.Combine(Path.GetTempPath(), $"check-compose-publish-empty-{Guid.NewGuid():N}.json");
+            File.WriteAllText(fixturePath, fixtureContent);
+            try
+            {
+                var (exitCode, stdOut, stdErr) = RunGuardScript("--config-file", fixturePath);
+
+                Assert.True(exitCode == 2, $"expected exit 2, got {exitCode}\nstdout:\n{stdOut}\nstderr:\n{stdErr}");
+                Assert.DoesNotContain("OK", stdOut, StringComparison.Ordinal);
             }
             finally
             {

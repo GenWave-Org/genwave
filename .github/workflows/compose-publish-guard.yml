@@ -1,12 +1,13 @@
 # Compose config guards. Each renders the merged compose config (docker compose -f compose.yaml
-# [-f compose.pinned.yaml -f compose.demo.yaml] config — the real --pinned shape, SPEC F136.5)
+# [-f compose.pinned.yaml] [-f compose.piper-only.yaml] config — the real --pinned /
+# --piper-only shapes, SPEC F136.5)
 # and pins a security invariant shut so it can never silently regress. Scoped to the files that
 # can cause either guard to fail — compose.pinned.yaml is in that set now too: a pin-bump PR
 # touching only that file must still trigger this guard. ubuntu-latest ships both docker and
 # jq, so no extra tooling install is needed.
 #
-#   publish guard (SPEC F67.1, STORY-181): fails the build if anything other than caddy 80/443
-#     publishes a 0.0.0.0 host port — the Icecast :8000 gotcha fixed in 05303ce, pinned shut.
+#   publish guard (SPEC F67.1, STORY-181): fails the build if anything outside the LAN allowlist
+#     (icecast 8000, api 8080/8081, admin_ui 3000) publishes a 0.0.0.0 host port.
 #   socket guard (SPEC F78.2, STORY-203): fails the build if /var/run/docker.sock is bind-mounted
 #     anywhere but `alloy`, or into `alloy` without read_only — the docker-socket carve-out.
 name: compose config guards
@@ -17,8 +18,7 @@ on:
     paths:
       - 'compose.yaml'
       - 'compose.pinned.yaml'
-      - 'compose.demo.yaml'
-      - 'Caddyfile'
+      - 'compose.piper-only.yaml'
       - 'tools/check-compose-publish.sh'
       - 'tools/check-compose-socket.sh'
       - '.github/workflows/compose-publish-guard.yml'
@@ -26,8 +26,7 @@ on:
     paths:
       - 'compose.yaml'
       - 'compose.pinned.yaml'
-      - 'compose.demo.yaml'
-      - 'Caddyfile'
+      - 'compose.piper-only.yaml'
       - 'tools/check-compose-publish.sh'
       - 'tools/check-compose-socket.sh'
       - '.github/workflows/compose-publish-guard.yml'
@@ -40,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Guard public-overlay host publishes
+      - name: Guard LAN-allowlist host publishes
         run: bash tools/check-compose-publish.sh
       - name: Guard docker-socket carve-out
         run: bash tools/check-compose-socket.sh
