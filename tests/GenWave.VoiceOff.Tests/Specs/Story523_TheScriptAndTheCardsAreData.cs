@@ -98,14 +98,14 @@ public static class FeatureTheScriptAndTheCardsAreData
         // Given tools/VoiceOff/cards
         // When  the set is loaded
 
-        [Fact(Skip = "pending: T661 — see docs/PLAN.md")]
-        public void ThereIsAtLeastOneCardPerProfileInEngines() => Assert.Fail("pending: T661 — there is at least one card per profile in engines/");
+        [Fact(Skip = "pending: T670 — see docs/PLAN.md")]
+        public void ThereIsAtLeastOneCardPerProfileInEngines() => Assert.Fail("pending: T670 — there is at least one card per profile in engines/");
 
-        [Fact(Skip = "pending: T661 — see docs/PLAN.md")]
-        public void ExactlyOneCardIsMarkedAsShipped() => Assert.Fail("pending: T661 — exactly one card is marked asShipped");
+        [Fact(Skip = "pending: T670 — see docs/PLAN.md")]
+        public void ExactlyOneCardIsMarkedAsShipped() => Assert.Fail("pending: T670 — exactly one card is marked asShipped");
 
-        [Fact(Skip = "pending: T661 — see docs/PLAN.md")]
-        public void TheFiveVariantCardsNamedInPROJECTMdArePresent() => Assert.Fail("pending: T661 — the five variant cards named in PROJECT.md are present");
+        [Fact(Skip = "pending: T670 — see docs/PLAN.md")]
+        public void TheFiveVariantCardsNamedInPROJECTMdArePresent() => Assert.Fail("pending: T670 — the five variant cards named in PROJECT.md are present");
     }
 
     // ---------------------------------------------------------------------

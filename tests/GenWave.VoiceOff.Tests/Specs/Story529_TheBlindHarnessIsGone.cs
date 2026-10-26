@@ -33,8 +33,8 @@ public static class FeatureTheBlindHarnessIsGone
         [Fact(Skip = "pending: T660 — see docs/PLAN.md")]
         public void PairingReelingAndTimingDoNotExist() => Assert.Fail("pending: T660 — Pairing, Reeling and Timing do not exist");
 
-        [Fact(Skip = "pending: T660 — see docs/PLAN.md")]
-        public void GauntletDoesNotExist() => Assert.Fail("pending: T660 — gauntlet/ does not exist");
+        [Fact(Skip = "pending: T663 — see docs/PLAN.md")]
+        public void GauntletDoesNotExist() => Assert.Fail("pending: T663 — gauntlet/ does not exist");
     }
 
     // AC3 — the old specs are gone
