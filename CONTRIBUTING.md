@@ -73,4 +73,4 @@ See the [README](README.md) for prerequisites and how to run the full stack.
 
 ## 🔐 Security issues
 
-Please do not open public issues for suspected vulnerabilities — report them privately to the maintainer.
+Please do not open public issues for suspected vulnerabilities — report them privately to the maintainer as described in [SECURITY.md](SECURITY.md).
