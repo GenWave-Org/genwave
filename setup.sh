@@ -206,7 +206,7 @@ SETUP_YES=0
 # install_first_beds's own first branch on the virgin/interview path.
 SETUP_OFFLINE=0
 
-# usage — prints the short plain help for -h/--help.
+# usage — prints the short plain help for -h/--help (to stderr, after the error line, for an unknown argument).
 usage() {
   cat <<'EOF'
 Usage: ./setup.sh [--repair [--yes]] [--offline]
@@ -2224,9 +2224,7 @@ main() {
         ;;
       *)
         echo "setup.sh: unknown argument: $arg" >&2
-        echo "  ./setup.sh                 first-run interview, or verify an existing install (read-only)" >&2
-        echo "  ./setup.sh --repair [--yes] fix drift verify finds — per-item confirm, or --yes for all" >&2
-        echo "  ./setup.sh --offline       first-run only — skip the background-music pack install" >&2
+        usage >&2
         exit 2
         ;;
     esac

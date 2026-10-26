@@ -689,7 +689,7 @@ public static class FeatureTheWizardInstallsTheFirstBeds
         [Fact]
         public void NamesTheOfflineFlag()
         {
-            // --help must name every flag the unknown-argument message names (--offline once went missing).
+            // --help must name --offline (it once went missing from the usage text).
             var (exitCode, stdOut, _) = RunSetup(
                 ScriptProcess.MakeBinDir(), ScratchEnvPath(), "", new Dictionary<string, string>(), "--help");
 
@@ -707,6 +707,19 @@ public static class FeatureTheWizardInstallsTheFirstBeds
             Assert.True(exitCode == 0 && stdOut.Contains("Usage:", StringComparison.Ordinal),
                 $"expected exit 0 and a Usage: line; exit={exitCode} stdout:\n{stdOut}");
             Assert.DoesNotMatch(@"SPEC F|STORY-|gh-#|\bT\d{3}\b|(?i:topology)", stdOut);
+        }
+
+        [Fact]
+        public void UnknownArgumentExitsTwoWithTheSameUsageAsHelp()
+        {
+            var (helpExit, helpStdOut, _) = RunSetup(
+                ScriptProcess.MakeBinDir(), ScratchEnvPath(), "", new Dictionary<string, string>(), "--help");
+            var (exitCode, _, stdErr) = RunSetup(
+                ScriptProcess.MakeBinDir(), ScratchEnvPath(), "", new Dictionary<string, string>(), "--bogus");
+
+            Assert.True(
+                helpExit == 0 && exitCode == 2 && stdErr == $"setup.sh: unknown argument: --bogus\n{helpStdOut}",
+                $"expected exit 2 and stderr = the unknown-argument line + the --help text; helpExit={helpExit} exit={exitCode} stderr:\n{stdErr}\nhelp stdout:\n{helpStdOut}");
         }
     }
 }
