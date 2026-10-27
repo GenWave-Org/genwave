@@ -25,7 +25,7 @@
   },
   "overrides": {},
   "facts": {
-    "checkpoint": "VibeVoice 7B (community mirror)",
+    "checkpoint": "VibeVoice 7B (community mirror), loaded 4-bit",
     "voices": "clone",
     "cloning": true,
     "ownVoice": true,
@@ -38,7 +38,7 @@
     ],
     "tricks": [
       "The big checkpoint can clone a voice; the 0.5B one cannot",
-      "The weights come from a community mirror and may not load; the card text will say so if they do not",
+      "The weights come from a community copy of the model Microsoft took down, and they are squeezed to 4-bit so they fit on a 16 GB card",
       "No tags exist, so every sound is dropped"
     ]
   },
