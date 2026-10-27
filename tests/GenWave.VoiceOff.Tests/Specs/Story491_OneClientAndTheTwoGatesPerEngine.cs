@@ -1,4 +1,4 @@
-// STORY-491 — One client, and the two gates per engine (gh-#614 · SPEC F214.1, F214.5, F214.6, F214.16 · PLAN T608, T611)
+// STORY-491 — One client, and the two gates per engine (gh-#614 · SPEC F214.1 as amended by F217.5, F217.6, F217.2 · PLAN T608, T611)
 //
 // BDD specification — xUnit. Every fact is pending at plan time (2026-10-21); the named task
 // activates its facts, watches them fail, then makes them pass.

@@ -3,7 +3,7 @@ using GenWave.Loudness;
 namespace GenWave.VoiceOff.Audio;
 
 /// <summary>
-/// The fixed format and the metadata strip for every clip the tool keeps (SPEC F214.4, F214.9): 24 kHz
+/// The fixed format and the metadata strip for every clip the tool keeps (format: SPEC F214.4 as amended by F217.5; the strip is kept from take one): 24 kHz
 /// mono s16le wav with no container or tag metadata. Used by <see cref="LoudnessMatch"/> for its second
 /// pass and reusable to re-strip a clip on rename.
 /// </summary>

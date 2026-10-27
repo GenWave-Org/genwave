@@ -4,9 +4,9 @@ using System.Text.RegularExpressions;
 namespace GenWave.Architecture.Tests.Support;
 
 /// <summary>
-/// Source scan behind law L12 (SPEC F214.16/F214.17, STORY-501, PLAN T619): <c>tools/VoiceOff</c>
-/// names no engine slug outside <c>engines/*.json</c> (a new engine is one profile and one shim, no
-/// C# change), and no image build or compose file mentions the tool. Plain text scans — comments
+/// Source scan behind law L12 (SPEC F217.13/F214.17, STORY-501, PLAN T619): <c>tools/VoiceOff</c>
+/// names no engine slug outside the data folders <c>engines/</c>, <c>cards/</c> and <c>script/</c> (a new
+/// engine is one profile and one shim, no C# change), and no image build or compose file mentions the tool. Plain text scans — comments
 /// count, because a slug in a comment is still a slug the next engine must edit around.
 /// </summary>
 internal static class VoiceOffSlugFence
@@ -39,7 +39,7 @@ internal static class VoiceOffSlugFence
                 foreach (var (slug, pattern) in matchers.Where(m => m.Pattern.IsMatch(lines[index])))
                 {
                     violations.Add(new LawViolation(
-                        LawId.L12, "tools/VoiceOff/" + relative, $"line {index + 1} names engine slug '{slug}' outside engines/*.json"));
+                        LawId.L12, "tools/VoiceOff/" + relative, $"line {index + 1} names engine slug '{slug}' outside engines/, cards/ and script/"));
                 }
             }
         }

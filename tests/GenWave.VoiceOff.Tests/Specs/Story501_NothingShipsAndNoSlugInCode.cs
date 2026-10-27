@@ -1,4 +1,4 @@
-// STORY-501 — Nothing ships, and no slug in code (gh-#614 · SPEC F214.16, F214.17 · PLAN T606)
+// STORY-501 — Nothing ships, and no slug in code (gh-#614 · SPEC F217.13, F214.17 · PLAN T606)
 //
 // BDD specification — xUnit. Every fact is pending at plan time (2026-10-21); the named task
 // activates its facts, watches them fail, then makes them pass.

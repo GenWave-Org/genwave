@@ -1,4 +1,4 @@
-// STORY-501 — Nothing ships, and no slug in code (gh-#614 · SPEC F214.16, F214.17 · PLAN T619)
+// STORY-501 — Nothing ships, and no slug in code (gh-#614 · SPEC F217.13, F214.17 · PLAN T619)
 //
 // BDD specification — xUnit. AC3–AC5 live in GenWave.VoiceOff.Tests.
 //

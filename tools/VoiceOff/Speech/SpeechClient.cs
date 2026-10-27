@@ -8,7 +8,7 @@ using GenWave.Tts;
 namespace GenWave.VoiceOff.Speech;
 
 /// <summary>
-/// The one HTTP client the tool renders through (SPEC F214.1): <c>POST /v1/audio/speech</c> and
+/// The one HTTP client the tool renders through (SPEC F214.1 as amended by F217.5): <c>POST /v1/audio/speech</c> and
 /// <c>GET /v1/audio/voices</c> against an engine endpoint. Failures come back as typed results.
 /// The client owns the deadline (the profile's timeout), so the <see cref="HttpClient"/> it is given
 /// must not carry one of its own: use <see cref="CreateHttpClient"/>.

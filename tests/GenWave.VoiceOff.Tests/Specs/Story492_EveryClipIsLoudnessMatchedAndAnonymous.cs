@@ -1,4 +1,4 @@
-// STORY-492 — Every clip is loudness-matched and anonymous (gh-#614 · SPEC F214.4, F214.9 · PLAN T609)
+// STORY-492 — Every clip is loudness-matched and anonymous (gh-#614 · SPEC F214.4 as amended by F217.5 · PLAN T609)
 //
 // BDD specification — xUnit. Every fact is pending at plan time (2026-10-21); the named task
 // activates its facts, watches them fail, then makes them pass.
