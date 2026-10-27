@@ -5,11 +5,7 @@
   "host": "thor-gpu",
   "voice": "ref-f3",
   "speed": 1,
-  "settings": {
-    "temperature": 0.8,
-    "top_k": 50,
-    "top_p": 0.95
-  },
+  "settings": {},
   "cues": {
     "breath": null,
     "laugh": null,
@@ -39,5 +35,5 @@
       "Weights are non-commercial"
     ]
   },
-  "why": "Spark cloned from the upbeat clip at its default sampler settings."
+  "why": "Spark cloned from the upbeat clip with the engine's own defaults."
 }

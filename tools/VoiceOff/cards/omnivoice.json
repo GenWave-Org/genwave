@@ -5,10 +5,7 @@
   "host": "thor-gpu",
   "voice": "ref-f3",
   "speed": 1,
-  "settings": {
-    "num_step": 32,
-    "guidance_scale": 2.0
-  },
+  "settings": {},
   "cues": {
     "breath": null,
     "laugh": "[laughter]",

@@ -5,10 +5,7 @@
   "host": "thor-gpu",
   "voice": "ref-f3",
   "speed": 1,
-  "settings": {
-    "temperature": 0.9,
-    "top_k": 50
-  },
+  "settings": {},
   "cues": {
     "breath": null,
     "laugh": null,
@@ -37,5 +34,5 @@
       "No tags exist, so every sound is dropped"
     ]
   },
-  "why": "CSM's only release, cloned through its context from the upbeat clip at its native sampler settings."
+  "why": "CSM's only release, cloned through its context from the upbeat clip with the engine's own defaults."
 }

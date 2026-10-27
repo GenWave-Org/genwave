@@ -1,34 +1,33 @@
 {
   "id": "fish",
   "engine": "fish",
-  "title": "Fish S2-Pro, 5B",
+  "title": "Fish S2-Pro, 4.6B",
   "host": "runes-gpu",
   "voice": "ref-f3",
   "speed": 1,
   "settings": {
     "temperature": 0.85,
-    "top_p": 0.85,
-    "repetition_penalty": 1.1
+    "top_p": 0.85
   },
   "cues": {
-    "breath": "[inhales]",
+    "breath": "[inhale]",
     "laugh": "[laughing]",
     "um": "[hesitating] um,",
-    "cough": "[clear throat]",
+    "cough": "[clearing throat]",
     "giggle": "[chuckling]",
-    "sigh": "[sighing]",
-    "pause": "[long-break]"
+    "sigh": "[sigh]",
+    "pause": "[pause]"
   },
   "overrides": {},
   "facts": {
-    "checkpoint": "S2-Pro 5B",
+    "checkpoint": "S2-Pro 4.6B",
     "voices": "clone",
     "cloning": true,
     "ownVoice": true,
     "cannot": [],
     "tricks": [
-      "Tags are free-form words in square brackets (S2-Pro mapping: inhales, laughing, hesitating, chuckling, sighing), so any of these may or may not be honoured",
-      "Break and long break are its documented pauses",
+      "Tags are free-form words in square brackets, so any word is accepted; most cues here use the model card's common tags, and hesitating is a free-form one the model also accepts",
+      "Pause uses the model card's [pause] tag",
       "Um is written out as a word",
       "Research-only licence"
     ]

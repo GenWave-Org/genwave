@@ -25,7 +25,7 @@
   "overrides": {},
   "facts": {
     "checkpoint": "VibeVoice-Realtime-0.5B",
-    "voices": 7,
+    "voices": 6,
     "cloning": false,
     "ownVoice": false,
     "cannot": [

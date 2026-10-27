@@ -22,7 +22,7 @@
   "overrides": {},
   "facts": {
     "checkpoint": "Parler-TTS Large v1 (2.2B)",
-    "voices": 34,
+    "voices": 3,
     "cloning": false,
     "ownVoice": true,
     "cannot": [

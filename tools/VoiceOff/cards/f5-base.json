@@ -5,11 +5,7 @@
   "host": "thor-gpu",
   "voice": "ref-f3",
   "speed": 1.05,
-  "settings": {
-    "nfe_step": 32,
-    "cfg_strength": 2,
-    "sway_sampling_coef": -1
-  },
+  "settings": {},
   "cues": {
     "breath": null,
     "laugh": null,
@@ -39,5 +35,5 @@
       "Weights are non-commercial"
     ]
   },
-  "why": "F5 cloned from the upbeat clip at its documented settings; its style comes from the clip alone."
+  "why": "F5 cloned from the upbeat clip with the engine's own defaults; its style comes from the clip alone."
 }

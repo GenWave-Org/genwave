@@ -23,7 +23,7 @@
   "overrides": {},
   "facts": {
     "checkpoint": "Chatterbox Turbo 350M",
-    "voices": 1,
+    "voices": "clone",
     "cloning": true,
     "ownVoice": true,
     "cannot": [

@@ -21,7 +21,7 @@
   },
   "overrides": {},
   "facts": {
-    "checkpoint": "orpheus-3b-0.1-ft, full precision",
+    "checkpoint": "orpheus-3b-0.1-ft, unquantised (bf16)",
     "voices": 8,
     "cloning": false,
     "ownVoice": true,
@@ -35,5 +35,5 @@
       "Um is written out as a word"
     ]
   },
-  "why": "Orpheus at full precision with its best voice and native sound tags."
+  "why": "Orpheus unquantised (bf16) with its best voice and native sound tags."
 }

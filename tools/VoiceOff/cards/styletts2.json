@@ -9,8 +9,7 @@
     "alpha": 0.3,
     "beta": 0.85,
     "embedding_scale": 2.0,
-    "diffusion_steps": 10,
-    "t": 0.7
+    "diffusion_steps": 10
   },
   "cues": {
     "breath": null,

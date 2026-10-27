@@ -22,7 +22,7 @@
   },
   "overrides": {},
   "facts": {
-    "checkpoint": "higgs-tts-3-4b, full precision",
+    "checkpoint": "higgs-tts-3-4b, unquantised (bf16)",
     "voices": "clone",
     "cloning": true,
     "ownVoice": true,
@@ -34,5 +34,5 @@
       "Weights are non-commercial"
     ]
   },
-  "why": "Higgs v3 at full precision, with its sound tags paired with the written sound they need."
+  "why": "Higgs v3 unquantised (bf16), with its sound tags paired with the written sound they need."
 }
