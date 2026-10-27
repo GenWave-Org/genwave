@@ -3,5 +3,5 @@
   "container": "voiceoff-piper",
   "port": 8880,
   "license": "GPL-3.0",
-  "notes": "Needs the Piper shim (F217.11): the station image speaks POST / with text/plain, not the /v1 contract. The single baked voice is the only voice it has (the gh-#147 lesson)."
+  "notes": "Served by the bench Piper shim (F217.11), which speaks the /v1 contract the station image does not. The single baked voice, lessac, is the only voice it has (the gh-#147 lesson)."
 }

@@ -3,7 +3,7 @@
   "engine": "piper",
   "title": "Piper, high quality",
   "host": "thor-cpu",
-  "voice": "en_US-lessac-high",
+  "voice": "lessac",
   "speed": 1.07,
   "settings": {
     "noise_scale": 0.75,
@@ -17,7 +17,7 @@
     "cough": null,
     "giggle": null,
     "sigh": null,
-    "pause": "..."
+    "pause": null
   },
   "overrides": {},
   "facts": {
@@ -30,12 +30,12 @@
       "laugh",
       "cough",
       "giggle",
-      "sigh"
+      "sigh",
+      "pause"
     ],
     "tricks": [
       "Speed 1.07 gives a length scale of about 0.93, a little brisker than the default",
       "Noise scale and rhythm variation are raised for a livelier delivery",
-      "Pause is written as an ellipsis, which Piper treats as a sentence break",
       "Um is written out as a word"
     ]
   },
