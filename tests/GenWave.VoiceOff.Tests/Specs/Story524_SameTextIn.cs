@@ -3,10 +3,17 @@
 // BDD specification — xUnit. Every fact is pending at plan time (2026-10-26); the named task
 // activates its facts, watches them fail, then makes them pass.
 
+using GenWave.Tts;
+using GenWave.VoiceOff.Deck;
+using GenWave.VoiceOff.Tests.Support;
+using GenWave.VoiceOff.Text;
+
 namespace GenWave.VoiceOff.Tests.Specs;
 
 public static class FeatureSameTextIn
 {
+    private const string Phone = "1-800-555-0199";
+
     // ---------------------------------------------------------------------
     // HAPPY PATH
     // ---------------------------------------------------------------------
@@ -16,15 +23,20 @@ public static class FeatureSameTextIn
     {
         // Given the paragraph with 1-800-555-0199 and a best-effort card with no overrides
         // When  the card text is prepared
+        private readonly ScriptFile script = SameTextScenario.Script();
+        private readonly Card card = SameTextScenario.BestEffort("""{ "laugh": "[laugh]" }""");
 
-        [Fact(Skip = "pending: T662 — see docs/PLAN.md")]
-        public void ThePhoneNumberIsStillInTheText() => Assert.Fail("pending: T662 — 1-800-555-0199 is still in the text");
+        [Fact]
+        public void ThePhoneNumberIsStillInTheText() =>
+            Assert.Contains(Phone, SameTextScenario.Prepared(card, script, 2).Text, StringComparison.Ordinal);
 
-        [Fact(Skip = "pending: T662 — see docs/PLAN.md")]
-        public void TheParagraphsCapitalsAreKept() => Assert.Fail("pending: T662 — the paragraph's capitals are kept");
+        [Fact]
+        public void TheParagraphsCapitalsAreKept() =>
+            Assert.StartsWith("Okay, quick bit of housekeeping, 'cause I kinda forgot last hour. The request line", SameTextScenario.Prepared(card, script, 2).Text, StringComparison.Ordinal);
 
-        [Fact(Skip = "pending: T662 — see docs/PLAN.md")]
-        public void TheParagraphsEllipsisIsKept() => Assert.Fail("pending: T662 — the paragraph's ellipsis is kept");
+        [Fact]
+        public void TheParagraphsEllipsisIsKept() =>
+            Assert.Contains("Weather today is... gorgeous", SameTextScenario.Prepared(card, script, 5).Text, StringComparison.Ordinal);
     }
 
     // AC2 — a cue becomes the card's tag
@@ -32,9 +44,12 @@ public static class FeatureSameTextIn
     {
         // Given a card mapping laugh to [laugh]
         // When  the laugh paragraph is prepared
+        private readonly ScriptFile script = SameTextScenario.Script();
+        private readonly Card card = SameTextScenario.BestEffort("""{ "laugh": "[laugh]" }""");
 
-        [Fact(Skip = "pending: T662 — see docs/PLAN.md")]
-        public void LaughStandsWhereLaughWas() => Assert.Fail("pending: T662 — [laugh] stands where {laugh} was");
+        [Fact]
+        public void LaughStandsWhereLaughWas() =>
+            Assert.Contains("morning [laugh]!", SameTextScenario.Prepared(card, script, 7).Text, StringComparison.Ordinal);
     }
 
     // AC3 — a cue becomes a written stand-in
@@ -42,9 +57,12 @@ public static class FeatureSameTextIn
     {
         // Given a card mapping um to the word um followed by a comma
         // When  the um paragraph is prepared
+        private readonly ScriptFile script = SameTextScenario.Script();
+        private readonly Card card = SameTextScenario.BestEffort("""{ "um": "Um," }""");
 
-        [Fact(Skip = "pending: T662 — see docs/PLAN.md")]
-        public void TheStandInStandsWhereUmWas() => Assert.Fail("pending: T662 — the stand-in stands where {um} was");
+        [Fact]
+        public void TheStandInStandsWhereUmWas() =>
+            Assert.StartsWith("Um, Oh! And the bake sale", SameTextScenario.Prepared(card, script, 3).Text, StringComparison.Ordinal);
     }
 
     // AC4 — an unmapped cue is dropped and declared
@@ -52,12 +70,24 @@ public static class FeatureSameTextIn
     {
         // Given a card mapping cough to null
         // When  the cough paragraph is prepared
+        private readonly ScriptFile script = SameTextScenario.Script();
+        private readonly Card card = SameTextScenario.BestEffort("""{ "cough": null, "giggle": "Hehe!" }""", null, "cough");
 
-        [Fact(Skip = "pending: T662 — see docs/PLAN.md")]
-        public void NoCoughTokenRemains() => Assert.Fail("pending: T662 — no cough token remains");
+        [Fact]
+        public void NoCoughTokenRemains()
+        {
+            string text = SameTextScenario.Prepared(card, script, 4).Text;
 
-        [Fact(Skip = "pending: T662 — see docs/PLAN.md")]
-        public void CoughIsListedInTheCardSCannotFacts() => Assert.Fail("pending: T662 — cough is listed in the card's cannot facts");
+            Assert.DoesNotContain("cough", text, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal("Sorry. Hehe! Allergies.", text);
+        }
+
+        [Fact]
+        public void CoughIsListedInTheCardSCannotFacts()
+        {
+            Assert.Contains("cough", SameTextScenario.Prepared(card, script, 4).DroppedCues);
+            Assert.Contains("cough", card.Facts.Cannot);
+        }
     }
 
     // AC5 — an override wins for its paragraph
@@ -65,12 +95,25 @@ public static class FeatureSameTextIn
     {
         // Given a card overriding paragraph 3 with the same words and an extra ellipsis
         // When  the card text is prepared
+        private readonly ScriptFile script = SameTextScenario.Script();
+        private readonly string overridden;
+        private readonly Card card;
 
-        [Fact(Skip = "pending: T662 — see docs/PLAN.md")]
-        public void Paragraph3EqualsTheOverride() => Assert.Fail("pending: T662 — paragraph 3 equals the override");
+        public ScenarioAnOverrideWinsForItsParagraph()
+        {
+            overridden = SameTextScenario.Source(script, 3).Replace("{um} Oh! And", "Oh!... And", StringComparison.Ordinal);
+            card = SameTextScenario.BestEffort("""{ "um": null }""", new Dictionary<int, string> { [3] = overridden }, "um");
+        }
 
-        [Fact(Skip = "pending: T662 — see docs/PLAN.md")]
-        public void Paragraph4IsUnchanged() => Assert.Fail("pending: T662 — paragraph 4 is unchanged");
+        [Fact]
+        public void Paragraph3EqualsTheOverride() =>
+            Assert.Equal(overridden, SameTextScenario.Prepared(card, script, 3).Text);
+
+        [Fact]
+        public void Paragraph4IsUnchanged() =>
+            Assert.Equal(
+                SameTextScenario.Prepared(SameTextScenario.BestEffort("""{ "um": null }""", cannot: "um"), script, 4).Text,
+                SameTextScenario.Prepared(card, script, 4).Text);
     }
 
     // AC6 — the as-shipped card speaks the station style
@@ -78,15 +121,28 @@ public static class FeatureSameTextIn
     {
         // Given the asShipped card
         // When  its text is prepared
+        private readonly ScriptFile script = SameTextScenario.Script();
+        private readonly Card card = SameTextScenario.ShippedCard("kokoro-as-shipped");
 
-        [Fact(Skip = "pending: T662 — see docs/PLAN.md")]
-        public void EveryCueIsStripped() => Assert.Fail("pending: T662 — every cue is stripped");
+        [Fact]
+        public void EveryCueIsStripped() =>
+            Assert.All(CardText.Prepare(card, script), p => Assert.DoesNotContain('{', p.Text));
 
-        [Fact(Skip = "pending: T662 — see docs/PLAN.md")]
-        public void TheTextEqualsKokoroSpeechMarkupOverTheNormalisedCueStrippedParagraph() => Assert.Fail("pending: T662 — the text equals KokoroSpeechMarkup over the normalised cue-stripped paragraph");
+        [Fact]
+        public void TheTextEqualsKokoroSpeechMarkupOverTheNormalisedCueStrippedParagraph()
+        {
+            Assert.All(script.Paragraphs, paragraph =>
+            {
+                string normalised = SpeechText.Normalize(CardText.ReplaceCues(paragraph.Text, new Dictionary<string, string?>()), AsShippedStation.Corrections);
+                string expected = KokoroSpeechMarkup.Render(normalised, AsShippedStation.Rules, AsShippedStation.SentencePauseSeconds);
 
-        [Fact(Skip = "pending: T662 — see docs/PLAN.md")]
-        public void ThePhoneParagraphHasNoRawPhoneNumberLeft() => Assert.Fail("pending: T662 — the phone paragraph has no 1-800-555-0199 left");
+                Assert.Equal(expected, CardText.Prepare(card, paragraph).Text);
+            });
+        }
+
+        [Fact]
+        public void ThePhoneParagraphHasNoRawPhoneNumberLeft() =>
+            Assert.DoesNotContain(Phone, SameTextScenario.Prepared(card, script, 2).Text, StringComparison.Ordinal);
     }
 
     // AC7 — the words law passes for tags and punctuation
@@ -94,9 +150,17 @@ public static class FeatureSameTextIn
     {
         // Given a card whose override adds [sigh] and a comma
         // When  the words law runs
+        private readonly ScriptFile script = SameTextScenario.Script();
 
-        [Fact(Skip = "pending: T662 — see docs/PLAN.md")]
-        public void ItPasses() => Assert.Fail("pending: T662 — it passes");
+        [Fact]
+        public void ItPasses()
+        {
+            string text = "It just doesn't get any better than that, really... [sigh] Man oh man, I love me some Metallica in the morning!";
+            Card card = SameTextScenario.BestEffort(
+                """{ "sigh": "[sigh]", "laugh": null }""", new Dictionary<int, string> { [7] = text }, "laugh");
+
+            Assert.Empty(WordsLaw.Check(card, CardText.Prepare(card, script)));
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -108,9 +172,18 @@ public static class FeatureSameTextIn
     {
         // Given an override replacing kinda with kind of
         // When  the words law runs
+        [Fact]
+        public void ItFailsNamingTheParagraphNumber()
+        {
+            ScriptFile script = SameTextScenario.Script();
+            string text = SameTextScenario.Source(script, 2).Replace("kinda", "kind of", StringComparison.Ordinal);
+            Card card = SameTextScenario.BestEffort("{}", new Dictionary<int, string> { [2] = text });
 
-        [Fact(Skip = "pending: T662 — see docs/PLAN.md")]
-        public void ItFailsNamingTheParagraphNumber() => Assert.Fail("pending: T662 — it fails naming the paragraph number");
+            WordsLawFailure failure = Assert.Single(WordsLaw.Check(card, CardText.Prepare(card, script)));
+
+            Assert.Equal(2, failure.Paragraph);
+            Assert.Contains("Paragraph 2", failure.Message, StringComparison.Ordinal);
+        }
     }
 
     // AC9 — a dropped word fails the words law
@@ -118,9 +191,18 @@ public static class FeatureSameTextIn
     {
         // Given an override missing the word GenWave
         // When  the words law runs
+        [Fact]
+        public void ItFailsNamingTheParagraphNumber()
+        {
+            ScriptFile script = SameTextScenario.Script();
+            string text = "Good morning, you're listening to, and that was Juniper Hollis with Paper Lanterns. Honestly? I could play that one all day.";
+            Card card = SameTextScenario.BestEffort("{}", new Dictionary<int, string> { [1] = text });
 
-        [Fact(Skip = "pending: T662 — see docs/PLAN.md")]
-        public void ItFailsNamingTheParagraphNumber() => Assert.Fail("pending: T662 — it fails naming the paragraph number");
+            WordsLawFailure failure = Assert.Single(WordsLaw.Check(card, CardText.Prepare(card, script)));
+
+            Assert.Equal(1, failure.Paragraph);
+            Assert.Contains("Paragraph 1", failure.Message, StringComparison.Ordinal);
+        }
     }
 
     // AC10 — an undeclared tag fails the words law
@@ -128,8 +210,18 @@ public static class FeatureSameTextIn
     {
         // Given an override using [gasp] when the card declares only [laugh]
         // When  the words law runs
+        [Fact]
+        public void ItFailsNamingTheTag()
+        {
+            ScriptFile script = SameTextScenario.Script();
+            string text = SameTextScenario.Source(script, 1).Replace("{breath}", "[gasp]", StringComparison.Ordinal).Replace("{laugh}", "[laugh]", StringComparison.Ordinal);
+            Card card = SameTextScenario.BestEffort(
+                """{ "laugh": "[laugh]", "breath": null }""", new Dictionary<int, string> { [1] = text }, "breath");
 
-        [Fact(Skip = "pending: T662 — see docs/PLAN.md")]
-        public void ItFailsNamingTheTag() => Assert.Fail("pending: T662 — it fails naming the tag");
+            WordsLawFailure failure = Assert.Single(WordsLaw.Check(card, CardText.Prepare(card, script)));
+
+            Assert.Equal("[gasp]", failure.Tag);
+            Assert.Contains("[gasp]", failure.Message, StringComparison.Ordinal);
+        }
     }
 }
