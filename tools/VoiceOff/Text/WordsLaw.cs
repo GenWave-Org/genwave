@@ -8,10 +8,10 @@ namespace GenWave.VoiceOff.Text;
 /// nothing dropped, nothing changed. Pure: no IO.
 /// <para>
 /// A tag is a bracketed <c>[...]</c> or angle <c>&lt;...&gt;</c> token. A best-effort card may use only the
-/// tags its cue map declares (exact text); the as-shipped card may carry Kokoro's own <c>[pause:Ns]</c> and
-/// <c>[word](/ipa/)</c> markup, and nothing else (the shipped pronunciation rules are empty today, so the
-/// IPA unwrap only matters once they are not). Words are letter/digit runs, kept whole across an inner
-/// apostrophe (<c>doesn't</c>), plus the spoken symbols (currency, <c>%&amp;@#+</c>), and compared
+/// tags its cue map declares (exact text); the as-shipped card may carry Kokoro's own <c>[pause:Ns]</c>
+/// markup, and nothing else. Any card may carry IPA pronunciation markup <c>[word](/ipa/)</c>: it is
+/// unwrapped to its spoken word before tags are counted, so it is never an undeclared tag. Words are
+/// letter/digit runs, kept whole across an inner apostrophe (<c>doesn't</c>), plus the spoken symbols (currency, <c>%&amp;@#+</c>), and compared
 /// case-insensitively: capitals, punctuation, ellipses and <c>!?</c> are delivery, not words, so a card
 /// may change them. A cue's stand-in words ("Um,") are
 /// part of <see cref="ParagraphText.Expected"/> at the cue's position, so the real word "um" elsewhere is
@@ -42,7 +42,7 @@ internal static partial class WordsLaw
         List<WordsLawFailure> failures = [];
         foreach (ParagraphText paragraph in paragraphs)
         {
-            string engine = card.AsShipped ? IpaAnnotation().Replace(paragraph.Text, "$1") : paragraph.Text;
+            string engine = IpaAnnotation().Replace(paragraph.Text, "$1");
             string[] undeclared = Tag().Matches(engine).Select(m => m.Value)
                 .Where(tag => !IsDeclared(card, declared, tag)).Distinct(StringComparer.Ordinal).ToArray();
             failures.AddRange(undeclared.Select(tag =>

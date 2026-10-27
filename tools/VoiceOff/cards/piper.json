@@ -1,0 +1,43 @@
+{
+  "id": "piper",
+  "engine": "piper",
+  "title": "Piper, high quality",
+  "host": "thor-cpu",
+  "voice": "en_US-lessac-high",
+  "speed": 1.07,
+  "settings": {
+    "noise_scale": 0.75,
+    "noise_w_scale": 0.95,
+    "sentence_silence": 0.15
+  },
+  "cues": {
+    "breath": null,
+    "laugh": null,
+    "um": "Um,",
+    "cough": null,
+    "giggle": null,
+    "sigh": null,
+    "pause": "..."
+  },
+  "overrides": {},
+  "facts": {
+    "checkpoint": "en_US-lessac-high",
+    "voices": 1,
+    "cloning": false,
+    "ownVoice": true,
+    "cannot": [
+      "breath",
+      "laugh",
+      "cough",
+      "giggle",
+      "sigh"
+    ],
+    "tricks": [
+      "Speed 1.07 gives a length scale of about 0.93, a little brisker than the default",
+      "Noise scale and rhythm variation are raised for a livelier delivery",
+      "Pause is written as an ellipsis, which Piper treats as a sentence break",
+      "Um is written out as a word"
+    ]
+  },
+  "why": "Piper's larger model for the same single female voice, with its speed and variation knobs nudged for a livelier read, and no way to make any sound but speech."
+}

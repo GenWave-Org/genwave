@@ -1,0 +1,38 @@
+{
+  "id": "cosyvoice-normaliser-on",
+  "engine": "cosyvoice",
+  "title": "CosyVoice 3, text rules on",
+  "variantOf": "cosyvoice",
+  "host": "thor-gpu",
+  "voice": "ref-f3",
+  "speed": 1,
+  "settings": {
+    "text_frontend": true,
+    "llm": "llm.rl.pt"
+  },
+  "cues": {
+    "breath": "[breath]",
+    "laugh": "[laughter]",
+    "um": "Um,",
+    "cough": "[cough]",
+    "giggle": "[laughter]",
+    "sigh": "[sigh]",
+    "pause": "..."
+  },
+  "overrides": {},
+  "facts": {
+    "checkpoint": "Fun-CosyVoice3-0.5B-2512 with llm.rl.pt",
+    "voices": "clone",
+    "cloning": true,
+    "ownVoice": true,
+    "cannot": [],
+    "tricks": [
+      "Breath, laugh, cough and sigh use the tokenizer's own tags",
+      "Giggle shares the laughter tag because there is no softer one",
+      "Um is written out as a word",
+      "The RL-tuned language model weights (llm.rl.pt) replace the stock ones",
+      "The built-in text clean-up is on, as the engine ships; it turns $2.50 into two point five dollars"
+    ]
+  },
+  "why": "The same CosyVoice 3 setup with its own text clean-up on, to hear what that does to the numbers."
+}

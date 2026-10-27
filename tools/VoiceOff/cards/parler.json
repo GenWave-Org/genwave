@@ -1,0 +1,42 @@
+{
+  "id": "parler",
+  "engine": "parler",
+  "title": "Parler, large",
+  "host": "thor-gpu",
+  "voice": "Lea",
+  "speed": 1,
+  "settings": {
+    "model": "parler-tts/parler-tts-large-v1",
+    "description": "Lea speaks in a bright, upbeat and very expressive tone with a slightly high pitch, at a slightly fast pace. Very clear audio, very close-sounding, with almost no background noise.",
+    "temperature": 0.9
+  },
+  "cues": {
+    "breath": null,
+    "laugh": null,
+    "um": "um,",
+    "cough": null,
+    "giggle": null,
+    "sigh": null,
+    "pause": "..."
+  },
+  "overrides": {},
+  "facts": {
+    "checkpoint": "Parler-TTS Large v1 (2.2B)",
+    "voices": 34,
+    "cloning": false,
+    "ownVoice": true,
+    "cannot": [
+      "breath",
+      "laugh",
+      "cough",
+      "giggle",
+      "sigh"
+    ],
+    "tricks": [
+      "The voice is steered by a written description of the speaker, not by tags",
+      "Pace is asked for in the description (slightly fast) because speed is ignored",
+      "Um is written out as a word"
+    ]
+  },
+  "why": "Parler's biggest checkpoint with a written description of a bright, upbeat speaker, since a description is its only expressive control."
+}

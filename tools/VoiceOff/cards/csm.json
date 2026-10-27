@@ -1,0 +1,41 @@
+{
+  "id": "csm",
+  "engine": "csm",
+  "title": "CSM, 1B",
+  "host": "thor-gpu",
+  "voice": "ref-f3",
+  "speed": 1,
+  "settings": {
+    "temperature": 0.9,
+    "top_k": 50
+  },
+  "cues": {
+    "breath": null,
+    "laugh": null,
+    "um": "Um,",
+    "cough": null,
+    "giggle": null,
+    "sigh": null,
+    "pause": "..."
+  },
+  "overrides": {},
+  "facts": {
+    "checkpoint": "csm-1b",
+    "voices": "clone",
+    "cloning": true,
+    "ownVoice": true,
+    "cannot": [
+      "breath",
+      "laugh",
+      "cough",
+      "giggle",
+      "sigh"
+    ],
+    "tricks": [
+      "The only expressive lever is the spoken context it is shown",
+      "It continues the delivery of the reference clip, so an upbeat clip matters most here",
+      "No tags exist, so every sound is dropped"
+    ]
+  },
+  "why": "CSM's only release, cloned through its context from the upbeat clip at its native sampler settings."
+}

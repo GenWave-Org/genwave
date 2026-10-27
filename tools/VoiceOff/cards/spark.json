@@ -1,0 +1,43 @@
+{
+  "id": "spark",
+  "engine": "spark",
+  "title": "Spark, 0.5B",
+  "host": "thor-gpu",
+  "voice": "ref-f3",
+  "speed": 1,
+  "settings": {
+    "temperature": 0.8,
+    "top_k": 50,
+    "top_p": 0.95
+  },
+  "cues": {
+    "breath": null,
+    "laugh": null,
+    "um": "Um,",
+    "cough": null,
+    "giggle": null,
+    "sigh": null,
+    "pause": "..."
+  },
+  "overrides": {},
+  "facts": {
+    "checkpoint": "Spark-TTS-0.5B",
+    "voices": "clone",
+    "cloning": true,
+    "ownVoice": true,
+    "cannot": [
+      "breath",
+      "laugh",
+      "cough",
+      "giggle",
+      "sigh"
+    ],
+    "tricks": [
+      "Cloning from the clip is used; its gender, pitch and speed mode cannot be combined with a clip",
+      "Output is 16 kHz, which limits the top end",
+      "A single call tops out at about 60 seconds, which one paragraph never reaches",
+      "Weights are non-commercial"
+    ]
+  },
+  "why": "Spark cloned from the upbeat clip at its default sampler settings."
+}

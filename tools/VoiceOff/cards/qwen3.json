@@ -1,0 +1,40 @@
+{
+  "id": "qwen3",
+  "engine": "qwen3",
+  "title": "Qwen3, voice design",
+  "host": "thor-gpu",
+  "voice": "voice-design",
+  "speed": 1,
+  "settings": {
+    "instruct": "A bright, upbeat young American woman, morning radio DJ, warm and playful, fast casual delivery, smiles while talking, laughs easily, gets excited on exclamations."
+  },
+  "cues": {
+    "breath": null,
+    "laugh": null,
+    "um": "Um,",
+    "cough": null,
+    "giggle": null,
+    "sigh": null,
+    "pause": "..."
+  },
+  "overrides": {},
+  "facts": {
+    "checkpoint": "Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+    "voices": 0,
+    "cloning": false,
+    "ownVoice": true,
+    "cannot": [
+      "breath",
+      "laugh",
+      "cough",
+      "giggle",
+      "sigh"
+    ],
+    "tricks": [
+      "The voice is designed from a written description, because the stock voices have no native English female",
+      "One description covers the whole paragraph",
+      "Every sound is dropped"
+    ]
+  },
+  "why": "Qwen3's voice-design checkpoint asked for an upbeat American woman, since its stock female voices all carry an accent in English."
+}

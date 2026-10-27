@@ -1,0 +1,46 @@
+{
+  "id": "vibevoice",
+  "engine": "vibevoice",
+  "title": "VibeVoice, 0.5B",
+  "host": "thor-gpu",
+  "voice": "en-Emma_woman",
+  "speed": 1,
+  "settings": {
+    "model": "microsoft/VibeVoice-Realtime-0.5B",
+    "do_sample": true,
+    "temperature": 0.9,
+    "top_p": 0.9,
+    "cfg_scale": 1.5,
+    "inference_steps": 10
+  },
+  "cues": {
+    "breath": null,
+    "laugh": null,
+    "um": "Um,",
+    "cough": null,
+    "giggle": null,
+    "sigh": null,
+    "pause": "..."
+  },
+  "overrides": {},
+  "facts": {
+    "checkpoint": "VibeVoice-Realtime-0.5B",
+    "voices": 7,
+    "cloning": false,
+    "ownVoice": false,
+    "cannot": [
+      "breath",
+      "laugh",
+      "cough",
+      "giggle",
+      "sigh"
+    ],
+    "tricks": [
+      "Sampling is turned on and the denoising steps are doubled to 10, away from the flat default",
+      "Emma is one of two female voices; Grace is the other and was not picked by ear yet",
+      "No tags exist, so every sound is dropped",
+      "Very short lines of three words or fewer can be unstable"
+    ]
+  },
+  "why": "VibeVoice's small checkpoint with sampling on and more denoising steps, because its stock setting is the flattest it can run."
+}

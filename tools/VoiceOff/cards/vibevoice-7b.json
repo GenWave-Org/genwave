@@ -1,0 +1,46 @@
+{
+  "id": "vibevoice-7b",
+  "engine": "vibevoice",
+  "title": "VibeVoice, 7B",
+  "variantOf": "vibevoice",
+  "host": "runes-gpu",
+  "voice": "ref-f3",
+  "speed": 1,
+  "settings": {
+    "model": "vibevoice/VibeVoice-7B",
+    "do_sample": true,
+    "temperature": 0.9,
+    "top_p": 0.9,
+    "cfg_scale": 1.5,
+    "inference_steps": 10
+  },
+  "cues": {
+    "breath": null,
+    "laugh": null,
+    "um": "Um,",
+    "cough": null,
+    "giggle": null,
+    "sigh": null,
+    "pause": "..."
+  },
+  "overrides": {},
+  "facts": {
+    "checkpoint": "VibeVoice 7B (community mirror)",
+    "voices": "clone",
+    "cloning": true,
+    "ownVoice": true,
+    "cannot": [
+      "breath",
+      "laugh",
+      "cough",
+      "giggle",
+      "sigh"
+    ],
+    "tricks": [
+      "The big checkpoint can clone a voice; the 0.5B one cannot",
+      "The weights come from a community mirror and may not load; the card text will say so if they do not",
+      "No tags exist, so every sound is dropped"
+    ]
+  },
+  "why": "VibeVoice's large checkpoint, which can clone the upbeat female clip, to hear what the extra size buys."
+}

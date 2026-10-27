@@ -1,0 +1,45 @@
+{
+  "id": "voxcpm",
+  "engine": "voxcpm",
+  "title": "VoxCPM2",
+  "host": "runes-gpu",
+  "voice": "ref-f3",
+  "speed": 1,
+  "settings": {
+    "cfg_value": 1.8,
+    "inference_timesteps": 25,
+    "normalize": false,
+    "retry_badcase": true,
+    "style_prompt": "cheerful, slightly faster"
+  },
+  "cues": {
+    "breath": null,
+    "laugh": null,
+    "um": "Um,",
+    "cough": null,
+    "giggle": null,
+    "sigh": null,
+    "pause": "…"
+  },
+  "overrides": {},
+  "facts": {
+    "checkpoint": "VoxCPM2 (about 8 GB)",
+    "voices": "clone",
+    "cloning": true,
+    "ownVoice": true,
+    "cannot": [
+      "breath",
+      "laugh",
+      "cough",
+      "giggle",
+      "sigh"
+    ],
+    "tricks": [
+      "VoxCPM2 takes a short style prompt in front of the text for a controlled clone",
+      "Its own text normaliser is off so digits arrive as written",
+      "Bad takes are retried automatically",
+      "No tags exist, so every sound is dropped"
+    ]
+  },
+  "why": "VoxCPM2 cloned from the upbeat clip with a cheerful style prompt, the control the older release lacked."
+}

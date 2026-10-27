@@ -1,0 +1,44 @@
+{
+  "id": "styletts2",
+  "engine": "styletts2",
+  "title": "StyleTTS2, emotive style",
+  "host": "thor-gpu",
+  "voice": "ref-f3",
+  "speed": 1,
+  "settings": {
+    "alpha": 0.3,
+    "beta": 0.85,
+    "embedding_scale": 2.0,
+    "diffusion_steps": 10,
+    "t": 0.7
+  },
+  "cues": {
+    "breath": null,
+    "laugh": "Haha!",
+    "um": "Um,",
+    "cough": null,
+    "giggle": null,
+    "sigh": "...",
+    "pause": "..."
+  },
+  "overrides": {},
+  "facts": {
+    "checkpoint": "StyleTTS2 LibriTTS",
+    "voices": "clone",
+    "cloning": true,
+    "ownVoice": true,
+    "cannot": [
+      "breath",
+      "cough",
+      "giggle"
+    ],
+    "tricks": [
+      "Beta and embedding scale are raised so the emotion follows the text more than the reference clip",
+      "Laugh and um are written out as words",
+      "Sigh and pause are written as an ellipsis, a sentence break",
+      "Backing embedding scale off to 1.5 is the fix if it gets too wild",
+      "Speed is ignored; this engine has no speed control"
+    ]
+  },
+  "why": "StyleTTS2 cloned from the upbeat female clip, with its style knobs pushed toward emotion because it has no tags to lean on."
+}

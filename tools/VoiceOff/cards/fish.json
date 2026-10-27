@@ -1,0 +1,37 @@
+{
+  "id": "fish",
+  "engine": "fish",
+  "title": "Fish S2-Pro, 5B",
+  "host": "runes-gpu",
+  "voice": "ref-f3",
+  "speed": 1,
+  "settings": {
+    "temperature": 0.85,
+    "top_p": 0.85,
+    "repetition_penalty": 1.1
+  },
+  "cues": {
+    "breath": "[inhales]",
+    "laugh": "[laughing]",
+    "um": "[hesitating] um,",
+    "cough": "[clear throat]",
+    "giggle": "[chuckling]",
+    "sigh": "[sighing]",
+    "pause": "[long-break]"
+  },
+  "overrides": {},
+  "facts": {
+    "checkpoint": "S2-Pro 5B",
+    "voices": "clone",
+    "cloning": true,
+    "ownVoice": true,
+    "cannot": [],
+    "tricks": [
+      "Tags are free-form words in square brackets (S2-Pro mapping: inhales, laughing, hesitating, chuckling, sighing), so any of these may or may not be honoured",
+      "Break and long break are its documented pauses",
+      "Um is written out as a word",
+      "Research-only licence"
+    ]
+  },
+  "why": "Fish's newest checkpoint with its free-form tags, cloned from the upbeat clip."
+}

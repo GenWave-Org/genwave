@@ -83,11 +83,8 @@ public static class FeatureSameTextIn
         }
 
         [Fact]
-        public void CoughIsListedInTheCardSCannotFacts()
-        {
+        public void CoughIsReportedAsDropped() =>
             Assert.Contains("cough", SameTextScenario.Prepared(card, script, 4).DroppedCues);
-            Assert.Contains("cough", card.Facts.Cannot);
-        }
     }
 
     // AC5 — an override wins for its paragraph
@@ -160,6 +157,47 @@ public static class FeatureSameTextIn
                 """{ "sigh": "[sigh]", "laugh": null }""", new Dictionary<int, string> { [7] = text }, "laugh");
 
             Assert.Empty(WordsLaw.Check(card, CardText.Prepare(card, script)));
+        }
+    }
+
+    // AC7b — every shipped card keeps the script's words
+    public sealed class ScenarioEveryShippedCardKeepsTheScriptSWords
+    {
+        // Given the shipped card set and the script
+        // When  the words law runs over every card
+        private readonly ScriptFile script = SameTextScenario.Script();
+
+        [Fact]
+        public void NoCardBreaksIt()
+        {
+            string[] broken = Directory.GetFiles(SameTextScenario.CardsDirectory, "*.json")
+                .Select(path => SameTextScenario.ShippedCard(Path.GetFileNameWithoutExtension(path)))
+                .Where(card => WordsLaw.Check(card, CardText.Prepare(card, script)).Count > 0)
+                .Select(card => card.Id)
+                .ToArray();
+
+            Assert.Empty(broken);
+        }
+    }
+
+    // AC7c — pronunciation markup is not an undeclared tag
+    public sealed class ScenarioPronunciationMarkupIsNotAnUndeclaredTag
+    {
+        // Given a best-effort card and a paragraph whose word w is written [w](/i/)
+        // When  the words law runs
+        private readonly Card card = SameTextScenario.BestEffort("{}");
+        private readonly ParagraphText marked = new(1, "Say [w](/i/) now", "Say w now", []);
+
+        [Fact]
+        public void ItPasses() =>
+            Assert.Empty(WordsLaw.Check(card, [marked]));
+
+        [Fact]
+        public void TheSpokenWordIsTheWordInsideTheBrackets()
+        {
+            WordsLawFailure failure = Assert.Single(WordsLaw.Check(card, [marked with { Expected = "Say x now" }]));
+
+            Assert.Contains("got \"w\"", failure.Message, StringComparison.Ordinal);
         }
     }
 

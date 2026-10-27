@@ -8,6 +8,8 @@ internal static class SameTextScenario
 {
     private static string ToolDirectory => Path.Combine(RepoRootLocator.Find(AppContext.BaseDirectory), "tools", "VoiceOff");
 
+    internal static string CardsDirectory => Path.Combine(ToolDirectory, "cards");
+
     internal static ScriptFile Script() => ScriptFile.Load(Path.Combine(ToolDirectory, "script", "script.json"));
 
     internal static Card ShippedCard(string id) =>

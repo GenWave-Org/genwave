@@ -36,10 +36,10 @@ internal static partial class CardReader
         bool? AsShipped = null,
         Dictionary<string, string>? Overrides = null);
 
-    [GeneratedRegex(@"\A[a-z0-9-]{3,40}\z")]
+    [GeneratedRegex(@"\A(?=.{3,40}\z)[a-z0-9]+(-[a-z0-9]+)*\z")]
     private static partial Regex IdShape();
 
-    /// <summary>Whether <paramref name="id"/> is a card id: 3 to 40 of a-z, 0-9 and hyphen.</summary>
+    /// <summary>Whether <paramref name="id"/> is a card id: strict kebab case, 3 to 40 of a-z and 0-9 in hyphen-separated words.</summary>
     internal static bool IsValidId(string? id) => id is not null && IdShape().IsMatch(id);
 
     /// <exception cref="InvalidDataException">The text breaks any single-card rule.</exception>
@@ -49,7 +49,7 @@ internal static partial class CardReader
         string id = dto.Id;
         if (!IdShape().IsMatch(id))
         {
-            throw new InvalidDataException($"Card file {fileName}: id \"{id}\" must be 3 to 40 of a-z, 0-9 and hyphen.");
+            throw new InvalidDataException($"Card file {fileName}: id \"{id}\" must be kebab case: 3 to 40 of a-z and 0-9 in words joined by single hyphens.");
         }
 
         Require(dto.Engine, "engine", id);

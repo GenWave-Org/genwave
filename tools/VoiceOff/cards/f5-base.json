@@ -1,0 +1,43 @@
+{
+  "id": "f5-base",
+  "engine": "f5",
+  "title": "F5, v1 Base",
+  "host": "thor-gpu",
+  "voice": "ref-f3",
+  "speed": 1.05,
+  "settings": {
+    "nfe_step": 32,
+    "cfg_strength": 2,
+    "sway_sampling_coef": -1
+  },
+  "cues": {
+    "breath": null,
+    "laugh": null,
+    "um": "Um,",
+    "cough": null,
+    "giggle": null,
+    "sigh": null,
+    "pause": "..."
+  },
+  "overrides": {},
+  "facts": {
+    "checkpoint": "F5TTS_v1_Base",
+    "voices": "clone",
+    "cloning": true,
+    "ownVoice": true,
+    "cannot": [
+      "breath",
+      "laugh",
+      "cough",
+      "giggle",
+      "sigh"
+    ],
+    "tricks": [
+      "The reference clip sets almost all of the style and emotion",
+      "Pause is written as an ellipsis, whose extra characters buy extra time",
+      "Digits get too little time because duration is estimated from byte count",
+      "Weights are non-commercial"
+    ]
+  },
+  "why": "F5 cloned from the upbeat clip at its documented settings; its style comes from the clip alone."
+}

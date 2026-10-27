@@ -1,0 +1,40 @@
+{
+  "id": "chatterbox",
+  "engine": "chatterbox",
+  "title": "Chatterbox, Turbo",
+  "host": "thor-gpu",
+  "voice": "ref-f3",
+  "speed": 1,
+  "settings": {
+    "model": "ResembleAI/chatterbox-turbo",
+    "temperature": 0.9,
+    "top_p": 0.95,
+    "repetition_penalty": 1.2
+  },
+  "cues": {
+    "breath": null,
+    "laugh": "[laugh]",
+    "um": "Um,",
+    "cough": "[cough]",
+    "giggle": "[chuckle]",
+    "sigh": "[sigh]",
+    "pause": "..."
+  },
+  "overrides": {},
+  "facts": {
+    "checkpoint": "Chatterbox Turbo 350M",
+    "voices": 1,
+    "cloning": true,
+    "ownVoice": true,
+    "cannot": [
+      "breath"
+    ],
+    "tricks": [
+      "Laugh, cough, giggle and sigh use Turbo's native tags",
+      "Giggle uses the chuckle tag",
+      "Pause is written as three plain dots, never the single ellipsis character, which Chatterbox turns into a comma",
+      "Turbo ignores exaggeration and cfg weight, so the sampler is the expressive knob"
+    ]
+  },
+  "why": "Chatterbox Turbo with its own sound tags and a slightly hotter sampler, cloned from the upbeat female clip."
+}
