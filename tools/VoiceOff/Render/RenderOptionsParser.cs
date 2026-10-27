@@ -13,6 +13,9 @@ internal static class RenderOptionsParser
     /// <summary>The engine profiles shipped beside the tool.</summary>
     internal static string DefaultEngines() => Path.Combine(AppContext.BaseDirectory, "engines");
 
+    /// <summary>The script shipped beside the tool.</summary>
+    internal static string DefaultScript() => Path.Combine(AppContext.BaseDirectory, "script", "script.json");
+
     /// <summary>The card files shipped beside the tool.</summary>
     internal static string DefaultCards() => Path.Combine(AppContext.BaseDirectory, "cards");
 
@@ -78,14 +81,13 @@ internal static class RenderOptionsParser
             return false;
         }
 
-        string baseDirectory = AppContext.BaseDirectory;
         options = new RenderOptions(
             runId,
             values.GetValueOrDefault("--card"),
             Path.GetFullPath(values.GetValueOrDefault("--root") ?? DefaultRoot()),
             Path.GetFullPath(values.GetValueOrDefault("--engines") ?? DefaultEngines()),
             Path.GetFullPath(values.GetValueOrDefault("--cards") ?? DefaultCards()),
-            Path.GetFullPath(values.GetValueOrDefault("--script") ?? Path.Combine(baseDirectory, "script", "script.json")),
+            Path.GetFullPath(values.GetValueOrDefault("--script") ?? DefaultScript()),
             dryRun);
         error = null;
         return true;

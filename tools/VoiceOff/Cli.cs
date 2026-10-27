@@ -1,4 +1,5 @@
 using GenWave.VoiceOff.Render;
+using GenWave.VoiceOff.Score;
 using GenWave.VoiceOff.Serving;
 
 namespace GenWave.VoiceOff;
@@ -10,11 +11,10 @@ internal static class Cli
     [
         new("render", "Render the script with each voice card, a paragraph at a time.", "voiceoff render --run <id> [--card <id>] [--root <dir>] [--engines <dir>] [--cards <dir>] [--script <file>] [--dry-run]", "voiceoff render --run first --dry-run"),
         new("serve", "Serve a run's cards on a web page for ranking, and keep the judgement.", "voiceoff serve --run <run-id> --port 8765 [--root <dir>] [--bind <ip>] [--engines <dir>] [--cards <dir>]"),
-        new("score", "Write the ranking of a run to RESULTS.md.", "voiceoff score --run <run-id> [--out <file>]"),
+        new("score", "Write the ranking of a run to RESULTS.md.", "voiceoff score --run <run-id> [--root <dir>] [--cards <dir>] [--engines <dir>] [--script <file>] [--out <file>]"),
     ];
 
     internal const int Ok = 0;
-    internal const int NotBuilt = 1;
     internal const int UsageError = 2;
 
     /// <summary>The synchronous entry for callers with no async context: every verb with the real services, never cancelled.</summary>
@@ -50,10 +50,9 @@ internal static class Cli
             return await ServeCommand.RunAsync(args[1..], output, error, ct);
         }
 
-        if (Verbs.Any(v => string.Equals(v.Name, verb, StringComparison.Ordinal)))
+        if (string.Equals(verb, "score", StringComparison.Ordinal))
         {
-            error.WriteLine($"The {verb} verb is not built yet.");
-            return NotBuilt;
+            return await ScoreCommand.RunAsync(args[1..], output, error, ct);
         }
 
         error.WriteLine($"Unknown verb '{verb}'. Run 'voiceoff --help' to see the verbs.");

@@ -82,7 +82,7 @@ internal sealed class ServeRun
             layout,
             manifest,
             cards.Cards.ToDictionary(c => c.Id, StringComparer.Ordinal),
-            new JudgementStore(Path.Combine(layout.RunDirectory, "judgement.json"), time));
+            new JudgementStore(layout.JudgementPath, time));
 
         // A judgement file that does not parse stops serve here, not on the judge's first page load.
         _ = await run.Judgements.ReadAsync(ct);

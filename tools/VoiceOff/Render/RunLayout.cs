@@ -14,6 +14,8 @@ internal sealed class RunLayout(string root, string runId)
 
     internal string RunJsonPath => Path.Combine(RunDirectory, "run.json");
 
+    internal string JudgementPath => Path.Combine(RunDirectory, "judgement.json");
+
     internal string RendersPath => Path.Combine(RunDirectory, "renders.jsonl");
 
     /// <summary>The folder holding one card's raw paragraphs.</summary>
