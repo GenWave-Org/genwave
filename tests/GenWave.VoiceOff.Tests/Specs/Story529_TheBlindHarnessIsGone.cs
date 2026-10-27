@@ -1,7 +1,11 @@
 // STORY-529 — The blind harness is gone and nothing ships (gh-#614 · SPEC F217 · PLAN T660)
 //
-// BDD specification — xUnit. Every fact is pending at plan time (2026-10-26); the named task
-// activates its facts, watches them fail, then makes them pass.
+// BDD specification — xUnit. LIVE at T660, except GauntletDoesNotExist (pending T663).
+// AC4 and AC7 (the slug fence over scratch trees) live in GenWave.Architecture.Tests'
+// Story529_SlugFenceDataFolders, because the fence is internal to that assembly.
+
+using System.Xml.Linq;
+using GenWave.VoiceOff.Tests.Support;
 
 namespace GenWave.VoiceOff.Tests.Specs;
 
@@ -16,12 +20,28 @@ public static class FeatureTheBlindHarnessIsGone
     {
         // Given the built tool
         // When  voiceoff --help runs
+        private readonly string[] verbs;
 
-        [Fact(Skip = "pending: T660 — see docs/PLAN.md")]
-        public void ItListsRenderServeAndScore() => Assert.Fail("pending: T660 — it lists render, serve and score");
+        public ScenarioHelpListsThreeVerbs()
+        {
+            StringWriter output = new();
+            Cli.Run(["--help"], output, TextWriter.Null);
+            verbs = output.ToString()
+                .Split('\n')
+                .SkipWhile(line => !line.StartsWith("Verbs:", StringComparison.Ordinal))
+                .Skip(1)
+                .Where(line => line.StartsWith("  ", StringComparison.Ordinal) && !line.StartsWith("   ", StringComparison.Ordinal)
+                    && line.Trim().Length > 0)
+                .Select(line => line.Trim().Split(' ')[0])
+                .ToArray();
+        }
 
-        [Fact(Skip = "pending: T660 — see docs/PLAN.md")]
-        public void ItListsNothingElse() => Assert.Fail("pending: T660 — it lists nothing else");
+        [Fact]
+        public void ItListsRenderServeAndScore() =>
+            Assert.Equal(["render", "score", "serve"], verbs.Order(StringComparer.Ordinal).ToArray());
+
+        [Fact]
+        public void ItListsNothingElse() => Assert.Equal(3, verbs.Length);
     }
 
     // AC2 — the old folders are gone
@@ -30,8 +50,13 @@ public static class FeatureTheBlindHarnessIsGone
         // Given tools/VoiceOff
         // When  its folders are listed
 
-        [Fact(Skip = "pending: T660 — see docs/PLAN.md")]
-        public void PairingReelingAndTimingDoNotExist() => Assert.Fail("pending: T660 — Pairing, Reeling and Timing do not exist");
+        [Fact]
+        public void PairingReelingAndTimingDoNotExist()
+        {
+            string tool = Path.Combine(RepoRootLocator.Find(AppContext.BaseDirectory), "tools", "VoiceOff");
+            string[] present = new[] { "Pairing", "Reeling", "Timing" }.Where(name => Directory.Exists(Path.Combine(tool, name))).ToArray();
+            Assert.Empty(present);
+        }
 
         [Fact(Skip = "pending: T663 — see docs/PLAN.md")]
         public void GauntletDoesNotExist() => Assert.Fail("pending: T663 — gauntlet/ does not exist");
@@ -43,18 +68,17 @@ public static class FeatureTheBlindHarnessIsGone
         // Given tests/GenWave.VoiceOff.Tests/Specs
         // When  its files are listed
 
-        [Fact(Skip = "pending: T660 — see docs/PLAN.md")]
-        public void Story496ToStory500DoNotExist() => Assert.Fail("pending: T660 — Story496 to Story500 do not exist");
-    }
-
-    // AC4 — the slug fence allows the data folders
-    public sealed class ScenarioTheSlugFenceAllowsTheDataFolders
-    {
-        // Given the L12 law
-        // When  a slug is planted under cards/ and under script/
-
-        [Fact(Skip = "pending: T660 — see docs/PLAN.md")]
-        public void TheLawPasses() => Assert.Fail("pending: T660 — the law passes");
+        [Fact]
+        public void Story496ToStory500DoNotExist()
+        {
+            string specs = Path.Combine(RepoRootLocator.Find(AppContext.BaseDirectory), "tests", "GenWave.VoiceOff.Tests", "Specs");
+            string[] present = Directory.EnumerateFiles(specs, "Story*.cs")
+                .Select(path => Path.GetFileName(path))
+                .Where(name => new[] { "Story496_", "Story497_", "Story498_", "Story499_", "Story500_" }
+                    .Any(prefix => name.StartsWith(prefix, StringComparison.Ordinal)))
+                .ToArray();
+            Assert.Empty(present);
+        }
     }
 
     // AC5 — the tool still references only Tts and Loudness
@@ -62,9 +86,16 @@ public static class FeatureTheBlindHarnessIsGone
     {
         // Given VoiceOff.csproj
         // When  its ProjectReferences are listed
+        private readonly string[] references = XDocument
+            .Load(Path.Combine(RepoRootLocator.Find(AppContext.BaseDirectory), "tools", "VoiceOff", "VoiceOff.csproj"))
+            .Descendants("ProjectReference")
+            .Select(e => Path.GetFileNameWithoutExtension(((string?)e.Attribute("Include") ?? string.Empty).Replace('\\', '/')))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
 
-        [Fact(Skip = "pending: T660 — see docs/PLAN.md")]
-        public void TheyAreGenWaveLoudnessAndGenWaveTts() => Assert.Fail("pending: T660 — they are GenWave.Loudness and GenWave.Tts");
+        [Fact]
+        public void TheyAreGenWaveLoudnessAndGenWaveTts() =>
+            Assert.Equal(["GenWave.Loudness", "GenWave.Tts"], references);
     }
 
     // ---------------------------------------------------------------------
@@ -77,17 +108,7 @@ public static class FeatureTheBlindHarnessIsGone
         // Given the built tool
         // When  voiceoff pair runs
 
-        [Fact(Skip = "pending: T660 — see docs/PLAN.md")]
-        public void ItExits2() => Assert.Fail("pending: T660 — it exits 2");
-    }
-
-    // AC7 — a slug in code still fails the fence
-    public sealed class ScenarioASlugInCodeStillFailsTheFence
-    {
-        // Given the L12 law
-        // When  a slug is planted under Render/
-
-        [Fact(Skip = "pending: T660 — see docs/PLAN.md")]
-        public void TheLawFails() => Assert.Fail("pending: T660 — the law fails");
+        [Fact]
+        public void ItExits2() => Assert.Equal(2, Cli.Run(["pair"], TextWriter.Null, TextWriter.Null));
     }
 }

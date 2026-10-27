@@ -1,12 +1,12 @@
-// STORY-493 — Render scores speed and footprint (gh-#614 · SPEC F214.7, F214.8 · PLAN T610, T611)
+// STORY-493 — Render scores speed (the footprint facts left with the resource sampler in T660) (gh-#614 · SPEC F214.7, F214.8 · PLAN T610, T611)
 //
 // BDD specification — xUnit. Every fact is pending at plan time (2026-10-21); the named task
 // activates its facts, watches them fail, then makes them pass.
 
 using System.Text.RegularExpressions;
+using GenWave.VoiceOff.Render;
 using GenWave.VoiceOff.Speech;
 using GenWave.VoiceOff.Tests.Support;
-using GenWave.VoiceOff.Timing;
 
 namespace GenWave.VoiceOff.Tests.Specs;
 
@@ -24,7 +24,7 @@ public static class FeatureRenderScoresSpeedAndFootprint
 
         [Fact]
         public void RtfIs05() =>
-            Assert.Equal(0.5, new TimingRecord("alpha", RenderLane.Plain, "hard-01", EngineTier.Cpu, 2000, 4000, null, null, true, null).Rtf);
+            Assert.Equal(0.5, new TimingRecord("alpha", "hard-01", EngineTier.Cpu, 2000, 4000, true, null).Rtf);
     }
 
     // AC2 — median and p95
@@ -35,7 +35,7 @@ public static class FeatureRenderScoresSpeedAndFootprint
 
         private static RtfSummary Summary() =>
             RtfSummary.From(Enumerable.Range(1, 20).Select(i =>
-                new TimingRecord("alpha", RenderLane.Plain, $"line-{i}", EngineTier.Cpu, i * 1000, 1000, null, null, true, null)))
+                new TimingRecord("alpha", $"line-{i}", EngineTier.Cpu, i * 1000, 1000, true, null)))
             ?? throw new InvalidOperationException("expected a summary");
 
         [Fact]
@@ -43,40 +43,6 @@ public static class FeatureRenderScoresSpeedAndFootprint
 
         [Fact]
         public void P95Is1905() => Assert.Equal(19.05, Summary().P95, 10);
-    }
-
-    // AC3 — RSS peak from docker stats
-    public sealed class ScenarioRSSPeakFromDockerStats
-    {
-        // Given docker stats lines reading 512MiB, 1.2GiB, 900MiB
-        // When  the sampler is parsed
-
-        [Fact]
-        public async Task PeakRSSIs1229MB()
-        {
-            ResourceUsage usage = await ScriptedResourceProbe.SampleAsync(["512MiB / 4GiB", "1.2GiB / 4GiB", "900MiB / 4GiB"], ["0"]);
-            Assert.Equal(1229, usage.PeakRssMb);
-        }
-    }
-
-    // AC4 — VRAM is the container's peak
-    public sealed class ScenarioVRAMIsTheContainersPeak
-    {
-        // Given the container's processes 101, 102 and GPU samples where they use 800, 3600, 3100 MiB in total (other processes ignored)
-        // When  the sampler is parsed
-
-        [Fact]
-        public async Task PeakVRAMIs3600MB()
-        {
-            ResourceUsage usage = await ScriptedResourceProbe.SampleAsync(
-                ["1MiB", "1MiB", "1MiB"],
-                [
-                    $"101, 500\n{ScriptedResourceProbe.ForeignGpuLine}\n102, 300",
-                    $"101, 1800\n102, 1800\n{ScriptedResourceProbe.ForeignGpuLine}",
-                    $"{ScriptedResourceProbe.ForeignGpuLine}\n101, 3000\n102, 100",
-                ]);
-            Assert.Equal(3600, usage.PeakVramMb);
-        }
     }
 
     // AC5 — the tier is a run fact
@@ -155,45 +121,13 @@ public static class FeatureRenderScoresSpeedAndFootprint
 
         [Fact]
         public void StdoutCarries6ClipLinesEngineLineIdRtf() =>
-            Assert.Equal(6, run.OutputLines.Count(l => Regex.IsMatch(l, @"^(alpha|beta) plain [a-z0-9-]+ rtf \d+\.\d\d$")));
+            Assert.Equal(6, run.OutputLines.Count(l => Regex.IsMatch(l, @"^(alpha|beta) [a-z0-9-]+ rtf \d+\.\d\d$")));
 
         [Fact]
         public void ASummaryPerEngine() =>
             Assert.Equal(
                 ["alpha: 3 clips, 0 failed", "beta: 3 clips, 0 failed"],
                 run.OutputLines.Where(l => l.Contains(" clips, ", StringComparison.Ordinal)).Select(l => l[..l.IndexOf(", rtf", StringComparison.Ordinal)]));
-
-        public void Dispose() => scenario.Dispose();
-    }
-
-    // ---------------------------------------------------------------------
-    // SAD PATH
-    // ---------------------------------------------------------------------
-
-    // AC8 — no GPU on the cpu tier
-    public sealed class ScenarioNoGPUOnTheCpuTier : IDisposable
-    {
-        // Given `render --tier cpu` on a host with no nvidia-smi
-        // When  the run finishes
-
-        private readonly RenderScenario scenario = new();
-        private readonly RenderRun run;
-
-        public ScenarioNoGPUOnTheCpuTier()
-        {
-            EngineStubServer stub = scenario.StartStubAsync().GetAwaiter().GetResult();
-            scenario.AddEngine("alpha", stub.BaseUri);
-            run = scenario.Run(scenario.EnginesDirectory, scenario.GauntletDirectory(RenderScenario.ThreeLines()), "cpu");
-        }
-
-        [Fact]
-        public void VRAMIs() => Assert.Contains(run.OutputLines, l => l.StartsWith("alpha: ", StringComparison.Ordinal) && l.Contains("VRAM —,", StringComparison.Ordinal));
-
-        [Fact]
-        public void NvidiaSmiIsNeverAsked() => Assert.Equal(0, run.GpuReads);
-
-        [Fact]
-        public void TheRunIsOk() => Assert.Equal(0, run.Exit);
 
         public void Dispose() => scenario.Dispose();
     }

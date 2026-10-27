@@ -1,7 +1,7 @@
 namespace GenWave.VoiceOff.Tests.Support;
 
-/// <summary>What one <c>render</c> call left behind: its exit code, both streams, the single run folder, and how often nvidia-smi was asked.</summary>
-internal sealed record RenderRun(int Exit, string Output, string Error, string? RunDirectory, int GpuReads)
+/// <summary>What one <c>render</c> call left behind: its exit code, both streams and the single run folder.</summary>
+internal sealed record RenderRun(int Exit, string Output, string Error, string? RunDirectory)
 {
     internal string[] OutputLines => Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 

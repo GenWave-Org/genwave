@@ -3,13 +3,12 @@ using System.Text.Json.Nodes;
 using GenWave.VoiceOff.Audio;
 using GenWave.VoiceOff.Render;
 using GenWave.VoiceOff.Speech;
-using GenWave.VoiceOff.Timing;
 
 namespace GenWave.VoiceOff.Tests.Support;
 
 /// <summary>
 /// Drives the real <c>render</c> verb through <see cref="Cli.Run(string[], TextWriter, TextWriter, RenderServices, CancellationToken)"/> over fixture
-/// engine and gauntlet folders in a temp root, with stub engines, a fake docker and a scripted resource probe. The real loudness match and ffmpeg run.
+/// engine and gauntlet folders in a temp root, with stub engines and a fake docker. The real loudness match and ffmpeg run.
 /// </summary>
 internal sealed class RenderScenario : IDisposable
 {
@@ -19,7 +18,6 @@ internal sealed class RenderScenario : IDisposable
     internal const string TwoSentences = "First sentence is right here. Second sentence follows right after it.";
 
     private static readonly Lazy<byte[]> LowSineWav = new(() => Synthesize(330));
-    private static readonly Lazy<byte[]> HighSineWav = new(() => Synthesize(660));
 
     private readonly EngineDirectoryFixture engines = new();
     private readonly GauntletFixtureDirectory gauntlets = new();
@@ -33,21 +31,16 @@ internal sealed class RenderScenario : IDisposable
 
     internal string Root { get; }
 
-    /// <summary>
-    /// Starts a stub that answers with a real, loudness-measurable WAV. By default the profile's first voice (<c>v1</c>) gets a low tone and
-    /// every other voice a high one, so voiceSelect passes; <paramref name="sameAudioForEveryVoice"/> gives all voices the one tone.
-    /// </summary>
-    internal async Task<EngineStubServer> StartStubAsync(bool sameAudioForEveryVoice = false)
+    /// <summary>Starts a stub that answers every voice with a real, loudness-measurable WAV.</summary>
+    internal async Task<EngineStubServer> StartStubAsync()
     {
-        EngineStubServer stub = sameAudioForEveryVoice
-            ? await EngineStubServer.StartAsync(speechBody: LowSineWav.Value)
-            : await EngineStubServer.StartAsync(speechBodyForVoice: voice => voice == "v1" ? LowSineWav.Value : HighSineWav.Value);
+        EngineStubServer stub = await EngineStubServer.StartAsync(speechBody: LowSineWav.Value);
         stubs.Add(stub);
         return stub;
     }
 
     /// <summary>Adds an engine profile whose endpoint is <paramref name="endpoint"/>. The first one added is the baseline.</summary>
-    internal void AddEngine(string slug, Uri endpoint, bool markupCue = false, string[]? tiers = null, int? timeoutSeconds = null, double? speed = null)
+    internal void AddEngine(string slug, Uri endpoint, string[]? tiers = null, int? timeoutSeconds = null, double? speed = null)
     {
         JsonObject node = EngineProfileJson.Valid(slug, baseline: engineFiles.Count == 0);
         node["endpoint"] = endpoint.AbsoluteUri;
@@ -61,11 +54,6 @@ internal sealed class RenderScenario : IDisposable
         if (speed is double s)
         {
             node["speed"] = s;
-        }
-
-        if (!markupCue)
-        {
-            node["markup"] = JsonNode.Parse("""{ "pause": null, "laugh": null, "sigh": null, "breath": null, "um": null, "emphasis": null }""");
         }
 
         engineFiles.Add((slug + ".json", node.ToJsonString()));
@@ -102,17 +90,15 @@ internal sealed class RenderScenario : IDisposable
     /// <summary>Like <see cref="Run(FakeDockerInspector, CancellationToken, string, string, string, string[])"/> with <c>--root</c> pointing at <paramref name="root"/>.</summary>
     internal RenderRun RunAt(string root, FakeDockerInspector docker, CancellationToken ct, string enginesDirectory, string gauntletDirectory, string tier, params string[] extra)
     {
-        // The container answers one reading: the sampler also ticks on a real one-second timer, and later ticks get no answer and are skipped.
-        ScriptedResourceProbe probe = new(["310MiB / 4GiB"], [], null);
         using HttpClient http = SpeechClient.CreateHttpClient();
-        RenderServices services = new(docker, probe, http, new FixedClockTimeProvider(new DateTimeOffset(2026, 10, 22, 19, 30, 0, TimeSpan.Zero)), new LoudnessMatch(), "test-host");
+        RenderServices services = new(docker, http, new FixedClockTimeProvider(new DateTimeOffset(2026, 10, 22, 19, 30, 0, TimeSpan.Zero)), new LoudnessMatch(), "test-host");
         string[] args = ["render", "--tier", tier, "--root", root, "--engines", enginesDirectory, "--gauntlet", gauntletDirectory, .. extra];
         StringWriter output = new();
         StringWriter error = new();
         int exit = Cli.Run(args, output, error, services, ct);
         string[] folders = Directory.Exists(root) ? Directory.GetDirectories(root) : [];
         string? runDirectory = folders.Length == 1 ? folders[0] : null;
-        return new RenderRun(exit, output.ToString(), error.ToString(), runDirectory, probe.GpuReads);
+        return new RenderRun(exit, output.ToString(), error.ToString(), runDirectory);
     }
 
     public void Dispose()

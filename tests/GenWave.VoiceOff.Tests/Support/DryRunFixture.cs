@@ -1,6 +1,5 @@
 using GenWave.VoiceOff.Render;
 using GenWave.VoiceOff.Speech;
-using GenWave.VoiceOff.Timing;
 
 namespace GenWave.VoiceOff.Tests.Support;
 
@@ -16,11 +15,11 @@ internal sealed class DryRunFixture : IDisposable
     private readonly string gauntlet;
     private readonly FakeDockerInspector docker = new(new ContainerState(true, true, "10.0.0.2"));
 
-    internal DryRunFixture(bool secondEngineGpuOnly = false, bool markupLanes = true)
+    internal DryRunFixture(bool secondEngineGpuOnly = false)
     {
         stub = scenario.StartStubAsync().GetAwaiter().GetResult();
-        scenario.AddEngine("alpha", stub.BaseUri, markupCue: markupLanes);
-        scenario.AddEngine("beta", stub.BaseUri, markupCue: markupLanes, tiers: secondEngineGpuOnly ? ["gpu"] : null);
+        scenario.AddEngine("alpha", stub.BaseUri);
+        scenario.AddEngine("beta", stub.BaseUri, tiers: secondEngineGpuOnly ? ["gpu"] : null);
         engines = scenario.EnginesDirectory;
         gauntlet = scenario.GauntletDirectory(Enumerable.Range(1, 10).Select(i => GauntletFixtureDirectory.Line($"leadin-{i}", "LeadIn", RenderScenario.Eight)).ToArray());
     }
@@ -37,7 +36,7 @@ internal sealed class DryRunFixture : IDisposable
         TimingLog log = new(new RunLayout(Root, runId).TimingPath);
         foreach (double wall in wallMs)
         {
-            log.AppendAsync(new TimingRecord("alpha", RenderLane.Plain, "leadin-1", EngineTier.Cpu, Math.Abs(wall), 3000, null, null, wall >= 0, null), CancellationToken.None)
+            log.AppendAsync(new TimingRecord("alpha", "leadin-1", EngineTier.Cpu, Math.Abs(wall), 3000, wall >= 0, null), CancellationToken.None)
                 .GetAwaiter().GetResult();
         }
     }

@@ -4,8 +4,8 @@ using System.Text.Json.Serialization;
 namespace GenWave.VoiceOff.Listening;
 
 /// <summary>
-/// The fail-closed reader for the listening files and the run files score reads (run.json, gates.json): duplicate keys, unknown members, missing members, wrong types and numeric enums are all
-/// refused. Enums read and write as camelCase strings (<c>"a"</c>, <c>"tie"</c>, <c>"plain"</c>).
+/// The fail-closed reader for the run files (run.json and the judgement file): duplicate keys, unknown members, missing members, wrong types and numeric enums are all
+/// refused. Enums read and write as camelCase strings (<c>"plain"</c>).
 /// </summary>
 internal static class StrictJson
 {

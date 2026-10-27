@@ -13,7 +13,7 @@ public static class FeatureRenderDryRun
     // AC1 — clip count
     public sealed class ScenarioClipCount : IDisposable
     {
-        // Given 2 attempted engines, 2 lanes, 10 lines
+        // Given 2 attempted engines, 10 lines
         // When  `render --dry-run` runs
 
         private readonly DryRunFixture fixture = new();
@@ -22,7 +22,7 @@ public static class FeatureRenderDryRun
         public ScenarioClipCount() => run = fixture.Run();
 
         [Fact]
-        public void ItPrints40Clips() => Assert.Contains("Dry run: 40 clips across 2 engines", run.OutputLines);
+        public void ItPrints20Clips() => Assert.Contains("Dry run: 20 clips across 2 engines", run.OutputLines);
 
         [Fact]
         public void ItExitsZero() => Assert.Equal(0, run.Exit);
@@ -34,7 +34,7 @@ public static class FeatureRenderDryRun
     public sealed class ScenarioETAFromTheLastRun : IDisposable
     {
         // Given a previous timing.jsonl with median wall 5 s
-        // When  `render --dry-run` runs for 40 clips
+        // When  `render --dry-run` runs for 20 clips
 
         private readonly DryRunFixture fixture = new();
         private readonly RenderRun run;
@@ -46,7 +46,7 @@ public static class FeatureRenderDryRun
         }
 
         [Fact]
-        public void ItPrints4Min() => Assert.Contains("ETA ~4 min (median 5.0 s per clip from run 20261021T100000Z-cpu)", run.OutputLines);
+        public void ItPrints2Min() => Assert.Contains("ETA ~2 min (median 5.0 s per clip from run 20261021T100000Z-cpu)", run.OutputLines);
 
         public void Dispose() => fixture.Dispose();
     }
@@ -67,9 +67,6 @@ public static class FeatureRenderDryRun
 
         [Fact]
         public void DockerWasNeverAsked() => Assert.Equal(0, fixture.DockerCalls);
-
-        [Fact]
-        public void NvidiaSmiWasNeverAsked() => Assert.Equal(0, run.GpuReads);
 
         public void Dispose() => fixture.Dispose();
     }
@@ -122,7 +119,7 @@ public static class FeatureRenderDryRun
         }
 
         [Fact]
-        public void ItReadsTheNewerRun() => Assert.Contains("ETA ~4 min (median 5.0 s per clip from run 20261021T100000Z-cpu)", run.OutputLines);
+        public void ItReadsTheNewerRun() => Assert.Contains("ETA ~2 min (median 5.0 s per clip from run 20261021T100000Z-cpu)", run.OutputLines);
 
         public void Dispose() => fixture.Dispose();
     }
@@ -143,7 +140,7 @@ public static class FeatureRenderDryRun
         }
 
         [Fact]
-        public void TheMedianIgnoresThem() => Assert.Contains("ETA ~4 min (median 5.0 s per clip from run 20261021T100000Z-cpu)", run.OutputLines);
+        public void TheMedianIgnoresThem() => Assert.Contains("ETA ~2 min (median 5.0 s per clip from run 20261021T100000Z-cpu)", run.OutputLines);
 
         public void Dispose() => fixture.Dispose();
     }
@@ -151,7 +148,7 @@ public static class FeatureRenderDryRun
     // The engines a tier skips are explained, and left out of the count.
     public sealed class ScenarioAnEngineNotAttemptedAtTheTier : IDisposable
     {
-        // Given a second engine that is gpu-only (2 lanes each, 10 lines)
+        // Given a second engine that is gpu-only (10 lines each)
         // When  `render --dry-run` runs on cpu
 
         private readonly DryRunFixture fixture = new(secondEngineGpuOnly: true);
@@ -160,7 +157,7 @@ public static class FeatureRenderDryRun
         public ScenarioAnEngineNotAttemptedAtTheTier() => run = fixture.Run();
 
         [Fact]
-        public void OnlyTheAttemptedEngineIsCounted() => Assert.Contains("Dry run: 20 clips across 1 engine", run.OutputLines);
+        public void OnlyTheAttemptedEngineIsCounted() => Assert.Contains("Dry run: 10 clips across 1 engine", run.OutputLines);
 
         [Fact]
         public void TheSkippedEngineIsNamed() => Assert.Contains("beta: not attempted at tier cpu", run.OutputLines);

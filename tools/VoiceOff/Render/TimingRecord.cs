@@ -1,6 +1,6 @@
 using GenWave.VoiceOff.Speech;
 
-namespace GenWave.VoiceOff.Timing;
+namespace GenWave.VoiceOff.Render;
 
 /// <summary>
 /// One line of <c>timing.jsonl</c> (ARCHITECTURE "Render record"): how long one render took against how much audio it made.
@@ -8,13 +8,10 @@ namespace GenWave.VoiceOff.Timing;
 /// </summary>
 internal sealed record TimingRecord(
     string Engine,
-    RenderLane Lane,
     string Line,
     EngineTier Tier,
     double WallMs,
     double AudioMs,
-    long? RssMb,
-    long? VramMb,
     bool Ok,
     string? Error,
     bool? Linear = null)

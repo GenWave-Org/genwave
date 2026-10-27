@@ -1,6 +1,6 @@
 using GenWave.VoiceOff.Processes;
 
-namespace GenWave.VoiceOff.Tests.Timing;
+namespace GenWave.VoiceOff.Tests.Processes;
 
 public sealed class CliRunnerTests
 {

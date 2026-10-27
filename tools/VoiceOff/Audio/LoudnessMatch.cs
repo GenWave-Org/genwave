@@ -5,7 +5,7 @@ using GenWave.Loudness;
 namespace GenWave.VoiceOff.Audio;
 
 /// <summary>
-/// Matches a render to the tool's loudness target before it is paired, reeled, or listened to (SPEC F214.4):
+/// Matches a render to the tool's loudness target before it is listened to (SPEC F214.4):
 /// a two-pass ffmpeg <c>loudnorm</c> (measure, then linear apply), a verify of the result, and the
 /// <see cref="ClipScrubber"/> format. A peaky clip (peaks more than 14.5 dB over its loudness) cannot take a linear
 /// gain under the true-peak ceiling, and loudnorm's dynamic fallback lands short clips 1–4 LU under the target; only

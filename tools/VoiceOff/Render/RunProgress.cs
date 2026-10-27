@@ -10,12 +10,12 @@ internal sealed class RunProgress(int plannedClips)
     private int planned = plannedClips;
     private int done;
 
-    /// <summary>The clips an attempted engine will render: every gauntlet line in every lane of its plan.</summary>
+    /// <summary>The clips an attempted engine will render: every gauntlet line.</summary>
     internal static int ClipsFor(EngineProfile profile, GauntletSet set)
     {
         ArgumentNullException.ThrowIfNull(profile);
         ArgumentNullException.ThrowIfNull(set);
-        return set.Lines.Count * LanePlan.For(profile).Count;
+        return set.Lines.Count;
     }
 
     /// <summary>An engine that never started rendering: its clips leave the total.</summary>

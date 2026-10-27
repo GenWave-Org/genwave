@@ -1,13 +1,11 @@
 using GenWave.VoiceOff.Script;
 using GenWave.VoiceOff.Speech;
-using GenWave.VoiceOff.Timing;
 
 namespace GenWave.VoiceOff.Render;
 
 /// <summary>
-/// <c>voiceoff render</c> (SPEC F214.1 to F214.8): the gauntlet through every selected engine and lane, loudness-matched into a new
-/// run folder with <c>run.json</c>, <c>timing.jsonl</c> and <c>gates.json</c>. An engine that is not attempted, unreachable or failing a
-/// gate is a row in the output, never a failed run.
+/// <c>voiceoff render</c> (SPEC F214.1 to F214.8): the gauntlet through every selected engine, loudness-matched into a new
+/// run folder with <c>run.json</c> and <c>timing.jsonl</c>. An engine that is not attempted, unreachable or failing its container gate is a row in the output, never a failed run.
 /// </summary>
 internal static class RenderCommand
 {
@@ -109,22 +107,11 @@ internal static class RenderCommand
         output.WriteLine($"Run {layout.RunId} -> {layout.RunDirectory}");
 
         EngineProfile[] selected = SelectEngines(profiles, options);
-        List<GateEntry> entries = [];
-        try
+        EngineRun run = new(services, options, set, layout, new TimingLog(layout.TimingPath), new RunProgress(selected.Sum(p => RunProgress.ClipsFor(p, set))), output);
+        run.DropTierSkips(selected);
+        foreach (EngineProfile profile in selected)
         {
-            EngineRun run = new(services, options, set, layout, new TimingLog(layout.TimingPath),
-                new RunProgress(selected.Sum(p => RunProgress.ClipsFor(p, set))), output);
-            run.DropTierSkips(selected);
-            foreach (EngineProfile profile in selected)
-            {
-                EngineRunResult result = await run.RunAsync(profile, ct);
-                entries.Add(result.Gates);
-                output.WriteLine(Summary(result));
-            }
-        }
-        finally
-        {
-            await new GatesFile(entries).WriteAsync(layout.GatesJsonPath, CancellationToken.None);
+            output.WriteLine(await run.RunAsync(profile, ct));
         }
 
         return Ok;
@@ -135,11 +122,4 @@ internal static class RenderCommand
         .Where(p => options.Engines.Count == 0 || options.Engines.Contains(p.Slug, StringComparer.Ordinal))
         .OrderBy(p => p.Slug, StringComparer.Ordinal)
         .ToArray();
-
-    private static string Summary(EngineRunResult result) => result.Gates switch
-    {
-        { Attempted: false } skipped => EngineSummary.ForNotAttempted(skipped),
-        { Container.Passed: false } failed => EngineSummary.ForFailedContainer(failed),
-        _ => EngineSummary.For(result),
-    };
 }

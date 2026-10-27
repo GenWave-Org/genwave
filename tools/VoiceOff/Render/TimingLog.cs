@@ -2,7 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace GenWave.VoiceOff.Timing;
+namespace GenWave.VoiceOff.Render;
 
 /// <summary>An append-only <c>timing.jsonl</c>: one JSON record per line, written whole so a crash can tear at most the last line.</summary>
 internal sealed class TimingLog(string path)

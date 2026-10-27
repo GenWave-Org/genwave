@@ -1,4 +1,4 @@
-namespace GenWave.VoiceOff.Timing;
+namespace GenWave.VoiceOff.Render;
 
 /// <summary>
 /// Median and p95 real-time factor over successful renders (SPEC F214.7). Percentiles interpolate linearly

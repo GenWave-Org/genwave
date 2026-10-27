@@ -49,10 +49,6 @@ public sealed class EngineProfileLoadingTests(ITestOutputHelper output)
         new("voice is null", () => EngineProfileJson.With(n => EngineProfileJson.Child(n, "voices")["bubbly"] = null), "voices.bubbly"),
         new("voiceReason absent", () => EngineProfileJson.With(n => n.Remove("voiceReason")), "voiceReason"),
         new("voiceReason blank", () => EngineProfileJson.With(n => n["voiceReason"] = ""), "voiceReason"),
-        new("repick register unknown", () => Repick(register: "shouty"), "repick.register"),
-        new("repick voice is null", () => Repick(voice: null), "repick.voice"),
-        new("repick voice blank", () => Repick(voice: " "), "repick.voice"),
-        new("repick reason blank", () => Repick(reason: " "), "repick.reason"),
         new("markup absent", () => EngineProfileJson.With(n => n.Remove("markup")), "markup"),
         new("markup lacks a cue", () => EngineProfileJson.With(n => EngineProfileJson.Child(n, "markup").Remove("um")), "missing the cue \"um\""),
         new("markup has an unknown cue", () => EngineProfileJson.With(n => EngineProfileJson.Child(n, "markup").Add("sihg", null)), "unknown cue \"sihg\""),
@@ -73,14 +69,6 @@ public sealed class EngineProfileLoadingTests(ITestOutputHelper output)
     ];
 
     public static TheoryData<string> DefectNames() => new(Defects.Select(d => d.Name));
-
-    private static string Repick(string? register = "bubbly", string? voice = "v9", string? reason = "clipped") =>
-        EngineProfileJson.With(n => n["repick"] = new JsonObject
-        {
-            ["register"] = register,
-            ["voice"] = voice,
-            ["reason"] = reason,
-        });
 
     [Theory]
     [MemberData(nameof(DefectNames))]
@@ -124,14 +112,6 @@ public sealed class EngineProfileLoadingTests(ITestOutputHelper output)
     [Fact]
     public void AnEndpointOverrideIsKept() =>
         Assert.Equal("http://10.0.0.5:9000/", Load(EngineProfileJson.With(n => n["endpoint"] = "http://10.0.0.5:9000")).Endpoint?.AbsoluteUri);
-
-    [Fact]
-    public void ARePickReplacesTheFirstChoice() =>
-        Assert.Equal("v9", Load(Repick()).VoiceFor(GauntletRegister.Bubbly));
-
-    [Fact]
-    public void ARePickLeavesTheOtherRegistersAlone() =>
-        Assert.Equal("v2", Load(Repick()).VoiceFor(GauntletRegister.Laconic));
 
     [Fact]
     public void ZeroBaselinesAreRefused()

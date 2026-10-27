@@ -66,9 +66,7 @@ public static class FeatureNothingShipsAndNoSlugInCode
 
         [Theory]
         [InlineData("voiceoff render --tier cpu")]
-        [InlineData("voiceoff pair --run <run-id>")]
         [InlineData("voiceoff serve --run <run-id> --port 8765")]
-        [InlineData("voiceoff reel --run <run-id>")]
         [InlineData("voiceoff score --run <run-id>")]
         public void EachVerbPrintsWithAnExample(string example) =>
             Assert.Contains($"Example: {example}", help, StringComparison.Ordinal);
@@ -85,7 +83,7 @@ public static class FeatureNothingShipsAndNoSlugInCode
         public ScenarioAVerbAnswersHelp()
         {
             StringWriter output = new();
-            exit = Cli.Run(["pair", "--help"], output, TextWriter.Null);
+            exit = Cli.Run(["serve", "--help"], output, TextWriter.Null);
             help = output.ToString();
             StringWriter render = new();
             Cli.Run(["render", "-h"], render, TextWriter.Null);
@@ -97,7 +95,7 @@ public static class FeatureNothingShipsAndNoSlugInCode
 
         [Fact]
         public void ItPrintsThatVerbsExample() =>
-            Assert.Contains("voiceoff pair --run <run-id>", help, StringComparison.Ordinal);
+            Assert.Contains("voiceoff serve --run <run-id>", help, StringComparison.Ordinal);
 
         [Fact]
         public void TheShortFlagWorksToo() =>

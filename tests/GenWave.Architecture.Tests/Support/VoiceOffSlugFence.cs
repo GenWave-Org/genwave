@@ -12,7 +12,7 @@ namespace GenWave.Architecture.Tests.Support;
 internal static class VoiceOffSlugFence
 {
     private static readonly string[] ScannedPatterns = ["*.cs", "*.html", "*.csproj"];
-    private static readonly string[] ExcludedSegments = ["engines", "shims", "gauntlet", "bin", "obj"];
+    private static readonly string[] ExcludedSegments = ["engines", "shims", "gauntlet", "cards", "script", "bin", "obj"];
     private static readonly string[] ImageScanExcludedSegments = [".claude", "node_modules", "bin", "obj", ".git"];
 
     /// <summary>Each <c>engines/*.json</c> profile's <c>"slug"</c>; a profile with no string slug throws.</summary>

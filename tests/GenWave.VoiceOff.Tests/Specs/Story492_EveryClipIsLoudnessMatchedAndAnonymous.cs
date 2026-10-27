@@ -155,7 +155,7 @@ public static class FeatureEveryClipIsLoudnessMatchedAndAnonymous
         public void TheReasonSaysItCouldNotBeMeasured() => Assert.Equal("loudness could not be measured", result.Error);
 
         [Fact]
-        public void TheClipIsNeverPaired() => Assert.False(File.Exists(output));
+        public void NoMatchedFileIsWritten() => Assert.False(File.Exists(output));
 
         [Fact]
         public void NoTempFileIsLeftBehind() => Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(output) ?? "", "matched*"));

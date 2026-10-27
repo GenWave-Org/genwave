@@ -4,7 +4,6 @@ using GenWave.VoiceOff.Render;
 using GenWave.VoiceOff.Script;
 using GenWave.VoiceOff.Speech;
 using GenWave.VoiceOff.Tests.Support;
-using GenWave.VoiceOff.Timing;
 
 namespace GenWave.VoiceOff.Tests.Render;
 
@@ -37,7 +36,7 @@ public static class RenderCommandTests
         public AMatchedRun()
         {
             RenderRun run = StandardRun(scenario, scenario.StartStubAsync().GetAwaiter().GetResult());
-            wavs = Directory.GetFiles(run.PathIn(Path.Combine("wav", "alpha", "plain")), "*.wav");
+            wavs = Directory.GetFiles(run.PathIn(Path.Combine("wav", "alpha")), "*.wav");
             lufs = wavs.Select(w => new FfmpegLoudnessAnalyzer().AnalyzeAsync(w, CancellationToken.None).GetAwaiter().GetResult().IntegratedLufs).ToArray();
         }
 
@@ -86,47 +85,6 @@ public static class RenderCommandTests
         public void Dispose() => scenario.Dispose();
     }
 
-    public sealed class AMappedCue : IDisposable
-    {
-        private readonly RenderScenario scenario = new();
-        private readonly RenderRun run;
-        private readonly EngineStubServer stub;
-
-        public AMappedCue()
-        {
-            stub = scenario.StartStubAsync().GetAwaiter().GetResult();
-            scenario.AddEngine("alpha", stub.BaseUri, markupCue: true);
-            string line = GauntletFixtureDirectory.Line("emotive-1", "Emotive", RenderScenario.Eight + " {laugh}", "[\"laugh\"]");
-            run = scenario.Run(scenario.EnginesDirectory, scenario.GauntletDirectory([line]), "cpu");
-        }
-
-        [Fact]
-        public void ItAddsAMarkupLaneAfterThePlainOne() => Assert.Equal([RenderLane.Plain, RenderLane.Markup], RecordsOf(run).Select(r => r.Lane));
-
-        [Fact]
-        public void TheMarkupClipIsMatchedIntoItsOwnFolder() =>
-            Assert.True(File.Exists(run.PathIn(Path.Combine("wav", "alpha", "markup", "emotive-1.wav"))));
-
-        // The markup lane renders last, so the stub's latest body is the markup clip's.
-        [Fact]
-        public void TheMarkupLaneSpeaksTheProfilesNativeTag() => Assert.Contains("[laugh]", stub.Requests.SpeechInputs[^1], StringComparison.Ordinal);
-
-        public void Dispose() => scenario.Dispose();
-    }
-
-    public sealed class NoMappedCue : IDisposable
-    {
-        private readonly RenderScenario scenario = new();
-        private readonly RenderRun run;
-
-        public NoMappedCue() => run = StandardRun(scenario, scenario.StartStubAsync().GetAwaiter().GetResult());
-
-        [Fact]
-        public void MeansNoMarkupFolder() => Assert.False(Directory.Exists(run.PathIn(Path.Combine("wav", "alpha", "markup"))));
-
-        public void Dispose() => scenario.Dispose();
-    }
-
     public sealed class ACrosstalkLine : IDisposable
     {
         private readonly RenderScenario scenario = new();
@@ -149,77 +107,24 @@ public static class RenderCommandTests
 
         [Fact]
         public void ItsMatchedClipIsBothTurnsAndThePause() =>
-            Assert.InRange(WavInfo.Read(File.ReadAllBytes(run.PathIn(Path.Combine("wav", "alpha", "plain", "cross-1.wav"))), out _)?.DurationMs ?? 0, 6500, 6700);
+            Assert.InRange(WavInfo.Read(File.ReadAllBytes(run.PathIn(Path.Combine("wav", "alpha", "cross-1.wav"))), out _)?.DurationMs ?? 0, 6500, 6700);
 
         [Fact]
         public void EachTurnIsRenderedWithItsOwnRegistersVoice() => Assert.Equal(["v1", "v2"], stub.Requests.SpeechVoices);
 
         [Fact]
         public void NoRawTurnFileIsLeftBehind() =>
-            Assert.Equal(["cross-1.wav"], Directory.GetFiles(run.PathIn(Path.Combine("raw", "alpha", "plain"))).Select(Path.GetFileName));
+            Assert.Equal(["cross-1.wav"], Directory.GetFiles(run.PathIn(Path.Combine("raw", "alpha"))).Select(Path.GetFileName));
 
         public void Dispose() => scenario.Dispose();
     }
 
-    public sealed class TheVoiceSelectGate : IDisposable
-    {
-        private readonly RenderScenario scenario = new();
-        private readonly RenderRun run;
-        private readonly EngineStubServer stub;
-
-        public TheVoiceSelectGate()
-        {
-            stub = scenario.StartStubAsync().GetAwaiter().GetResult();
-            run = StandardRun(scenario, stub);
-        }
-
-        [Fact]
-        public void RendersTheFirstVoiceTwiceAndTheSecondOnce() => Assert.Equal(["v1", "v1", "v3"], stub.Requests.SpeechVoices.Take(3));
-
-        [Fact]
-        public void KeepsItsRendersApartFromTheClips() =>
-            Assert.Equal(
-                ["a1.wav", "a2.wav", "b.wav"],
-                Directory.GetFiles(run.PathIn(Path.Combine("gates", "alpha")), "*.wav").Select(f => Path.GetFileName(f)).Where(n => !n.EndsWith(".raw.wav", StringComparison.Ordinal)).Order(StringComparer.Ordinal));
-
-        [Fact]
-        public void LeavesNoTimingRecordForThem() => Assert.Equal(3, RecordsOf(run).Count);
-
-        [Fact]
-        public void PassesWhenTheVoicesDiffer() => Assert.True(ReadJson(run, "gates.json")["engines"]?[0]?["voiceSelect"]?["passed"]?.GetValue<bool>());
-
-        public void Dispose() => scenario.Dispose();
-    }
-
-    public sealed class IdenticalAudioForEveryVoice : IDisposable
+    public sealed class EnginesRenderInSlugOrder : IDisposable
     {
         private readonly RenderScenario scenario = new();
         private readonly RenderRun run;
 
-        public IdenticalAudioForEveryVoice() => run = StandardRun(scenario, scenario.StartStubAsync(sameAudioForEveryVoice: true).GetAwaiter().GetResult());
-
-        [Fact]
-        public void FailsVoiceSelect() => Assert.False(ReadJson(run, "gates.json")["engines"]?[0]?["voiceSelect"]?["passed"]?.GetValue<bool>());
-
-        [Fact]
-        public void StillRendersTheClips() => Assert.Equal(3, RecordsOf(run).Count);
-
-        [Fact]
-        public void StartsTheEnginesRowWithTheMark() => Assert.Contains(run.OutputLines, l => l.StartsWith("alpha: ❌ ", StringComparison.Ordinal) && l.Contains(" clips, ", StringComparison.Ordinal));
-
-        [Fact]
-        public void PutsTheGateReasonInTheEnginesRow() =>
-            Assert.Contains(run.OutputLines, l => l.StartsWith("alpha: ❌ ", StringComparison.Ordinal) && l.Contains("voices sound the same", StringComparison.Ordinal));
-
-        public void Dispose() => scenario.Dispose();
-    }
-
-    public sealed class TheGatesFile : IDisposable
-    {
-        private readonly RenderScenario scenario = new();
-        private readonly RenderRun run;
-
-        public TheGatesFile()
+        public EnginesRenderInSlugOrder()
         {
             EngineStubServer stub = scenario.StartStubAsync().GetAwaiter().GetResult();
             scenario.AddEngine("zulu", stub.BaseUri);
@@ -230,8 +135,7 @@ public static class RenderCommandTests
 
         [Fact]
         // The files sort alpha-b.json before alpha.json, so only the slug order puts alpha first.
-        public void HoldsOneEntryPerSelectedEngineInSlugOrder() =>
-            Assert.Equal(["alpha", "alpha-b", "zulu"], ReadJson(run, "gates.json")["engines"]?.AsArray().Select(e => e?["slug"]?.GetValue<string>()));
+        public void OneAfterTheOtherBySlug() => Assert.Equal(["alpha", "alpha-b", "zulu"], RecordsOf(run).Select(r => r.Engine).Distinct());
 
         public void Dispose() => scenario.Dispose();
     }
@@ -438,9 +342,6 @@ public static class RenderCommandTests
         [Fact]
         public void KeepsTheManifest() => Assert.True(File.Exists(run.PathIn("run.json")));
 
-        [Fact]
-        public void StillWritesTheGatesFile() => Assert.True(File.Exists(run.PathIn("gates.json")));
-
         public void Dispose()
         {
             slow.DisposeAsync().AsTask().GetAwaiter().GetResult();
@@ -491,15 +392,12 @@ public static class RenderCommandTests
         public void Dispose() => scenario.Dispose();
     }
 
-    public sealed class TheFootprintRecordedPerClip : IDisposable
+    public sealed class TheLoudnessDecisionRecordedPerClip : IDisposable
     {
         private readonly RenderScenario scenario = new();
         private readonly IReadOnlyList<TimingRecord> records;
 
-        public TheFootprintRecordedPerClip() => records = RecordsOf(StandardRun(scenario, scenario.StartStubAsync().GetAwaiter().GetResult()));
-
-        [Fact]
-        public void EveryRecordCarriesTheSamplersPeakRss() => Assert.Equal([310L], records.Select(r => r.RssMb).Distinct());
+        public TheLoudnessDecisionRecordedPerClip() => records = RecordsOf(StandardRun(scenario, scenario.StartStubAsync().GetAwaiter().GetResult()));
 
         [Fact]
         public void EveryRecordCarriesTheLoudnessMatchesDecision() => Assert.Equal([false], records.Select(r => r.Linear).Distinct());

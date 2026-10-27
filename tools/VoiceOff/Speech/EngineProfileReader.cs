@@ -26,8 +26,6 @@ internal static partial class EngineProfileReader
 
     private static readonly JsonDocumentOptions DocumentOptions = new() { AllowDuplicateProperties = false };
 
-    private sealed record RepickDto(string? Register, string? Voice, string? Reason);
-
     private sealed record ProfileDto(
         string? Slug,
         bool? Baseline,
@@ -37,7 +35,6 @@ internal static partial class EngineProfileReader
         List<string>? Tiers,
         Dictionary<string, string>? Voices,
         string? VoiceReason,
-        RepickDto? Repick,
         Dictionary<string, string?>? Markup,
         double? Speed,
         int? TimeoutSeconds,
@@ -64,7 +61,6 @@ internal static partial class EngineProfileReader
             Tiers(dto, fileName),
             Voices(dto, fileName),
             Required(dto.VoiceReason, "voiceReason", fileName),
-            Repick(dto, fileName),
             Markup(dto, fileName),
             Speed(dto, fileName),
             Timeout(dto, fileName),
@@ -221,24 +217,6 @@ internal static partial class EngineProfileReader
         }
 
         return voices;
-    }
-
-    private static EngineRepick? Repick(ProfileDto dto, string fileName)
-    {
-        if (dto.Repick is null)
-        {
-            return null;
-        }
-
-        if (!RegisterKeys.TryParse(dto.Repick.Register, out GauntletRegister register))
-        {
-            throw new InvalidDataException($"Engine profile {fileName}: repick.register \"{dto.Repick.Register}\" is not a register.");
-        }
-
-        return new EngineRepick(
-            register,
-            Required(dto.Repick.Voice, "repick.voice", fileName),
-            Required(dto.Repick.Reason, "repick.reason", fileName));
     }
 
     // CueText.Markup strips a cue the map lacks as well as one mapped to null, so a typo'd or missing key
