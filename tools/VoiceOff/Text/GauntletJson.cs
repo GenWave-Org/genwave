@@ -2,7 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 
-namespace GenWave.VoiceOff.Script;
+namespace GenWave.VoiceOff.Text;
 
 /// <summary>Reads a gauntlet file once, turning every JSON failure into an <see cref="InvalidDataException"/> that names the file.</summary>
 internal static class GauntletJson

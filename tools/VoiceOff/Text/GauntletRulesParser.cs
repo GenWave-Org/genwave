@@ -3,7 +3,7 @@ using GenWave.Core.Domain;
 using GenWave.Tts;
 using PronunciationRule = GenWave.Tts.PronunciationRule;
 
-namespace GenWave.VoiceOff.Script;
+namespace GenWave.VoiceOff.Text;
 
 /// <summary>Validates the two station-rules files: exactly <c>provenance</c> plus the rule list.</summary>
 internal static class GauntletRulesParser

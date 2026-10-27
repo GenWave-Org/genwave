@@ -1,7 +1,7 @@
 using System.Text.Json.Nodes;
 using GenWave.Loudness;
 using GenWave.VoiceOff.Render;
-using GenWave.VoiceOff.Script;
+using GenWave.VoiceOff.Text;
 using GenWave.VoiceOff.Speech;
 using GenWave.VoiceOff.Tests.Support;
 

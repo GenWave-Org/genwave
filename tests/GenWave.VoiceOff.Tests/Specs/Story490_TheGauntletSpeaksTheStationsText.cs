@@ -7,7 +7,7 @@ using GenWave.Core.Domain;
 using GenWave.Tts;
 using PronunciationRule = GenWave.Tts.PronunciationRule;
 using GenWave.VoiceOff.Render;
-using GenWave.VoiceOff.Script;
+using GenWave.VoiceOff.Text;
 using GenWave.VoiceOff.Tests.Support;
 using static GenWave.VoiceOff.Tests.Support.GauntletFixtureDirectory;
 

@@ -4,7 +4,7 @@ using System.Text.Json.Nodes;
 using GenWave.Core.Domain;
 using GenWave.Tts;
 
-namespace GenWave.VoiceOff.Script;
+namespace GenWave.VoiceOff.Text;
 
 /// <summary>
 /// The Voice Off script set, loaded from a <c>gauntlet</c> directory (SPEC F214.2). Lines come from

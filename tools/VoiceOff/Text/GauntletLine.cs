@@ -1,4 +1,4 @@
-namespace GenWave.VoiceOff.Script;
+namespace GenWave.VoiceOff.Text;
 
 /// <summary>
 /// One gauntlet line. A Crosstalk line carries <see cref="Turns"/> and no <see cref="Register"/> or

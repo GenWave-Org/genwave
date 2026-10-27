@@ -1,7 +1,7 @@
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
-namespace GenWave.VoiceOff.Script;
+namespace GenWave.VoiceOff.Text;
 
 /// <summary>Turns a lines file's JSON into validated <see cref="GauntletLine"/>s. Every failure names the line id.</summary>
 internal static partial class GauntletLineParser

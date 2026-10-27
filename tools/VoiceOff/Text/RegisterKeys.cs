@@ -1,4 +1,4 @@
-namespace GenWave.VoiceOff.Script;
+namespace GenWave.VoiceOff.Text;
 
 /// <summary>The file spelling of each <see cref="GauntletRegister"/>.</summary>
 internal static class RegisterKeys

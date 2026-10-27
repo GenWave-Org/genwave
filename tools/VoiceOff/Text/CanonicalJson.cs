@@ -1,6 +1,6 @@
 using System.Text.Json.Nodes;
 
-namespace GenWave.VoiceOff.Script;
+namespace GenWave.VoiceOff.Text;
 
 /// <summary>Canonical JSON: object keys sorted ordinally, no whitespace. The bytes a content hash is taken over.</summary>
 internal static class CanonicalJson

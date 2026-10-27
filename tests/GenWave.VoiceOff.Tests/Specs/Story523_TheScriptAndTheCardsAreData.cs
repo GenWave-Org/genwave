@@ -1,12 +1,33 @@
 // STORY-523 — The script and the cards are data (gh-#614 · SPEC F217 · PLAN T661)
 //
-// BDD specification — xUnit. Every fact is pending at plan time (2026-10-26); the named task
-// activates its facts, watches them fail, then makes them pass.
+// BDD specification — xUnit. AC1–AC6 and AC8–AC11 are live (T661); AC7 stays pending until T670.
+
+using GenWave.VoiceOff.Deck;
+using GenWave.VoiceOff.Speech;
+using GenWave.VoiceOff.Tests.Support;
+using GenWave.VoiceOff.Text;
 
 namespace GenWave.VoiceOff.Tests.Specs;
 
 public static class FeatureTheScriptAndTheCardsAreData
 {
+    private static string ToolDirectory => Path.Combine(RepoRootLocator.Find(AppContext.BaseDirectory), "tools", "VoiceOff");
+
+    private static string ShippedScriptPath => Path.Combine(ToolDirectory, "script", "script.json");
+
+    private static EngineProfileSet Engines => EngineProfileSet.Load(RealEngines.Directory);
+
+    private static string EngineSlug => Engines.Baseline.Slug;
+
+    private static string Reference(string engine) =>
+        CardFixtureDirectory.CardJson("reference-card", engine, extraMembers: "\"asShipped\": true,");
+
+    private static string Tuned(string engine, string host = "thor-cpu", string cues = """{ "laugh": "Haha!" }""") =>
+        CardFixtureDirectory.CardJson("tuned-card", engine, host, cues, extraMembers: "\"variantOf\": \"reference-card\",");
+
+    private static InvalidDataException LoadFailure(CardFixtureDirectory fixture, params (string FileName, string Json)[] files) =>
+        Assert.Throws<InvalidDataException>(() => CardSet.Load(fixture.Create(files), Engines));
+
     // ---------------------------------------------------------------------
     // HAPPY PATH
     // ---------------------------------------------------------------------
@@ -16,15 +37,26 @@ public static class FeatureTheScriptAndTheCardsAreData
     {
         // Given tools/VoiceOff/script/script.json
         // When  it is loaded
+        private readonly ScriptFile script = ScriptFile.Load(ShippedScriptPath);
 
-        [Fact(Skip = "pending: T661 — see docs/PLAN.md")]
-        public void ItHoldsEightParagraphs() => Assert.Fail("pending: T661 — it holds eight paragraphs");
+        [Fact]
+        public void ItHoldsEightParagraphs()
+        {
+            Assert.Equal(8, script.Paragraphs.Count);
+        }
 
-        [Fact(Skip = "pending: T661 — see docs/PLAN.md")]
-        public void ItsVersionIsV2() => Assert.Fail("pending: T661 — its version is v2");
+        [Fact]
+        public void ItsVersionIsV2()
+        {
+            Assert.Equal("v2", script.Version);
+        }
 
-        [Fact(Skip = "pending: T661 — see docs/PLAN.md")]
-        public void EveryParagraphHasA1BasedNumberAndNonEmptyText() => Assert.Fail("pending: T661 — every paragraph has a 1-based number and non-empty text");
+        [Fact]
+        public void EveryParagraphHasA1BasedNumberAndNonEmptyText()
+        {
+            Assert.Equal(Enumerable.Range(1, 8), script.Paragraphs.Select(p => p.Number));
+            Assert.All(script.Paragraphs, p => Assert.False(string.IsNullOrWhiteSpace(p.Text)));
+        }
     }
 
     // AC2 — the script hash is stable
@@ -33,8 +65,15 @@ public static class FeatureTheScriptAndTheCardsAreData
         // Given the script file
         // When  it is loaded twice
 
-        [Fact(Skip = "pending: T661 — see docs/PLAN.md")]
-        public void BothLoadsReportTheSameSHA256Hash() => Assert.Fail("pending: T661 — both loads report the same SHA-256 hash");
+        [Fact]
+        public void BothLoadsReportTheSameSHA256Hash()
+        {
+            string first = ScriptFile.Load(ShippedScriptPath).Hash;
+            string second = ScriptFile.Load(ShippedScriptPath).Hash;
+
+            Assert.Matches("^[0-9a-f]{64}$", first);
+            Assert.Equal(first, second);
+        }
     }
 
     // AC3 — the script hash moves with the text
@@ -43,8 +82,15 @@ public static class FeatureTheScriptAndTheCardsAreData
         // Given the script with one character changed
         // When  it is loaded
 
-        [Fact(Skip = "pending: T661 — see docs/PLAN.md")]
-        public void TheHashDiffersFromTheShippedHash() => Assert.Fail("pending: T661 — the hash differs from the shipped hash");
+        [Fact]
+        public void TheHashDiffersFromTheShippedHash()
+        {
+            string json = File.ReadAllText(ShippedScriptPath);
+            string changed = json.Replace("Good morning", "Good mornin");
+
+            Assert.NotEqual(json, changed);
+            Assert.NotEqual(ScriptFile.Load(ShippedScriptPath).Hash, ScriptFile.Parse(changed, "changed.json").Hash);
+        }
     }
 
     // AC4 — the cue vocabulary covers the script
@@ -52,44 +98,95 @@ public static class FeatureTheScriptAndTheCardsAreData
     {
         // Given the seven cues breath, laugh, um, cough, giggle, sigh and pause
         // When  the script's cue tokens are listed
+        private readonly ScriptFile script = ScriptFile.Load(ShippedScriptPath);
 
-        [Fact(Skip = "pending: T661 — see docs/PLAN.md")]
-        public void EveryTokenIsOneOfTheSeven() => Assert.Fail("pending: T661 — every token is one of the seven");
+        [Fact]
+        public void EveryTokenIsOneOfTheSeven()
+        {
+            string[] seven = ["breath", "laugh", "um", "cough", "giggle", "sigh", "pause"];
 
-        [Fact(Skip = "pending: T661 — see docs/PLAN.md")]
-        public void NoOtherTokenShapeAppears() => Assert.Fail("pending: T661 — no other token shape appears");
+            Assert.True(CueVocabulary.Script.SetEquals(seven));
+            Assert.NotEmpty(script.CueTokens());
+            Assert.All(script.CueTokens(), token => Assert.Contains(token, seven));
+        }
+
+        [Fact]
+        public void NoOtherTokenShapeAppears()
+        {
+            string leftover = string.Concat(script.Paragraphs.Select(p => CueVocabulary.Token().Replace(p.Text, string.Empty)));
+
+            Assert.DoesNotContain('{', leftover);
+            Assert.DoesNotContain('}', leftover);
+        }
     }
 
     // AC5 — a card loads
-    public sealed class ScenarioACardLoads
+    public sealed class ScenarioACardLoads : IDisposable
     {
         // Given a card file with engine, host, voice, speed, settings, cues, overrides, facts and why
         // When  it is loaded
+        private readonly CardFixtureDirectory fixture = new();
+        private readonly Card card;
 
-        [Fact(Skip = "pending: T661 — see docs/PLAN.md")]
-        public void ItsEngineNamesAProfileInEngines() => Assert.Fail("pending: T661 — its engine names a profile in engines/");
+        public ScenarioACardLoads()
+        {
+            string directory = fixture.Create(("reference-card.json", Reference(EngineSlug)));
+            card = CardSet.Load(directory, Engines).Cards.Single();
+        }
 
-        [Fact(Skip = "pending: T661 — see docs/PLAN.md")]
-        public void ItsHostIsOneOfThorGpuThorCpuRunesGpu() => Assert.Fail("pending: T661 — its host is one of thor-gpu, thor-cpu, runes-gpu");
+        public void Dispose() => fixture.Dispose();
 
-        [Fact(Skip = "pending: T661 — see docs/PLAN.md")]
-        public void ItsSettingsObjectIsKeptVerbatim() => Assert.Fail("pending: T661 — its settings object is kept verbatim");
+        [Fact]
+        public void ItsEngineNamesAProfileInEngines()
+        {
+            Assert.Contains(Engines.Profiles, p => p.Slug == card.Engine);
+        }
 
-        [Fact(Skip = "pending: T661 — see docs/PLAN.md")]
-        public void ItsFactsCarryACannotList() => Assert.Fail("pending: T661 — its facts carry a cannot list");
+        [Fact]
+        public void ItsHostIsOneOfThorGpuThorCpuRunesGpu()
+        {
+            Assert.Equal(CardHost.ThorCpu, card.Host);
+        }
 
-        [Fact(Skip = "pending: T661 — see docs/PLAN.md")]
-        public void ItsWhyIsNonEmpty() => Assert.Fail("pending: T661 — its why is non-empty");
+        [Fact]
+        public void ItsSettingsObjectIsKeptVerbatim()
+        {
+            Assert.Equal("""{"alpha":0.3,"nested":{"keep":[1,"two",null]}}""", card.Settings.ToJsonString());
+        }
+
+        [Fact]
+        public void ItsFactsCarryACannotList()
+        {
+            Assert.Equal(["breath", "sigh"], card.Facts.Cannot);
+        }
+
+        [Fact]
+        public void ItsWhyIsNonEmpty()
+        {
+            Assert.False(string.IsNullOrWhiteSpace(card.Why));
+        }
     }
 
     // AC6 — a variant names its sibling
-    public sealed class ScenarioAVariantNamesItsSibling
+    public sealed class ScenarioAVariantNamesItsSibling : IDisposable
     {
         // Given a card with variantOf
         // When  the card set is loaded
+        private readonly CardFixtureDirectory fixture = new();
+        private readonly CardSet set;
 
-        [Fact(Skip = "pending: T661 — see docs/PLAN.md")]
-        public void TheSiblingIsACardInTheSameSet() => Assert.Fail("pending: T661 — the sibling is a card in the same set");
+        public ScenarioAVariantNamesItsSibling() =>
+            set = CardSet.Load(fixture.Create(("reference-card.json", Reference(EngineSlug)), ("tuned-card.json", Tuned(EngineSlug))), Engines);
+
+        public void Dispose() => fixture.Dispose();
+
+        [Fact]
+        public void TheSiblingIsACardInTheSameSet()
+        {
+            Card variant = set.Cards.Single(c => c.VariantOf is not null);
+
+            Assert.Contains(set.Cards, c => c.Id == variant.VariantOf);
+        }
     }
 
     // AC7 — the shipped card set is complete
@@ -117,9 +214,20 @@ public static class FeatureTheScriptAndTheCardsAreData
     {
         // Given a card naming an engine with no profile
         // When  the set is loaded
+        private readonly InvalidDataException failure;
 
-        [Fact(Skip = "pending: T661 — see docs/PLAN.md")]
-        public void LoadingFailsNamingTheCardId() => Assert.Fail("pending: T661 — loading fails naming the card id");
+        public ScenarioAnUnknownEngineIsRefused()
+        {
+            using CardFixtureDirectory fixture = new();
+            failure = LoadFailure(fixture, ("reference-card.json", Reference(EngineSlug)), ("tuned-card.json", Tuned("no-such-engine")));
+        }
+
+        [Fact]
+        public void LoadingFailsNamingTheCardId()
+        {
+            Assert.Contains("tuned-card", failure.Message);
+            Assert.Contains("no-such-engine", failure.Message);
+        }
     }
 
     // AC9 — an unknown host is refused
@@ -127,9 +235,20 @@ public static class FeatureTheScriptAndTheCardsAreData
     {
         // Given a card with host laptop
         // When  the set is loaded
+        private readonly InvalidDataException failure;
 
-        [Fact(Skip = "pending: T661 — see docs/PLAN.md")]
-        public void LoadingFailsNamingTheCardIdAndTheHost() => Assert.Fail("pending: T661 — loading fails naming the card id and the host");
+        public ScenarioAnUnknownHostIsRefused()
+        {
+            using CardFixtureDirectory fixture = new();
+            failure = LoadFailure(fixture, ("reference-card.json", Reference(EngineSlug)), ("tuned-card.json", Tuned(EngineSlug, host: "laptop")));
+        }
+
+        [Fact]
+        public void LoadingFailsNamingTheCardIdAndTheHost()
+        {
+            Assert.Contains("tuned-card", failure.Message);
+            Assert.Contains("laptop", failure.Message);
+        }
     }
 
     // AC10 — an unknown cue key is refused
@@ -137,9 +256,19 @@ public static class FeatureTheScriptAndTheCardsAreData
     {
         // Given a card whose cues map a key hiccup
         // When  the set is loaded
+        private readonly InvalidDataException failure;
 
-        [Fact(Skip = "pending: T661 — see docs/PLAN.md")]
-        public void LoadingFailsNamingTheKey() => Assert.Fail("pending: T661 — loading fails naming the key");
+        public ScenarioAnUnknownCueKeyIsRefused()
+        {
+            using CardFixtureDirectory fixture = new();
+            failure = LoadFailure(fixture, ("reference-card.json", Reference(EngineSlug)), ("tuned-card.json", Tuned(EngineSlug, cues: """{ "hiccup": "Hic!" }""")));
+        }
+
+        [Fact]
+        public void LoadingFailsNamingTheKey()
+        {
+            Assert.Contains("hiccup", failure.Message);
+        }
     }
 
     // AC11 — a duplicate id is refused
@@ -147,8 +276,18 @@ public static class FeatureTheScriptAndTheCardsAreData
     {
         // Given two card files sharing an id
         // When  the set is loaded
+        private readonly InvalidDataException failure;
 
-        [Fact(Skip = "pending: T661 — see docs/PLAN.md")]
-        public void LoadingFailsNamingTheId() => Assert.Fail("pending: T661 — loading fails naming the id");
+        public ScenarioADuplicateIdIsRefused()
+        {
+            using CardFixtureDirectory fixture = new();
+            failure = LoadFailure(fixture, ("a.json", Reference(EngineSlug)), ("b.json", Reference(EngineSlug)));
+        }
+
+        [Fact]
+        public void LoadingFailsNamingTheId()
+        {
+            Assert.Contains("reference-card", failure.Message);
+        }
     }
 }

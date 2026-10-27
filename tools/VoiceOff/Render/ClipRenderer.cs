@@ -1,7 +1,7 @@
 using GenWave.Tts;
 using GenWave.VoiceOff.Audio;
 using GenWave.Loudness;
-using GenWave.VoiceOff.Script;
+using GenWave.VoiceOff.Text;
 using GenWave.VoiceOff.Speech;
 
 namespace GenWave.VoiceOff.Render;

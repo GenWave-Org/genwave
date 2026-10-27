@@ -1,4 +1,4 @@
-namespace GenWave.VoiceOff.Script;
+namespace GenWave.VoiceOff.Text;
 
 /// <summary>The voice a line is read in.</summary>
 internal enum GauntletRegister

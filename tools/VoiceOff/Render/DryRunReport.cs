@@ -1,4 +1,4 @@
-using GenWave.VoiceOff.Script;
+using GenWave.VoiceOff.Text;
 using GenWave.VoiceOff.Speech;
 
 namespace GenWave.VoiceOff.Render;

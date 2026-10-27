@@ -1,7 +1,7 @@
 using System.Text.RegularExpressions;
 using GenWave.Tts;
 
-namespace GenWave.VoiceOff.Script;
+namespace GenWave.VoiceOff.Text;
 
 /// <summary>Builds the text an engine is handed for a gauntlet line, in the plain or the markup lane (SPEC F214.3).</summary>
 internal static class CueText

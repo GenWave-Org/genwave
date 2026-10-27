@@ -1,6 +1,6 @@
 using System.Text.Json.Nodes;
 using GenWave.VoiceOff.Speech;
-using GenWave.VoiceOff.Script;
+using GenWave.VoiceOff.Text;
 using GenWave.VoiceOff.Tests.Support;
 using Xunit.Abstractions;
 

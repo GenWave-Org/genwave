@@ -1,4 +1,4 @@
-namespace GenWave.VoiceOff.Script;
+namespace GenWave.VoiceOff.Text;
 
 /// <summary>How the plain lane finishes a normalized line.</summary>
 internal enum PlainLaneStyle
