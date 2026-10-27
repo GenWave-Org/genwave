@@ -1,13 +1,13 @@
-using GenWave.VoiceOff.Script;
+using GenWave.VoiceOff.Deck;
 using GenWave.VoiceOff.Speech;
-using GenWave.VoiceOff.Timing;
+using GenWave.VoiceOff.Text;
 
 namespace GenWave.VoiceOff.Render;
 
 /// <summary>
-/// <c>voiceoff render</c> (SPEC F214.1 to F214.8): the gauntlet through every selected engine and lane, loudness-matched into a new
-/// run folder with <c>run.json</c>, <c>timing.jsonl</c> and <c>gates.json</c>. An engine that is not attempted, unreachable or failing a
-/// gate is a row in the output, never a failed run.
+/// <c>voiceoff render</c> (SPEC F217.4 to F217.6): every card (or one) through its engine, a paragraph at a time, loudness-matched into a
+/// run folder with <c>run.json</c> and <c>renders.jsonl</c>. A card that is refused, whose container is down, or whose paragraph fails is a row
+/// in the output and in <c>run.json</c>, never a failed run.
 /// </summary>
 internal static class RenderCommand
 {
@@ -15,9 +15,6 @@ internal static class RenderCommand
     internal const int Failed = 1;
     internal const int UsageError = 2;
     internal const int Interrupted = 130;
-
-    internal const string CorrectionsPendingNotice =
-        "Corrections are pending: export the station's corrections before trusting pronunciation results.";
 
     /// <param name="args">The arguments after the <c>render</c> verb.</param>
     internal static async Task<int> RunAsync(IReadOnlyList<string> args, TextWriter output, TextWriter error, RenderServices services, CancellationToken ct)
@@ -33,26 +30,27 @@ internal static class RenderCommand
             return UsageError;
         }
 
-        if (!TryLoad(options, error, out EngineProfileSet? profiles, out GauntletSet? set) || profiles is null || set is null)
+        if (!TryLoad(options, error, out EngineProfileSet? engines, out CardSet? cards, out ScriptFile? script) || engines is null || cards is null || script is null)
         {
             return Failed;
         }
 
-        string? unknown = options.Engines.FirstOrDefault(slug => profiles.Profiles.All(p => !string.Equals(p.Slug, slug, StringComparison.Ordinal)));
-        if (unknown is not null)
+        IReadOnlyList<Card> selected = cards.Cards.Where(c => options.CardId is null || string.Equals(c.Id, options.CardId, StringComparison.Ordinal)).ToList();
+        if (selected.Count == 0)
         {
-            error.WriteLine($"Unknown engine '{unknown}'. Known engines: {string.Join(", ", profiles.Profiles.Select(p => p.Slug))}.");
+            error.WriteLine($"Unknown card '{options.CardId}'. Known cards: {string.Join(", ", cards.Cards.Select(c => c.Id))}.");
             return UsageError;
         }
 
+        IReadOnlyList<CardPlan> plans = selected.Select(c => CardPlanner.Plan(c, script)).ToList();
         if (options.DryRun)
         {
-            return await DryRunReport.RunAsync(options, SelectEngines(profiles, options), set, output, ct);
+            return await DryRunReport.RunAsync(options.Root, plans, output, ct);
         }
 
         try
         {
-            return await RunLoadedAsync(options, profiles, set, output, error, services, ct);
+            return await RunPlannedAsync(options, engines, script, plans, output, error, services, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -61,14 +59,16 @@ internal static class RenderCommand
         }
     }
 
-    private static bool TryLoad(RenderOptions options, TextWriter error, out EngineProfileSet? profiles, out GauntletSet? set)
+    private static bool TryLoad(RenderOptions options, TextWriter error, out EngineProfileSet? engines, out CardSet? cards, out ScriptFile? script)
     {
-        profiles = null;
-        set = null;
+        engines = null;
+        cards = null;
+        script = null;
         try
         {
-            profiles = EngineProfileSet.Load(options.EnginesDirectory);
-            set = GauntletSet.Load(options.GauntletDirectory);
+            engines = EngineProfileSet.Load(options.EnginesDirectory);
+            cards = CardSet.Load(options.CardsDirectory, engines);
+            script = ScriptFile.Load(options.ScriptPath);
             return true;
         }
         catch (Exception ex) when (ex is InvalidDataException or DirectoryNotFoundException)
@@ -78,68 +78,30 @@ internal static class RenderCommand
         }
     }
 
-    private static async Task<int> RunLoadedAsync(
-        RenderOptions options, EngineProfileSet profiles, GauntletSet set, TextWriter output, TextWriter error, RenderServices services, CancellationToken ct)
+    private static async Task<int> RunPlannedAsync(
+        RenderOptions options, EngineProfileSet engines, ScriptFile script, IReadOnlyList<CardPlan> plans,
+        TextWriter output, TextWriter error, RenderServices services, CancellationToken ct)
     {
-        if (set.CorrectionsPending)
+        RunLayout layout = new(options.Root, options.RunId);
+        (RunManifest? manifest, string? problem) = await RunOpening.OpenAsync(layout, script.Hash, options.CardId is not null, services.Time.GetUtcNow(), ct);
+        if (manifest is null)
         {
-            output.WriteLine(CorrectionsPendingNotice);
-        }
-
-        DateTimeOffset startedAt = services.Time.GetUtcNow();
-        RunLayout layout = new(options.Root, RunId.Format(startedAt, options.Tier));
-        if (Directory.Exists(layout.RunDirectory))
-        {
-            error.WriteLine($"The run folder {layout.RunDirectory} already exists; wait a second and run again.");
+            error.WriteLine(problem);
             return Failed;
         }
 
-        try
-        {
-            Directory.CreateDirectory(layout.RunDirectory);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            error.WriteLine($"Cannot create the run folder {layout.RunDirectory}: {ex.Message}");
-            return Failed;
-        }
-
-        await new RunManifest(layout.RunId, RunId.TierName(options.Tier), services.HostName, startedAt, set.ContentHash, set.CorrectionsPending)
-            .WriteAsync(layout.RunJsonPath, ct);
         output.WriteLine($"Run {layout.RunId} -> {layout.RunDirectory}");
-
-        EngineProfile[] selected = SelectEngines(profiles, options);
-        List<GateEntry> entries = [];
+        RunProgress progress = new(plans.Sum(p => p.Paragraphs.Count));
         try
         {
-            EngineRun run = new(services, options, set, layout, new TimingLog(layout.TimingPath),
-                new RunProgress(selected.Sum(p => RunProgress.ClipsFor(p, set))), output);
-            run.DropTierSkips(selected);
-            foreach (EngineProfile profile in selected)
-            {
-                EngineRunResult result = await run.RunAsync(profile, ct);
-                entries.Add(result.Gates);
-                output.WriteLine(Summary(result));
-            }
+            await new CardRunner(services, engines, layout, new RenderLog(layout.RendersPath), progress, output).RunAsync(plans, manifest, ct);
+            return Ok;
         }
-        finally
+        catch (InvalidDataException ex)
         {
-            await new GatesFile(entries).WriteAsync(layout.GatesJsonPath, CancellationToken.None);
+            // A renders.jsonl with a bad line: nothing of the card has been touched yet.
+            error.WriteLine(ex.Message);
+            return Failed;
         }
-
-        return Ok;
     }
-
-    /// <summary>The engines the run was asked for (all when none was named), in slug order.</summary>
-    private static EngineProfile[] SelectEngines(EngineProfileSet profiles, RenderOptions options) => profiles.Profiles
-        .Where(p => options.Engines.Count == 0 || options.Engines.Contains(p.Slug, StringComparer.Ordinal))
-        .OrderBy(p => p.Slug, StringComparer.Ordinal)
-        .ToArray();
-
-    private static string Summary(EngineRunResult result) => result.Gates switch
-    {
-        { Attempted: false } skipped => EngineSummary.ForNotAttempted(skipped),
-        { Container.Passed: false } failed => EngineSummary.ForFailedContainer(failed),
-        _ => EngineSummary.For(result),
-    };
 }

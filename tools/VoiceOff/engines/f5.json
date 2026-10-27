@@ -3,10 +3,6 @@
   "container": "voiceoff-f5",
   "port": 8880,
   "timeoutSeconds": 600,
-  "tiers": ["gpu"],
-  "voices": { "bubbly": "ref-f1", "laconic": "ref-m1", "late-night": "ref-m2" },
-  "voiceReason": "Clone-only engine, so the voices are the shared reference clips: bubbly is ref-f1 (female, about 209 Hz), laconic is ref-m1 (male, about 127 Hz) and late-night is ref-m2 (male, about 89 Hz). Each clip's exact transcript comes from refs.json.",
-  "markup": { "pause": null, "laugh": null, "sigh": null, "breath": null, "um": null, "emphasis": null },
   "license": "Code MIT; weights CC-BY-NC-4.0 (non-commercial, flagged).",
   "notes": "F5-TTS v1 Base (f5-tts 1.1.22, SWivid/F5-TTS F5TTS_v1_Base step 1250000 plus the Vocos vocoder, about 1.4 GB). The shim wraps the F5TTS API with a fixed seed and honours speed. It has no native cue tags. One CPU line took 79 s warm on a quiet box (16 cores, nothing else rendering, 2026-10-23), so it is GPU tier only."
 }

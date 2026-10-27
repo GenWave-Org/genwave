@@ -88,9 +88,9 @@ internal static class LawId
     /// <c>obsolete:</c> (<c>Story443_SkipPrefixLaw</c>, scanner <see cref="SkipReasons"/>).</summary>
     public const string L11 = "L11";
 
-    /// <summary>Voice Off slug fence (SPEC F214.16, STORY-501, PLAN T619): no engine slug from
+    /// <summary>Voice Off slug fence (SPEC F217.13, STORY-501, PLAN T619): no engine slug from
     /// <c>tools/VoiceOff/engines/*.json</c> appears as a whole word in <c>tools/VoiceOff</c> code
-    /// (comments included), and no Dockerfile or compose file mentions VoiceOff
+    /// (comments included; <c>engines/</c>, <c>cards/</c> and <c>script/</c> are data and may name engines), and no Dockerfile or compose file mentions VoiceOff
     /// (<c>Story501_VoiceOffSlugFence</c>, scanner <see cref="VoiceOffSlugFence"/>).</summary>
     public const string L12 = "L12";
 

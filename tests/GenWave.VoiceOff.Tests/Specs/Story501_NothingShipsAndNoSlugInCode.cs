@@ -1,4 +1,4 @@
-// STORY-501 — Nothing ships, and no slug in code (gh-#614 · SPEC F214.16, F214.17 · PLAN T606)
+// STORY-501 — Nothing ships, and no slug in code (gh-#614 · SPEC F217.13, F214.17 · PLAN T606)
 //
 // BDD specification — xUnit. Every fact is pending at plan time (2026-10-21); the named task
 // activates its facts, watches them fail, then makes them pass.
@@ -65,10 +65,8 @@ public static class FeatureNothingShipsAndNoSlugInCode
         }
 
         [Theory]
-        [InlineData("voiceoff render --tier cpu")]
-        [InlineData("voiceoff pair --run <run-id>")]
+        [InlineData("voiceoff render --run first --dry-run")]
         [InlineData("voiceoff serve --run <run-id> --port 8765")]
-        [InlineData("voiceoff reel --run <run-id>")]
         [InlineData("voiceoff score --run <run-id>")]
         public void EachVerbPrintsWithAnExample(string example) =>
             Assert.Contains($"Example: {example}", help, StringComparison.Ordinal);
@@ -85,7 +83,7 @@ public static class FeatureNothingShipsAndNoSlugInCode
         public ScenarioAVerbAnswersHelp()
         {
             StringWriter output = new();
-            exit = Cli.Run(["pair", "--help"], output, TextWriter.Null);
+            exit = Cli.Run(["serve", "--help"], output, TextWriter.Null);
             help = output.ToString();
             StringWriter render = new();
             Cli.Run(["render", "-h"], render, TextWriter.Null);
@@ -97,14 +95,20 @@ public static class FeatureNothingShipsAndNoSlugInCode
 
         [Fact]
         public void ItPrintsThatVerbsExample() =>
-            Assert.Contains("voiceoff pair --run <run-id>", help, StringComparison.Ordinal);
+            Assert.Contains("voiceoff serve --run <run-id>", help, StringComparison.Ordinal);
 
         [Fact]
         public void TheShortFlagWorksToo() =>
-            Assert.Contains("voiceoff render --tier cpu", renderHelp, StringComparison.Ordinal);
+            Assert.Contains("voiceoff render --run first --dry-run", renderHelp, StringComparison.Ordinal);
 
-        [Fact]
-        public void TheRenderExampleListsTheRootFolder() =>
-            Assert.Contains("[--root <dir>]", renderHelp, StringComparison.Ordinal);
+        [Theory]
+        [InlineData("--run <id>")]
+        [InlineData("[--card <id>]")]
+        [InlineData("[--root <dir>]")]
+        [InlineData("[--engines <dir>]")]
+        [InlineData("[--cards <dir>]")]
+        [InlineData("[--script <file>]")]
+        public void TheRenderUsageListsEveryFlag(string flag) =>
+            Assert.Contains(flag, renderHelp, StringComparison.Ordinal);
     }
 }

@@ -1,6 +1,5 @@
 using System.Text.Json.Nodes;
 using GenWave.VoiceOff.Speech;
-using GenWave.VoiceOff.Script;
 using GenWave.VoiceOff.Tests.Support;
 using Xunit.Abstractions;
 
@@ -37,28 +36,10 @@ public sealed class EngineProfileLoadingTests(ITestOutputHelper output)
         new("port is a string", () => EngineProfileJson.With(n => n["port"] = "8880"), "port"),
         new("endpoint is ftp", () => EngineProfileJson.With(n => n["endpoint"] = "ftp://host:1/"), "endpoint"),
         new("endpoint is relative", () => EngineProfileJson.With(n => n["endpoint"] = "/v1"), "endpoint"),
-        new("tiers absent", () => EngineProfileJson.With(n => n.Remove("tiers")), "tiers"),
-        new("tiers empty", () => EngineProfileJson.With(n => n["tiers"] = new JsonArray()), "tiers"),
-        new("tier unknown", () => EngineProfileJson.With(n => n["tiers"] = new JsonArray("tpu")), "tier \"tpu\""),
-        new("tier twice", () => EngineProfileJson.With(n => n["tiers"] = new JsonArray("cpu", "cpu")), "listed twice"),
-        new("tier is a number", () => EngineProfileJson.With(n => n["tiers"] = new JsonArray(1)), "tiers"),
-        new("voices absent", () => EngineProfileJson.With(n => n.Remove("voices")), "voices"),
-        new("voices lack a register", () => EngineProfileJson.With(n => EngineProfileJson.Child(n, "voices").Remove("laconic")), "\"laconic\""),
-        new("voices have an extra register", () => EngineProfileJson.With(n => EngineProfileJson.Child(n, "voices").Add("whisper", "v4")), "\"whisper\""),
-        new("voice blank", () => EngineProfileJson.With(n => EngineProfileJson.Child(n, "voices")["bubbly"] = " "), "\"bubbly\""),
-        new("voice is null", () => EngineProfileJson.With(n => EngineProfileJson.Child(n, "voices")["bubbly"] = null), "voices.bubbly"),
-        new("voiceReason absent", () => EngineProfileJson.With(n => n.Remove("voiceReason")), "voiceReason"),
-        new("voiceReason blank", () => EngineProfileJson.With(n => n["voiceReason"] = ""), "voiceReason"),
-        new("repick register unknown", () => Repick(register: "shouty"), "repick.register"),
-        new("repick voice is null", () => Repick(voice: null), "repick.voice"),
-        new("repick voice blank", () => Repick(voice: " "), "repick.voice"),
-        new("repick reason blank", () => Repick(reason: " "), "repick.reason"),
-        new("markup absent", () => EngineProfileJson.With(n => n.Remove("markup")), "markup"),
-        new("markup lacks a cue", () => EngineProfileJson.With(n => EngineProfileJson.Child(n, "markup").Remove("um")), "missing the cue \"um\""),
-        new("markup has an unknown cue", () => EngineProfileJson.With(n => EngineProfileJson.Child(n, "markup").Add("sihg", null)), "unknown cue \"sihg\""),
-        new("markup tag blank", () => EngineProfileJson.With(n => EngineProfileJson.Child(n, "markup")["laugh"] = " "), "\"laugh\""),
-        new("speed zero", () => EngineProfileJson.With(n => n["speed"] = 0), "speed"),
-        new("speed above 4", () => EngineProfileJson.With(n => n["speed"] = 4.1), "speed"),
+        new("retired tiers member", () => EngineProfileJson.With(n => n["tiers"] = new JsonArray("cpu")), "tiers"),
+        new("retired voices member", () => EngineProfileJson.With(n => n["voices"] = new JsonObject()), "voices"),
+        new("retired markup member", () => EngineProfileJson.With(n => n["markup"] = new JsonObject()), "markup"),
+        new("retired speed member", () => EngineProfileJson.With(n => n["speed"] = 1.0), "speed"),
         new("timeoutSeconds zero", () => EngineProfileJson.With(n => n["timeoutSeconds"] = 0), "timeoutSeconds"),
         new("timeoutSeconds above 600", () => EngineProfileJson.With(n => n["timeoutSeconds"] = 601), "timeoutSeconds"),
         new("license absent", () => EngineProfileJson.With(n => n.Remove("license")), "license"),
@@ -73,14 +54,6 @@ public sealed class EngineProfileLoadingTests(ITestOutputHelper output)
     ];
 
     public static TheoryData<string> DefectNames() => new(Defects.Select(d => d.Name));
-
-    private static string Repick(string? register = "bubbly", string? voice = "v9", string? reason = "clipped") =>
-        EngineProfileJson.With(n => n["repick"] = new JsonObject
-        {
-            ["register"] = register,
-            ["voice"] = voice,
-            ["reason"] = reason,
-        });
 
     [Theory]
     [MemberData(nameof(DefectNames))]
@@ -98,9 +71,6 @@ public sealed class EngineProfileLoadingTests(ITestOutputHelper output)
     public void ThePlainValidProfileLoads() => Assert.Equal("alpha", Load(EngineProfileJson.Valid().ToJsonString()).Slug);
 
     [Fact]
-    public void AbsentSpeedDefaultsToOne() => Assert.Equal(1.0, Load(EngineProfileJson.Valid().ToJsonString()).Speed);
-
-    [Fact]
     public void AbsentTimeoutDefaultsTo120() => Assert.Equal(120, Load(EngineProfileJson.Valid().ToJsonString()).TimeoutSeconds);
 
     [Fact]
@@ -108,30 +78,8 @@ public sealed class EngineProfileLoadingTests(ITestOutputHelper output)
         Assert.False(Load(EngineProfileJson.With(n => n.Remove("baseline"))).Baseline);
 
     [Fact]
-    public void ANullMarkupValueMeansStripTheCue() =>
-        Assert.Null(Load(EngineProfileJson.Valid().ToJsonString()).Markup["pause"]);
-
-    [Fact]
-    public void ANativeTagIsKept() =>
-        Assert.Equal("[laugh]", Load(EngineProfileJson.Valid().ToJsonString()).Markup["laugh"]);
-
-    [Fact]
-    public void TheMarkupMapNamesEveryKnownCue() =>
-        Assert.Equal(
-            CueVocabulary.Known.Order(StringComparer.Ordinal),
-            Load(EngineProfileJson.Valid().ToJsonString()).Markup.Keys.Order(StringComparer.Ordinal));
-
-    [Fact]
     public void AnEndpointOverrideIsKept() =>
         Assert.Equal("http://10.0.0.5:9000/", Load(EngineProfileJson.With(n => n["endpoint"] = "http://10.0.0.5:9000")).Endpoint?.AbsoluteUri);
-
-    [Fact]
-    public void ARePickReplacesTheFirstChoice() =>
-        Assert.Equal("v9", Load(Repick()).VoiceFor(GauntletRegister.Bubbly));
-
-    [Fact]
-    public void ARePickLeavesTheOtherRegistersAlone() =>
-        Assert.Equal("v2", Load(Repick()).VoiceFor(GauntletRegister.Laconic));
 
     [Fact]
     public void ZeroBaselinesAreRefused()
@@ -156,8 +104,4 @@ public sealed class EngineProfileLoadingTests(ITestOutputHelper output)
     public void EveryShippedProfileLoads() =>
         Assert.Equal(
             ["chatterbox", "cosyvoice", "csm", "dia", "f5", "fish", "higgs", "kokoro", "omnivoice", "orpheus", "parler", "piper", "qwen3", "spark", "styletts2", "vibevoice", "voxcpm"], EngineProfileSet.Load(RealEngines.Directory).Profiles.Select(p => p.Slug));
-
-    [Fact]
-    public void TheShippedBaselineGivesEachRegisterItsOwnVoice() =>
-        Assert.Equal(3, RegisterKeys.All.Select(EngineProfileSet.Load(RealEngines.Directory).Baseline.VoiceFor).Distinct().Count());
 }

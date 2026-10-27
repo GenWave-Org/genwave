@@ -1,4 +1,4 @@
-// STORY-491 — One client, and the two gates per engine (gh-#614 · SPEC F214.1, F214.5, F214.6, F214.16 · PLAN T608, T611)
+// STORY-491 — One client, and the two gates per engine (gh-#614 · SPEC F214.1 as amended by F217.5, F217.6, F217.2 · PLAN T608, T611)
 //
 // BDD specification — xUnit. Every fact is pending at plan time (2026-10-21); the named task
 // activates its facts, watches them fail, then makes them pass.
@@ -6,10 +6,8 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using GenWave.VoiceOff.Render;
 using GenWave.VoiceOff.Speech;
-using GenWave.VoiceOff.Script;
 using GenWave.VoiceOff.Tests.Support;
 
 namespace GenWave.VoiceOff.Tests.Specs;
@@ -25,7 +23,7 @@ public static class FeatureOneClientAndTheTwoGatesPerEngine
         await using EngineStubServer stub = await EngineStubServer.StartAsync(speechDelay: delay);
         using HttpClient http = SpeechClient.CreateHttpClient();
         SpeechResult result = await new SpeechClient(http, stub.BaseUri, TimeSpan.FromSeconds(10))
-            .RenderAsync(Line, "v1", 1.0, CancellationToken.None);
+            .RenderAsync(Line, "v1", 1.0, null, CancellationToken.None);
         return new Rendered(result, stub.Requests.SpeechBody);
     }
 
@@ -102,57 +100,9 @@ public static class FeatureOneClientAndTheTwoGatesPerEngine
         public void ItReturnsAAndB() => Assert.Equal(["a", "b"], listed.VoiceIds);
     }
 
-    // AC5 — distinct voices pass voiceSelect
-    public sealed class ScenarioDistinctVoicesPassVoiceSelect
-    {
-        // Same-voice distance 0.1, cross-voice distance 1.0: 10x, over the 3x margin.
-        private readonly GateResult gate = VoiceSelectGate.Evaluate(
-            new AudioFingerprint([0.0, 0.0]), new AudioFingerprint([0.1, 0.0]), new AudioFingerprint([1.0, 0.0]));
-
-        [Fact]
-        public void ItPasses() => Assert.True(gate.Passed);
-    }
-
-    // AC6 — a re-pick replaces
-    public sealed class ScenarioARePickReplaces
-    {
-        private readonly RenderLedger ledger = new();
-
-        public ScenarioARePickReplaces()
-        {
-            EngineProfile first = EngineProfileReader.Parse(EngineProfileJson.Valid().ToJsonString(), "alpha.json");
-            EngineProfile repicked = EngineProfileReader.Parse(
-                EngineProfileJson.With(n => n["repick"] = JsonSerializer.SerializeToNode(
-                    new { register = "bubbly", voice = "v9", reason = "v1 clipped on plosives" })), "alpha.json");
-            ledger.Record(new RenderRecord(GauntletRegister.Bubbly, "line-1", RenderLane.Plain, first.VoiceFor(GauntletRegister.Bubbly), "a.wav"));
-            ledger.Record(new RenderRecord(GauntletRegister.Bubbly, "line-2", RenderLane.Plain, first.VoiceFor(GauntletRegister.Bubbly), "b.wav"));
-            ledger.Record(new RenderRecord(GauntletRegister.Bubbly, "line-1", RenderLane.Plain, repicked.VoiceFor(GauntletRegister.Bubbly), "c.wav"));
-            ledger.Record(new RenderRecord(GauntletRegister.Bubbly, "line-1", RenderLane.Markup, repicked.VoiceFor(GauntletRegister.Bubbly), "d.wav"));
-            ledger.Retain(repicked);
-        }
-
-        [Fact]
-        public void OnlyTheRePickedVoiceSRendersAreKept() =>
-            Assert.Equal([("v9", "c.wav")], ledger.Records.Where(r => r.Lane == RenderLane.Plain).Select(r => (r.Voice, r.AudioPath)));
-
-        [Fact]
-        public void TheMarkupLaneRenderOfTheSameLineIsKeptBesideThePlainOne() =>
-            Assert.Equal(["c.wav", "d.wav"], ledger.Records.Select(r => r.AudioPath).Order(StringComparer.Ordinal));
-    }
-
     // ---------------------------------------------------------------------
     // SAD PATH
     // ---------------------------------------------------------------------
-
-    // AC7 — same audio fails voiceSelect
-    public sealed class ScenarioSameAudioFailsVoiceSelect
-    {
-        private readonly GateResult gate = VoiceSelectGate.Evaluate(
-            new AudioFingerprint([0.5, 0.5]), new AudioFingerprint([0.5, 0.5]), new AudioFingerprint([0.5, 0.5]));
-
-        [Fact]
-        public void VoiceSelectIs() => Assert.False(gate.Passed);
-    }
 
     // AC8 — no container fails the gate
     public sealed class ScenarioNoContainerFailsTheGate : IDisposable
@@ -167,20 +117,15 @@ public static class FeatureOneClientAndTheTwoGatesPerEngine
         {
             EngineStubServer stub = scenario.StartStubAsync().GetAwaiter().GetResult();
             scenario.AddEngine("alpha", stub.BaseUri);
-            run = scenario.Run(
-                new FakeDockerInspector(new ContainerState(true, false, "10.0.0.2")),
-                scenario.EnginesDirectory, scenario.GauntletDirectory(RenderScenario.ThreeLines()), "cpu");
+            scenario.AddCard("alpha-card", "alpha");
+            run = scenario.RunWith(new FakeDockerInspector(new ContainerState(true, false, "10.0.0.2")), CancellationToken.None, "first");
         }
 
         [Fact]
-        public void ItIs()
-        {
-            JsonNode gates = JsonNode.Parse(File.ReadAllText(run.PathIn("gates.json"))) ?? throw new InvalidOperationException("gates.json is empty");
-            Assert.Equal(false, gates["engines"]?[0]?["container"]?["passed"]?.GetValue<bool>());
-        }
+        public void ItIs() => Assert.Contains(run.OutputLines, l => l.StartsWith("alpha-card ❌ container: ", StringComparison.Ordinal));
 
         [Fact]
-        public void TheEngineGetsNoPairs() => Assert.False(Directory.Exists(run.PathIn(Path.Combine("wav", "alpha"))));
+        public void TheCardGetsNoClip() => Assert.False(File.Exists(run.PathIn(Path.Combine("cards", "alpha-card.wav"))));
 
         public void Dispose() => scenario.Dispose();
     }
@@ -197,15 +142,16 @@ public static class FeatureOneClientAndTheTwoGatesPerEngine
         public ScenarioAnUnreachableEngineIsRecorded()
         {
             scenario.AddEngine("alpha", new Uri($"http://127.0.0.1:{ClosedPort()}/"));
-            run = scenario.Run(scenario.EnginesDirectory, scenario.GauntletDirectory(RenderScenario.ThreeLines()), "cpu");
+            scenario.AddCard("alpha-card", "alpha");
+            run = scenario.Run("first");
         }
 
         [Fact]
         public void TheRunFinishes() => Assert.Equal(0, run.Exit);
 
         [Fact]
-        public void TheEngineRowShowsWithTheError() =>
-            Assert.Contains(run.OutputLines, l => l.StartsWith("alpha: ❌ container: voices endpoint at http://127.0.0.1:", StringComparison.Ordinal) && l.Contains("failed:", StringComparison.Ordinal));
+        public void TheCardRowShowsTheError() =>
+            Assert.Contains(run.OutputLines, l => l.StartsWith("alpha-card ❌ container: voices endpoint at http://127.0.0.1:", StringComparison.Ordinal) && l.Contains("failed:", StringComparison.Ordinal));
 
         // A port nothing listens on: bind a free one, then let it go.
         private static int ClosedPort()

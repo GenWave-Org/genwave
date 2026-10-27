@@ -2,15 +2,7 @@
   "slug": "cosyvoice",
   "container": "voiceoff-cosyvoice",
   "port": 8880,
-  "tiers": ["cpu", "gpu"],
   "timeoutSeconds": 600,
-  "voices": {
-    "bubbly": "ref-f1",
-    "laconic": "ref-m1",
-    "late-night": "ref-m2"
-  },
-  "voiceReason": "This engine has no stock voices, so each register clones one shared reference clip: bubbly is the bright female clip (ref-f1), laconic is the mid male clip (ref-m1) and late-night is the low male clip (ref-m2).",
-  "markup": { "pause": null, "laugh": null, "sigh": null, "breath": "[breath]", "um": null, "emphasis": null },
   "license": "Code and weights Apache-2.0",
   "notes": "Fun-CosyVoice3-0.5B-2512 (FunAudioLLM, CosyVoice commit 074ca6d). The shim wraps inference_zero_shot with the reference clip and transcript behind the required system prefix, fixed seed, honours speed. Native tag used: [breath] (the tokenizer also lists [laughter] and [sigh], untested). The wetext English normaliser cannot download from ModelScope without a token, so the text frontend runs without it. One CPU line took 56 s warm (63 s cold) on a quiet box (16 cores, nothing else rendering, 2026-10-23), just under the 60 s line, so it is in both tiers. Weights 9.1 GB, image 9.9 GB."
 }

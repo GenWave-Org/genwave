@@ -1,7 +1,8 @@
 using System.Globalization;
-using GenWave.VoiceOff.Render;
+using GenWave.Core.Logging;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
@@ -15,15 +16,18 @@ namespace GenWave.VoiceOff.Serving;
 internal static class ServeHost
 {
     /// <summary>Builds the host, not started. When it starts it prints where to open the page to <paramref name="output"/>.</summary>
+    /// <param name="error">Where one line per failed request is written; the reply itself stays generic.</param>
     /// <param name="candidates">The network interfaces to choose the shown address from; null reads this machine's.</param>
-    /// <exception cref="InvalidDataException">The run is missing, is not paired, or a file of it is bad.</exception>
-    internal static WebApplication Build(ServeOptions options, TimeProvider time, TextWriter output, IReadOnlyList<NetworkCandidate>? candidates = null)
+    /// <exception cref="InvalidDataException">The run was not rendered, or a file of it is bad.</exception>
+    internal static async Task<WebApplication> BuildAsync(
+        ServeOptions options, TimeProvider time, TextWriter output, TextWriter error, CancellationToken ct, IReadOnlyList<NetworkCandidate>? candidates = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(time);
         ArgumentNullException.ThrowIfNull(output);
+        ArgumentNullException.ThrowIfNull(error);
 
-        ServeRun run = ServeRun.Open(options.Root, options.RunId);
+        ServeRun run = await ServeRun.OpenAsync(options, time, ct);
 
         // The host reads appsettings*.json from the working directory and ASPNETCORE_* variables by default. Neither may change what a LAN
         // sees (Development shows stack traces; a Kestrel:Endpoints section adds listeners), so the environment is fixed to Production,
@@ -34,29 +38,48 @@ internal static class ServeHost
         {
             Args = ["--hostBuilder:reloadConfigOnChange=false", "--preferHostingUrls=false"],
             EnvironmentName = Environments.Production,
-            ContentRootPath = Path.GetDirectoryName(run.IndexPath),
+            ContentRootPath = run.RunDirectory,
         });
         builder.Configuration.Sources.Clear();
 
-        // The console carries the one URL line and nothing else; a request line would carry a judge name.
+        // The console carries the one URL line and nothing else.
         builder.Logging.ClearProviders();
         builder.WebHost.ConfigureKestrel(kestrel =>
         {
             kestrel.AddServerHeader = false;
-            kestrel.Limits.MaxRequestBodySize = ListeningRoutes.MaxBodyBytes;
+            kestrel.Limits.MaxRequestBodySize = JsonBody.MaxBodyBytes;
             kestrel.Listen(options.Bind, options.Port);
         });
 
+        TextWriter failures = TextWriter.Synchronized(error);
         WebApplication app = builder.Build();
         app.Use(async (http, next) =>
         {
             SecurityHeaders.Apply(http.Response);
-            await next(http);
+            try
+            {
+                await next(http);
+            }
+            // A failure after the reply has started is not logged; that is accepted.
+            catch (Exception ex) when (ex is not OperationCanceledException && !http.Response.HasStarted)
+            {
+                // Kestrel clears the headers of an unhandled failure, so the answer is rebuilt with them. The cause goes to the log line, not the body.
+                failures.WriteLine(FailureLine(http.Request, ex));
+                http.Response.Clear();
+                SecurityHeaders.Apply(http.Response);
+                http.Response.StatusCode = StatusCodes.Status500InternalServerError;
+                http.Response.ContentType = "text/plain; charset=utf-8";
+                await http.Response.WriteAsync("The server could not complete the request.", http.RequestAborted);
+            }
         });
-        ListeningRoutes.Map(app, run, time);
+        ServeRoutes.Map(app, run);
         app.Lifetime.ApplicationStarted.Register(() => output.WriteLine(OpenLine(app, options, candidates ?? NetworkCandidates.Detect())));
         return app;
     }
+
+    // One line: the message is free text, so CR and LF cannot start a second (forged) line.
+    internal static string FailureLine(HttpRequest request, Exception ex) =>
+        LogSanitize.Strip($"{request.Method} {request.Path} failed: {ex.GetType().Name}: {ex.Message}");
 
     /// <summary>The port Kestrel actually bound; differs from the option when that was 0.</summary>
     internal static int BoundPort(WebApplication app)

@@ -4,8 +4,8 @@ using Microsoft.Extensions.Hosting;
 namespace GenWave.VoiceOff.Serving;
 
 /// <summary>
-/// <c>voiceoff serve</c> (SPEC F214.10): serves a paired run's listening page until cancelled. Exit 0 on a clean stop, 2 for a usage error,
-/// 1 for a run that is missing or not paired, or a port that cannot be used.
+/// <c>voiceoff serve</c> (SPEC F217.7): serves a rendered run's cards and keeps the judgement until cancelled. Exit 0 on a clean stop, 2 for a usage
+/// error, 1 for a run that is missing or not rendered, a bad card or judgement file, or a port that cannot be used.
 /// </summary>
 internal static class ServeCommand
 {
@@ -28,7 +28,7 @@ internal static class ServeCommand
 
         try
         {
-            await using WebApplication app = ServeHost.Build(options, TimeProvider.System, output);
+            await using WebApplication app = await ServeHost.BuildAsync(options, TimeProvider.System, output, error, ct);
             await app.StartAsync(ct);
             await app.WaitForShutdownAsync(ct);
             await app.StopAsync(CancellationToken.None);

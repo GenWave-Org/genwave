@@ -2,7 +2,7 @@ using System.Reflection;
 
 namespace GenWave.VoiceOff.Listening;
 
-/// <summary>The embedded one-file listening page (<c>page.html</c>); <c>pair</c> writes it to <c>session/index.html</c>.</summary>
+/// <summary>The embedded one-file listening page (<c>page.html</c>); <c>serve</c> hands it out.</summary>
 internal static class ListeningPage
 {
     private const string ResourceName = "page.html";

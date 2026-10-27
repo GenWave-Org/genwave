@@ -3,14 +3,6 @@
   "container": "voiceoff-parler",
   "port": 8880,
   "timeoutSeconds": 600,
-  "tiers": ["gpu"],
-  "voices": {
-    "bubbly": "Lea",
-    "laconic": "Jon",
-    "late-night": "Gary"
-  },
-  "voiceReason": "Parler has 34 trained speaker names, and the shim adds a short description for each: bubbly is Lea (bright, upbeat, lively), laconic is Jon (dry, flat, slow) and late-night is Gary (low, warm, relaxed).",
-  "markup": { "pause": null, "laugh": null, "sigh": null, "breath": null, "um": null, "emphasis": null },
   "license": "Code and weights: Apache-2.0.",
   "notes": "Parler-TTS Mini v1.1 (parler-tts/parler-tts-mini-v1.1, 880M) with the parler-tts package at commit d108732 on transformers 4.46.1 (its required pin). Voice = speaker name plus a fixed description; seed 1234. Speed is ignored. It has no native tags (commas shape pauses), so every cue is stripped. Weights are about 3.6 GB, with the image near 7.7 GB. One CPU line took 92 s warm on a quiet box (16 cores, nothing else rendering, 2026-10-23), so it is gpu only. The Gary smoke render was only 2.4 s, shorter than the line, so check that voice."
 }

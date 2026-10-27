@@ -23,12 +23,13 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="gauntlet\**" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="cards\**" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="script\**" CopyToOutputDirectory="PreserveNewest" />
     <None Include="engines\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
-    <!-- The listening page is one self-contained file that pair writes next to the clips. -->
+    <!-- The listening page is one self-contained file; serve hands it out. -->
     <EmbeddedResource Include="Listening\page.html" LogicalName="page.html" />
   </ItemGroup>
 

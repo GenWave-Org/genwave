@@ -1,0 +1,28 @@
+{
+  "id": "kokoro",
+  "engine": "kokoro",
+  "title": "Kokoro, tuned",
+  "host": "thor-cpu",
+  "voice": "af_heart",
+  "speed": 1.08,
+  "settings": {},
+  "cues": {
+    "breath": "[pause:0.35s]",
+    "laugh": "Haha!",
+    "um": "Um,",
+    "cough": "Ahem.",
+    "giggle": "Hehe!",
+    "sigh": "[pause:0.5s]",
+    "pause": "[pause:0.8s]"
+  },
+  "overrides": {},
+  "facts": {
+    "checkpoint": "Kokoro-82M v1.0",
+    "voices": 54,
+    "cloning": false,
+    "ownVoice": true,
+    "cannot": [],
+    "tricks": ["Pause, breath and sigh use the native [pause:Ns] tag (a kokoro-fastapi v0.6.0 feature, exact spelling only, anything else is read aloud)", "Sigh is a 0.5 s pause because a written Ahh... is spoken as a word", "Laugh, um, cough and giggle have no native tag, so they are written out as spoken words (Haha!, Um, Ahem., Hehe!)"]
+  },
+  "why": "Kokoro at its best: af_heart, its best-graded voice, a touch faster, with the native pause tags for pause, breath and sigh and spoken stand-ins for the sounds it cannot make."
+}

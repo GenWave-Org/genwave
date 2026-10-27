@@ -1,23 +1,23 @@
-using GenWave.VoiceOff.Script;
-using GenWave.VoiceOff.Speech;
+using GenWave.VoiceOff.Deck;
 
 namespace GenWave.VoiceOff.Render;
 
-/// <summary><c>render --dry-run</c> (STORY-495): what a run would render and roughly how long it takes. Makes no request and writes no file.</summary>
+/// <summary><c>render --dry-run</c> (STORY-495): what a run would render and roughly how long it takes. Makes no request, asks docker nothing and writes no file.</summary>
 internal static class DryRunReport
 {
-    internal static async Task<int> RunAsync(RenderOptions options, IReadOnlyList<EngineProfile> selected, GauntletSet set, TextWriter output, CancellationToken ct)
+    internal static async Task<int> RunAsync(string root, IReadOnlyList<CardPlan> plans, TextWriter output, CancellationToken ct)
     {
-        EngineProfile[] attempted = selected.Where(p => EngineRun.AttemptsTier(p, options.Tier)).ToArray();
-        int clips = attempted.Sum(p => RunProgress.ClipsFor(p, set));
-        string engines = attempted.Length == 1 ? "1 engine" : $"{attempted.Length} engines";
-        output.WriteLine($"Dry run: {(clips == 1 ? "1 clip" : $"{clips} clips")} across {engines}");
-        output.WriteLine((await PreviousRunFinder.FindAsync(options.Root, options.Tier, ct)).EtaLine(clips));
-        foreach (EngineProfile skipped in selected.Except(attempted))
+        int paragraphs = plans.Sum(p => p.Paragraphs.Count);
+        string cards = plans.Count == 1 ? "1 card" : $"{plans.Count} cards";
+        output.WriteLine($"Dry run: {(paragraphs == 1 ? "1 paragraph" : $"{paragraphs} paragraphs")} across {cards}");
+        foreach (CardPlan plan in plans)
         {
-            output.WriteLine($"{skipped.Slug}: not attempted at tier {RunId.TierName(options.Tier)}");
+            output.WriteLine(plan.Refusal is { } refusal
+                ? $"{plan.Card.Id}: ❌ {refusal}"
+                : $"{plan.Card.Id}: {plan.Card.Engine} on {CardHostName.Of(plan.Card.Host)}, {plan.Paragraphs.Count} paragraphs");
         }
 
+        output.WriteLine((await PreviousRunSpeed.FindAsync(root, ct)).EtaLine(paragraphs));
         return RenderCommand.Ok;
     }
 }

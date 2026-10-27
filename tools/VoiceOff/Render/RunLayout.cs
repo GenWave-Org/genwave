@@ -1,8 +1,11 @@
-using GenWave.VoiceOff.Speech;
+using System.Globalization;
 
 namespace GenWave.VoiceOff.Render;
 
-/// <summary>Where a run keeps its files: <c>&lt;root&gt;/&lt;run-id&gt;/</c> with <c>raw</c>, <c>wav</c>, <c>gates</c> and the three json files.</summary>
+/// <summary>
+/// Where a run keeps its files (F217.5): <c>&lt;root&gt;/&lt;run-id&gt;/</c> with <c>raw/&lt;card&gt;/&lt;n&gt;.wav</c>,
+/// <c>cards/&lt;card&gt;.wav</c>, <c>renders.jsonl</c> and <c>run.json</c>. Card ids are kebab-case, so every path is one safe segment.
+/// </summary>
 internal sealed class RunLayout(string root, string runId)
 {
     internal string RunId { get; } = runId;
@@ -11,21 +14,20 @@ internal sealed class RunLayout(string root, string runId)
 
     internal string RunJsonPath => Path.Combine(RunDirectory, "run.json");
 
-    internal string TimingPath => Path.Combine(RunDirectory, "timing.jsonl");
+    internal string JudgementPath => Path.Combine(RunDirectory, "judgement.json");
 
-    internal string GatesJsonPath => Path.Combine(RunDirectory, "gates.json");
+    internal string RendersPath => Path.Combine(RunDirectory, "renders.jsonl");
 
-    /// <summary>The engine's bytes as returned, before loudness matching.</summary>
-    internal string RawPath(string slug, RenderLane lane, string lineId, string? suffix = null) =>
-        Path.Combine(RunDirectory, "raw", slug, LaneFolder(lane), lineId + suffix + ".wav");
+    /// <summary>The folder holding one card's raw paragraphs.</summary>
+    internal string RawDirectory(string cardId) => Path.Combine(RunDirectory, "raw", cardId);
+
+    /// <summary>The engine's bytes for paragraph <paramref name="n"/> as returned, before joining and loudness matching.</summary>
+    internal string RawPath(string cardId, int n) =>
+        Path.Combine(RawDirectory(cardId), n.ToString(CultureInfo.InvariantCulture) + ".wav");
 
     /// <summary>The loudness-matched clip every later step reads.</summary>
-    internal string WavPath(string slug, RenderLane lane, string lineId) =>
-        Path.Combine(RunDirectory, "wav", slug, LaneFolder(lane), lineId + ".wav");
+    internal string ClipPath(string cardId) => Path.Combine(RunDirectory, "cards", cardId + ".wav");
 
-    /// <summary>A voiceSelect gate render (not a clip): <c>gates/&lt;slug&gt;/&lt;name&gt;.wav</c>.</summary>
-    internal string GatePath(string slug, string name, bool raw = false) =>
-        Path.Combine(RunDirectory, "gates", slug, raw ? name + ".raw.wav" : name + ".wav");
-
-    internal static string LaneFolder(RenderLane lane) => lane.ToString().ToLowerInvariant();
+    /// <summary>Where the joined paragraphs wait for the loudness match; never survives a render.</summary>
+    internal string JoinedPath(string cardId) => Path.Combine(RunDirectory, "cards", cardId + ".joined.tmp");
 }

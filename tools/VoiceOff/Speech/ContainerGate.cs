@@ -1,7 +1,7 @@
 namespace GenWave.VoiceOff.Speech;
 
 /// <summary>
-/// The container gate (SPEC F214.6): <c>docker inspect</c> says the container is running and its voices
+/// The container gate (SPEC F217.6): <c>docker inspect</c> says the container is running and its voices
 /// endpoint answers with at least one voice. The tool never starts or stops anything.
 /// </summary>
 internal static class ContainerGate

@@ -1,13 +1,14 @@
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using GenWave.Tts;
 
 namespace GenWave.VoiceOff.Speech;
 
 /// <summary>
-/// The one HTTP client the tool renders through (SPEC F214.1): <c>POST /v1/audio/speech</c> and
+/// The one HTTP client the tool renders through (SPEC F214.1 as amended by F217.5): <c>POST /v1/audio/speech</c> and
 /// <c>GET /v1/audio/voices</c> against an engine endpoint. Failures come back as typed results.
 /// The client owns the deadline (the profile's timeout), so the <see cref="HttpClient"/> it is given
 /// must not carry one of its own: use <see cref="CreateHttpClient"/>.
@@ -51,16 +52,20 @@ internal sealed class SpeechClient
         [property: JsonPropertyName("input")] string Input,
         [property: JsonPropertyName("voice")] string Voice,
         [property: JsonPropertyName("speed")] double Speed,
-        [property: JsonPropertyName("response_format")] string ResponseFormat);
+        [property: JsonPropertyName("response_format")] string ResponseFormat,
+        [property: JsonPropertyName("settings"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] JsonObject? Settings);
 
-    /// <summary>Renders <paramref name="text"/> with <paramref name="voice"/>; the caller's own cancellation still propagates.</summary>
-    internal async Task<SpeechResult> RenderAsync(string text, string voice, double speed, CancellationToken ct)
+    /// <summary>
+    /// Renders <paramref name="text"/> with <paramref name="voice"/>; the caller's own cancellation still propagates.
+    /// <paramref name="settings"/> is the engine-specific object a card carries (F217.5), sent as <c>settings</c> when given.
+    /// </summary>
+    internal async Task<SpeechResult> RenderAsync(string text, string voice, double speed, JsonObject? settings, CancellationToken ct)
     {
         long start = time.GetTimestamp();
         (byte[]? audio, SpeechError? error) = await SendAsync(
             () => new HttpRequestMessage(HttpMethod.Post, EndpointUri.Combine(endpoint.AbsoluteUri, "v1/audio/speech"))
             {
-                Content = JsonContent.Create(new SpeechRequest(text, voice, speed, ResponseFormat)),
+                Content = JsonContent.Create(new SpeechRequest(text, voice, speed, ResponseFormat, settings?.DeepClone().AsObject())),
             },
             limits.MaxAudioBytes,
             ct);

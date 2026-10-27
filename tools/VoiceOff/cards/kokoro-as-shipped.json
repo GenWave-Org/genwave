@@ -1,0 +1,29 @@
+{
+  "id": "kokoro-as-shipped",
+  "engine": "kokoro",
+  "title": "Kokoro, as the station sounds today",
+  "asShipped": true,
+  "host": "thor-cpu",
+  "voice": "af_heart",
+  "speed": 1,
+  "settings": {},
+  "cues": {
+    "breath": null,
+    "laugh": null,
+    "um": null,
+    "cough": null,
+    "giggle": null,
+    "sigh": null,
+    "pause": null
+  },
+  "overrides": {},
+  "facts": {
+    "checkpoint": "Kokoro-82M v1.0",
+    "voices": 54,
+    "cloning": false,
+    "ownVoice": true,
+    "cannot": ["breath", "laugh", "um", "cough", "giggle", "sigh", "pause"],
+    "tricks": ["Voice blending is possible but not used here"]
+  },
+  "why": "The reference: the station's own voice and settings, every cue stripped, exactly as it airs today."
+}

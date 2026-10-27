@@ -1,7 +1,5 @@
-using GenWave.VoiceOff.Pairing;
-using GenWave.VoiceOff.Reeling;
 using GenWave.VoiceOff.Render;
-using GenWave.VoiceOff.Scoring;
+using GenWave.VoiceOff.Score;
 using GenWave.VoiceOff.Serving;
 
 namespace GenWave.VoiceOff;
@@ -11,15 +9,12 @@ internal static class Cli
 {
     internal static readonly IReadOnlyList<VerbHelp> Verbs =
     [
-        new("render", "Render the test scripts with each voice engine.", "voiceoff render --tier cpu [--engine <slug>] [--root <dir>] [--engines <dir>] [--gauntlet <dir>]", "voiceoff render --tier cpu --dry-run"),
-        new("pair", "Build blind A/B pairs from a finished render run.", "voiceoff pair --run <run-id> [--root <dir>] [--engines <dir>] [--gauntlet <dir>] [--seed <n>]"),
-        new("serve", "Serve the pairs on a local web page for listening.", "voiceoff serve --run <run-id> --port 8765"),
-        new("reel", "Join a run's clips into one reel to listen through.", "voiceoff reel --run <run-id> [--root <dir>] [--engines <dir>] [--gauntlet <dir>]"),
-        new("score", "Score the listening results of a run.", "voiceoff score --run <run-id> [--run <run-id>] [--root <dir>] [--engines <dir>] [--out <file>] [--budget-seconds <n>]"),
+        new("render", "Render the script with each voice card, a paragraph at a time.", "voiceoff render --run <id> [--card <id>] [--root <dir>] [--engines <dir>] [--cards <dir>] [--script <file>] [--dry-run]", "voiceoff render --run first --dry-run"),
+        new("serve", "Serve a run's cards on a web page for ranking, and keep the judgement.", "voiceoff serve --run <run-id> --port 8765 [--root <dir>] [--bind <ip>] [--engines <dir>] [--cards <dir>]"),
+        new("score", "Write the ranking of a run to RESULTS.md.", "voiceoff score --run <run-id> [--root <dir>] [--cards <dir>] [--engines <dir>] [--script <file>] [--out <file>]"),
     ];
 
     internal const int Ok = 0;
-    internal const int NotBuilt = 1;
     internal const int UsageError = 2;
 
     /// <summary>The synchronous entry for callers with no async context: every verb with the real services, never cancelled.</summary>
@@ -50,30 +45,14 @@ internal static class Cli
             return await RenderCommand.RunAsync(args[1..], output, error, services, ct);
         }
 
-        if (string.Equals(verb, "pair", StringComparison.Ordinal))
-        {
-            return await PairCommand.RunAsync(args[1..], output, error, ct);
-        }
-
-        if (string.Equals(verb, "reel", StringComparison.Ordinal))
-        {
-            return await ReelCommand.RunAsync(args[1..], output, error, ct);
-        }
-
-        if (string.Equals(verb, "score", StringComparison.Ordinal))
-        {
-            return await ScoreCommand.RunAsync(args[1..], output, error, ct);
-        }
-
         if (string.Equals(verb, "serve", StringComparison.Ordinal))
         {
             return await ServeCommand.RunAsync(args[1..], output, error, ct);
         }
 
-        if (Verbs.Any(v => string.Equals(v.Name, verb, StringComparison.Ordinal)))
+        if (string.Equals(verb, "score", StringComparison.Ordinal))
         {
-            error.WriteLine($"The {verb} verb is not built yet.");
-            return NotBuilt;
+            return await ScoreCommand.RunAsync(args[1..], output, error, ct);
         }
 
         error.WriteLine($"Unknown verb '{verb}'. Run 'voiceoff --help' to see the verbs.");

@@ -2,15 +2,7 @@
   "slug": "spark",
   "container": "voiceoff-spark",
   "port": 8880,
-  "tiers": ["gpu"],
   "timeoutSeconds": 600,
-  "voices": {
-    "bubbly": "ref-f1",
-    "laconic": "ref-m1",
-    "late-night": "ref-m2"
-  },
-  "voiceReason": "Spark-TTS has no stock voices, so each register clones one of the shared reference clips: bubbly is ref-f1 (female), laconic is ref-m1 (male) and late-night is ref-m2 (the lowest male voice).",
-  "markup": { "pause": null, "laugh": null, "sigh": null, "breath": null, "um": null, "emphasis": null },
   "license": "Code Apache-2.0; weights CC-BY-NC-SA-4.0 (non-commercial, share-alike)",
   "notes": "Spark-TTS-0.5B at revision 64207155, upstream code at commit 2f1ea908 (April 2025, not maintained since). Clone mode with the reference transcript, seeded per render. It has no cue tags, and speed is ignored. The weights are non-commercial, so this engine cannot ship in the station. One CPU line took 92 s warm on a quiet box (16 cores, nothing else rendering, 2026-10-23), so GPU only. Output is 16 kHz."
 }

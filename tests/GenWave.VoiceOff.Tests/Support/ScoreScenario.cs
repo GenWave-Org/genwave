@@ -1,73 +1,133 @@
-using GenWave.VoiceOff.Speech;
+using System.Globalization;
+using System.Text.Json.Nodes;
+using GenWave.VoiceOff.Render;
+using GenWave.VoiceOff.Text;
 
 namespace GenWave.VoiceOff.Tests.Support;
 
 /// <summary>
-/// Fixture runs in a temp root plus an engines folder (a baseline and challengers, made-up slugs), driven through <see cref="Cli.Run(string[], TextWriter, TextWriter)"/>.
-/// <c>--out</c> goes into the temp root, so the repo's RESULTS.md is never touched.
+/// A scored run on disk and the real <c>score</c> verb run over it through <see cref="Cli"/>: four cards (<see cref="One"/>, <see cref="Two"/>, <see cref="Three"/> rendered, <see cref="Four"/> failed),
+/// their card files, one engine profile, a script, renders.jsonl and, unless left out, a judgement. The first run writes <c>RESULTS.md</c> into the scenario folder.
 /// </summary>
 internal sealed class ScoreScenario : IDisposable
 {
-    private readonly EngineDirectoryFixture engineFolders = new();
-    private readonly List<ScoreRunBuilder> runs = [];
+    internal const string One = "a-one";
+    internal const string Two = "b-two";
+    internal const string Three = "c-three";
+    internal const string Four = "d-four";
+    internal const string FailureReason = "container was down";
 
-    internal ScoreScenario(string baseline = "alpha", params string[] challengers)
+    /// <summary>Written as 23:30 at UTC-5 so the date line proves the date is the UTC one (2026-10-28).</summary>
+    internal static readonly DateTimeOffset Started = DateTimeOffset.Parse("2026-10-27T23:30:00-05:00", CultureInfo.InvariantCulture);
+
+    /// <summary>Written verbatim by the judge: a cell separator, a heading and a code fence, none of which may break the page.</summary>
+    internal const string AwkwardNote = "Warm.\n| not a cell\n# not a heading\n```\nnot a fence";
+
+    private readonly string folder = Path.Combine(Path.GetTempPath(), "voiceoff-score-" + Guid.NewGuid().ToString("N"));
+    private readonly EngineDirectoryFixture engines = new();
+    private readonly CardFixtureDirectory cards = new();
+    private readonly string enginesDirectory;
+    private readonly string cardsDirectory;
+    private readonly StringWriter output = new();
+    private readonly StringWriter errorOutput = new();
+
+    /// <param name="order">The judgement order; null leaves judgement.json out.</param>
+    /// <param name="scriptHashInRun">What run.json records as the script hash; null records the hash of the script on disk.</param>
+    internal ScoreScenario(string[]? order, string? scriptHashInRun = null)
     {
-        Root = Path.Combine(Path.GetTempPath(), "voiceoff-score-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(Root);
-        Baseline = baseline;
-        List<(string, string)> files = [(baseline + ".json", EngineProfileJson.With(node => node["license"] = "MIT", baseline))];
-        foreach (string slug in challengers.Length == 0 ? ["beta"] : challengers)
+        Directory.CreateDirectory(RunDirectory);
+        ScriptPath = Path.Combine(folder, "script.json");
+        File.WriteAllText(ScriptPath, """{ "version": "1", "paragraphs": [ { "n": 1, "text": "Hello there." } ] }""");
+        ScriptHash = ScriptFile.Load(ScriptPath).Hash;
+
+        enginesDirectory = engines.Create(("alpha.json", EngineProfileJson.Valid("alpha").ToJsonString()));
+        cardsDirectory = cards.Create(
+            (One + ".json", CardFixtureDirectory.CardJson(One, "alpha", host: "thor-cpu", extraMembers: "\"asShipped\": true,")),
+            (Two + ".json", CardFixtureDirectory.CardJson(Two, "alpha", host: "runes-gpu")),
+            (Three + ".json", CardFixtureDirectory.CardJson(Three, "alpha", host: "thor-gpu")),
+            (Four + ".json", CardFixtureDirectory.CardJson(Four, "alpha", host: "thor-cpu")));
+
+        Dictionary<string, CardEntry> runCards = new(StringComparer.Ordinal)
         {
-            files.Add((slug + ".json", EngineProfileJson.Valid(slug, baseline: null).ToJsonString()));
+            [One] = new CardEntry("thor-cpu", true),
+            [Two] = new CardEntry("runes-gpu", true),
+            [Three] = new CardEntry("thor-gpu", true),
+            [Four] = new CardEntry("thor-cpu", false, FailureReason),
+        };
+        new RunManifest("scored", scriptHashInRun ?? ScriptHash, Started, runCards)
+            .WriteAsync(Path.Combine(RunDirectory, "run.json"), CancellationToken.None).GetAwaiter().GetResult();
+        RenderLog log = new(Path.Combine(RunDirectory, "renders.jsonl"));
+        log.AppendAsync(new RenderRecord(One, 1, 12, 1500, 1000, true, null), CancellationToken.None).GetAwaiter().GetResult();
+        log.AppendAsync(new RenderRecord(One, 2, 12, 2800, 1000, true, null), CancellationToken.None).GetAwaiter().GetResult();
+        log.AppendAsync(new RenderRecord(Four, 1, 12, 10, 0, false, "down"), CancellationToken.None).GetAwaiter().GetResult();
+
+        if (order is not null)
+        {
+            File.WriteAllText(Path.Combine(RunDirectory, "judgement.json"), JudgementJson(order));
         }
 
-        EnginesDirectory = engineFolders.Create([.. files]);
+        ResultsPath = Path.Combine(folder, "RESULTS.md");
+        Exit = Score(ResultsPath);
     }
 
-    internal string Root { get; }
+    internal string RunDirectory => Path.Combine(folder, "scored");
 
-    internal string Baseline { get; }
+    internal string ScriptPath { get; }
 
-    internal string EnginesDirectory { get; }
+    internal string ScriptHash { get; }
 
-    internal string Stdout { get; private set; } = string.Empty;
+    internal string ResultsPath { get; }
 
-    internal string Stderr { get; private set; } = string.Empty;
+    internal int Exit { get; }
 
-    internal ScoreRunBuilder AddRun(EngineTier tier = EngineTier.Cpu, string startedAt = "2026-10-22T10:00:00Z", string hash = "hash-one")
+    internal string Stdout => output.ToString();
+
+    internal string Stderr => errorOutput.ToString();
+
+    internal string JudgementPath => Path.Combine(RunDirectory, "judgement.json");
+
+    /// <summary>The file the first run wrote, or empty when it wrote none.</summary>
+    internal string Results => File.Exists(ResultsPath) ? File.ReadAllText(ResultsPath) : string.Empty;
+
+    /// <summary>Runs <c>score</c> again over the same files, writing <paramref name="outPath"/>.</summary>
+    internal int Score(string outPath) =>
+        Cli.Run(
+            ["score", "--run", "scored", "--root", folder, "--engines", enginesDirectory, "--cards", cardsDirectory, "--script", ScriptPath, "--out", outPath],
+            output,
+            errorOutput);
+
+    /// <summary>The data rows of the table under the <c>## </c> heading containing <paramref name="heading"/>, each as its trimmed cells.</summary>
+    internal IReadOnlyList<string[]> Table(string heading) =>
+        [.. Section(heading).Where(l => l.StartsWith('|')).Skip(2).Select(l => l.Trim('|').Split(" | ").Select(c => c.Trim()).ToArray())];
+
+    internal IReadOnlyList<string> Section(string heading)
     {
-        ScoreRunBuilder run = new(Root, Baseline, tier, startedAt, hash);
-        runs.Add(run);
-        return run;
+        string[] lines = Results.Split('\n');
+        return [.. lines.SkipWhile(l => !(l.StartsWith("## ", StringComparison.Ordinal) && l.Contains(heading, StringComparison.Ordinal)))
+            .Skip(1)
+            .TakeWhile(l => !l.StartsWith("## ", StringComparison.Ordinal))];
     }
 
-    /// <summary>Writes every run, scores them all, and returns the exit code. <paramref name="outName"/> names the RESULTS file inside the temp root.</summary>
-    internal int Score(string outName = "RESULTS.md", params string[] extraArgs)
+    private static string JudgementJson(string[] order)
     {
-        foreach (ScoreRunBuilder run in runs)
+        JsonObject cardEntries = new()
         {
-            run.Write();
-        }
-
-        List<string> args = ["score", "--root", Root, "--engines", EnginesDirectory, "--out", OutPath(outName)];
-        args.AddRange(runs.SelectMany(r => new[] { "--run", r.FolderName }));
-        args.AddRange(extraArgs);
-        StringWriter output = new();
-        StringWriter error = new();
-        int exit = Cli.Run([.. args], output, error);
-        Stdout = output.ToString();
-        Stderr = error.ToString();
-        return exit;
+            [One] = new JsonObject { ["winces"] = 2, ["stars"] = 4, ["notes"] = "warm" },
+            [Two] = new JsonObject { ["winces"] = 3, ["stars"] = null, ["notes"] = "" },
+            [Three] = new JsonObject { ["winces"] = 0, ["stars"] = 5, ["notes"] = AwkwardNote },
+        };
+        return new JsonObject
+        {
+            ["savedAt"] = "2026-10-27T12:00:00Z",
+            ["order"] = new JsonArray([.. order.Select(o => JsonValue.Create(o))]),
+            ["cards"] = cardEntries,
+        }.ToJsonString();
     }
-
-    internal string OutPath(string name = "RESULTS.md") => Path.Combine(Root, name);
-
-    internal string Results(string name = "RESULTS.md") => File.ReadAllText(OutPath(name));
 
     public void Dispose()
     {
-        engineFolders.Dispose();
-        Directory.Delete(Root, recursive: true);
+        engines.Dispose();
+        cards.Dispose();
+        Directory.Delete(folder, recursive: true);
     }
 }
