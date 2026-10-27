@@ -50,7 +50,7 @@ public static class FeatureTheScriptAndTheCardsAreData
         [Fact]
         public void ItsVersionIsV2()
         {
-            Assert.Equal("v2", script.Version);
+            Assert.Equal("v3", script.Version);
         }
 
         [Fact]

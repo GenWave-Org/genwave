@@ -1,9 +1,9 @@
 {
-  "version": "v2",
+  "version": "v3",
   "paragraphs": [
     {
       "n": 1,
-      "text": "Good morning, you're listening to GenWave, and that was Juniper Hollis with Paper Lanterns. {breath} Honestly? I could play that one all day. {laugh}"
+      "text": "Good morning, you're listening to GenWave, and that was Juniper Hollis with Paper Lanterns. {breath} Honestly? I could play that one all day. {laugh} Anyway, here's the weather."
     },
     {
       "n": 2,
@@ -27,7 +27,7 @@
     },
     {
       "n": 7,
-      "text": "It just doesn't get any better than that, really... {sigh} Man oh man I love me some Metallica in the morning {laugh}!"
+      "text": "It just doesn't get any better than that, really... {sigh} Man oh man {laugh} I love me some Metallica in the morning!"
     },
     {
       "n": 8,

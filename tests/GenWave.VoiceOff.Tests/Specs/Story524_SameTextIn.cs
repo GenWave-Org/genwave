@@ -49,7 +49,7 @@ public static class FeatureSameTextIn
 
         [Fact]
         public void LaughStandsWhereLaughWas() =>
-            Assert.Contains("morning [laugh]!", SameTextScenario.Prepared(card, script, 7).Text, StringComparison.Ordinal);
+            Assert.Contains("man [laugh] I love me some Metallica in the morning!", SameTextScenario.Prepared(card, script, 7).Text, StringComparison.Ordinal);
     }
 
     // AC3 — a cue becomes a written stand-in
