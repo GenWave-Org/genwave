@@ -20,7 +20,7 @@ internal static class ServeOptionsParser
         for (int i = 0; i < args.Count; i++)
         {
             string name = args[i];
-            if (name is not ("--run" or "--root" or "--port" or "--bind"))
+            if (name is not ("--run" or "--root" or "--port" or "--bind" or "--engines" or "--cards"))
             {
                 error = name.StartsWith("--", StringComparison.Ordinal)
                     ? $"Unknown option '{name}'. Run 'voiceoff --help' to see the verbs."
@@ -75,7 +75,14 @@ internal static class ServeOptionsParser
             bind = parsed;
         }
 
-        options = new ServeOptions(runId, Path.GetFullPath(given.GetValueOrDefault("--root") ?? RenderOptionsParser.DefaultRoot()), port, bind);
+        // The same defaults render uses.
+        options = new ServeOptions(
+            runId,
+            Path.GetFullPath(given.GetValueOrDefault("--root") ?? RenderOptionsParser.DefaultRoot()),
+            port,
+            bind,
+            Path.GetFullPath(given.GetValueOrDefault("--engines") ?? RenderOptionsParser.DefaultEngines()),
+            Path.GetFullPath(given.GetValueOrDefault("--cards") ?? RenderOptionsParser.DefaultCards()));
         error = null;
         return true;
     }

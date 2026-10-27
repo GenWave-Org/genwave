@@ -9,7 +9,7 @@ internal static class JsonBody
     /// <summary>The largest body, in bytes (F217.7: 64 KB).</summary>
     internal const int MaxBodyBytes = 64 * 1024;
 
-    private const string Json = "application/json";
+    internal const string Json = "application/json";
 
     /// <returns>The body text, or null with <paramref name="refusal"/> set to the status to answer.</returns>
     internal static async Task<(string? Body, IResult? Refusal)> ReadAsync(HttpRequest request, CancellationToken ct)

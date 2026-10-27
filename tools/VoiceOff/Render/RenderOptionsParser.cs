@@ -10,6 +10,12 @@ internal static class RenderOptionsParser
     internal static string DefaultRoot() =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), DefaultRootFolder);
 
+    /// <summary>The engine profiles shipped beside the tool.</summary>
+    internal static string DefaultEngines() => Path.Combine(AppContext.BaseDirectory, "engines");
+
+    /// <summary>The card files shipped beside the tool.</summary>
+    internal static string DefaultCards() => Path.Combine(AppContext.BaseDirectory, "cards");
+
     /// <param name="args">The arguments after the verb.</param>
     internal static bool TryParse(IReadOnlyList<string> args, out RenderOptions? options, out string? error)
     {
@@ -77,8 +83,8 @@ internal static class RenderOptionsParser
             runId,
             values.GetValueOrDefault("--card"),
             Path.GetFullPath(values.GetValueOrDefault("--root") ?? DefaultRoot()),
-            Path.GetFullPath(values.GetValueOrDefault("--engines") ?? Path.Combine(baseDirectory, "engines")),
-            Path.GetFullPath(values.GetValueOrDefault("--cards") ?? Path.Combine(baseDirectory, "cards")),
+            Path.GetFullPath(values.GetValueOrDefault("--engines") ?? DefaultEngines()),
+            Path.GetFullPath(values.GetValueOrDefault("--cards") ?? DefaultCards()),
             Path.GetFullPath(values.GetValueOrDefault("--script") ?? Path.Combine(baseDirectory, "script", "script.json")),
             dryRun);
         error = null;

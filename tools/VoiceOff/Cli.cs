@@ -1,4 +1,5 @@
 using GenWave.VoiceOff.Render;
+using GenWave.VoiceOff.Serving;
 
 namespace GenWave.VoiceOff;
 
@@ -8,7 +9,7 @@ internal static class Cli
     internal static readonly IReadOnlyList<VerbHelp> Verbs =
     [
         new("render", "Render the script with each voice card, a paragraph at a time.", "voiceoff render --run <id> [--card <id>] [--root <dir>] [--engines <dir>] [--cards <dir>] [--script <file>] [--dry-run]", "voiceoff render --run first --dry-run"),
-        new("serve", "Serve the engine cards on a local web page for ranking.", "voiceoff serve --run <run-id> --port 8765"),
+        new("serve", "Serve a run's cards on a web page for ranking, and keep the judgement.", "voiceoff serve --run <run-id> --port 8765 [--root <dir>] [--bind <ip>] [--engines <dir>] [--cards <dir>]"),
         new("score", "Write the ranking of a run to RESULTS.md.", "voiceoff score --run <run-id> [--out <file>]"),
     ];
 
@@ -42,6 +43,11 @@ internal static class Cli
         if (string.Equals(verb, "render", StringComparison.Ordinal))
         {
             return await RenderCommand.RunAsync(args[1..], output, error, services, ct);
+        }
+
+        if (string.Equals(verb, "serve", StringComparison.Ordinal))
+        {
+            return await ServeCommand.RunAsync(args[1..], output, error, ct);
         }
 
         if (Verbs.Any(v => string.Equals(v.Name, verb, StringComparison.Ordinal)))

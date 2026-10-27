@@ -39,6 +39,9 @@ internal static partial class CardReader
     [GeneratedRegex(@"\A[a-z0-9-]{3,40}\z")]
     private static partial Regex IdShape();
 
+    /// <summary>Whether <paramref name="id"/> is a card id: 3 to 40 of a-z, 0-9 and hyphen.</summary>
+    internal static bool IsValidId(string? id) => id is not null && IdShape().IsMatch(id);
+
     /// <exception cref="InvalidDataException">The text breaks any single-card rule.</exception>
     internal static Card Parse(string json, string fileName)
     {
