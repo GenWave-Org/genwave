@@ -1,6 +1,6 @@
 // STORY-529 — The blind harness is gone and nothing ships (gh-#614 · SPEC F217 · PLAN T660)
 //
-// BDD specification — xUnit. LIVE at T660, except GauntletDoesNotExist (pending T663).
+// BDD specification — xUnit. LIVE (T660, T663).
 // AC4 and AC7 (the slug fence over scratch trees) live in GenWave.Architecture.Tests'
 // Story529_SlugFenceDataFolders, because the fence is internal to that assembly.
 
@@ -58,8 +58,9 @@ public static class FeatureTheBlindHarnessIsGone
             Assert.Empty(present);
         }
 
-        [Fact(Skip = "pending: T663 — see docs/PLAN.md")]
-        public void GauntletDoesNotExist() => Assert.Fail("pending: T663 — gauntlet/ does not exist");
+        [Fact]
+        public void GauntletDoesNotExist() =>
+            Assert.False(Directory.Exists(Path.Combine(RepoRootLocator.Find(AppContext.BaseDirectory), "tools", "VoiceOff", "gauntlet")));
     }
 
     // AC3 — the old specs are gone

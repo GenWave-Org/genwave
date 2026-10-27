@@ -1,31 +1,14 @@
-using System.Globalization;
 using System.Text.RegularExpressions;
-using GenWave.VoiceOff.Speech;
 
 namespace GenWave.VoiceOff.Render;
 
-/// <summary>A run's folder name: the UTC start time and the tier, e.g. <c>20261022T193000Z-cpu</c>.</summary>
+/// <summary>A run's folder name, chosen by whoever starts it: one path segment of letters, digits, dot, underscore and hyphen, starting with a letter or digit.</summary>
 internal static partial class RunId
 {
-    internal static string Format(DateTimeOffset startedAt, EngineTier tier) =>
-        startedAt.UtcDateTime.ToString("yyyyMMdd'T'HHmmss'Z'", CultureInfo.InvariantCulture) + "-" + TierName(tier);
+    internal const string Rule = "letters, digits, '.', '_' and '-', starting with a letter or digit, at most 64 characters";
 
-    /// <summary>Reads a folder name written by <see cref="Format"/>; false for any other name.</summary>
-    internal static bool TryParseTier(string name, out EngineTier tier)
-    {
-        ArgumentNullException.ThrowIfNull(name);
-        Match match = Shape().Match(name);
-        tier = match.Success && match.Groups["tier"].Value == "gpu" ? EngineTier.Gpu : EngineTier.Cpu;
-        return match.Success;
-    }
+    internal static bool IsValid(string? name) => name is not null && Shape().IsMatch(name);
 
-    [GeneratedRegex(@"\A\d{8}T\d{6}Z-(?<tier>cpu|gpu)\z", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\A[A-Za-z0-9][A-Za-z0-9._-]{0,63}\z", RegexOptions.CultureInvariant)]
     private static partial Regex Shape();
-
-    internal static string TierName(EngineTier tier) => tier switch
-    {
-        EngineTier.Cpu => "cpu",
-        EngineTier.Gpu => "gpu",
-        _ => throw new ArgumentOutOfRangeException(nameof(tier), tier, "Unknown tier."),
-    };
 }

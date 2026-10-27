@@ -65,7 +65,7 @@ public static class FeatureNothingShipsAndNoSlugInCode
         }
 
         [Theory]
-        [InlineData("voiceoff render --tier cpu")]
+        [InlineData("voiceoff render --run first --dry-run")]
         [InlineData("voiceoff serve --run <run-id> --port 8765")]
         [InlineData("voiceoff score --run <run-id>")]
         public void EachVerbPrintsWithAnExample(string example) =>
@@ -99,10 +99,16 @@ public static class FeatureNothingShipsAndNoSlugInCode
 
         [Fact]
         public void TheShortFlagWorksToo() =>
-            Assert.Contains("voiceoff render --tier cpu", renderHelp, StringComparison.Ordinal);
+            Assert.Contains("voiceoff render --run first --dry-run", renderHelp, StringComparison.Ordinal);
 
-        [Fact]
-        public void TheRenderExampleListsTheRootFolder() =>
-            Assert.Contains("[--root <dir>]", renderHelp, StringComparison.Ordinal);
+        [Theory]
+        [InlineData("--run <id>")]
+        [InlineData("[--card <id>]")]
+        [InlineData("[--root <dir>]")]
+        [InlineData("[--engines <dir>]")]
+        [InlineData("[--cards <dir>]")]
+        [InlineData("[--script <file>]")]
+        public void TheRenderUsageListsEveryFlag(string flag) =>
+            Assert.Contains(flag, renderHelp, StringComparison.Ordinal);
     }
 }

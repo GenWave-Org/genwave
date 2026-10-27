@@ -23,7 +23,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="gauntlet\**" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="cards\**" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="script\**" CopyToOutputDirectory="PreserveNewest" />
     <None Include="engines\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

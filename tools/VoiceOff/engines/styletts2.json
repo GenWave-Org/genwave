@@ -3,10 +3,6 @@
   "container": "voiceoff-styletts2",
   "port": 8880,
   "timeoutSeconds": 600,
-  "tiers": ["cpu", "gpu"],
-  "voices": { "bubbly": "ref-f1", "laconic": "ref-m1", "late-night": "ref-m2" },
-  "voiceReason": "Clone-only engine, so the voices are the shared reference clips: bubbly is ref-f1 (female, about 209 Hz), laconic is ref-m1 (male, about 127 Hz) and late-night is ref-m2 (male, about 89 Hz). The style vector is computed from each clip.",
-  "markup": { "pause": null, "laugh": null, "sigh": null, "breath": null, "um": null, "emphasis": null },
   "license": "Code MIT; weights have no stated licence (LibriTTS checkpoint, with a disclosure notice asking that output be labelled as synthetic).",
   "notes": "StyleTTS2 LibriTTS checkpoint (styletts2 pip 0.1.6, about 870 MB of weights fetched from Hugging Face and GitHub at first start into the mounted cache). The shim wraps StyleTTS2.inference with a fixed seed, 10 diffusion steps, and ignores speed. It has no native cue tags. One CPU line took 6 s warm (22 s cold) on a quiet box (16 cores, nothing else rendering, 2026-10-23). Uses torch 2.5.1 because the package loads checkpoints with the old torch.load defaults."
 }

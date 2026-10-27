@@ -47,11 +47,11 @@ internal static class ServeOptionsParser
     private static bool TryBuild(Dictionary<string, string> given, [NotNullWhen(true)] out ServeOptions? options, out string? error)
     {
         options = null;
-        if (!given.TryGetValue("--run", out string? runId) || !RunId.TryParseTier(runId, out _))
+        if (!given.TryGetValue("--run", out string? runId) || !RunId.IsValid(runId))
         {
             error = given.ContainsKey("--run")
-                ? $"'{given["--run"]}' is not a run id like 20261022T193000Z-cpu."
-                : "Option '--run' is required: the paired run to serve, e.g. --run 20261022T193000Z-cpu.";
+                ? $"'{given["--run"]}' is not a run id ({RunId.Rule})."
+                : "Option '--run' is required: the paired run to serve, e.g. --run first.";
             return false;
         }
 

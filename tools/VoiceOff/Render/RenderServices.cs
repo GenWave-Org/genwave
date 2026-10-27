@@ -8,14 +8,12 @@ internal sealed record RenderServices(
     IDockerInspector Docker,
     HttpClient Http,
     TimeProvider Time,
-    LoudnessMatch Match,
-    string HostName)
+    LoudnessMatch Match)
 {
     /// <summary>The real docker CLI, the real clock and ffmpeg.</summary>
     internal static RenderServices Default() => new(
         new DockerCliInspector(),
         SpeechClient.CreateHttpClient(),
         TimeProvider.System,
-        new LoudnessMatch(),
-        Environment.MachineName);
+        new LoudnessMatch());
 }

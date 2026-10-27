@@ -2,15 +2,7 @@
   "slug": "omnivoice",
   "container": "voiceoff-omnivoice",
   "port": 8880,
-  "tiers": ["gpu"],
   "timeoutSeconds": 600,
-  "voices": {
-    "bubbly": "ref-f1",
-    "laconic": "ref-m1",
-    "late-night": "ref-m2"
-  },
-  "voiceReason": "This engine has no stock voices, so each register clones one shared reference clip: bubbly is the bright female clip (ref-f1), laconic is the mid male clip (ref-m1) and late-night is the low male clip (ref-m2).",
-  "markup": { "pause": null, "laugh": "[laughter]", "sigh": "[sigh]", "breath": null, "um": null, "emphasis": null },
   "license": "Code Apache-2.0; weights CC-BY-NC (non-commercial)",
   "notes": "OmniVoice 0.6B (k2-fsa/OmniVoice, pip omnivoice 0.2.1, 24 kHz). The shim wraps voice cloning from the shared reference clips (the most stable mode), fixed seed, honours speed. Native tags: [laughter] and [sigh]. One CPU line took 88 s warm on a quiet box (16 cores, nothing else rendering, 2026-10-23), so it is gpu tier only. Weights 3.1 GB. NC weights flag: fine for the bench, not for shipping."
 }

@@ -52,6 +52,12 @@ internal static partial class CardReader
         Require(dto.Engine, "engine", id);
         Require(dto.Title, "title", id);
         Require(dto.Voice, "voice", id);
+        RequireNoControlCharacters(dto.Voice, id);
+        if ((object?)dto.Settings is null)
+        {
+            throw new InvalidDataException($"Card {id}: settings must be an object (use {{}} for none).");
+        }
+
         Require(dto.Why, "why", id);
         Require(dto.Facts.Checkpoint, "facts.checkpoint", id);
         if (dto.AsShipped == false)
@@ -62,6 +68,11 @@ internal static partial class CardReader
         if (dto.Speed is not (> 0 and <= 4))
         {
             throw new InvalidDataException($"Card {id}: speed must be above 0 and at most 4.");
+        }
+
+        if (dto.AsShipped is true && dto.Overrides is { Count: > 0 })
+        {
+            throw new InvalidDataException($"Card {id}: the as-shipped card takes no overrides; it is the station's own path.");
         }
 
         return new Card(
@@ -100,12 +111,21 @@ internal static partial class CardReader
         }
     }
 
+    // The voice name goes into a request body; a line break or other control character is never part of one.
+    private static void RequireNoControlCharacters(string voice, string id)
+    {
+        if (voice.Any(char.IsControl))
+        {
+            throw new InvalidDataException($"Card {id}: voice must not contain control characters.");
+        }
+    }
+
     private static CardHost Host(string host, string id) =>
         host switch
         {
-            "thor-gpu" => CardHost.ThorGpu,
-            "thor-cpu" => CardHost.ThorCpu,
-            "runes-gpu" => CardHost.RunesGpu,
+            CardHostName.ThorGpu => CardHost.ThorGpu,
+            CardHostName.ThorCpu => CardHost.ThorCpu,
+            CardHostName.RunesGpu => CardHost.RunesGpu,
             _ => throw new InvalidDataException($"Card {id}: host \"{host}\" must be thor-gpu, thor-cpu or runes-gpu."),
         };
 

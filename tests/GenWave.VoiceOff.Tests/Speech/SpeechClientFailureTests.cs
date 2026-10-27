@@ -8,7 +8,7 @@ public sealed class SpeechClientFailureTests
     private static async Task<SpeechResult> RenderAgainst(EngineStubServer stub, TimeSpan timeout)
     {
         using HttpClient http = SpeechClient.CreateHttpClient();
-        return await new SpeechClient(http, stub.BaseUri, timeout).RenderAsync("hello there", "v1", 1.0, CancellationToken.None);
+        return await new SpeechClient(http, stub.BaseUri, timeout).RenderAsync("hello there", "v1", 1.0, null, CancellationToken.None);
     }
 
     [Fact]
@@ -64,7 +64,7 @@ public sealed class SpeechClientFailureTests
         await using EngineStubServer stub = await EngineStubServer.StartAsync(speechDelay: TimeSpan.FromSeconds(30));
         ManualTimeProvider time = new();
         using HttpClient http = SpeechClient.CreateHttpClient();
-        Task<SpeechResult> render = new SpeechClient(http, stub.BaseUri, TimeSpan.FromSeconds(120), time).RenderAsync("hello there", "v1", 1.0, CancellationToken.None);
+        Task<SpeechResult> render = new SpeechClient(http, stub.BaseUri, TimeSpan.FromSeconds(120), time).RenderAsync("hello there", "v1", 1.0, null, CancellationToken.None);
         time.FireAll();
         SpeechResult result = await render;
         Assert.Equal((TimeSpan.FromSeconds(120), "No answer within 120 seconds."), (time.DueTimes[0], result.Error?.Message));
@@ -76,7 +76,7 @@ public sealed class SpeechClientFailureTests
         await using EngineStubServer stub = await EngineStubServer.StartAsync(speechBody: new byte[100]);
         using HttpClient http = SpeechClient.CreateHttpClient();
         SpeechResult result = await new SpeechClient(http, stub.BaseUri, TimeSpan.FromSeconds(10), limits: new SpeechLimits(99, 1000))
-            .RenderAsync("hello there", "v1", 1.0, CancellationToken.None);
+            .RenderAsync("hello there", "v1", 1.0, null, CancellationToken.None);
         Assert.Equal(SpeechErrorKind.TooLarge, result.Error?.Kind);
     }
 
@@ -86,7 +86,7 @@ public sealed class SpeechClientFailureTests
         await using EngineStubServer stub = await EngineStubServer.StartAsync(speechBody: new byte[100]);
         using HttpClient http = SpeechClient.CreateHttpClient();
         SpeechResult result = await new SpeechClient(http, stub.BaseUri, TimeSpan.FromSeconds(10), limits: new SpeechLimits(100, 1000))
-            .RenderAsync("hello there", "v1", 1.0, CancellationToken.None);
+            .RenderAsync("hello there", "v1", 1.0, null, CancellationToken.None);
         Assert.Equal(100, result.Audio.Length);
     }
 
@@ -114,7 +114,7 @@ public sealed class SpeechClientFailureTests
         }
 
         using HttpClient http = SpeechClient.CreateHttpClient();
-        SpeechResult result = await new SpeechClient(http, gone, TimeSpan.FromSeconds(10)).RenderAsync("hello there", "v1", 1.0, CancellationToken.None);
+        SpeechResult result = await new SpeechClient(http, gone, TimeSpan.FromSeconds(10)).RenderAsync("hello there", "v1", 1.0, null, CancellationToken.None);
         Assert.Equal(SpeechErrorKind.Unreachable, result.Error?.Kind);
     }
 
@@ -176,6 +176,6 @@ public sealed class SpeechClientFailureTests
         using HttpClient http = SpeechClient.CreateHttpClient();
         using CancellationTokenSource cts = new(TimeSpan.FromMilliseconds(100));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            new SpeechClient(http, stub.BaseUri, TimeSpan.FromSeconds(30)).RenderAsync("hello there", "v1", 1.0, cts.Token));
+            new SpeechClient(http, stub.BaseUri, TimeSpan.FromSeconds(30)).RenderAsync("hello there", "v1", 1.0, null, cts.Token));
     }
 }

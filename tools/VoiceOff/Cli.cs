@@ -7,7 +7,7 @@ internal static class Cli
 {
     internal static readonly IReadOnlyList<VerbHelp> Verbs =
     [
-        new("render", "Render the test scripts with each voice engine.", "voiceoff render --tier cpu [--engine <slug>] [--root <dir>] [--engines <dir>] [--gauntlet <dir>]", "voiceoff render --tier cpu --dry-run"),
+        new("render", "Render the script with each voice card, a paragraph at a time.", "voiceoff render --run <id> [--card <id>] [--root <dir>] [--engines <dir>] [--cards <dir>] [--script <file>] [--dry-run]", "voiceoff render --run first --dry-run"),
         new("serve", "Serve the engine cards on a local web page for ranking.", "voiceoff serve --run <run-id> --port 8765"),
         new("score", "Write the ranking of a run to RESULTS.md.", "voiceoff score --run <run-id> [--out <file>]"),
     ];

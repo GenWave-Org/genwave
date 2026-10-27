@@ -10,19 +10,19 @@ public static class FeatureRenderDryRun
     // HAPPY PATH
     // ---------------------------------------------------------------------
 
-    // AC1 — clip count
-    public sealed class ScenarioClipCount : IDisposable
+    // AC1 — paragraph count
+    public sealed class ScenarioParagraphCount : IDisposable
     {
-        // Given 2 attempted engines, 10 lines
+        // Given 2 cards, 8 paragraphs each
         // When  `render --dry-run` runs
 
         private readonly DryRunFixture fixture = new();
         private readonly RenderRun run;
 
-        public ScenarioClipCount() => run = fixture.Run();
+        public ScenarioParagraphCount() => run = fixture.Run();
 
         [Fact]
-        public void ItPrints20Clips() => Assert.Contains("Dry run: 20 clips across 2 engines", run.OutputLines);
+        public void ItPrints16Paragraphs() => Assert.Contains("Dry run: 16 paragraphs across 2 cards", run.OutputLines);
 
         [Fact]
         public void ItExitsZero() => Assert.Equal(0, run.Exit);
@@ -33,20 +33,20 @@ public static class FeatureRenderDryRun
     // AC2 — ETA from the last run
     public sealed class ScenarioETAFromTheLastRun : IDisposable
     {
-        // Given a previous timing.jsonl with median wall 5 s
-        // When  `render --dry-run` runs for 20 clips
+        // Given a previous renders.jsonl with median wall 5 s
+        // When  `render --dry-run` runs for 16 paragraphs
 
         private readonly DryRunFixture fixture = new();
         private readonly RenderRun run;
 
         public ScenarioETAFromTheLastRun()
         {
-            fixture.SeedRun("20261021T100000Z-cpu", 4000, 5000, 6000);
+            fixture.SeedRun("second", 4000, 5000, 6000);
             run = fixture.Run();
         }
 
         [Fact]
-        public void ItPrints2Min() => Assert.Contains("ETA ~2 min (median 5.0 s per clip from run 20261021T100000Z-cpu)", run.OutputLines);
+        public void ItPrints2Min() => Assert.Contains("ETA ~2 min (median 5.0 s per paragraph from run second)", run.OutputLines);
 
         public void Dispose() => fixture.Dispose();
     }
@@ -83,7 +83,7 @@ public static class FeatureRenderDryRun
 
         public ScenarioNothingIsWritten()
         {
-            seeded.SeedRun("20261021T100000Z-cpu", 5000);
+            seeded.SeedRun("second", 5000);
             before = seeded.Entries();
             fresh.Run();
             seeded.Run();
@@ -113,21 +113,21 @@ public static class FeatureRenderDryRun
 
         public ScenarioTheNewestRunIsUsed()
         {
-            fixture.SeedRun("20261020T100000Z-cpu", 30_000);
-            fixture.SeedRun("20261021T100000Z-cpu", 5000);
+            fixture.SeedRun("first", 30_000);
+            fixture.SeedRun("second", 5000);
             run = fixture.Run();
         }
 
         [Fact]
-        public void ItReadsTheNewerRun() => Assert.Contains("ETA ~2 min (median 5.0 s per clip from run 20261021T100000Z-cpu)", run.OutputLines);
+        public void ItReadsTheNewerRun() => Assert.Contains("ETA ~2 min (median 5.0 s per paragraph from run second)", run.OutputLines);
 
         public void Dispose() => fixture.Dispose();
     }
 
-    // Failed clips do not count towards the median.
+    // Failed paragraphs do not count towards the median.
     public sealed class ScenarioFailedClipsAreIgnored : IDisposable
     {
-        // Given a run of 5 s clips and three failed 600 s clips
+        // Given a run of 5 s paragraphs and three failed 600 s paragraphs
         // When  `render --dry-run` runs
 
         private readonly DryRunFixture fixture = new();
@@ -135,32 +135,33 @@ public static class FeatureRenderDryRun
 
         public ScenarioFailedClipsAreIgnored()
         {
-            fixture.SeedRun("20261021T100000Z-cpu", 5000, -600_000, -600_000, -600_000, 5000);
+            fixture.SeedRun("second", 5000, -600_000, -600_000, -600_000, 5000);
             run = fixture.Run();
         }
 
         [Fact]
-        public void TheMedianIgnoresThem() => Assert.Contains("ETA ~2 min (median 5.0 s per clip from run 20261021T100000Z-cpu)", run.OutputLines);
+        public void TheMedianIgnoresThem() => Assert.Contains("ETA ~2 min (median 5.0 s per paragraph from run second)", run.OutputLines);
 
         public void Dispose() => fixture.Dispose();
     }
 
-    // The engines a tier skips are explained, and left out of the count.
-    public sealed class ScenarioAnEngineNotAttemptedAtTheTier : IDisposable
+    // A card the words law refuses is listed with its reason and sends nothing.
+    public sealed class ScenarioACardTheWordsLawRefuses : IDisposable
     {
-        // Given a second engine that is gpu-only (10 lines each)
-        // When  `render --dry-run` runs on cpu
+        // Given a second card whose override changes a word
+        // When  `render --dry-run` runs
 
-        private readonly DryRunFixture fixture = new(secondEngineGpuOnly: true);
+        private readonly DryRunFixture fixture = new(secondCardBreaksTheWordsLaw: true);
         private readonly RenderRun run;
 
-        public ScenarioAnEngineNotAttemptedAtTheTier() => run = fixture.Run();
+        public ScenarioACardTheWordsLawRefuses() => run = fixture.Run();
 
         [Fact]
-        public void OnlyTheAttemptedEngineIsCounted() => Assert.Contains("Dry run: 10 clips across 1 engine", run.OutputLines);
+        public void OnlyTheRenderableCardSParagraphsAreCounted() => Assert.Contains("Dry run: 8 paragraphs across 2 cards", run.OutputLines);
 
         [Fact]
-        public void TheSkippedEngineIsNamed() => Assert.Contains("beta: not attempted at tier cpu", run.OutputLines);
+        public void TheRefusedCardIsListedWithItsReason() =>
+            Assert.Contains(run.OutputLines, l => l.StartsWith("card-two: ❌ words law: Paragraph 3 changes the script's words", StringComparison.Ordinal));
 
         public void Dispose() => fixture.Dispose();
     }
@@ -186,44 +187,44 @@ public static class FeatureRenderDryRun
         public void Dispose() => fixture.Dispose();
     }
 
-    public sealed class ScenarioAGpuRunWithOnlyCpuHistory : IDisposable
+    public sealed class ScenarioARunWithNoGoodParagraphs : IDisposable
     {
-        // Given a cpu run in the root
-        // When  `render --dry-run` runs on gpu
-
-        private readonly DryRunFixture fixture = new();
-        private readonly RenderRun run;
-
-        public ScenarioAGpuRunWithOnlyCpuHistory()
-        {
-            fixture.SeedRun("20261021T100000Z-cpu", 5000);
-            run = fixture.Run("gpu");
-        }
-
-        [Fact]
-        public void TheETAIsUnknown() => Assert.Contains("ETA unknown (no previous run)", run.OutputLines);
-
-        public void Dispose() => fixture.Dispose();
-    }
-
-    public sealed class ScenarioACorruptTimingLog : IDisposable
-    {
-        // Given a newest run whose timing.jsonl is not timing records
+        // Given a newest run whose every paragraph failed
         // When  `render --dry-run` runs
 
         private readonly DryRunFixture fixture = new();
         private readonly RenderRun run;
 
-        public ScenarioACorruptTimingLog()
+        public ScenarioARunWithNoGoodParagraphs()
         {
-            fixture.SeedRun("20261020T100000Z-cpu", 5000);
-            fixture.SeedGarbage("20261021T100000Z-cpu");
+            fixture.SeedRun("second", -5000, -5000);
+            run = fixture.Run();
+        }
+
+        [Fact]
+        public void TheETAIsUnknown() => Assert.Contains("ETA unknown (run second has no finished paragraphs)", run.OutputLines);
+
+        public void Dispose() => fixture.Dispose();
+    }
+
+    public sealed class ScenarioACorruptRendersLog : IDisposable
+    {
+        // Given a newest run whose renders.jsonl is not render records
+        // When  `render --dry-run` runs
+
+        private readonly DryRunFixture fixture = new();
+        private readonly RenderRun run;
+
+        public ScenarioACorruptRendersLog()
+        {
+            fixture.SeedRun("first", 5000);
+            fixture.SeedGarbage("second");
             run = fixture.Run();
         }
 
         [Fact]
         public void TheETAIsUnknownWithAReason() =>
-            Assert.Contains("ETA unknown (timing.jsonl of run 20261021T100000Z-cpu is unreadable)", run.OutputLines);
+            Assert.Contains("ETA unknown (renders.jsonl of run second is unreadable)", run.OutputLines);
 
         [Fact]
         public void ItStillExitsZero() => Assert.Equal(0, run.Exit);
@@ -233,7 +234,7 @@ public static class FeatureRenderDryRun
 
     public sealed class ScenarioValidationMatchesARealRun : IDisposable
     {
-        // Given an unknown engine slug / a profile folder that is not there
+        // Given an unknown card / a profile folder that is not there
         // When  `render --dry-run` runs
 
         private readonly DryRunFixture fixture = new();
@@ -242,12 +243,12 @@ public static class FeatureRenderDryRun
 
         public ScenarioValidationMatchesARealRun()
         {
-            unknownEngine = fixture.Run("cpu", "--engine", "nope");
-            missingProfiles = Cli.Run(["render", "--tier", "cpu", "--dry-run", "--engines", Path.Combine(fixture.Root, "no-engines")], TextWriter.Null, TextWriter.Null);
+            unknownEngine = fixture.Run("--card", "nope");
+            missingProfiles = Cli.Run(["render", "--run", "next", "--dry-run", "--engines", Path.Combine(fixture.Root, "no-engines")], TextWriter.Null, TextWriter.Null);
         }
 
         [Fact]
-        public void AnUnknownEngineExitsTwo() => Assert.Equal(2, unknownEngine.Exit);
+        public void AnUnknownCardExitsTwo() => Assert.Equal(2, unknownEngine.Exit);
 
         [Fact]
         public void AMissingProfileFolderExitsOne() => Assert.Equal(1, missingProfiles);

@@ -3,21 +3,6 @@
   "container": "voiceoff-higgs",
   "port": 8880,
   "timeoutSeconds": 600,
-  "tiers": ["gpu"],
-  "voices": {
-    "bubbly": "ref-f1",
-    "laconic": "ref-m1",
-    "late-night": "ref-m2"
-  },
-  "voiceReason": "The engine has no stock voices, so each register clones one shared reference clip: bubbly is the female reader (ref-f1), laconic is the mid-pitched male (ref-m1) and late-night is the deepest male (ref-m2). Smoke renders came out at about 224 Hz and 103 Hz against references of 209 Hz and 89 Hz.",
-  "markup": {
-    "pause": "<|prosody:pause|>",
-    "laugh": "<|sfx:laughter|>",
-    "sigh": "<|sfx:sigh|>",
-    "breath": null,
-    "um": null,
-    "emphasis": null
-  },
   "license": "Boson Higgs TTS 3 Research and Non-Commercial License (NC): research use free, production needs a commercial license; creators may monetise with the credit \"Built with Higgs TTS 3 licensed from Boson AI\"",
   "notes": "bosonai/higgs-tts-3-4b through the transformers port multimodalart/higgs-audio-v3-tts-4b-transformers (pinned revision, remote modeling code; the safetensors hash matches the official file) and the bosonai/higgs-audio-v2-tokenizer codec. BF16 is 9.3 GB, so the shim loads the backbone as 4-bit nf4 to fit 8 GB; quality loss from that is unmeasured, and the output was not run through speech recognition. Laugh and sigh are sound-effect tags that the maker says go first and are followed by an onomatopoeia, so the bare tag may be weak. Emphasis is a sentence-level prosody tag and is left unmapped. GPU only: a 4B model on the CPU was not tried. One line took about 6 to 7 seconds on a 3060 Ti with the desktop using 2.5 GB of the card."
 }

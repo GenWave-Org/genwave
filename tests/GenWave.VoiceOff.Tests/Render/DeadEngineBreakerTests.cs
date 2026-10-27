@@ -5,14 +5,14 @@ namespace GenWave.VoiceOff.Tests.Render;
 
 public sealed class DeadEngineBreakerTests
 {
-    private static ClipOutcome Failure(SpeechErrorKind kind) => ClipOutcome.Failed("no", 0, kind);
+    private static CardOutcome Failure(SpeechErrorKind kind) => CardOutcome.Failed("no", kind);
 
-    private static ClipOutcome Success() => new(true, null, null, 1, 1, true);
+    private static CardOutcome Success() => CardOutcome.Success();
 
-    private static DeadEngineBreaker After(params ClipOutcome[] outcomes)
+    private static DeadEngineBreaker After(params CardOutcome[] outcomes)
     {
         DeadEngineBreaker breaker = new();
-        foreach (ClipOutcome outcome in outcomes)
+        foreach (CardOutcome outcome in outcomes)
         {
             breaker.Record(outcome);
         }
@@ -38,5 +38,5 @@ public sealed class DeadEngineBreakerTests
 
     [Fact]
     public void AFailureWithNoEngineErrorIsNotAStrike() =>
-        Assert.False(After(ClipOutcome.Failed("match", 0), ClipOutcome.Failed("match", 0), ClipOutcome.Failed("match", 0)).Tripped);
+        Assert.False(After(CardOutcome.Failed("match"), CardOutcome.Failed("match"), CardOutcome.Failed("match")).Tripped);
 }

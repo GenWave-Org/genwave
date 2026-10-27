@@ -12,10 +12,6 @@ internal static class EngineProfileJson
               "slug": "{{slug}}",
               "container": "alpha-box",
               "port": 8880,
-              "tiers": ["cpu", "gpu"],
-              "voices": { "bubbly": "v1", "laconic": "v2", "late-night": "v3" },
-              "voiceReason": "three different stock voices",
-              "markup": { "pause": null, "laugh": "[laugh]", "sigh": null, "breath": null, "um": null, "emphasis": null },
               "license": "MIT"
             }
             """)?.AsObject() ?? throw new InvalidOperationException("Valid profile did not parse.");

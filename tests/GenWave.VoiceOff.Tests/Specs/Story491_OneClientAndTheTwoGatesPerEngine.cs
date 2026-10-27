@@ -23,7 +23,7 @@ public static class FeatureOneClientAndTheTwoGatesPerEngine
         await using EngineStubServer stub = await EngineStubServer.StartAsync(speechDelay: delay);
         using HttpClient http = SpeechClient.CreateHttpClient();
         SpeechResult result = await new SpeechClient(http, stub.BaseUri, TimeSpan.FromSeconds(10))
-            .RenderAsync(Line, "v1", 1.0, CancellationToken.None);
+            .RenderAsync(Line, "v1", 1.0, null, CancellationToken.None);
         return new Rendered(result, stub.Requests.SpeechBody);
     }
 
@@ -117,16 +117,15 @@ public static class FeatureOneClientAndTheTwoGatesPerEngine
         {
             EngineStubServer stub = scenario.StartStubAsync().GetAwaiter().GetResult();
             scenario.AddEngine("alpha", stub.BaseUri);
-            run = scenario.Run(
-                new FakeDockerInspector(new ContainerState(true, false, "10.0.0.2")),
-                scenario.EnginesDirectory, scenario.GauntletDirectory(RenderScenario.ThreeLines()), "cpu");
+            scenario.AddCard("alpha-card", "alpha");
+            run = scenario.RunWith(new FakeDockerInspector(new ContainerState(true, false, "10.0.0.2")), CancellationToken.None, "first");
         }
 
         [Fact]
-        public void ItIs() => Assert.Contains(run.OutputLines, l => l.StartsWith("alpha: ❌ container: ", StringComparison.Ordinal));
+        public void ItIs() => Assert.Contains(run.OutputLines, l => l.StartsWith("alpha-card ❌ container: ", StringComparison.Ordinal));
 
         [Fact]
-        public void TheEngineGetsNoClips() => Assert.False(Directory.Exists(run.PathIn(Path.Combine("wav", "alpha"))));
+        public void TheCardGetsNoClip() => Assert.False(File.Exists(run.PathIn(Path.Combine("cards", "alpha-card.wav"))));
 
         public void Dispose() => scenario.Dispose();
     }
@@ -143,15 +142,16 @@ public static class FeatureOneClientAndTheTwoGatesPerEngine
         public ScenarioAnUnreachableEngineIsRecorded()
         {
             scenario.AddEngine("alpha", new Uri($"http://127.0.0.1:{ClosedPort()}/"));
-            run = scenario.Run(scenario.EnginesDirectory, scenario.GauntletDirectory(RenderScenario.ThreeLines()), "cpu");
+            scenario.AddCard("alpha-card", "alpha");
+            run = scenario.Run("first");
         }
 
         [Fact]
         public void TheRunFinishes() => Assert.Equal(0, run.Exit);
 
         [Fact]
-        public void TheEngineRowShowsWithTheError() =>
-            Assert.Contains(run.OutputLines, l => l.StartsWith("alpha: ❌ container: voices endpoint at http://127.0.0.1:", StringComparison.Ordinal) && l.Contains("failed:", StringComparison.Ordinal));
+        public void TheCardRowShowsTheError() =>
+            Assert.Contains(run.OutputLines, l => l.StartsWith("alpha-card ❌ container: voices endpoint at http://127.0.0.1:", StringComparison.Ordinal) && l.Contains("failed:", StringComparison.Ordinal));
 
         // A port nothing listens on: bind a free one, then let it go.
         private static int ClosedPort()

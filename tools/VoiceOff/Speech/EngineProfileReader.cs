@@ -2,20 +2,17 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
-using GenWave.VoiceOff.Text;
 
 namespace GenWave.VoiceOff.Speech;
 
 /// <summary>
 /// Reads one engine profile, refusing anything the schema does not allow: duplicate or unknown
-/// properties, wrong-case names, JSON null anywhere but a <c>markup</c> value, and every field rule.
+/// properties, wrong-case names, JSON null anywhere, and every field rule.
 /// Every failure is an <see cref="InvalidDataException"/> naming the file (and the field).
 /// </summary>
 internal static partial class EngineProfileReader
 {
-    internal const double DefaultSpeed = 1.0;
     internal const int DefaultTimeoutSeconds = 120;
-    private const double MaxSpeed = 4.0;
     private const int MaxTimeoutSeconds = 600;
 
     private static readonly JsonSerializerOptions Options = new()
@@ -32,11 +29,6 @@ internal static partial class EngineProfileReader
         string? Container,
         int? Port,
         string? Endpoint,
-        List<string>? Tiers,
-        Dictionary<string, string>? Voices,
-        string? VoiceReason,
-        Dictionary<string, string?>? Markup,
-        double? Speed,
         int? TimeoutSeconds,
         string? License,
         string? Notes);
@@ -58,11 +50,6 @@ internal static partial class EngineProfileReader
             Container(dto, fileName),
             Port(dto, fileName),
             Endpoint(dto, fileName),
-            Tiers(dto, fileName),
-            Voices(dto, fileName),
-            Required(dto.VoiceReason, "voiceReason", fileName),
-            Markup(dto, fileName),
-            Speed(dto, fileName),
             Timeout(dto, fileName),
             Required(dto.License, "license", fileName),
             dto.Notes);
@@ -84,7 +71,7 @@ internal static partial class EngineProfileReader
         }
     }
 
-    // Null means "strip this cue" under markup and nothing anywhere else.
+    // Null means nothing anywhere in a profile.
     private static void RejectNulls(JsonNode? node, string fileName, string path)
     {
         switch (node)
@@ -93,7 +80,7 @@ internal static partial class EngineProfileReader
                 foreach (KeyValuePair<string, JsonNode?> property in obj)
                 {
                     string child = $"{path}.{property.Key}";
-                    if (property.Value is null && path != "$.markup")
+                    if (property.Value is null)
                     {
                         throw new InvalidDataException($"Engine profile {fileName} has a null value at {child}; leave the property out instead.");
                     }
@@ -161,104 +148,6 @@ internal static partial class EngineProfileReader
             ? uri
             : throw new InvalidDataException($"Engine profile {fileName}: endpoint \"{dto.Endpoint}\" must be an absolute http or https URL.");
     }
-
-    private static List<EngineTier> Tiers(ProfileDto dto, string fileName)
-    {
-        if (dto.Tiers is not { Count: > 0 })
-        {
-            throw new InvalidDataException($"Engine profile {fileName} needs a non-empty tiers list.");
-        }
-
-        List<EngineTier> tiers = [];
-        foreach (string name in dto.Tiers)
-        {
-            EngineTier tier = name switch
-            {
-                "cpu" => EngineTier.Cpu,
-                "gpu" => EngineTier.Gpu,
-                _ => throw new InvalidDataException($"Engine profile {fileName}: tier \"{name}\" must be cpu or gpu."),
-            };
-            if (tiers.Contains(tier))
-            {
-                throw new InvalidDataException($"Engine profile {fileName}: tier \"{name}\" is listed twice.");
-            }
-
-            tiers.Add(tier);
-        }
-
-        return tiers;
-    }
-
-    private static Dictionary<GauntletRegister, string> Voices(ProfileDto dto, string fileName)
-    {
-        if (dto.Voices is null)
-        {
-            throw new InvalidDataException($"Engine profile {fileName} needs voices.");
-        }
-
-        foreach (string key in dto.Voices.Keys)
-        {
-            if (!RegisterKeys.TryParse(key, out _))
-            {
-                throw new InvalidDataException($"Engine profile {fileName}: voices has an unknown register \"{key}\".");
-            }
-        }
-
-        Dictionary<GauntletRegister, string> voices = [];
-        foreach (GauntletRegister register in RegisterKeys.All)
-        {
-            string key = RegisterKeys.Key(register);
-            if (!dto.Voices.TryGetValue(key, out string? voice) || string.IsNullOrWhiteSpace(voice))
-            {
-                throw new InvalidDataException($"Engine profile {fileName}: voices needs a non-blank voice for \"{key}\".");
-            }
-
-            voices[register] = voice;
-        }
-
-        return voices;
-    }
-
-    // CueText.Markup strips a cue the map lacks as well as one mapped to null, so a typo'd or missing key
-    // would silently drop cues. The map must therefore name every known cue, and only those.
-    private static Dictionary<string, string?> Markup(ProfileDto dto, string fileName)
-    {
-        if (dto.Markup is null)
-        {
-            throw new InvalidDataException($"Engine profile {fileName} needs a markup map.");
-        }
-
-        foreach (string cue in dto.Markup.Keys)
-        {
-            if (!CueVocabulary.Known.Contains(cue))
-            {
-                throw new InvalidDataException($"Engine profile {fileName}: markup has an unknown cue \"{cue}\".");
-            }
-        }
-
-        foreach (string cue in CueVocabulary.Known.Order(StringComparer.Ordinal))
-        {
-            if (!dto.Markup.TryGetValue(cue, out string? tag))
-            {
-                throw new InvalidDataException($"Engine profile {fileName}: markup is missing the cue \"{cue}\" (use null to strip it).");
-            }
-
-            if (tag is not null && string.IsNullOrWhiteSpace(tag))
-            {
-                throw new InvalidDataException($"Engine profile {fileName}: markup for \"{cue}\" is blank (use null to strip it).");
-            }
-        }
-
-        return new Dictionary<string, string?>(dto.Markup, StringComparer.Ordinal);
-    }
-
-    private static double Speed(ProfileDto dto, string fileName) =>
-        dto.Speed switch
-        {
-            null => DefaultSpeed,
-            > 0 and <= MaxSpeed and double speed => speed,
-            _ => throw new InvalidDataException($"Engine profile {fileName}: speed must be above 0 and at most {MaxSpeed}."),
-        };
 
     private static int Timeout(ProfileDto dto, string fileName) =>
         dto.TimeoutSeconds switch

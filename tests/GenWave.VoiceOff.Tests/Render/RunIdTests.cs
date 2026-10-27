@@ -1,15 +1,28 @@
 using GenWave.VoiceOff.Render;
-using GenWave.VoiceOff.Speech;
 
 namespace GenWave.VoiceOff.Tests.Render;
 
 public sealed class RunIdTests
 {
-    [Fact]
-    public void ItIsTheUtcStartAndTheTier() =>
-        Assert.Equal("20261022T193000Z-cpu", RunId.Format(new DateTimeOffset(2026, 10, 22, 19, 30, 0, TimeSpan.Zero), EngineTier.Cpu));
+    [Theory]
+    [InlineData("first")]
+    [InlineData("2026-10-26_kokoro.v2")]
+    [InlineData("0")]
+    public void AFolderSizedNameIsValid(string name) => Assert.True(RunId.IsValid(name));
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(".hidden")]
+    [InlineData("-flag")]
+    [InlineData("a/b")]
+    [InlineData("..")]
+    [InlineData("has space")]
+    [InlineData("trailing\n")]
+    public void ANameThatIsNotOneSafeSegmentIsInvalid(string name) => Assert.False(RunId.IsValid(name));
 
     [Fact]
-    public void ALocalOffsetIsConvertedToUtc() =>
-        Assert.Equal("20261022T193000Z-gpu", RunId.Format(new DateTimeOffset(2026, 10, 22, 21, 30, 0, TimeSpan.FromHours(2)), EngineTier.Gpu));
+    public void ANameOver64CharactersIsInvalid() => Assert.False(RunId.IsValid(new string('a', 65)));
+
+    [Fact]
+    public void ANullNameIsInvalid() => Assert.False(RunId.IsValid(null));
 }

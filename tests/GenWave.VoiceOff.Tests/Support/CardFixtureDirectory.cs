@@ -13,6 +13,10 @@ internal sealed class CardFixtureDirectory : IDisposable
         string cues = """{ "laugh": "Haha!", "breath": null }""",
         string settings = """{ "alpha": 0.3, "nested": { "keep": [1, "two", null] } }""",
         string extraMembers = "") =>
+        CardJson(id, engine, host, cues, settings, extraMembers, extraMembers.Contains("\"asShipped\"", StringComparison.Ordinal) ? "{}" : """{ "4": "Sorry. Allergies." }""");
+
+    // The as-shipped card takes no overrides, so a card marked asShipped gets an empty object.
+    private static string CardJson(string id, string engine, string host, string cues, string settings, string extraMembers, string overrides) =>
         $$"""
         {
           "id": "{{id}}",
@@ -23,7 +27,7 @@ internal sealed class CardFixtureDirectory : IDisposable
           "speed": 1.1,
           "settings": {{settings}},
           "cues": {{cues}},
-          "overrides": { "4": "Sorry. Allergies." },
+          "overrides": {{overrides}},
           "facts": { "checkpoint": "cp-1", "voices": 54, "cloning": false, "ownVoice": true, "cannot": ["breath", "sigh"], "tricks": [] },
           {{extraMembers}}
           "why": "Because {{id}}."

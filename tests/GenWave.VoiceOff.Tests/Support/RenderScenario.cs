@@ -8,97 +8,106 @@ namespace GenWave.VoiceOff.Tests.Support;
 
 /// <summary>
 /// Drives the real <c>render</c> verb through <see cref="Cli.Run(string[], TextWriter, TextWriter, RenderServices, CancellationToken)"/> over fixture
-/// engine and gauntlet folders in a temp root, with stub engines and a fake docker. The real loudness match and ffmpeg run.
+/// engine and card folders in a temp root, the repo's real script, stub engines and a fake docker. The real loudness match and ffmpeg run.
+/// The first engine added is the baseline; the first card added is the as-shipped card (and so takes no overrides).
 /// </summary>
 internal sealed class RenderScenario : IDisposable
 {
-    internal const string Eight = "one two three four five six seven eight";
-
-    /// <summary>Two sentences, so the station's speech markup has a break to put a pause in.</summary>
-    internal const string TwoSentences = "First sentence is right here. Second sentence follows right after it.";
-
     private static readonly Lazy<byte[]> LowSineWav = new(() => Synthesize(330));
 
     private readonly EngineDirectoryFixture engines = new();
-    private readonly GauntletFixtureDirectory gauntlets = new();
+    private readonly CardFixtureDirectory cards = new();
     private readonly List<EngineStubServer> stubs = [];
     private readonly List<(string File, string Json)> engineFiles = [];
+    private readonly List<(string File, string Json)> cardFiles = [];
+    private readonly List<string> scriptCopies = [];
 
     internal RenderScenario()
     {
         Root = Path.Combine(Path.GetTempPath(), "voiceoff-root-" + Guid.NewGuid().ToString("N"));
+        ScriptPath = Path.Combine(RepoRootLocator.Find(AppContext.BaseDirectory), "tools", "VoiceOff", "script", "script.json");
     }
 
     internal string Root { get; }
 
-    /// <summary>Starts a stub that answers every voice with a real, loudness-measurable WAV.</summary>
-    internal async Task<EngineStubServer> StartStubAsync()
+    /// <summary>The script every run reads; the repo's own unless <see cref="WriteScript"/> was used.</summary>
+    internal string ScriptPath { get; set; }
+
+    /// <summary>Starts a stub that answers every speech request with a real, loudness-measurable WAV.</summary>
+    internal async Task<EngineStubServer> StartStubAsync(TimeSpan speechDelay = default, int? failSpeechRequest = null)
     {
-        EngineStubServer stub = await EngineStubServer.StartAsync(speechBody: LowSineWav.Value);
+        EngineStubServer stub = await EngineStubServer.StartAsync(speechDelay: speechDelay, speechBody: LowSineWav.Value, failSpeechRequest: failSpeechRequest);
         stubs.Add(stub);
         return stub;
     }
 
-    /// <summary>Adds an engine profile whose endpoint is <paramref name="endpoint"/>. The first one added is the baseline.</summary>
-    internal void AddEngine(string slug, Uri endpoint, string[]? tiers = null, int? timeoutSeconds = null, double? speed = null)
+    /// <summary>Adds an engine profile whose endpoint is <paramref name="endpoint"/>; its container is <c>&lt;slug&gt;-box</c>.</summary>
+    internal void AddEngine(string slug, Uri endpoint, int? timeoutSeconds = null)
     {
         JsonObject node = EngineProfileJson.Valid(slug, baseline: engineFiles.Count == 0);
         node["endpoint"] = endpoint.AbsoluteUri;
         node["container"] = slug + "-box";
-        node["tiers"] = new JsonArray((tiers ?? ["cpu", "gpu"]).Select(t => (JsonNode?)JsonValue.Create(t)).ToArray());
         if (timeoutSeconds is int timeout)
         {
             node["timeoutSeconds"] = timeout;
         }
 
-        if (speed is double s)
-        {
-            node["speed"] = s;
-        }
-
         engineFiles.Add((slug + ".json", node.ToJsonString()));
     }
 
-    internal string EnginesDirectory => engines.Create(engineFiles.ToArray());
+    /// <summary>Adds an engine file as written, for a spec that needs a broken one.</summary>
+    internal void AddEngineFile(string fileName, string json) => engineFiles.Add((fileName, json));
 
-    /// <summary>A gauntlet folder: valid rules and the given lines (a pending corrections file when asked).</summary>
-    internal string GauntletDirectory(string[] lines, bool correctionsPending = false) =>
-        gauntlets.Create(
-            ("lines.json", GauntletFixtureDirectory.Lines(lines)),
-            ("corrections.json", correctionsPending ? """{ "provenance": "pending", "corrections": [] }""" : GauntletFixtureDirectory.ValidCorrections));
+    /// <summary>Adds a card file as written, for a spec that needs a broken one.</summary>
+    internal void AddCardFile(string fileName, string json) => cardFiles.Add((fileName, json));
 
-    internal static string[] ThreeLines() =>
-    [
-        GauntletFixtureDirectory.Line("leadin-1", "LeadIn", Eight),
-        GauntletFixtureDirectory.Line("stationid-1", "StationId", Eight),
-        GauntletFixtureDirectory.Line("emotive-1", "Emotive", Eight),
-    ];
+    /// <summary>Adds a card on <paramref name="engine"/>; <paramref name="edit"/> may change the card JSON before it is written.</summary>
+    internal void AddCard(string id, string engine, Action<JsonObject>? edit = null)
+    {
+        JsonObject node = JsonNode.Parse(CardFixtureDirectory.CardJson(id, engine))?.AsObject() ?? throw new InvalidOperationException("The card fixture did not parse.");
+        if (cardFiles.Count == 0)
+        {
+            node.Remove("overrides");
+            node["asShipped"] = true;
+        }
 
-    internal static string CrosstalkLine(string id) =>
-        $$"""{ "id": "{{id}}", "class": "Crosstalk", "turns": [ { "register": "bubbly", "text": "{{Eight}}" }, { "register": "laconic", "text": "{{Eight}}" } ], "cues": [] }""";
+        edit?.Invoke(node);
+        cardFiles.Add((id + ".json", node.ToJsonString()));
+    }
 
-    /// <summary>Runs <c>render</c> with the standard options plus <paramref name="extra"/>; every container is running.</summary>
-    internal RenderRun Run(string enginesDirectory, string gauntletDirectory, string tier, params string[] extra) =>
-        Run(new FakeDockerInspector(new ContainerState(true, true, "10.0.0.2")), enginesDirectory, gauntletDirectory, tier, extra);
+    /// <summary>Writes a copy of the repo's script changed by <paramref name="edit"/> and makes it the script of later runs.</summary>
+    internal void WriteScript(Func<string, string> edit)
+    {
+        string path = Path.Combine(Path.GetTempPath(), "voiceoff-script-" + Guid.NewGuid().ToString("N") + ".json");
+        File.WriteAllText(path, edit(File.ReadAllText(ScriptPath)));
+        scriptCopies.Add(path);
+        ScriptPath = path;
+    }
 
-    internal RenderRun Run(FakeDockerInspector docker, string enginesDirectory, string gauntletDirectory, string tier, params string[] extra) =>
-        Run(docker, CancellationToken.None, enginesDirectory, gauntletDirectory, tier, extra);
+    private (string Engines, string Cards)? written;
 
-    internal RenderRun Run(FakeDockerInspector docker, CancellationToken ct, string enginesDirectory, string gauntletDirectory, string tier, params string[] extra) =>
-        RunAt(Root, docker, ct, enginesDirectory, gauntletDirectory, tier, extra);
+    internal string EnginesDirectory => (written ??= (engines.Create(engineFiles.ToArray()), cards.Create(cardFiles.ToArray()))).Engines;
 
-    /// <summary>Like <see cref="Run(FakeDockerInspector, CancellationToken, string, string, string, string[])"/> with <c>--root</c> pointing at <paramref name="root"/>.</summary>
-    internal RenderRun RunAt(string root, FakeDockerInspector docker, CancellationToken ct, string enginesDirectory, string gauntletDirectory, string tier, params string[] extra)
+    internal string CardsDirectory => (written ??= (engines.Create(engineFiles.ToArray()), cards.Create(cardFiles.ToArray()))).Cards;
+
+    /// <summary>Runs <c>render --run &lt;runId&gt;</c> with the standard options plus <paramref name="extra"/>; every container is running.</summary>
+    internal RenderRun Run(string runId, params string[] extra) =>
+        RunWith(new FakeDockerInspector(new ContainerState(true, true, "10.0.0.2")), CancellationToken.None, runId, extra);
+
+    internal RenderRun RunWith(FakeDockerInspector docker, CancellationToken ct, string runId, params string[] extra) =>
+        RunAt(Root, docker, ct, runId, extra);
+
+    /// <summary>Like <see cref="RunWith"/> with <c>--root</c> pointing at <paramref name="root"/>.</summary>
+    internal RenderRun RunAt(string root, FakeDockerInspector docker, CancellationToken ct, string runId, params string[] extra)
     {
         using HttpClient http = SpeechClient.CreateHttpClient();
-        RenderServices services = new(docker, http, new FixedClockTimeProvider(new DateTimeOffset(2026, 10, 22, 19, 30, 0, TimeSpan.Zero)), new LoudnessMatch(), "test-host");
-        string[] args = ["render", "--tier", tier, "--root", root, "--engines", enginesDirectory, "--gauntlet", gauntletDirectory, .. extra];
+        RenderServices services = new(docker, http, new FixedClockTimeProvider(new DateTimeOffset(2026, 10, 22, 19, 30, 0, TimeSpan.Zero)), new LoudnessMatch());
+        string[] args = ["render", "--run", runId, "--root", root, "--engines", EnginesDirectory, "--cards", CardsDirectory, "--script", ScriptPath, .. extra];
         StringWriter output = new();
         StringWriter error = new();
         int exit = Cli.Run(args, output, error, services, ct);
-        string[] folders = Directory.Exists(root) ? Directory.GetDirectories(root) : [];
-        string? runDirectory = folders.Length == 1 ? folders[0] : null;
-        return new RenderRun(exit, output.ToString(), error.ToString(), runDirectory);
+        string runDirectory = Path.Combine(root, runId);
+        return new RenderRun(exit, output.ToString(), error.ToString(), Directory.Exists(runDirectory) ? runDirectory : null);
     }
 
     public void Dispose()
@@ -109,7 +118,12 @@ internal sealed class RenderScenario : IDisposable
         }
 
         engines.Dispose();
-        gauntlets.Dispose();
+        cards.Dispose();
+        foreach (string copy in scriptCopies)
+        {
+            File.Delete(copy);
+        }
+
         if (Directory.Exists(Root))
         {
             Directory.Delete(Root, recursive: true);

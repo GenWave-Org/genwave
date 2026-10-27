@@ -2,15 +2,7 @@
   "slug": "qwen3",
   "container": "voiceoff-qwen3",
   "port": 8880,
-  "tiers": ["gpu"],
   "timeoutSeconds": 600,
-  "voices": {
-    "bubbly": "Vivian",
-    "laconic": "Aiden",
-    "late-night": "Uncle_Fu"
-  },
-  "voiceReason": "Only Ryan and Aiden are English-native stock voices, both male. Bubbly is Vivian (a bright young female voice), laconic is Aiden (a clear mid-range male) and late-night is Uncle_Fu (a low, mellow male). Vivian and Uncle_Fu are Chinese-native timbres speaking English, which is the closest the stock set gets to the three registers.",
-  "markup": { "pause": null, "laugh": null, "sigh": null, "breath": null, "um": null, "emphasis": null },
   "license": "Code Apache-2.0; weights Apache-2.0",
   "notes": "Qwen3-TTS-12Hz-1.7B-CustomVoice at revision 0c0e3051, run through the qwen-tts 0.1.1 package (generate_custom_voice, language English, fixed seed). It has no inline cue tags. Free-text instruct control exists but the shim does not use it. Weights are about 4.3 GB on disk and download at first start. One CPU line took 77 s warm on a quiet box (16 cores, nothing else rendering, 2026-10-23), so the CPU tier is dropped."
 }

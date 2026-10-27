@@ -89,9 +89,21 @@ internal sealed class ScriptFile
                 throw new InvalidDataException($"Script file {fileName}: paragraph {paragraph.N} has no text.");
             }
 
+            RequireKnownCues(paragraph, fileName);
             paragraphs.Add(new ScriptParagraph(paragraph.N, paragraph.Text));
         }
 
         return paragraphs;
+    }
+
+    // Fails closed: a cue the seven-cue vocabulary lacks would reach an engine as literal braces, or be dropped by one card and not another.
+    private static void RequireKnownCues(ParagraphDto paragraph, string fileName)
+    {
+        string? unknown = CueVocabulary.Token().Matches(paragraph.Text).Select(m => m.Groups[1].Value)
+            .FirstOrDefault(name => !CueVocabulary.Script.Contains(name));
+        if (unknown is not null)
+        {
+            throw new InvalidDataException($"Script file {fileName}: paragraph {paragraph.N} uses the cue {{{unknown}}}, which is not one of {string.Join(", ", CueVocabulary.Script.Order(StringComparer.Ordinal))}.");
+        }
     }
 }

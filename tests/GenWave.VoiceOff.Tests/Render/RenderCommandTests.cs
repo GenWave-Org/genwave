@@ -1,256 +1,251 @@
 using System.Text.Json.Nodes;
-using GenWave.Loudness;
 using GenWave.VoiceOff.Render;
-using GenWave.VoiceOff.Text;
 using GenWave.VoiceOff.Speech;
 using GenWave.VoiceOff.Tests.Support;
 
 namespace GenWave.VoiceOff.Tests.Render;
 
 /// <summary>
-/// The render verb end to end over stub engines, with the real loudness match. Each nested class is one run and its facts
-/// (one assertion each); the run happens in the constructor.
+/// The rules of <c>voiceoff render</c> that no story pins, driven through the real CLI over stub engines. Each nested class is one
+/// run and its facts (one assertion each); the run happens in the constructor.
 /// </summary>
 public static class RenderCommandTests
 {
-    private static IReadOnlyList<TimingRecord> RecordsOf(RenderRun run) =>
-        new TimingLog(run.PathIn("timing.jsonl")).ReadAsync(CancellationToken.None).GetAwaiter().GetResult();
+    private static JsonNode RunJson(RenderRun run) =>
+        JsonNode.Parse(File.ReadAllText(run.PathIn("run.json"))) ?? throw new InvalidOperationException("run.json is empty");
 
-    private static JsonNode ReadJson(RenderRun run, string file) =>
-        JsonNode.Parse(File.ReadAllText(run.PathIn(file))) ?? throw new InvalidOperationException($"{file} is empty");
+    private static JsonNode CardEntry(RenderRun run, string id) =>
+        RunJson(run)["cards"]?[id] ?? throw new InvalidOperationException($"run.json has no card {id}");
 
-    private static string[] ThreeLines() => RenderScenario.ThreeLines();
+    private static FakeDockerInspector Running() => new(new ContainerState(true, true, "10.0.0.2"));
 
-    private static RenderRun StandardRun(RenderScenario scenario, EngineStubServer stub, string[]? lines = null, params string[] extra)
+    private static EngineStubServer OneEngineWithCards(RenderScenario scenario, params string[] cardIds) =>
+        OneEngineWithCards(scenario, scenario.StartStubAsync().GetAwaiter().GetResult(), cardIds);
+
+    private static EngineStubServer OneEngineWithCards(RenderScenario scenario, EngineStubServer stub, string[] cardIds)
     {
         scenario.AddEngine("alpha", stub.BaseUri);
-        return scenario.Run(scenario.EnginesDirectory, scenario.GauntletDirectory(lines ?? ThreeLines()), "cpu", extra);
+        foreach (string id in cardIds)
+        {
+            scenario.AddCard(id, "alpha");
+        }
+
+        return stub;
     }
 
-    public sealed class AMatchedRun : IDisposable
+    public sealed class ARenderedCardInRunJson : IDisposable
     {
         private readonly RenderScenario scenario = new();
-        private readonly string[] wavs;
-        private readonly double[] lufs;
+        private readonly JsonObject entry;
 
-        public AMatchedRun()
+        public ARenderedCardInRunJson()
         {
-            RenderRun run = StandardRun(scenario, scenario.StartStubAsync().GetAwaiter().GetResult());
-            wavs = Directory.GetFiles(run.PathIn(Path.Combine("wav", "alpha")), "*.wav");
-            lufs = wavs.Select(w => new FfmpegLoudnessAnalyzer().AnalyzeAsync(w, CancellationToken.None).GetAwaiter().GetResult().IntegratedLufs).ToArray();
+            OneEngineWithCards(scenario, "card-one");
+            entry = CardEntry(scenario.Run("first"), "card-one").AsObject();
         }
 
         [Fact]
-        public void EveryLineHasAMatchedClip() => Assert.Equal(3, wavs.Length);
-
-        [Fact]
-        public void EveryMatchedClipMeasuresSixteenLufs() => Assert.All(lufs, l => Assert.InRange(l, -17, -15));
+        public void HasNoReasonProperty() => Assert.False(entry.ContainsKey("reason"));
 
         public void Dispose() => scenario.Dispose();
     }
 
-    public sealed class TheManifest : IDisposable
-    {
-        private readonly RenderScenario scenario = new();
-        private readonly JsonNode manifest;
-        private readonly string gauntletHash;
-
-        public TheManifest()
-        {
-            EngineStubServer stub = scenario.StartStubAsync().GetAwaiter().GetResult();
-            scenario.AddEngine("alpha", stub.BaseUri);
-            string gauntlet = scenario.GauntletDirectory(ThreeLines());
-            gauntletHash = GauntletSet.Load(gauntlet).ContentHash;
-            manifest = ReadJson(scenario.Run(scenario.EnginesDirectory, gauntlet, "cpu"), "run.json");
-        }
-
-        [Fact]
-        public void ItNamesTheRun() => Assert.Equal("20261022T193000Z-cpu", manifest["runId"]?.GetValue<string>());
-
-        [Fact]
-        public void ItNamesTheTier() => Assert.Equal("cpu", manifest["tier"]?.GetValue<string>());
-
-        [Fact]
-        public void ItNamesTheHost() => Assert.Equal("test-host", manifest["host"]?.GetValue<string>());
-
-        [Fact]
-        public void ItSaysWhenTheRunStarted() => Assert.Equal("2026-10-22T19:30:00+00:00", manifest["startedAt"]?.GetValue<string>());
-
-        [Fact]
-        public void ItCarriesTheGauntletHash() => Assert.Equal(gauntletHash, manifest["gauntletHash"]?.GetValue<string>());
-
-        [Fact]
-        public void ItSaysCorrectionsAreNotPending() => Assert.False(manifest["correctionsPending"]?.GetValue<bool>());
-
-        public void Dispose() => scenario.Dispose();
-    }
-
-    public sealed class ACrosstalkLine : IDisposable
-    {
-        private readonly RenderScenario scenario = new();
-        private readonly RenderRun run;
-        private readonly EngineStubServer stub;
-        private readonly TimingRecord record;
-
-        public ACrosstalkLine()
-        {
-            stub = scenario.StartStubAsync().GetAwaiter().GetResult();
-            run = StandardRun(scenario, stub, [RenderScenario.CrosstalkLine("cross-1")]);
-            record = Assert.Single(RecordsOf(run));
-        }
-
-        [Fact]
-        public void ItsRecordIsOk() => Assert.True(record.Ok);
-
-        [Fact]
-        public void ItsRecordedAudioIsBothTurnsAndThePause() => Assert.InRange(record.AudioMs, 6500, 6700);
-
-        [Fact]
-        public void ItsMatchedClipIsBothTurnsAndThePause() =>
-            Assert.InRange(WavInfo.Read(File.ReadAllBytes(run.PathIn(Path.Combine("wav", "alpha", "cross-1.wav"))), out _)?.DurationMs ?? 0, 6500, 6700);
-
-        [Fact]
-        public void EachTurnIsRenderedWithItsOwnRegistersVoice() => Assert.Equal(["v1", "v2"], stub.Requests.SpeechVoices);
-
-        [Fact]
-        public void NoRawTurnFileIsLeftBehind() =>
-            Assert.Equal(["cross-1.wav"], Directory.GetFiles(run.PathIn(Path.Combine("raw", "alpha"))).Select(Path.GetFileName));
-
-        public void Dispose() => scenario.Dispose();
-    }
-
-    public sealed class EnginesRenderInSlugOrder : IDisposable
-    {
-        private readonly RenderScenario scenario = new();
-        private readonly RenderRun run;
-
-        public EnginesRenderInSlugOrder()
-        {
-            EngineStubServer stub = scenario.StartStubAsync().GetAwaiter().GetResult();
-            scenario.AddEngine("zulu", stub.BaseUri);
-            scenario.AddEngine("alpha-b", stub.BaseUri);
-            scenario.AddEngine("alpha", stub.BaseUri);
-            run = scenario.Run(scenario.EnginesDirectory, scenario.GauntletDirectory(ThreeLines()), "cpu", "--engine", "zulu", "--engine", "alpha", "--engine", "alpha-b");
-        }
-
-        [Fact]
-        // The files sort alpha-b.json before alpha.json, so only the slug order puts alpha first.
-        public void OneAfterTheOtherBySlug() => Assert.Equal(["alpha", "alpha-b", "zulu"], RecordsOf(run).Select(r => r.Engine).Distinct());
-
-        public void Dispose() => scenario.Dispose();
-    }
-
-    public sealed class OnlyTheNamedEngine : IDisposable
-    {
-        private readonly RenderScenario scenario = new();
-        private readonly RenderRun run;
-
-        public OnlyTheNamedEngine()
-        {
-            EngineStubServer stub = scenario.StartStubAsync().GetAwaiter().GetResult();
-            scenario.AddEngine("alpha", stub.BaseUri);
-            scenario.AddEngine("beta", stub.BaseUri);
-            run = scenario.Run(scenario.EnginesDirectory, scenario.GauntletDirectory(ThreeLines()), "cpu", "--engine", "beta");
-        }
-
-        [Fact]
-        public void IsRendered() => Assert.Equal(["beta"], RecordsOf(run).Select(r => r.Engine).Distinct());
-
-        public void Dispose() => scenario.Dispose();
-    }
-
-    public sealed class AnUnknownEngine : IDisposable
-    {
-        private readonly RenderScenario scenario = new();
-        private readonly RenderRun run;
-
-        public AnUnknownEngine() => run = StandardRun(scenario, scenario.StartStubAsync().GetAwaiter().GetResult(), null, "--engine", "nope");
-
-        [Fact]
-        public void IsAUsageError() => Assert.Equal(2, run.Exit);
-
-        [Fact]
-        public void IsNamedInTheMessage() => Assert.Contains("'nope'", run.Error, StringComparison.Ordinal);
-
-        [Fact]
-        public void WritesNothing() => Assert.False(Directory.Exists(scenario.Root));
-
-        public void Dispose() => scenario.Dispose();
-    }
-
-    public sealed class ABrokenProfile : IDisposable
-    {
-        private readonly RenderScenario scenario = new();
-        private readonly EngineDirectoryFixture engines = new();
-        private readonly RenderRun run;
-
-        public ABrokenProfile()
-        {
-            scenario.StartStubAsync().GetAwaiter().GetResult();
-            string dir = engines.Create(("alpha.json", EngineProfileJson.With(n => n.Remove("license"))));
-            run = scenario.Run(dir, scenario.GauntletDirectory(ThreeLines()), "cpu");
-        }
-
-        [Fact]
-        public void IsRefusedWithExit1() => Assert.Equal(1, run.Exit);
-
-        [Fact]
-        public void IsRefusedNamingTheFile() => Assert.Contains("alpha.json", run.Error, StringComparison.Ordinal);
-
-        [Fact]
-        public void WritesNothing() => Assert.False(Directory.Exists(scenario.Root));
-
-        public void Dispose()
-        {
-            engines.Dispose();
-            scenario.Dispose();
-        }
-    }
-
-    public sealed class ABrokenGauntlet : IDisposable
-    {
-        private readonly RenderScenario scenario = new();
-        private readonly RenderRun run;
-
-        public ABrokenGauntlet()
-        {
-            EngineStubServer stub = scenario.StartStubAsync().GetAwaiter().GetResult();
-            scenario.AddEngine("alpha", stub.BaseUri);
-            string bad = scenario.GauntletDirectory([GauntletFixtureDirectory.Line("short-1", "LeadIn", "too short")]);
-            run = scenario.Run(scenario.EnginesDirectory, bad, "cpu");
-        }
-
-        [Fact]
-        public void IsRefusedWithExit1() => Assert.Equal(1, run.Exit);
-
-        [Fact]
-        public void IsRefusedNamingTheLine() => Assert.Contains("short-1", run.Error, StringComparison.Ordinal);
-
-        [Fact]
-        public void WritesNothing() => Assert.False(Directory.Exists(scenario.Root));
-
-        public void Dispose() => scenario.Dispose();
-    }
-
-    public sealed class ARunFolderThatAlreadyExists : IDisposable
+    public sealed class AWholeRunOnAFolderThatHasRunJson : IDisposable
     {
         private readonly RenderScenario scenario = new();
         private readonly EngineStubServer stub;
-        private readonly RenderRun run;
+        private readonly int requestsBefore;
+        private readonly RenderRun second;
 
-        public ARunFolderThatAlreadyExists()
+        public AWholeRunOnAFolderThatHasRunJson()
         {
-            stub = scenario.StartStubAsync().GetAwaiter().GetResult();
-            scenario.AddEngine("alpha", stub.BaseUri);
-            Directory.CreateDirectory(Path.Combine(scenario.Root, "20261022T193000Z-cpu"));
-            run = scenario.Run(scenario.EnginesDirectory, scenario.GauntletDirectory(ThreeLines()), "cpu");
+            stub = OneEngineWithCards(scenario, "card-one");
+            scenario.Run("first");
+            requestsBefore = stub.Requests.TotalRequests;
+            second = scenario.Run("first");
         }
 
         [Fact]
-        public void IsRefusedWithExit1() => Assert.Equal(1, run.Exit);
+        public void IsRefusedWithExit1() => Assert.Equal(1, second.Exit);
 
         [Fact]
-        public void ReachesNoEngine() => Assert.Equal(0, stub.Requests.TotalRequests);
+        public void SendsTheEngineNothing() => Assert.Equal(requestsBefore, stub.Requests.TotalRequests);
+
+        public void Dispose() => scenario.Dispose();
+    }
+
+    public sealed class ASingleCardAfterTheScriptChanged : IDisposable
+    {
+        private readonly RenderScenario scenario = new();
+        private readonly byte[] before;
+        private readonly RenderRun second;
+
+        public ASingleCardAfterTheScriptChanged()
+        {
+            OneEngineWithCards(scenario, "card-one");
+            RenderRun first = scenario.Run("first");
+            before = File.ReadAllBytes(first.PathIn("run.json"));
+            scenario.WriteScript(text => text.Replace("Honestly?", "Truthfully?", StringComparison.Ordinal));
+            second = scenario.Run("first", "--card", "card-one");
+        }
+
+        [Fact]
+        public void IsRefusedWithExit1() => Assert.Equal(1, second.Exit);
+
+        [Fact]
+        public void LeavesRunJsonByteIdentical() => Assert.Equal(before, File.ReadAllBytes(second.PathIn("run.json")));
+
+        public void Dispose() => scenario.Dispose();
+    }
+
+    public sealed class ASingleCardOnAnEmptyRoot : IDisposable
+    {
+        private readonly RenderScenario scenario = new();
+        private readonly RenderRun run;
+
+        public ASingleCardOnAnEmptyRoot()
+        {
+            OneEngineWithCards(scenario, "card-one", "card-two");
+            run = scenario.Run("first", "--card", "card-two");
+        }
+
+        [Fact]
+        public void ListsOnlyThatCardInRunJson() => Assert.Equal(["card-two"], RunJson(run)["cards"]?.AsObject().Select(p => p.Key));
+
+        public void Dispose() => scenario.Dispose();
+    }
+
+    public sealed class AnEngineThatStopsAnswering : IDisposable
+    {
+        private readonly RenderScenario scenario = new();
+        private readonly RenderRun run;
+
+        public AnEngineThatStopsAnswering()
+        {
+            EngineStubServer stub = scenario.StartStubAsync(speechDelay: TimeSpan.FromSeconds(30)).GetAwaiter().GetResult();
+            scenario.AddEngine("alpha", stub.BaseUri, timeoutSeconds: 1);
+            foreach (string id in new[] { "card-1", "card-2", "card-3", "card-4", "card-5" })
+            {
+                scenario.AddCard(id, "alpha");
+            }
+
+            run = scenario.Run("first");
+        }
+
+        [Fact]
+        public void TheRunStillExits0() => Assert.Equal(0, run.Exit);
+
+        [Theory]
+        [InlineData("card-1")]
+        [InlineData("card-2")]
+        [InlineData("card-3")]
+        public void TheFirstThreeCardsFailWithATimeout(string id) =>
+            Assert.Contains("timeout", CardEntry(run, id)["reason"]?.GetValue<string>(), StringComparison.Ordinal);
+
+        [Theory]
+        [InlineData("card-4")]
+        [InlineData("card-5")]
+        public void TheRemainingCardsAreNotRendered(string id) => Assert.False(CardEntry(run, id)["rendered"]?.GetValue<bool>());
+
+        [Theory]
+        [InlineData("card-4")]
+        [InlineData("card-5")]
+        public void TheRemainingCardsAreRecordedStopped(string id) =>
+            Assert.Equal(CardRunner.StoppedReason, CardEntry(run, id)["reason"]?.GetValue<string>());
+
+        public void Dispose() => scenario.Dispose();
+    }
+
+    public sealed class ACancelledRun : IDisposable
+    {
+        private readonly RenderScenario scenario = new();
+        private readonly RenderRun run;
+
+        public ACancelledRun()
+        {
+            EngineStubServer stub = scenario.StartStubAsync(speechDelay: TimeSpan.FromSeconds(30)).GetAwaiter().GetResult();
+            OneEngineWithCards(scenario, stub, ["card-one"]);
+            using CancellationTokenSource cancel = new(TimeSpan.FromSeconds(1));
+            run = scenario.RunWith(Running(), cancel.Token, "first");
+        }
+
+        [Fact]
+        public void ExitsWith130() => Assert.Equal(130, run.Exit);
+
+        [Fact]
+        public void KeepsRunJson() => Assert.True(File.Exists(run.PathIn("run.json")));
+
+        public void Dispose() => scenario.Dispose();
+    }
+
+    public sealed class ABrokenEngineProfile : IDisposable
+    {
+        private readonly RenderScenario scenario = new();
+        private readonly RenderRun run;
+
+        public ABrokenEngineProfile()
+        {
+            scenario.AddEngineFile("alpha.json", EngineProfileJson.With(n => n.Remove("license")));
+            scenario.AddCardFile("card-one.json", CardFixtureDirectory.CardJson("card-one", "alpha"));
+            run = scenario.Run("first");
+        }
+
+        [Fact]
+        public void ExitsWith1() => Assert.Equal(1, run.Exit);
+
+        [Fact]
+        public void NamesTheFile() => Assert.Contains("alpha.json", run.Error, StringComparison.Ordinal);
+
+        [Fact]
+        public void WritesNoRunFolder() => Assert.False(Directory.Exists(scenario.Root));
+
+        public void Dispose() => scenario.Dispose();
+    }
+
+    public sealed class ABrokenCard : IDisposable
+    {
+        private readonly RenderScenario scenario = new();
+        private readonly RenderRun run;
+
+        public ABrokenCard()
+        {
+            OneEngineWithCards(scenario, "card-one");
+            scenario.AddCardFile("broken-card.json", "{ this is not json");
+            run = scenario.Run("first");
+        }
+
+        [Fact]
+        public void ExitsWith1() => Assert.Equal(1, run.Exit);
+
+        [Fact]
+        public void NamesTheFile() => Assert.Contains("broken-card", run.Error, StringComparison.Ordinal);
+
+        [Fact]
+        public void WritesNoRunFolder() => Assert.False(Directory.Exists(scenario.Root));
+
+        public void Dispose() => scenario.Dispose();
+    }
+
+    public sealed class ABrokenScript : IDisposable
+    {
+        private readonly RenderScenario scenario = new();
+        private readonly RenderRun run;
+
+        public ABrokenScript()
+        {
+            OneEngineWithCards(scenario, "card-one");
+            scenario.WriteScript(_ => "{ this is not json");
+            run = scenario.Run("first");
+        }
+
+        [Fact]
+        public void ExitsWith1() => Assert.Equal(1, run.Exit);
+
+        [Fact]
+        public void NamesTheFile() => Assert.Contains(Path.GetFileName(scenario.ScriptPath), run.Error, StringComparison.Ordinal);
+
+        [Fact]
+        public void WritesNoRunFolder() => Assert.False(Directory.Exists(scenario.Root));
 
         public void Dispose() => scenario.Dispose();
     }
@@ -263,12 +258,9 @@ public static class RenderCommandTests
 
         public ARootThatCannotBeCreated()
         {
-            EngineStubServer stub = scenario.StartStubAsync().GetAwaiter().GetResult();
-            scenario.AddEngine("alpha", stub.BaseUri);
+            OneEngineWithCards(scenario, "card-one");
             File.WriteAllText(rootFile, "not a folder");
-            run = scenario.RunAt(
-                rootFile, new FakeDockerInspector(new ContainerState(true, true, "10.0.0.2")), CancellationToken.None,
-                scenario.EnginesDirectory, scenario.GauntletDirectory(ThreeLines()), "cpu");
+            run = scenario.RunAt(rootFile, Running(), CancellationToken.None, "first");
         }
 
         [Fact]
@@ -284,123 +276,73 @@ public static class RenderCommandTests
         }
     }
 
-    public sealed class AnEngineThatStopsAnswering : IDisposable
+    public sealed class ACorruptRendersLogOnASingleCardRun : IDisposable
     {
         private readonly RenderScenario scenario = new();
-        private readonly EngineStubServer slow = EngineStubServer.StartAsync(speechDelay: TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
-        private readonly RenderRun run;
-        private readonly IReadOnlyList<TimingRecord> records;
+        private readonly RenderRun second;
+        private readonly byte[] clipBefore;
+        private readonly byte[] runJsonBefore;
 
-        public AnEngineThatStopsAnswering()
+        public ACorruptRendersLogOnASingleCardRun()
         {
-            scenario.AddEngine("alpha", slow.BaseUri, timeoutSeconds: 1);
-            string[] lines = [.. ThreeLines(), GauntletFixtureDirectory.Line("leadin-2", "LeadIn", RenderScenario.Eight), GauntletFixtureDirectory.Line("leadin-3", "LeadIn", RenderScenario.Eight)];
-            run = scenario.Run(scenario.EnginesDirectory, scenario.GauntletDirectory(lines), "cpu");
-            records = RecordsOf(run);
+            OneEngineWithCards(scenario, "card-one", "card-two");
+            RenderRun first = scenario.Run("first");
+            File.WriteAllText(first.PathIn("renders.jsonl"), "not json\nnot json either\n");
+            clipBefore = File.ReadAllBytes(first.PathIn(Path.Combine("cards", "card-one.wav")));
+            runJsonBefore = File.ReadAllBytes(first.PathIn("run.json"));
+            second = scenario.Run("first", "--card", "card-one");
         }
 
         [Fact]
-        public void TheRunStillExits0() => Assert.Equal(0, run.Exit);
+        public void ExitsWith1() => Assert.Equal(1, second.Exit);
 
         [Fact]
-        public void EveryClipIsRecordedFailed() => Assert.Equal(5, records.Count(r => !r.Ok));
+        public void NamesTheFile() => Assert.Contains("renders.jsonl", second.Error, StringComparison.Ordinal);
 
         [Fact]
-        public void TheClipsAfterTheThirdStrikeAreMarkedStopped() => Assert.Equal(2, records.Count(r => r.Error == EngineRun.StoppedError));
+        public void LeavesTheCardSClipByteIdentical() =>
+            Assert.Equal(clipBefore, File.ReadAllBytes(second.PathIn(Path.Combine("cards", "card-one.wav"))));
 
         [Fact]
-        public void TheEnginesRowSaysItStopped() =>
-            Assert.Contains(run.OutputLines, l => l.StartsWith("alpha: ❌ engine stopped answering, ", StringComparison.Ordinal));
+        public void LeavesRunJsonByteIdentical() => Assert.Equal(runJsonBefore, File.ReadAllBytes(second.PathIn("run.json")));
 
-        [Fact]
-        public void TheEnginesRowCountsTheFailedClips() =>
-            Assert.Contains(run.OutputLines, l => l.StartsWith("alpha: ❌ ", StringComparison.Ordinal) && l.Contains(" 5 clips, 5 failed", StringComparison.Ordinal));
-
-        public void Dispose()
-        {
-            slow.DisposeAsync().AsTask().GetAwaiter().GetResult();
-            scenario.Dispose();
-        }
+        public void Dispose() => scenario.Dispose();
     }
 
-    public sealed class ACancelledRun : IDisposable
+    public sealed class AReRenderCancelledBeforeItFinishes : IDisposable
     {
         private readonly RenderScenario scenario = new();
-        private readonly EngineStubServer slow = EngineStubServer.StartAsync(speechDelay: TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
-        private readonly RenderRun run;
+        private readonly RenderRun second;
 
-        public ACancelledRun()
+        public AReRenderCancelledBeforeItFinishes()
         {
-            scenario.AddEngine("alpha", slow.BaseUri);
+            OneEngineWithCards(scenario, "card-one", "card-two");
+            scenario.Run("first");
+            // Same folder, same root; the engine file now points at a stub that never answers.
+            EngineStubServer silent = scenario.StartStubAsync(speechDelay: TimeSpan.FromSeconds(30)).GetAwaiter().GetResult();
+            string engineFile = Path.Combine(scenario.EnginesDirectory, "alpha.json");
+            JsonNode engine = JsonNode.Parse(File.ReadAllText(engineFile)) ?? throw new InvalidOperationException("alpha.json is empty");
+            engine["endpoint"] = silent.BaseUri.AbsoluteUri;
+            File.WriteAllText(engineFile, engine.ToJsonString());
             using CancellationTokenSource cancel = new(TimeSpan.FromSeconds(1));
-            run = scenario.Run(new FakeDockerInspector(new ContainerState(true, true, "10.0.0.2")), cancel.Token, scenario.EnginesDirectory, scenario.GauntletDirectory(ThreeLines()), "cpu");
+            second = scenario.RunWith(Running(), cancel.Token, "first", "--card", "card-one");
         }
 
         [Fact]
-        public void Exits130() => Assert.Equal(130, run.Exit);
+        public void ExitsWith130() => Assert.Equal(130, second.Exit);
 
         [Fact]
-        public void KeepsTheManifest() => Assert.True(File.Exists(run.PathIn("run.json")));
-
-        public void Dispose()
-        {
-            slow.DisposeAsync().AsTask().GetAwaiter().GetResult();
-            scenario.Dispose();
-        }
-    }
-
-    public sealed class AProfileWithItsOwnSpeed : IDisposable
-    {
-        private readonly RenderScenario scenario = new();
-        private readonly EngineStubServer stub;
-
-        public AProfileWithItsOwnSpeed()
-        {
-            stub = scenario.StartStubAsync().GetAwaiter().GetResult();
-            scenario.AddEngine("alpha", stub.BaseUri, speed: 1.25);
-            scenario.Run(scenario.EnginesDirectory, scenario.GauntletDirectory(ThreeLines()), "cpu");
-        }
+        public void RecordsTheCardNotRendered() => Assert.False(CardEntry(second, "card-one")["rendered"]?.GetValue<bool>());
 
         [Fact]
-        public void SendsThatSpeedWithEveryRequest() => Assert.Equal([1.25], stub.Requests.SpeechSpeeds.Distinct());
-
-        public void Dispose() => scenario.Dispose();
-    }
-
-    public sealed class TheBaselineAndAnotherEngineRenderingTheSameLine : IDisposable
-    {
-        private readonly RenderScenario scenario = new();
-        private readonly EngineStubServer baseline;
-        private readonly EngineStubServer other;
-
-        public TheBaselineAndAnotherEngineRenderingTheSameLine()
-        {
-            baseline = scenario.StartStubAsync().GetAwaiter().GetResult();
-            other = scenario.StartStubAsync().GetAwaiter().GetResult();
-            scenario.AddEngine("alpha", baseline.BaseUri);
-            scenario.AddEngine("beta", other.BaseUri);
-            string line = GauntletFixtureDirectory.Line("leadin-1", "LeadIn", RenderScenario.TwoSentences);
-            scenario.Run(scenario.EnginesDirectory, scenario.GauntletDirectory([line]), "cpu");
-        }
+        public void GivesTheDidNotFinishReason() =>
+            Assert.Equal(CardRunner.UnfinishedReason, CardEntry(second, "card-one")["reason"]?.GetValue<string>());
 
         [Fact]
-        public void TheBaselineGetsTheStationsSpeechMarkup() => Assert.Contains("[pause:", baseline.Requests.SpeechInputs[^1], StringComparison.Ordinal);
+        public void LeavesNoClip() => Assert.False(File.Exists(second.PathIn(Path.Combine("cards", "card-one.wav"))));
 
         [Fact]
-        public void TheOtherEngineGetsPlainText() => Assert.DoesNotContain("[pause:", other.Requests.SpeechInputs[^1], StringComparison.Ordinal);
-
-        public void Dispose() => scenario.Dispose();
-    }
-
-    public sealed class TheLoudnessDecisionRecordedPerClip : IDisposable
-    {
-        private readonly RenderScenario scenario = new();
-        private readonly IReadOnlyList<TimingRecord> records;
-
-        public TheLoudnessDecisionRecordedPerClip() => records = RecordsOf(StandardRun(scenario, scenario.StartStubAsync().GetAwaiter().GetResult()));
-
-        [Fact]
-        public void EveryRecordCarriesTheLoudnessMatchesDecision() => Assert.Equal([false], records.Select(r => r.Linear).Distinct());
+        public void LeavesTheOtherCardRendered() => Assert.True(CardEntry(second, "card-two")["rendered"]?.GetValue<bool>());
 
         public void Dispose() => scenario.Dispose();
     }

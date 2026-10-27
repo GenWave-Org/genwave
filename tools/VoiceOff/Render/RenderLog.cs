@@ -1,20 +1,18 @@
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 
 namespace GenWave.VoiceOff.Render;
 
-/// <summary>An append-only <c>timing.jsonl</c>: one JSON record per line, written whole so a crash can tear at most the last line.</summary>
-internal sealed class TimingLog(string path)
+/// <summary>An append-only <c>renders.jsonl</c>: one JSON record per line, written whole so a crash can tear at most the last line.</summary>
+internal sealed class RenderLog(string path)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     {
-        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
         RespectNullableAnnotations = true,
         RespectRequiredConstructorParameters = true,
     };
 
-    internal async Task AppendAsync(TimingRecord record, CancellationToken ct)
+    internal async Task AppendAsync(RenderRecord record, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(record);
         string? directory = Path.GetDirectoryName(Path.GetFullPath(path));
@@ -28,6 +26,19 @@ internal sealed class TimingLog(string path)
         stream.Seek(0, SeekOrigin.End);
         await stream.WriteAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(record, Json) + "\n"), ct);
         await stream.FlushAsync(ct);
+    }
+
+    /// <summary>Drops every line of <paramref name="cardId"/> so a re-render replaces them; the other cards' lines stay as written.</summary>
+    /// <exception cref="InvalidDataException">The file has a line that is not a render record.</exception>
+    internal async Task RemoveCardAsync(string cardId, CancellationToken ct)
+    {
+        IReadOnlyList<RenderRecord> all = await ReadAsync(ct);
+        IReadOnlyList<RenderRecord> kept = all.Where(r => !string.Equals(r.Card, cardId, StringComparison.Ordinal)).ToList();
+        // Nothing of this card is in the log (a whole run starts with none): leave the file alone.
+        if (kept.Count < all.Count)
+        {
+            await AtomicTextFile.WriteAsync(path, string.Concat(kept.Select(r => JsonSerializer.Serialize(r, Json) + "\n")), ct);
+        }
     }
 
     /// <summary>A crash mid-write leaves a last line with no newline; cut it so the next record starts on a fresh line.</summary>
@@ -53,7 +64,7 @@ internal sealed class TimingLog(string path)
     }
 
     /// <summary>Every record in the file; a missing file is empty, and an unreadable last line (a crash mid-write) is dropped. An unreadable earlier line is corruption and throws.</summary>
-    internal async Task<IReadOnlyList<TimingRecord>> ReadAsync(CancellationToken ct)
+    internal async Task<IReadOnlyList<RenderRecord>> ReadAsync(CancellationToken ct)
     {
         if (!File.Exists(path))
         {
@@ -61,28 +72,28 @@ internal sealed class TimingLog(string path)
         }
 
         string[] lines = (await File.ReadAllLinesAsync(path, ct)).Where(l => l.Length > 0).ToArray();
-        List<TimingRecord> records = [];
+        List<RenderRecord> records = [];
         for (int i = 0; i < lines.Length; i++)
         {
-            TimingRecord? record = TryParse(lines[i]);
+            RenderRecord? record = TryParse(lines[i]);
             if (record is not null)
             {
                 records.Add(record);
             }
             else if (i < lines.Length - 1)
             {
-                throw new InvalidDataException($"{path} line {i + 1} is not a timing record.");
+                throw new InvalidDataException($"{path} line {i + 1} is not a render record.");
             }
         }
 
         return records;
     }
 
-    private static TimingRecord? TryParse(string line)
+    private static RenderRecord? TryParse(string line)
     {
         try
         {
-            return JsonSerializer.Deserialize<TimingRecord>(line, Json);
+            return JsonSerializer.Deserialize<RenderRecord>(line, Json);
         }
         catch (JsonException)
         {
