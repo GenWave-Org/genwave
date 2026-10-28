@@ -1,0 +1,43 @@
+{
+  "id": "parler-mini-expresso",
+  "engine": "parler",
+  "title": "Parler, mini expresso",
+  "variantOf": "parler",
+  "host": "thor-gpu",
+  "voice": "Talia",
+  "speed": 1,
+  "settings": {
+    "model": "parler-tts/parler-tts-mini-expresso",
+    "description": "Talia speaks fast in a happy tone with emphasis and high quality audio.",
+    "temperature": 0.9
+  },
+  "cues": {
+    "breath": null,
+    "laugh": null,
+    "um": "um,",
+    "cough": null,
+    "giggle": null,
+    "sigh": null,
+    "pause": "..."
+  },
+  "overrides": {},
+  "facts": {
+    "checkpoint": "Parler-TTS Mini Expresso",
+    "voices": 4,
+    "cloning": false,
+    "ownVoice": true,
+    "cannot": [
+      "breath",
+      "laugh",
+      "cough",
+      "giggle",
+      "sigh"
+    ],
+    "tricks": [
+      "This is the only Parler checkpoint trained on emotion styles (happy, laughing, whisper and more)",
+      "The description asks for a happy tone with emphasis",
+      "Um is written out as a word"
+    ]
+  },
+  "why": "The one Parler checkpoint with emotion styles, asked for a happy voice, to hear whether style training beats the bigger model."
+}

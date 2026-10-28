@@ -1,0 +1,38 @@
+{
+  "id": "higgs",
+  "engine": "higgs",
+  "title": "Higgs v3, 4B",
+  "host": "runes-gpu",
+  "voice": "ref-f3",
+  "speed": 1,
+  "settings": {
+    "temperature": 0.8,
+    "top_k": 50,
+    "top_p": 0.95,
+    "max_new_tokens": 2048
+  },
+  "cues": {
+    "breath": "<|prosody:pause|>",
+    "laugh": "<|sfx:laughter|>Haha",
+    "um": "Um,",
+    "cough": "<|sfx:cough|>Ahem",
+    "giggle": "<|sfx:laughter|>Hehe",
+    "sigh": "<|sfx:sigh|>Haah",
+    "pause": "<|prosody:long_pause|>"
+  },
+  "overrides": {},
+  "facts": {
+    "checkpoint": "higgs-tts-3-4b, unquantised (bf16)",
+    "voices": "clone",
+    "cloning": true,
+    "ownVoice": true,
+    "cannot": [],
+    "tricks": [
+      "Sound tags must be attached to an onomatopoeia with no space, so each one carries a written sound after it",
+      "Breath is a short pause and pause is the long pause",
+      "Um is written out as a word",
+      "Weights are non-commercial"
+    ]
+  },
+  "why": "Higgs v3 unquantised (bf16), with its sound tags paired with the written sound they need."
+}

@@ -1,0 +1,37 @@
+{
+  "id": "cosyvoice",
+  "engine": "cosyvoice",
+  "title": "CosyVoice 3, text rules off",
+  "host": "thor-gpu",
+  "voice": "ref-f3",
+  "speed": 1,
+  "settings": {
+    "text_frontend": false,
+    "llm": "llm.rl.pt"
+  },
+  "cues": {
+    "breath": "[breath]",
+    "laugh": "[laughter]",
+    "um": "Um,",
+    "cough": "[cough]",
+    "giggle": "[laughter]",
+    "sigh": "[sigh]",
+    "pause": "..."
+  },
+  "overrides": {},
+  "facts": {
+    "checkpoint": "Fun-CosyVoice3-0.5B-2512 with llm.rl.pt",
+    "voices": "clone",
+    "cloning": true,
+    "ownVoice": true,
+    "cannot": [],
+    "tricks": [
+      "Breath, laugh, cough and sigh use the tokenizer's own tags",
+      "Giggle shares the laughter tag because there is no softer one",
+      "Um is written out as a word",
+      "The RL-tuned language model weights (llm.rl.pt) replace the stock ones",
+      "The built-in text clean-up is off so digits and dollar amounts reach the model as written"
+    ]
+  },
+  "why": "CosyVoice 3 with its native sound tags and the text clean-up off, because the clean-up misreads prices and the repeated phone number."
+}

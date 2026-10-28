@@ -1,6 +1,6 @@
 // STORY-523 — The script and the cards are data (gh-#614 · SPEC F217 · PLAN T661)
 //
-// BDD specification — xUnit. AC1–AC6 and AC8–AC11 are live (T661); AC7 stays pending until T670.
+// BDD specification — xUnit. AC1–AC6 and AC8–AC11 are live (T661); AC7 and the set-wide card checks are live (T670).
 
 using GenWave.VoiceOff.Deck;
 using GenWave.VoiceOff.Speech;
@@ -12,6 +12,8 @@ namespace GenWave.VoiceOff.Tests.Specs;
 public static class FeatureTheScriptAndTheCardsAreData
 {
     private static string ToolDirectory => Path.Combine(RepoRootLocator.Find(AppContext.BaseDirectory), "tools", "VoiceOff");
+
+    private static string ShippedCardsDirectory => Path.Combine(ToolDirectory, "cards");
 
     private static string ShippedScriptPath => Path.Combine(ToolDirectory, "script", "script.json");
 
@@ -48,7 +50,7 @@ public static class FeatureTheScriptAndTheCardsAreData
         [Fact]
         public void ItsVersionIsV2()
         {
-            Assert.Equal("v2", script.Version);
+            Assert.Equal("v3", script.Version);
         }
 
         [Fact]
@@ -194,15 +196,56 @@ public static class FeatureTheScriptAndTheCardsAreData
     {
         // Given tools/VoiceOff/cards
         // When  the set is loaded
+        private readonly CardSet set = CardSet.Load(ShippedCardsDirectory, Engines);
 
-        [Fact(Skip = "pending: T670 — see docs/PLAN.md")]
-        public void ThereIsAtLeastOneCardPerProfileInEngines() => Assert.Fail("pending: T670 — there is at least one card per profile in engines/");
+        [Fact]
+        public void ThereIsAtLeastOneCardPerProfileInEngines()
+        {
+            string[] uncovered = Engines.Profiles.Select(p => p.Slug).Where(slug => set.Cards.All(c => c.Engine != slug)).ToArray();
 
-        [Fact(Skip = "pending: T670 — see docs/PLAN.md")]
-        public void ExactlyOneCardIsMarkedAsShipped() => Assert.Fail("pending: T670 — exactly one card is marked asShipped");
+            Assert.Empty(uncovered);
+        }
 
-        [Fact(Skip = "pending: T670 — see docs/PLAN.md")]
-        public void TheFiveVariantCardsNamedInPROJECTMdArePresent() => Assert.Fail("pending: T670 — the five variant cards named in PROJECT.md are present");
+        [Fact]
+        public void ExactlyOneCardIsMarkedAsShipped()
+        {
+            Assert.Single(set.Cards, c => c.AsShipped);
+        }
+
+        [Fact]
+        public void TheFiveVariantCardsNamedInPROJECTMdArePresent()
+        {
+            string[] variants = ["chatterbox-original", "cosyvoice-normaliser-on", "parler-mini-expresso", "dia2", "vibevoice-7b"];
+
+            Assert.Equal(variants.Order(StringComparer.Ordinal), set.Cards.Where(c => c.VariantOf is not null).Select(c => c.Id).Order(StringComparer.Ordinal));
+        }
+    }
+
+    // AC7b — every shipped card says what it cannot do
+    public sealed class ScenarioEveryShippedCardDeclaresWhatItCannotDo
+    {
+        // Given the shipped cards
+        // When  each card's dropped cues and cannot facts are compared
+        private static readonly string[] Seven = ["breath", "laugh", "um", "cough", "giggle", "sigh", "pause"];
+
+        private readonly IReadOnlyList<Card> cards = CardSet.Load(ShippedCardsDirectory, Engines).Cards;
+
+        [Fact]
+        public void EveryDroppedCueIsInCannot()
+        {
+            Assert.All(cards, card =>
+            {
+                string[] dropped = Seven.Where(cue => !card.Cues.TryGetValue(cue, out string? tag) || tag is null).ToArray();
+
+                Assert.Empty(dropped.Except(card.Facts.Cannot));
+            });
+        }
+
+        [Fact]
+        public void EveryCannotEntryIsOneOfTheSeven()
+        {
+            Assert.All(cards, card => Assert.Empty(card.Facts.Cannot.Except(Seven)));
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -289,5 +332,26 @@ public static class FeatureTheScriptAndTheCardsAreData
         {
             Assert.Contains("reference-card", failure.Message);
         }
+    }
+
+    // AC12 — an id that is not strict kebab case is refused
+    public sealed class ScenarioAnIdThatIsNotStrictKebabCaseIsRefused
+    {
+        // Given card ids with a doubled, leading or trailing hyphen
+        // When  each card is read
+        private static InvalidDataException ReadFailure(string id) =>
+            Assert.Throws<InvalidDataException>(() => CardReader.Parse(CardFixtureDirectory.CardJson(id, EngineSlug), "bad.json"));
+
+        [Fact]
+        public void ADoubledHyphenIsRefusedNamingTheCardId() =>
+            Assert.Contains("double--hyphen", ReadFailure("double--hyphen").Message, StringComparison.Ordinal);
+
+        [Fact]
+        public void ALeadingHyphenIsRefused() =>
+            Assert.Contains("kebab", ReadFailure("-leading").Message, StringComparison.Ordinal);
+
+        [Fact]
+        public void ATrailingHyphenIsRefused() =>
+            Assert.Contains("kebab", ReadFailure("trailing-").Message, StringComparison.Ordinal);
     }
 }

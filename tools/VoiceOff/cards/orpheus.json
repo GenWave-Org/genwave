@@ -1,0 +1,39 @@
+{
+  "id": "orpheus",
+  "engine": "orpheus",
+  "title": "Orpheus, 3B",
+  "host": "runes-gpu",
+  "voice": "tara",
+  "speed": 1,
+  "settings": {
+    "temperature": 0.65,
+    "top_p": 0.9,
+    "repetition_penalty": 1.15
+  },
+  "cues": {
+    "breath": null,
+    "laugh": "<laugh>",
+    "um": "Um,",
+    "cough": "<cough>",
+    "giggle": "<chuckle>",
+    "sigh": "<sigh>",
+    "pause": "..."
+  },
+  "overrides": {},
+  "facts": {
+    "checkpoint": "orpheus-3b-0.1-ft, unquantised (bf16)",
+    "voices": 8,
+    "cloning": false,
+    "ownVoice": true,
+    "cannot": [
+      "breath"
+    ],
+    "tricks": [
+      "Tara is the maker's top voice for realism",
+      "Laugh, cough and sigh use native tags; giggle uses the chuckle tag",
+      "A higher repetition penalty and temperature make it speak faster",
+      "Um is written out as a word"
+    ]
+  },
+  "why": "Orpheus unquantised (bf16) with its best voice and native sound tags."
+}

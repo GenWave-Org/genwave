@@ -1,0 +1,40 @@
+{
+  "id": "dia2",
+  "engine": "dia",
+  "title": "Dia2, 2B",
+  "variantOf": "dia",
+  "host": "thor-gpu",
+  "voice": "ref-f3",
+  "speed": 1,
+  "settings": {
+    "model": "nari-labs/Dia2-2B"
+  },
+  "cues": {
+    "breath": null,
+    "laugh": null,
+    "um": "Um,",
+    "cough": null,
+    "giggle": null,
+    "sigh": null,
+    "pause": "..."
+  },
+  "overrides": {},
+  "facts": {
+    "checkpoint": "Dia2-2B",
+    "voices": "clone",
+    "cloning": true,
+    "ownVoice": true,
+    "cannot": [
+      "breath",
+      "laugh",
+      "cough",
+      "giggle",
+      "sigh"
+    ],
+    "tricks": [
+      "Dia2 lists no sound tags, so every sound is dropped",
+      "It handles long text and streams, so drift across lines may be lower"
+    ]
+  },
+  "why": "The newer Dia2, which lists no sound tags, to hear whether its steadier long reading wins."
+}

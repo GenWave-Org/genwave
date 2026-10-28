@@ -1,0 +1,43 @@
+{
+  "id": "chatterbox-original",
+  "engine": "chatterbox",
+  "title": "Chatterbox, original",
+  "variantOf": "chatterbox",
+  "host": "thor-gpu",
+  "voice": "ref-f3",
+  "speed": 1,
+  "settings": {
+    "model": "ResembleAI/chatterbox",
+    "exaggeration": 0.7,
+    "cfg_weight": 0.3
+  },
+  "cues": {
+    "breath": null,
+    "laugh": null,
+    "um": "Um,",
+    "cough": null,
+    "giggle": null,
+    "sigh": null,
+    "pause": "..."
+  },
+  "overrides": {},
+  "facts": {
+    "checkpoint": "Chatterbox original 500M",
+    "voices": "clone",
+    "cloning": true,
+    "ownVoice": true,
+    "cannot": [
+      "breath",
+      "laugh",
+      "cough",
+      "giggle",
+      "sigh"
+    ],
+    "tricks": [
+      "Exaggeration 0.7 with cfg weight 0.3 is the dramatic setting",
+      "This checkpoint has no sound tags, so every sound is dropped",
+      "Pause is written as three plain dots"
+    ]
+  },
+  "why": "The original Chatterbox, which trades Turbo's sound tags for the exaggeration knob."
+}
