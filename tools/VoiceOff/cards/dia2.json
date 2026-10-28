@@ -3,7 +3,7 @@
   "engine": "dia",
   "title": "Dia2, 2B",
   "variantOf": "dia",
-  "host": "thor-gpu",
+  "host": "runes-gpu",
   "voice": "ref-f3",
   "speed": 1,
   "settings": {

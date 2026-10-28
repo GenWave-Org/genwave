@@ -2,7 +2,7 @@
   "id": "parler",
   "engine": "parler",
   "title": "Parler, large",
-  "host": "thor-gpu",
+  "host": "runes-gpu",
   "voice": "Lea",
   "speed": 1,
   "settings": {

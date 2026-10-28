@@ -2,7 +2,7 @@
   "id": "omnivoice",
   "engine": "omnivoice",
   "title": "OmniVoice",
-  "host": "thor-gpu",
+  "host": "runes-gpu",
   "voice": "ref-f3",
   "speed": 1,
   "settings": {},
