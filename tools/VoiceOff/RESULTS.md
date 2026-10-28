@@ -7,7 +7,7 @@
 
 ## 🏆 Ranking
 
-The one-star cards (13 to 23) were not ranked against each other, so their order means nothing.
+The one-star cards (13 to 23) were not ranked against each other, so their order means nothing. A note that is only a time is where the listener stopped the clip.
 
 | Rank | Card | Engine | Host | Winces | Stars | Why |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -36,8 +36,6 @@ The one-star cards (13 to 23) were not ranked against each other, so their order
 | 23 | vibevoice | vibevoice | thor-gpu | 5 | 1 | VibeVoice's small checkpoint with sampling on and more denoising steps, because its stock setting is the flattest it can run. |
 
 ## 📝 Notes
-
-A note that is only a time is where the listener stopped the clip.
 
 ### orpheus
 

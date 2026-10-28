@@ -2,6 +2,7 @@
 //
 // BDD specification — xUnit. Active since T666.
 
+using System.Text.Json.Nodes;
 using GenWave.VoiceOff.Tests.Support;
 
 namespace GenWave.VoiceOff.Tests.Specs;
@@ -154,6 +155,50 @@ public static class FeatureScoreIsPure
         public void Dispose() => score.Dispose();
     }
 
+    // AC10 — the judge's remarks are printed under the ranking heading
+    public sealed class ScenarioRemarksArePrinted : IDisposable
+    {
+        private const string Remarks = "Cards 13 to 23 were not ranked | their order means nothing.";
+
+        // Given a judgement with remarks
+        // When  score runs
+        private readonly ScoreScenario score = new(JudgedOrder, remarks: JsonValue.Create(Remarks));
+
+        [Fact]
+        public void TheyAreTheFirstThingUnderTheRankingHeading() =>
+            Assert.Equal("Cards 13 to 23 were not ranked \\| their order means nothing.", score.Section("Ranking").First(l => l.Length > 0));
+
+        [Fact]
+        public void TheTableFollowsThem() =>
+            Assert.StartsWith("| Rank |", score.Section("Ranking").First(l => l.StartsWith('|')), StringComparison.Ordinal);
+
+        [Fact]
+        public void TheyAreNotRepeatedInTheNotes() => Assert.DoesNotContain("not ranked", string.Join('\n', score.Section("Notes")), StringComparison.Ordinal);
+
+        public void Dispose() => score.Dispose();
+    }
+
+    // AC11 — no remarks, no extra lines
+    public sealed class ScenarioNoRemarksAddNothing : IDisposable
+    {
+        // Given a judgement without remarks, and one whose remarks are blank
+        // When  score runs
+        private readonly ScoreScenario absent = new(JudgedOrder);
+        private readonly ScoreScenario blank = new(JudgedOrder, remarks: JsonValue.Create("  \n "));
+
+        [Fact]
+        public void TheTableFollowsTheHeadingAfterOneBlankLine() => Assert.StartsWith("| Rank |", absent.Section("Ranking")[1], StringComparison.Ordinal);
+
+        [Fact]
+        public void BlankRemarksPrintNothing() => Assert.Equal(absent.Results, blank.Results);
+
+        public void Dispose()
+        {
+            absent.Dispose();
+            blank.Dispose();
+        }
+    }
+
     // ---------------------------------------------------------------------
     // SAD PATH
     // ---------------------------------------------------------------------
@@ -188,6 +233,22 @@ public static class FeatureScoreIsPure
         [Fact]
         public void ItExitsNonZeroSayingNothingHasBeenJudgedYet() =>
             Assert.Equal($"Nothing has been judged yet: {score.JudgementPath} does not exist.", score.Stderr.Trim());
+
+        [Fact]
+        public void TheExitCodeIs1() => Assert.Equal(1, score.Exit);
+
+        [Fact]
+        public void NoResultsFileIsWritten() => Assert.False(File.Exists(score.ResultsPath));
+
+        public void Dispose() => score.Dispose();
+    }
+
+    // AC12 — remarks that are not text are refused
+    public sealed class ScenarioRemarksThatAreNotTextAreRefused : IDisposable
+    {
+        // Given a judgement whose remarks is a number
+        // When  score runs
+        private readonly ScoreScenario score = new(JudgedOrder, remarks: JsonValue.Create(5));
 
         [Fact]
         public void TheExitCodeIs1() => Assert.Equal(1, score.Exit);

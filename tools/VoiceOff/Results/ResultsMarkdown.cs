@@ -20,7 +20,7 @@ internal static class ResultsMarkdown
         IReadOnlyList<RankedCard> ranking = Ranking.Of(input.Manifest, input.Judgement);
         StringBuilder text = new();
         WriteHeader(text, input.Manifest);
-        WriteRanking(text, ranking, input.Cards);
+        WriteRanking(text, ranking, input.Cards, input.Judgement.Remarks);
         WriteNotes(text, ranking);
         WriteTray(text, input.Manifest);
         WriteFacts(text, input);
@@ -39,10 +39,11 @@ internal static class ResultsMarkdown
         Line(text);
     }
 
-    private static void WriteRanking(StringBuilder text, IReadOnlyList<RankedCard> ranking, IReadOnlyDictionary<string, Card> cards)
+    private static void WriteRanking(StringBuilder text, IReadOnlyList<RankedCard> ranking, IReadOnlyDictionary<string, Card> cards, string? remarks)
     {
         Line(text, "## 🏆 Ranking");
         Line(text);
+        WriteRemarks(text, remarks);
         if (ranking.Count == 0)
         {
             Line(text, "No card rendered in this run.");
@@ -67,6 +68,18 @@ internal static class ResultsMarkdown
             ]));
         }
 
+        Line(text);
+    }
+
+    // Free text from the judge's own file, so it is escaped as running text (not fenced: it is meant to read as prose) and kept to one paragraph.
+    private static void WriteRemarks(StringBuilder text, string? remarks)
+    {
+        if (string.IsNullOrWhiteSpace(remarks))
+        {
+            return;
+        }
+
+        Line(text, MarkdownCell.Escape(remarks.Trim()));
         Line(text);
     }
 

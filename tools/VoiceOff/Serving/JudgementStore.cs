@@ -28,23 +28,39 @@ internal sealed class JudgementStore(string path, TimeProvider time)
         }
     }
 
-    /// <summary>Writes the request as the whole judgement, stamped with the server's clock (UTC), cards in id order.</summary>
+    /// <summary>
+    /// Writes the request as the whole judgement, stamped with the server's clock (UTC), cards in id order. The request has no remarks (the page never sends
+    /// them), so the saved ones are carried over rather than wiped.
+    /// </summary>
     internal async Task<Judgement> SaveAsync(JudgementRequest request, CancellationToken ct)
     {
-        Judgement judgement = new(
-            time.GetUtcNow(),
-            [.. request.Order],
-            new SortedDictionary<string, CardJudgement>(request.Cards.ToDictionary(c => c.Key, c => c.Value), StringComparer.Ordinal));
         await writing.WaitAsync(ct);
         try
         {
+            Judgement judgement = new(
+                time.GetUtcNow(),
+                [.. request.Order],
+                new SortedDictionary<string, CardJudgement>(request.Cards.ToDictionary(c => c.Key, c => c.Value), StringComparer.Ordinal),
+                await SavedRemarksAsync(ct));
             await AtomicTextFile.WriteAsync(path, StrictJson.Write(judgement), ct);
+            return judgement;
         }
         finally
         {
             writing.Release();
         }
+    }
 
-        return judgement;
+    // A file that cannot be read has no remarks worth keeping, and a save is how the judge recovers from it.
+    private async Task<string?> SavedRemarksAsync(CancellationToken ct)
+    {
+        try
+        {
+            return (await ReadAsync(ct))?.Remarks;
+        }
+        catch (InvalidDataException)
+        {
+            return null;
+        }
     }
 }

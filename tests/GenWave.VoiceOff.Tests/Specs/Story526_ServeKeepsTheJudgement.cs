@@ -92,6 +92,42 @@ public static class FeatureServeKeepsTheJudgement
         public void Dispose() => serve.Dispose();
     }
 
+    // AC3b — a save keeps the judge's remarks
+    public sealed class ScenarioASaveKeepsTheRemarks : IDisposable
+    {
+        private const string Remarks = "Not ranked against each other.";
+
+        // Given a judgement.json holding remarks the page never sends
+        // When  the page PUTs a whole judgement without them
+        private readonly ServeScenario serve = new();
+        private readonly JsonNode saved;
+
+        public ScenarioASaveKeepsTheRemarks()
+        {
+            File.WriteAllText(serve.JudgementPath, new JsonObject
+            {
+                ["savedAt"] = "2026-10-27T12:00:00Z",
+                ["order"] = new JsonArray(),
+                ["cards"] = new JsonObject(),
+                ["remarks"] = Remarks,
+            }.ToJsonString());
+            serve.Accept(ServeScenario.Judgement([ServeScenario.First], (ServeScenario.First, 1, 3, "kept")));
+            saved = Parse(File.ReadAllText(serve.JudgementPath));
+        }
+
+        [Fact]
+        public void TheFileStillHoldsTheRemarks() => Assert.Equal(Remarks, saved["remarks"]?.GetValue<string>());
+
+        [Fact]
+        public void TheSaveItselfLanded() => Assert.Equal([ServeScenario.First], Ids(saved["order"]));
+
+        [Fact]
+        public void StateReturnsTheRemarks() =>
+            Assert.Equal(Remarks, Parse(serve.GetText("state"))["judgement"]?["remarks"]?.GetValue<string>());
+
+        public void Dispose() => serve.Dispose();
+    }
+
     // AC4 — state returns the judgement
     public sealed class ScenarioStateReturnsTheJudgement : IDisposable
     {
@@ -167,6 +203,61 @@ public static class FeatureServeKeepsTheJudgement
             serve.Accept(ServeScenario.Judgement([ServeScenario.First], (ServeScenario.First, 0, 3, "kept")));
             before = serve.JudgementBytes();
             answer = serve.Put(ServeScenario.Judgement([ServeScenario.First, "zzz-nothing"]));
+        }
+
+        [Fact]
+        public void TheReplyIs400() => Assert.Equal(HttpStatusCode.BadRequest, answer.StatusCode);
+
+        [Fact]
+        public void JudgementJsonIsUnchanged() => Assert.Equal(before, serve.JudgementBytes());
+
+        public void Dispose() => serve.Dispose();
+    }
+
+    // AC7b — a save replaces a broken judgement.json
+    public sealed class ScenarioASaveReplacesABrokenFile : IDisposable
+    {
+        // Given a judgement.json that is not JSON
+        // When  the page PUTs a whole judgement
+        private readonly ServeScenario serve = new();
+        private readonly HttpResponseMessage answer;
+        private readonly JsonNode saved;
+
+        public ScenarioASaveReplacesABrokenFile()
+        {
+            File.WriteAllText(serve.JudgementPath, "not json");
+            answer = serve.Put(ServeScenario.Judgement([ServeScenario.Second, ServeScenario.First], (ServeScenario.First, 1, 3, "fresh")));
+            saved = Parse(File.ReadAllText(serve.JudgementPath));
+        }
+
+        [Fact]
+        public void TheReplyIs200() => Assert.Equal(HttpStatusCode.OK, answer.StatusCode);
+
+        [Fact]
+        public void TheFileHoldsTheNewOrder() => Assert.Equal([ServeScenario.Second, ServeScenario.First], Ids(saved["order"]));
+
+        [Fact]
+        public void TheFileHasNoRemarks() => Assert.Null(saved["remarks"]);
+
+        public void Dispose() => serve.Dispose();
+    }
+
+    // AC7c — a PUT carrying remarks is refused
+    public sealed class ScenarioARemarksPutIsRefused : IDisposable
+    {
+        // Given a saved judgement
+        // When  a PUT adds "remarks" to a whole judgement
+        private readonly ServeScenario serve = new();
+        private readonly byte[] before;
+        private readonly HttpResponseMessage answer;
+
+        public ScenarioARemarksPutIsRefused()
+        {
+            serve.Accept(ServeScenario.Judgement([ServeScenario.First], (ServeScenario.First, 0, 3, "kept")));
+            before = serve.JudgementBytes();
+            JsonObject body = Parse(ServeScenario.Judgement([ServeScenario.Second, ServeScenario.First])).AsObject();
+            body["remarks"] = "x";
+            answer = serve.Put(body.ToJsonString());
         }
 
         [Fact]
