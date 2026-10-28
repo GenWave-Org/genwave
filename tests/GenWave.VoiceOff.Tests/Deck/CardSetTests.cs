@@ -82,16 +82,25 @@ public sealed class CardSetTests : IDisposable
     }
 
     [Theory]
-    [InlineData("54", false, 54)]
-    [InlineData("\"clone\"", true, null)]
-    public void VoicesIsANumberOrTheWordClone(string voices, bool isClone, int? count)
+    [InlineData("54", "Count", 54)]
+    [InlineData("\"clone\"", "Clone", 0)]
+    [InlineData("\"design\"", "Design", 0)]
+    public void VoicesIsANumberOrTheWordCloneOrDesign(string voices, string kind, int count)
     {
         string json = CardFixtureDirectory.CardJson("voices-card", Engine).Replace("\"voices\": 54", $"\"voices\": {voices}", StringComparison.Ordinal);
 
         Card card = CardReader.Parse(json, "voices.json");
 
-        Assert.Equal(isClone, card.Facts.Voices.IsClone);
+        Assert.Equal(Enum.Parse<CardVoicesKind>(kind), card.Facts.Voices.Kind);
         Assert.Equal(count, card.Facts.Voices.Count);
+    }
+
+    [Fact]
+    public void AnUnsetVoicesValueFailsLoudlyInsteadOfReadingAsZero()
+    {
+        CardVoices unset = default;
+
+        Assert.Throws<InvalidOperationException>(() => unset.Text);
     }
 
     [Fact]
@@ -100,5 +109,17 @@ public sealed class CardSetTests : IDisposable
         string json = CardFixtureDirectory.CardJson("voices-card", Engine).Replace("\"voices\": 54", "\"voices\": \"many\"", StringComparison.Ordinal);
 
         Assert.Throws<InvalidDataException>(() => CardReader.Parse(json, "voices.json"));
+    }
+
+    [Fact]
+    public void TheRefusalNamesAllThreeForms()
+    {
+        string json = CardFixtureDirectory.CardJson("voices-card", Engine).Replace("\"voices\": 54", "\"voices\": \"many\"", StringComparison.Ordinal);
+
+        InvalidDataException refusal = Assert.Throws<InvalidDataException>(() => CardReader.Parse(json, "voices.json"));
+
+        Assert.Equal(
+            "Card voices-card: facts.voices must be a whole number, \"clone\" (a voice cloned from a clip) or \"design\" (a voice designed from a written description).",
+            refusal.Message);
     }
 }

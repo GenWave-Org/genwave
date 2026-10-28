@@ -45,7 +45,7 @@ internal sealed class ScoreScenario : IDisposable
         cardsDirectory = cards.Create(
             (One + ".json", CardFixtureDirectory.CardJson(One, "alpha", host: "thor-cpu", extraMembers: "\"asShipped\": true,")),
             (Two + ".json", CardFixtureDirectory.CardJson(Two, "alpha", host: "runes-gpu")),
-            (Three + ".json", CardFixtureDirectory.CardJson(Three, "alpha", host: "thor-gpu")),
+            (Three + ".json", CardFixtureDirectory.CardJson(Three, "alpha", host: "thor-gpu").Replace("\"voices\": 54", "\"voices\": \"design\"", StringComparison.Ordinal)),
             (Four + ".json", CardFixtureDirectory.CardJson(Four, "alpha", host: "thor-cpu")));
 
         Dictionary<string, CardEntry> runCards = new(StringComparer.Ordinal)

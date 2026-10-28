@@ -149,7 +149,7 @@ internal static class ResultsMarkdown
             [
                 MarkdownCell.Escape(id),
                 MarkdownCell.Escape(facts.Checkpoint),
-                facts.Voices.Count is int count ? Number(count) : CardVoices.CloneKeyword,
+                facts.Voices.Text,
                 YesNo(facts.Cloning),
                 YesNo(facts.OwnVoice),
                 MarkdownCell.Escape(Joined(facts.Cannot, ", ")),

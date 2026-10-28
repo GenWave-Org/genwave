@@ -176,22 +176,28 @@ internal static partial class CardReader
             facts.Cannot,
             facts.Tricks);
 
-    // A whole number of built-in voices, or the word "clone"; nothing else.
+    // A whole number of built-in voices, or the word "clone" or "design"; nothing else.
     private static CardVoices Voices(JsonNode voices, string id)
     {
         if (voices is JsonValue value)
         {
             if (value.TryGetValue(out int count) && count >= 0)
             {
-                return new CardVoices(count);
+                return CardVoices.Builtin(count);
             }
 
-            if (value.TryGetValue(out string? word) && string.Equals(word, CardVoices.CloneKeyword, StringComparison.Ordinal))
+            if (value.TryGetValue(out string? word))
             {
-                return CardVoices.Cloned;
+                switch (word)
+                {
+                    case CardVoices.CloneKeyword:
+                        return CardVoices.Cloned;
+                    case CardVoices.DesignKeyword:
+                        return CardVoices.Designed;
+                }
             }
         }
 
-        throw new InvalidDataException($"Card {id}: facts.voices must be a whole number or \"{CardVoices.CloneKeyword}\".");
+        throw new InvalidDataException($"Card {id}: facts.voices must be a whole number, \"{CardVoices.CloneKeyword}\" (a voice cloned from a clip) or \"{CardVoices.DesignKeyword}\" (a voice designed from a written description).");
     }
 }

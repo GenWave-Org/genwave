@@ -87,6 +87,14 @@ public static class FeatureScoreIsPure
         public void EveryCardOfTheRunHasARow() =>
             Assert.Equal([ScoreScenario.One, ScoreScenario.Two, ScoreScenario.Three, ScoreScenario.Four], score.Table("Facts").Select(r => r[0]));
 
+        [Fact]
+        public void ADesignedVoiceIsPrintedAsDesignAndNotAsZero() =>
+            Assert.Equal("design", score.Table("Facts").Single(r => r[0] == ScoreScenario.Three)[2]);
+
+        [Fact]
+        public void ADesignedVoiceStillSaysNoToCloning() =>
+            Assert.Equal("no", score.Table("Facts").Single(r => r[0] == ScoreScenario.Three)[3]);
+
         // renders.jsonl is used here and nowhere else: the seconds spent on a card, 1.5 s + 2.8 s.
         [Fact]
         public void TheRenderTimeComesFromTheRenderLog() => Assert.Equal("4.3 s", score.Table("Facts")[0][8]);
