@@ -1,6 +1,6 @@
 <p align="center"><img src="GenWave-logo.png" alt="GenWave" width="380"></p>
 
-<p align="center"><b>A radio station for your house, with a DJ who knows the music.</b></p>
+<p align="center"><b>A radio station for your house, with a DJ who knows your music.</b></p>
 
 <p align="center">
 
@@ -12,7 +12,7 @@
 
 </p>
 
-GenWave is my radio station. It plays my music library around the clock on the home network, with crossfades between tracks, every song at the same loudness, and a DJ who knows what is playing and tells you about it. It runs on Docker on one box in the house. It is open source, so you can run your own.
+GenWave is my radio station. It plays my music library around the clock on my home network, with crossfades between tracks, every song at the same loudness, a DJ who knows what is playing and tells you about it, and yes, even some parody ads :) It runs on Docker on one box in my house. It is open source, so you can run your own too!
 
 **Contents:** [Features](#-features) · [Getting started](#-getting-started) · [Why GenWave](#-why-genwave) · [Docs](#-docs) · [Built with](#-built-with) · [Contributing](#-contributing) · [License](#-license)
 
@@ -26,7 +26,7 @@ GenWave is my radio station. It plays my music library around the clock on the h
 - 🧠 Optional local LLM (Ollama) writes what the DJ says between songs. Without one, the DJ uses templates.
 - 🗓️ Named shows on a weekly schedule, so mornings and late nights sound different.
 - 🎭 Personas: give the DJ a name, a voice and a style.
-- 📣 Station sponsors and short ads, written and voiced on the box.
+- 📣 Station sponsors and short parody ads, written and voiced on the box.
 - 📻 A now-playing page for the house with song requests.
 - 🛠️ An admin console for the library, schedule, voices and settings.
 - 🧩 Plugins add new providers without forking the station.
@@ -38,20 +38,20 @@ GenWave is my radio station. It plays my music library around the clock on the h
 
 ## 🚀 Getting started
 
-You need Docker with Compose v2.24 or newer and a folder of `.mp3` or `.flac` files. [HARDWARE.md](HARDWARE.md) lists the boxes it runs on.
+You need Docker with Compose v2.24 or newer and a folder of `.mp3` or `.flac` files. [HARDWARE.md](HARDWARE.md) lists the boxes it runs on (currently).
 
 1. **Get the code.**
    ```bash
    git clone https://github.com/GenWave-Org/genwave.git && cd genwave
    ```
-2. **Run the setup wizard.** It asks four questions, writes `.env` with fresh secrets, and starts the station.
+2. **Run the setup wizard.** It asks four questions, writes a `.env` file with fresh secrets, and starts your station.
    ```bash
    ./setup.sh
    ```
-3. **Listen.** Open `http://localhost:8000/stream` in any audio player, and the admin console at `http://localhost:3000`. Sign in with the admin password the wizard printed (it is also `ADMIN_PASSWORD` in `.env`).
+3. **Listen.** Open `http://localhost:8000/stream` in any audio player, and the admin console is available at `http://localhost:3000`. Sign in with the admin password the wizard printed (it is also `ADMIN_PASSWORD` in `.env`).
 4. **Expect "Please Stand By".** You may hear it at first. That is normal: the station plays it, with a short pause between repeats, until the first tracks in your library are analysed, then the music starts.
 
-Prefer a one-liner? [download.genwaveradio.com](https://download.genwaveradio.com/) fetches the same wizard.
+Prefer a one-liner? [download.genwaveradio.com](https://download.genwaveradio.com/) fetches the exact same wizard without needing to clone the repo, etc.
 
 ## 💡 Why GenWave
 
@@ -90,8 +90,8 @@ GenWave is built with AI as a force multiplier, and every design decision, revie
 
 ## 🤝 Contributing
 
-Bug fixes and small improvements are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first. It is short.
+Bug fixes and small improvements are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first. Don't worry, it's short.
 
 ## 📄 License
 
-GenWave is licensed under the [GNU Affero General Public License v3.0](LICENSE). The plugin contracts in [`src/GenWave.Abstractions/`](src/GenWave.Abstractions/) are MIT, so a plugin can link them under any license.
+GenWave is licensed under the [GNU Affero General Public License v3.0](LICENSE). The plugin contracts in [`src/GenWave.Abstractions/`](src/GenWave.Abstractions/) are MIT, so a plugin can link them under any license you want.
