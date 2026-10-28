@@ -20,7 +20,7 @@
   "overrides": {},
   "facts": {
     "checkpoint": "Qwen3-TTS-12Hz-1.7B-VoiceDesign",
-    "voices": 0,
+    "voices": "design",
     "cloning": false,
     "ownVoice": true,
     "cannot": [

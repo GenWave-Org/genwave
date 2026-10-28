@@ -33,7 +33,8 @@ internal sealed class ScoreScenario : IDisposable
 
     /// <param name="order">The judgement order; null leaves judgement.json out.</param>
     /// <param name="scriptHashInRun">What run.json records as the script hash; null records the hash of the script on disk.</param>
-    internal ScoreScenario(string[]? order, string? scriptHashInRun = null)
+    /// <param name="remarks">The judgement's top-level <c>remarks</c> member as raw JSON (so a wrong type can be tried); null leaves the member out.</param>
+    internal ScoreScenario(string[]? order, string? scriptHashInRun = null, JsonNode? remarks = null)
     {
         Directory.CreateDirectory(RunDirectory);
         ScriptPath = Path.Combine(folder, "script.json");
@@ -44,7 +45,7 @@ internal sealed class ScoreScenario : IDisposable
         cardsDirectory = cards.Create(
             (One + ".json", CardFixtureDirectory.CardJson(One, "alpha", host: "thor-cpu", extraMembers: "\"asShipped\": true,")),
             (Two + ".json", CardFixtureDirectory.CardJson(Two, "alpha", host: "runes-gpu")),
-            (Three + ".json", CardFixtureDirectory.CardJson(Three, "alpha", host: "thor-gpu")),
+            (Three + ".json", CardFixtureDirectory.CardJson(Three, "alpha", host: "thor-gpu").Replace("\"voices\": 54", "\"voices\": \"design\"", StringComparison.Ordinal)),
             (Four + ".json", CardFixtureDirectory.CardJson(Four, "alpha", host: "thor-cpu")));
 
         Dictionary<string, CardEntry> runCards = new(StringComparer.Ordinal)
@@ -63,7 +64,7 @@ internal sealed class ScoreScenario : IDisposable
 
         if (order is not null)
         {
-            File.WriteAllText(Path.Combine(RunDirectory, "judgement.json"), JudgementJson(order));
+            File.WriteAllText(Path.Combine(RunDirectory, "judgement.json"), JudgementJson(order, remarks));
         }
 
         ResultsPath = Path.Combine(folder, "RESULTS.md");
@@ -108,7 +109,7 @@ internal sealed class ScoreScenario : IDisposable
             .TakeWhile(l => !l.StartsWith("## ", StringComparison.Ordinal))];
     }
 
-    private static string JudgementJson(string[] order)
+    private static string JudgementJson(string[] order, JsonNode? remarks)
     {
         JsonObject cardEntries = new()
         {
@@ -116,12 +117,18 @@ internal sealed class ScoreScenario : IDisposable
             [Two] = new JsonObject { ["winces"] = 3, ["stars"] = null, ["notes"] = "" },
             [Three] = new JsonObject { ["winces"] = 0, ["stars"] = 5, ["notes"] = AwkwardNote },
         };
-        return new JsonObject
+        JsonObject judgement = new()
         {
             ["savedAt"] = "2026-10-27T12:00:00Z",
             ["order"] = new JsonArray([.. order.Select(o => JsonValue.Create(o))]),
             ["cards"] = cardEntries,
-        }.ToJsonString();
+        };
+        if (remarks is not null)
+        {
+            judgement["remarks"] = remarks;
+        }
+
+        return judgement.ToJsonString();
     }
 
     public void Dispose()

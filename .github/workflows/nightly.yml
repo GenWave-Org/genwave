@@ -49,7 +49,7 @@ jobs:
         with:
           packages: ffmpeg espeak-ng
       - name: Test (Category=Integration — needs Docker + ffmpeg, on-demand here, never in ci.yml)
-        run: dotnet test GenWave.sln --no-build --configuration Release --filter "Category=Integration" --logger trx
+        run: dotnet test GenWave.sln --no-build --configuration Release --filter "Category=Integration&Requires!=DevStack" --logger trx
       # SPEC F180.2 says "Artifacts: trx + fixture logs"; only the trx is uploaded below — the
       # fixtures print to the test output that the trx already captures, so no separate log
       # artifact exists to upload.

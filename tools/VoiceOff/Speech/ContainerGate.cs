@@ -36,9 +36,9 @@ internal static class ContainerGate
         }
 
         VoiceListResult voices = await new SpeechClient(http, endpoint, TimeSpan.FromSeconds(profile.TimeoutSeconds)).ListVoicesAsync(ct);
-        return voices.Ok
-            ? new ContainerGateResult(GateResult.Pass($"{voices.VoiceIds.Count} voices at {endpoint}"), endpoint)
-            : Failed($"voices endpoint at {endpoint} failed: {voices.Error?.Message}");
+        return voices.Error is { } error
+            ? Failed($"voices endpoint at {endpoint} failed ({error.Kind.Label()}): {error.Message}")
+            : new ContainerGateResult(GateResult.Pass($"{voices.VoiceIds.Count} voices at {endpoint}"), endpoint);
     }
 
     /// <summary>The profile's own endpoint when it names one, else the running container's address on the profile's port.</summary>

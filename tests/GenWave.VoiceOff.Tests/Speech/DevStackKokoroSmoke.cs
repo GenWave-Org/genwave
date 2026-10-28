@@ -9,6 +9,7 @@ public sealed class DevStackKokoroSmoke(ITestOutputHelper output)
     /// <summary>The client reaches the dev stack's running baseline container through <c>docker inspect</c> and lists its voices.</summary>
     [Fact]
     [Trait("Category", "Integration")]
+    [Trait("Requires", "DevStack")] // CI has no dev stack: nightly.yml filters this trait out; a dev box runs it.
     public async Task TheClientListsTheDevStacksVoices()
     {
         EngineProfile baseline = EngineProfileSet.Load(RealEngines.Directory).Baseline;

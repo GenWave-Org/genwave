@@ -7,7 +7,7 @@
 
 ## 🏆 Ranking
 
-The one-star cards (13 to 23) were not ranked against each other, so their order means nothing.
+The one-star cards (13 to 23) were not ranked against each other, so their order means nothing. A note that is only a time is where the listener stopped the clip.
 
 | Rank | Card | Engine | Host | Winces | Stars | Why |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -36,8 +36,6 @@ The one-star cards (13 to 23) were not ranked against each other, so their order
 | 23 | vibevoice | vibevoice | thor-gpu | 5 | 1 | VibeVoice's small checkpoint with sampling on and more denoising steps, because its stock setting is the flattest it can run. |
 
 ## 📝 Notes
-
-A note that is only a time is where the listener stopped the clip.
 
 ### orpheus
 
@@ -198,7 +196,7 @@ Every card rendered.
 | parler | Parler-TTS Large v1 (2.2B) | 3 | no | yes | breath, laugh, cough, giggle, sigh | The voice is steered by a written description of the speaker, not by tags; Pace is asked for in the description (slightly fast) because speed is ignored; Um is written out as a word | — | 172.6 s |
 | parler-mini-expresso | Parler-TTS Mini Expresso | 4 | no | yes | breath, laugh, cough, giggle, sigh | This is the only Parler checkpoint trained on emotion styles (happy, laughing, whisper and more); The description asks for a happy tone with emphasis; Um is written out as a word | parler | 128.4 s |
 | piper | en_US-lessac-high | 1 | no | yes | breath, laugh, cough, giggle, sigh, pause | Speed 1.07 gives a length scale of about 0.93, a little brisker than the default; Noise scale and rhythm variation are raised for a livelier delivery; Um is written out as a word | — | 30.8 s |
-| qwen3 | Qwen3-TTS-12Hz-1.7B-VoiceDesign | 0 | no | yes | breath, laugh, cough, giggle, sigh | The voice is designed from a written description, because the stock voices have no native English female; One description covers the whole paragraph; Every sound is dropped | — | 207.6 s |
+| qwen3 | Qwen3-TTS-12Hz-1.7B-VoiceDesign | design | no | yes | breath, laugh, cough, giggle, sigh | The voice is designed from a written description, because the stock voices have no native English female; One description covers the whole paragraph; Every sound is dropped | — | 207.6 s |
 | spark | Spark-TTS-0.5B | clone | yes | yes | breath, laugh, cough, giggle, sigh | Cloning from the clip is used; its gender, pitch and speed mode cannot be combined with a clip; Output is 16 kHz, which limits the top end; A single call tops out at about 60 seconds, which one paragraph never reaches; Weights are non-commercial | — | 90.4 s |
 | styletts2 | StyleTTS2 LibriTTS | clone | yes | yes | breath, cough, giggle | Beta and embedding scale are raised so the emotion follows the text more than the reference clip; Laugh and um are written out as words; Sigh and pause are written as an ellipsis, a sentence break; Backing embedding scale off to 1.5 is the fix if it gets too wild; Speed is ignored; this engine has no speed control | — | 48.7 s |
 | vibevoice | VibeVoice-Realtime-0.5B | 6 | no | no | breath, laugh, cough, giggle, sigh | Sampling is turned on and the denoising steps are doubled to 10, away from the flat default; Emma is one of two female voices; Grace is the other and was not picked by ear yet; No tags exist, so every sound is dropped; Very short lines of three words or fewer can be unstable | — | 78.8 s |

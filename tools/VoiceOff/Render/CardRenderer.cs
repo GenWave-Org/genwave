@@ -49,7 +49,7 @@ internal sealed class CardRenderer(SpeechClient client, LoudnessMatch match, Run
             CancellationToken.None);
         if (result.Error is { } speechError)
         {
-            return (path, CardOutcome.Failed($"paragraph {paragraph.Number} failed ({Label(speechError.Kind)}): {speechError.Message}", speechError.Kind));
+            return (path, CardOutcome.Failed($"paragraph {paragraph.Number} failed ({speechError.Kind.Label()}): {speechError.Message}", speechError.Kind));
         }
 
         return (path, problem is null ? null : CardOutcome.Failed($"paragraph {paragraph.Number} failed (unreadable audio): {problem}"));
@@ -89,14 +89,4 @@ internal sealed class CardRenderer(SpeechClient client, LoudnessMatch match, Run
             File.Delete(joined);
         }
     }
-
-    private static string Label(SpeechErrorKind kind) => kind switch
-    {
-        SpeechErrorKind.Unreachable => "unreachable",
-        SpeechErrorKind.HttpStatus => "http status",
-        SpeechErrorKind.Timeout => "timeout",
-        SpeechErrorKind.EmptyBody => "empty body",
-        SpeechErrorKind.TooLarge => "too large",
-        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown speech error kind."),
-    };
 }
