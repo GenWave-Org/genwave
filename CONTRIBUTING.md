@@ -61,7 +61,7 @@ See the [README](README.md) for prerequisites and how to run the full stack.
 | Tier | What | Filter | Where it runs |
 |---|---|---|---|
 | 1 | Every fact without the trait, including the fixture Postgres facts | `Category!=Integration` | Every PR (`ci.yml`) and every release tag (`release.yml`) |
-| 2 | Needs more than Postgres: a Kokoro container, an ffmpeg stream capture, or a full compose stack | `Category=Integration` | `nightly.yml`, and by hand on a dev box |
+| 2 | Needs more than Postgres: a Kokoro container, an ffmpeg stream capture, or a full compose stack | `Category=Integration` | `nightly.yml`, and by hand on a dev box. Facts that also carry `Requires=DevStack` need your running `./launch.sh` stack, so the nightly leaves them out and they run only by hand |
 | 3 | `Skip="manual: …"` facts | `manual:` | By hand, checked by listening to the stream |
 
 ## ✅ Pull requests

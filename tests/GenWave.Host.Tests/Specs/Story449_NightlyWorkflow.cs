@@ -91,7 +91,7 @@ public static class FeatureTheNightlyKeepsOneRedIssue
         public void ItHasASixtyMinuteBudget() => Assert.Matches(@"timeout-minutes:\s*60", job);
 
         [Fact]
-        public void ItFiltersTheIntegrationCategory() => Assert.Contains("--filter \"Category=Integration\"", job, StringComparison.Ordinal);
+        public void ItFiltersTheIntegrationCategory() => Assert.Contains("--filter \"Category=Integration&Requires!=DevStack\"", job, StringComparison.Ordinal);
 
         [Fact]
         public void ItLogsTrx() => Assert.Contains("--logger trx", job, StringComparison.Ordinal);
