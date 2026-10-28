@@ -68,6 +68,16 @@ public sealed class ContainerGateTests
     }
 
     [Fact]
+    public async Task AVoicesEndpointThatStallsFailsLabelledAsATimeout()
+    {
+        await using EngineStubServer stub = await EngineStubServer.StartAsync(voicesDelay: TimeSpan.FromSeconds(30));
+        EngineProfile profile = EngineProfileReader.Parse(
+            EngineProfileJson.With(n => { n["endpoint"] = stub.BaseUri.AbsoluteUri; n["timeoutSeconds"] = 1; }), "alpha.json");
+        ContainerGateResult result = await Gate(profile, new ContainerState(true, true, "10.0.0.2"));
+        Assert.Contains("(timeout)", result.Gate.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task TheInspectorIsAskedForTheProfilesContainer()
     {
         ContainerState state = ContainerState.Missing("x");

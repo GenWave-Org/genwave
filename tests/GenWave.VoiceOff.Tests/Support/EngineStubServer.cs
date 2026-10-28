@@ -84,6 +84,7 @@ internal sealed class EngineStubServer : IAsyncDisposable
     /// <param name="speechBody">The body the speech route answers with; defaults to <see cref="Audio"/> on 200.</param>
     /// <param name="speechBodyForVoice">Answers a 200 with the body for the requested voice instead of <paramref name="speechBody"/>.</param>
     /// <param name="failSpeechRequest">The 1-based speech request that answers 500 whatever <paramref name="speechStatus"/> says.</param>
+    /// <param name="voicesDelay">How long the voices route waits before answering.</param>
     /// <param name="voicesJson">The voices route body; null leaves the route unmapped (404).</param>
     internal static async Task<EngineStubServer> StartAsync(
         TimeSpan speechDelay = default,
@@ -92,7 +93,8 @@ internal sealed class EngineStubServer : IAsyncDisposable
         string? voicesJson = """{"voices":["a","b"]}""",
         bool dropMidBody = false,
         Func<string, byte[]>? speechBodyForVoice = null,
-        int? failSpeechRequest = null)
+        int? failSpeechRequest = null,
+        TimeSpan voicesDelay = default)
     {
         WebApplicationBuilder builder = WebApplication.CreateSlimBuilder();
         builder.Logging.ClearProviders();
@@ -134,6 +136,11 @@ internal sealed class EngineStubServer : IAsyncDisposable
         {
             app.MapGet("/v1/audio/voices", async (HttpContext ctx) =>
             {
+                if (voicesDelay > TimeSpan.Zero)
+                {
+                    await Task.Delay(voicesDelay, ctx.RequestAborted);
+                }
+
                 if (dropMidBody)
                 {
                     await DropMidBodyAsync(ctx);

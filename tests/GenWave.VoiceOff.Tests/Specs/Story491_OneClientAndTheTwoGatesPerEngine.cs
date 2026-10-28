@@ -151,7 +151,7 @@ public static class FeatureOneClientAndTheTwoGatesPerEngine
 
         [Fact]
         public void TheCardRowShowsTheError() =>
-            Assert.Contains(run.OutputLines, l => l.StartsWith("alpha-card ❌ container: voices endpoint at http://127.0.0.1:", StringComparison.Ordinal) && l.Contains("failed:", StringComparison.Ordinal));
+            Assert.Contains(run.OutputLines, l => l.StartsWith("alpha-card ❌ container: voices endpoint at http://127.0.0.1:", StringComparison.Ordinal) && l.Contains("failed (unreachable):", StringComparison.Ordinal));
 
         // A port nothing listens on: bind a free one, then let it go.
         private static int ClosedPort()
