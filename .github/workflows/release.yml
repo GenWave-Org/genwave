@@ -143,7 +143,7 @@ jobs:
         env:
           PLATFORM: ${{ matrix.platform }}
         run: echo "PLATFORM_PAIR=${PLATFORM//\//-}" >> "$GITHUB_ENV"
-      - uses: docker/login-action@v4.6.0
+      - uses: docker/login-action@v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -221,7 +221,7 @@ jobs:
           path: ${{ runner.temp }}/digests
           pattern: digests-${{ matrix.image }}-*
           merge-multiple: true
-      - uses: docker/login-action@v4.6.0
+      - uses: docker/login-action@v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -320,7 +320,7 @@ jobs:
     env:
       GW_TAG: ${{ github.ref_name }}
     steps:
-      - uses: docker/login-action@v4.6.0
+      - uses: docker/login-action@v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
