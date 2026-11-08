@@ -34,6 +34,7 @@ public sealed class FeatureNamespaceCycleFreedom
         "GenWave.Host",
         "GenWave.Loudness",
         "GenWave.MediaLibrary",
+        "GenWave.Memory",
         "GenWave.Orchestration",
         "GenWave.Plugins",
         "GenWave.Tts",

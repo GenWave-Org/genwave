@@ -5,7 +5,7 @@
 //
 // Spans three files by seam: AC1/AC2 (T684, LlmCopyWriter) here; AC3/AC4/AC6 (T684/T685,
 // BoothLogWriter + engine callback) in tests/GenWave.Host.Tests/Specs/Story532_EveryDjLineIsOnTheRecord_Booth.cs;
-// AC5/AC7 (T682, IUtteranceStore) in tests/GenWave.Memory.Tests/Specs/Story532_EveryDjLineIsOnTheRecord_Store.cs.
+// AC5/AC7 (T682, IUtteranceStore) in tests/GenWave.MediaLibrary.Tests/Specs/Story532_EveryDjLineIsOnTheRecord_Store.cs (real Postgres, so it lives beside the DatabaseFixture; GenWave.Memory stays Core + Abstractions only).
 
 namespace GenWave.Tts.Tests.Specs;
 

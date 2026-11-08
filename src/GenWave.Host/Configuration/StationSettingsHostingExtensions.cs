@@ -98,6 +98,10 @@ static class StationSettingsHostingExtensions
         // import route (PersonaController.Import) is its only consumer.
         builder.Services.AddPersonaImportStore(stationConnStr);
 
+        // Utterance log (SPEC F218, STORY-532, PLAN T682) — every accepted LLM-written DJ line;
+        // Memory:UtteranceRetentionDays (default 28) swept at insert. Same lazy station_svc story.
+        builder.Services.AddUtteranceStore(stationConnStr, builder.Configuration);
+
         // Format-clock schedule store + resolver (SPEC F91.1, F91.3; STORY-240/241, PLAN T118-T120) —
         // same station_svc connection string as every registration above; station.segment_schedule
         // lives in the same schema. ScheduleRepository ships dark since T118 (AddScheduleStore itself

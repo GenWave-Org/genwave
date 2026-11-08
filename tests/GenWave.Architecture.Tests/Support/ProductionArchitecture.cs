@@ -31,6 +31,7 @@ internal static class ProductionArchitecture
             ProductionAssemblies.Abstractions,
             ProductionAssemblies.Plugins,
             ProductionAssemblies.Ads,
+            ProductionAssemblies.Memory,
             ProductionAssemblies.Npgsql,
             ProductionAssemblies.Dapper)
         .Build();
