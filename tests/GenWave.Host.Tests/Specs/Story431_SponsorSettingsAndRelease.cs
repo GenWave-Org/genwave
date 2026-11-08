@@ -137,6 +137,13 @@ public static class FeatureSponsorSettingsOptionsLawsAndTheRelease
         // published 5.10.0 nupkg does not exist yet; it publishes on the v5.10.0 tag, PLAN T531,
         // which cuts this same tree) and deletes the allowlist in the same PR, so the fact below
         // again compares directly with no third tolerance list.
+        //
+        // PLAN T683 (SPEC F218.5, gh-#293 gh-#920) reopens the same window for one additive change:
+        // QuirkRule and PersonaCard.QuirkRules landed in src/GenWave.Abstractions ahead of the next
+        // package bump, so Support/PendingPublicationSurfaceAllowlist.cs again names exactly those
+        // added lines and the diff below tolerates only them. Story483's ScenarioNoContractChange
+        // reads the same allowlist. The next release cut regenerates the baseline and deletes the
+        // allowlist in the same PR (Fixtures/README.md, pending-publication amendment).
         [Fact]
         public void ThePackageSurfaceDiffVs5100IsEmpty()
         {
@@ -144,7 +151,7 @@ public static class FeatureSponsorSettingsOptionsLawsAndTheRelease
             Assert.True(baseline.Count > 20, $"the baseline fixture has only {baseline.Count} lines — too small to be a real enumeration.");
 
             var current = PublicSurface.Of(typeof(IAdSpotSource).Assembly);
-            var diffLines = PublicSurface.DiffAgainst(current, baseline, DiffHeading);
+            var diffLines = PublicSurface.DiffAgainst(current, baseline, DiffHeading, PendingPublicationSurfaceAllowlist.Lines);
 
             if (diffLines.Count == 0)
                 return;

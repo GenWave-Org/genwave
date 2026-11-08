@@ -423,6 +423,9 @@ public sealed partial class PersonaController(
         if (card.SchemaVersion > PersonaCard.CurrentSchemaVersion)
             return BadRequest(NewerSchemaProblem(card.SchemaVersion));
 
+        if (PersonaCardQuirkRulesValidator.FirstProblem(card) is { } quirkRuleProblem)
+            return BadRequest(MalformedCardProblem(quirkRuleProblem));
+
         var (legacyVoice, voiceWarnings) = await ResolveVoiceAsync(card.Voice, ct);
         IReadOnlyList<string> warnings = PaceWarning(card.Voice.Pace) is { } paceWarning
             ? [.. voiceWarnings, paceWarning]

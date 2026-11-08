@@ -79,10 +79,19 @@ public static class PublicSurface
     /// AC6, STORY-483 AC11 · PLAN T590) so the message-building rule, like the counting rule above,
     /// lives in exactly one place; the heading is a parameter (not hard-coded here) because each
     /// caller names its own baseline.
+    ///
+    /// <para>
+    /// <paramref name="tolerated"/> (the T524 / T683 pending-publication precedent,
+    /// <see cref="PendingPublicationSurfaceAllowlist"/>) names ADDED lines the diff forgives — line by
+    /// line, as a multiset, so a duplicate of a tolerated line, any other addition, and every removal
+    /// still show up.
+    /// </para>
     /// </summary>
-    public static IReadOnlyList<string> DiffAgainst(IReadOnlyList<string> current, IReadOnlyList<string> baseline, string heading)
+    public static IReadOnlyList<string> DiffAgainst(
+        IReadOnlyList<string> current, IReadOnlyList<string> baseline, string heading,
+        IReadOnlyList<string>? tolerated = null)
     {
-        var added = ExcessOf(current, baseline);
+        var added = ExcessOf(ExcessOf(current, baseline), tolerated ?? []);
         var removed = ExcessOf(baseline, current);
 
         if (added.Count == 0 && removed.Count == 0)
