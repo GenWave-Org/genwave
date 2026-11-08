@@ -336,6 +336,7 @@ public static class FeatureAiredKindStamp
             {
                 await conn.ExecuteAsync("drop table if exists station.schedule_special");
                 await conn.ExecuteAsync("alter table station.segment_schedule drop column if exists show_id");
+                await conn.ExecuteAsync("drop table if exists station.utterance"); // F218 db/50: FK into station.show, must go first (no consumer yet)
                 await conn.ExecuteAsync("drop table if exists station.show");
                 await conn.ExecuteAsync("alter table station.booth_log drop column if exists segment_kind");
             }
