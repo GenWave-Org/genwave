@@ -17,7 +17,7 @@ public static class FeatureShiftKey
 
         [Fact]
         public void ItIsThePersonaIdDayStartMinuteAndStationLocalDate() =>
-            Assert.Equal("7|0|1260|2026-11-08", ShiftKey.Scheduled(7, DayOfWeek.Sunday, 1260, Date).ToString());
+            Assert.Equal("7|Sunday|1260|2026-11-08", ShiftKey.Scheduled(7, DayOfWeek.Sunday, 1260, Date).ToString());
     }
 
     public sealed class ScenarioAnUnscheduledHourHasAShiftKey
@@ -44,6 +44,20 @@ public static class FeatureShiftKey
         }
     }
 
+    public sealed class ScenarioANegativePersonaIdIsRejected
+    {
+        // Given a negative persona id
+        // When  the shift key is built
+
+        [Fact]
+        public void ScheduledThrows() =>
+            Assert.Throws<ArgumentOutOfRangeException>(() => ShiftKey.Scheduled(-1, DayOfWeek.Friday, 90, Date));
+
+        [Fact]
+        public void UnscheduledThrows() =>
+            Assert.Throws<ArgumentOutOfRangeException>(() => ShiftKey.Unscheduled(-1, Date));
+    }
+
     public sealed class ScenarioMalformedTextIsRejected
     {
         // Given text that is not a shift key
@@ -54,6 +68,8 @@ public static class FeatureShiftKey
         [InlineData("7")]
         [InlineData("7|not-a-date")]
         [InlineData("7|9|0|2026-11-08")]
+        [InlineData("7|1|60|2026-11-08")]
+        [InlineData("7|tuesday|60|2026-11-08")]
         [InlineData("7|1|1440|2026-11-08")]
         public void ParsingFails(string text) => Assert.False(ShiftKey.TryParse(text, out _));
     }

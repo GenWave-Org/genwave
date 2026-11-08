@@ -129,7 +129,8 @@ public sealed class LlmCopyWriter(
     IDegradationModeReader degradationMode,
     IStationClockProvider? stationClock = null,
     IContextPatterFactSource? patterFactSource = null,
-    IShowFlavorLineSource? showFlavorLineSource = null)
+    IShowFlavorLineSource? showFlavorLineSource = null,
+    IUtteranceStore? utteranceStore = null)
     : ISegmentCopyWriter, IPersonaPreviewWriter, IAnnouncementCopyWriter
 {
     /// <summary>Name of the <see cref="IHttpClientFactory"/> client this writer resolves (registered in Program.cs).</summary>
@@ -271,6 +272,56 @@ public sealed class LlmCopyWriter(
         kind is SegmentKind.LeadIn or SegmentKind.BackAnnounce or SegmentKind.SignOff or SegmentKind.SignOn
             or SegmentKind.ContextSegment;
 
+    /// <summary>
+    /// The template rung after an LLM miss (SPEC F218.1): same copy the plain fallback returns, run
+    /// through <see cref="RecordTemplateCopyAsync"/>.
+    /// </summary>
+    async Task<SegmentCopy> FallbackAndRecordAsync(SegmentRequest request, CancellationToken ct) =>
+        await RecordTemplateCopyAsync(request, await fallback.WriteAsync(request, ct), ct);
+
+    /// <summary>
+    /// The ONE seam for template copy that airs in an LLM's place (SPEC F218.1): stored with
+    /// <c>fallback = true</c>. Called by this writer's own miss path and by
+    /// <see cref="DegradationGatedCopyWriter"/> when degradation mode routes around the LLM. Kinds
+    /// that never air template copy (<see cref="TemplateCopyPolicy"/>) and kinds this writer does not
+    /// author are returned untouched.
+    /// </summary>
+    internal async Task<SegmentCopy> RecordTemplateCopyAsync(SegmentRequest request, SegmentCopy templated, CancellationToken ct) =>
+        IsLlmAuthored(request.Kind) && !TemplateCopyPolicy.NeverAirsTemplateCopy(request.Kind)
+            ? await RecordAsync(request, templated, fallbackCopy: true, ct)
+            : templated;
+
+    /// <summary>
+    /// SPEC F218.1 (STORY-532, PLAN T684) — stores <paramref name="copy"/> in the utterance log BEFORE
+    /// render, raw text as handed to the renderer, and returns it stamped with the new row id. A request
+    /// the planner left unstamped (no persona, no shift key) is not recorded. A store fault is logged
+    /// and costs only the record, never the segment (SPEC F12.4).
+    /// </summary>
+    async Task<SegmentCopy> RecordAsync(SegmentRequest request, SegmentCopy copy, bool fallbackCopy, CancellationToken ct)
+    {
+        if (utteranceStore is null || request.PersonaId is not { } personaId
+            || !ShiftKey.TryParse(request.ShiftKeyText, out var shiftKey))
+            return copy;
+
+        try
+        {
+            var id = await utteranceStore.RecordAsync(
+                new NewUtterance(
+                    personaId, request.ShowId, UtteranceKind.Patter, request.Kind.ToString(), shiftKey, copy.Text, fallbackCopy),
+                ct);
+            return copy with { UtteranceId = id };
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Utterance record failed for {Kind}; the segment airs unrecorded", request.Kind);
+            return copy;
+        }
+    }
+
     public async Task<SegmentCopy> WriteAsync(SegmentRequest request, CancellationToken ct)
     {
         // StationId/TimeDate stay templated — brand/time copy must be crisp, consistent, and
@@ -297,7 +348,7 @@ public sealed class LlmCopyWriter(
             // (F12.4), not escape past the fallback ladder toward the caller.
             cfg = optionsMonitor.CurrentValue;
             if (string.IsNullOrEmpty(cfg.Endpoint))
-                return await fallback.WriteAsync(request, ct);
+                return await FallbackAndRecordAsync(request, ct);
 
             // Resolved ONLY on this LLM path (F35.2) — templated kinds and the disabled writer
             // never call the accessor at all, so a persona plays no part in copy they never touch.
@@ -346,7 +397,7 @@ public sealed class LlmCopyWriter(
                 // DescribeNullTextReason's own remarks.
                 LogFailure(request, persona, cfg.Model, attemptedAt, exception: null,
                     reason: DescribeNullTextReason(cleanup, cfg.ReasoningEffort));
-                return await fallback.WriteAsync(request, ct);
+                return await FallbackAndRecordAsync(request, ct);
             }
 
             // A sentence-boundary salvage (SPEC F123.2-F123.4, STORY-319, PLAN T263) is a SUCCESS at
@@ -358,7 +409,7 @@ public sealed class LlmCopyWriter(
             statusHolder.Record(LlmAttemptOutcome.Ok, attemptedAt);
             // Only genuinely LLM-authored copy is fresh-per-airing (F34.6) — every fallback path
             // above returns the template writer's own SegmentCopy (FreshPerAiring: false) unchanged.
-            return new SegmentCopy(cleaned, FreshPerAiring: true);
+            return await RecordAsync(request, new SegmentCopy(cleaned, FreshPerAiring: true), fallbackCopy: false, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -374,7 +425,7 @@ public sealed class LlmCopyWriter(
             // carrying the exception type/status plus call context (F69.7).
             statusHolder.Record(LlmAttemptOutcome.Failed, attemptedAt);
             LogFailure(request, persona, cfg?.Model, attemptedAt, ex, reason: null);
-            return await fallback.WriteAsync(request, ct);
+            return await FallbackAndRecordAsync(request, ct);
         }
     }
 

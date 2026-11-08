@@ -30,7 +30,7 @@ public sealed partial class BreakPlanner
     // already known, and the ONLY place that must align them: the drained request's Voice always wins,
     // aligning the forwarded snapshot to it, never the reverse (this is an alignment, not a resolve).
     SegmentRequest BuildHandoffRequest(SegmentKind kind, HandoffContext handoff, StationIdentity identity) =>
-        new(
+        StampShift(new(
             kind,
             handoff.Voice,
             identity.Name,
@@ -46,7 +46,7 @@ public sealed partial class BreakPlanner
             CounterpartShowName: handoff.CounterpartShowName)
         {
             Speaker = handoff.Speaker is { } s ? s with { Voice = handoff.Voice } : null,
-        };
+        }, handoff.PersonaId);
 
     // Verbatim copy of Orchestrator.BuildTimeDateRequest (SPEC F110.3/F141.2): LocalNow carries the
     // deferral's own armed Due, never a drain-time StationLocalNow() read. Speaker (PLAN T527, SPEC
@@ -81,7 +81,7 @@ public sealed partial class BreakPlanner
 
         var speaker = await ResolveSpeakerAsync(speakers, contextPersonaId, identity, contextVoice, ct);
 
-        var contextReq = new SegmentRequest(
+        var contextReq = StampShift(new SegmentRequest(
             SegmentKind.ContextSegment,
             contextVoice,
             identity.Name,
@@ -92,7 +92,7 @@ public sealed partial class BreakPlanner
             ContextFacts: content.SegmentFacts)
         {
             Speaker = speaker,
-        };
+        }, contextPersonaId);
 
         return (contextReq, providerKey);
     }

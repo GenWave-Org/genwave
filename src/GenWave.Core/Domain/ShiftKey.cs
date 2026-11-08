@@ -4,7 +4,8 @@ using System.Globalization;
 namespace GenWave.Core.Domain;
 
 /// <summary>
-/// Identifies one DJ shift (gh-#293, SPEC F218): <c>personaId|day|startMinute|date</c> for a scheduled
+/// Identifies one DJ shift (gh-#293, SPEC F218): <c>personaId|dayName|startMinute|date</c> (the day is the
+/// <see cref="DayOfWeek"/> name, e.g. <c>7|Tuesday|360|2026-11-10</c>) for a scheduled
 /// show segment, <c>personaId|date</c> when no segment is on air. <c>date</c> is the station-local
 /// calendar date (<c>yyyy-MM-dd</c>), so a shift crossing UTC midnight keeps one key. Pure value:
 /// build with <see cref="Scheduled"/>/<see cref="Unscheduled"/>, round-trip via
@@ -15,23 +16,29 @@ public sealed record ShiftKey
     const char Separator = '|';
     const string DateFormat = "yyyy-MM-dd";
 
+    static readonly string[] DayNames = Enum.GetNames<DayOfWeek>();
+
     readonly string value;
 
     ShiftKey(string value) => this.value = value;
 
     public static ShiftKey Scheduled(long personaId, DayOfWeek day, int startMinute, DateOnly localDate)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(personaId);
         if (startMinute is < 0 or >= 24 * 60)
         {
             throw new ArgumentOutOfRangeException(nameof(startMinute), startMinute, "Start minute must be within one day.");
         }
 
         return new(string.Create(CultureInfo.InvariantCulture,
-            $"{personaId}{Separator}{(int)day}{Separator}{startMinute}{Separator}{Format(localDate)}"));
+            $"{personaId}{Separator}{day}{Separator}{startMinute}{Separator}{Format(localDate)}"));
     }
 
-    public static ShiftKey Unscheduled(long personaId, DateOnly localDate) =>
-        new(string.Create(CultureInfo.InvariantCulture, $"{personaId}{Separator}{Format(localDate)}"));
+    public static ShiftKey Unscheduled(long personaId, DateOnly localDate)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(personaId);
+        return new(string.Create(CultureInfo.InvariantCulture, $"{personaId}{Separator}{Format(localDate)}"));
+    }
 
     public static bool TryParse(string? text, [NotNullWhen(true)] out ShiftKey? key)
     {
@@ -42,7 +49,7 @@ public sealed record ShiftKey
             [var p, var d] => long.TryParse(p, NumberStyles.None, CultureInfo.InvariantCulture, out _) && IsDate(d),
             [var p, var day, var start, var d] =>
                 long.TryParse(p, NumberStyles.None, CultureInfo.InvariantCulture, out _)
-                && int.TryParse(day, NumberStyles.None, CultureInfo.InvariantCulture, out var dayNo) && dayNo is >= 0 and <= 6
+                && DayNames.Contains(day, StringComparer.Ordinal)
                 && int.TryParse(start, NumberStyles.None, CultureInfo.InvariantCulture, out var minute) && minute < 24 * 60
                 && IsDate(d),
             _ => false,

@@ -380,7 +380,8 @@ public sealed class HandoffCeremonyProducer(
                         CounterpartName: null, // no OTHER DJ to name — it is the same persona
                         ShowName: onAir.NextSegment?.Show?.Name,
                         ShowFlavor: onAir.NextSegment?.Show?.Flavor,
-                        Speaker: speaker),
+                        Speaker: speaker,
+                        PersonaId: incomingId),
                     notBefore: heldNotBefore);
             }
 
@@ -408,7 +409,8 @@ public sealed class HandoffCeremonyProducer(
                     outgoing.Value.Voice, outgoing.Value.Name, incoming?.Name,
                     ShowName: onAir.Show?.Name,
                     CounterpartShowName: onAir.NextSegment?.Show?.Name,
-                    Speaker: await ForPersonaOrNullAsync(outgoingId, ct)));
+                    Speaker: await ForPersonaOrNullAsync(outgoingId, ct),
+                    PersonaId: outgoingId));
         }
 
         if (incoming is null || boundaryAt.Value <= now)
@@ -457,7 +459,8 @@ public sealed class HandoffCeremonyProducer(
                     incoming.Value.Voice, incoming.Value.Name, outgoing?.Name,
                     ShowName: onAir.NextSegment?.Show?.Name,
                     ShowFlavor: onAir.NextSegment?.Show?.Flavor,
-                    Speaker: speaker),
+                    Speaker: speaker,
+                    PersonaId: incomingId),
                 notBefore: heldNotBefore);
         }
     }

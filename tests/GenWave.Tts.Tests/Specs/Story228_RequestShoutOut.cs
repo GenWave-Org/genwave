@@ -89,10 +89,13 @@ public static class FeatureRequestShoutOut
         // CounterpartName above, never anything a listener typed. Flavor is operator-authored show
         // config (station.show.flavor), not listener text either — the same class of text the
         // persona Soul/Backstory fields already are.
+        // ShiftKeyText (SPEC F218.1, PLAN T684): the planner-built "personaId|day|minute|date" shift key —
+        // numbers, a DayOfWeek name and a station date, assembled by ShiftKey; never listener text.
         static readonly string[] SegmentRequestStringMembers =
         [
             "Voice", "StationName", "StationId", "PersonaName", "CounterpartName", "ContextFacts",
             "CrossingTrackTitle", "CrossingTrackArtist", "ShowName", "ShowFlavor", "CounterpartShowName",
+            "ShiftKeyText",
         ];
         static readonly string[] MediaItemStringMembers = ["MediaId", "Locator", "Title", "Artist", "Album", "Genre", "DjName"];
 

@@ -23,12 +23,12 @@ public sealed partial class BreakPlanner
 
         var (voice, personaName, personaId) = await ResolvePersonaAsync(context.Identity.Voice, ct);
         var speaker = await ResolveSpeakerAsync(speakers, personaId, context.Identity, voice, ct);
-        var request = new SegmentRequest(
+        var request = StampShift(new SegmentRequest(
             SegmentKind.BackAnnounce, voice, context.Identity.Name, prev, StationLocalNow(), context.Identity.Id, personaName)
         {
             CrosstalkAiredThisBreak = crosstalkAiredThisBreak,
             Speaker = speaker,
-        };
+        }, personaId);
 
         return new PlannedSlot(0, SegmentKind.BackAnnounce, new RenderSource(request), Reservation: null, DropPolicyFor(SegmentKind.BackAnnounce), ObserveDuration: true);
     }
@@ -240,12 +240,12 @@ public sealed partial class BreakPlanner
 
         var (voice, personaName, personaId) = await ResolvePersonaAsync(context.Identity.Voice, ct);
         var speaker = await ResolveSpeakerAsync(speakers, personaId, context.Identity, voice, ct);
-        var request = new SegmentRequest(
+        var request = StampShift(new SegmentRequest(
             SegmentKind.LeadIn, voice, context.Identity.Name, next, StationLocalNow(), context.Identity.Id, personaName)
         {
             CrosstalkAiredThisBreak = crosstalkAiredThisBreak,
             Speaker = speaker,
-        };
+        }, personaId);
 
         return new PlannedSlot(0, SegmentKind.LeadIn, new RenderSource(request), Reservation: null, DropPolicyFor(SegmentKind.LeadIn), ObserveDuration: true);
     }

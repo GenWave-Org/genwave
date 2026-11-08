@@ -215,8 +215,7 @@ public sealed class TtsSegmentSource(
     /// </summary>
     bool ShouldDropNonFreshGuardedCopy(SegmentRequest request, SegmentCopy copy)
     {
-        if (request.Kind is not (SegmentKind.SignOff or SegmentKind.SignOn or SegmentKind.ContextSegment
-            or SegmentKind.Announcement)) // widened at T338 — see the class remarks for the F144.4 fallback law
+        if (!TemplateCopyPolicy.NeverAirsTemplateCopy(request.Kind))
             return false;
         if (copy.FreshPerAiring)
             return false;
@@ -339,7 +338,15 @@ public sealed class TtsSegmentSource(
         // cached content: the cache key below never includes PersonaName, so a cache-hit render
         // still carries whichever persona is CURRENTLY active (F39.3).
         // Render succeeded (cache hit or fresh synthesis) — publish before returning (gitea-#246).
-        events.Publish(new SegmentGenerated($"tts:{hash}", request.Kind.ToString(), request.Voice));
+        // SPEC F218.2 (PLAN T684): persona/show/utterance ride along, and the copy text always, so the
+        // booth log can quote what aired whether or not the utterance record landed.
+        events.Publish(new SegmentGenerated($"tts:{hash}", request.Kind.ToString(), request.Voice)
+        {
+            PersonaId = request.PersonaId,
+            ShowId = request.ShowId,
+            UtteranceId = copy.UtteranceId,
+            Text = copy.Text,
+        });
 
         // DjName (gh-#259) carries the SPEAKER's persona name for Now Playing attribution —
         // request.PersonaName verbatim, no StationName fallback (unlike the Artist credit line

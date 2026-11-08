@@ -75,7 +75,11 @@ sealed class BoothLogWriter(
                 "track-started", Summarize(t), personaAccessor.ActivePersonaId, t.Artist,
                 BuildPickStamp(t.PersonaPick, t.CrosstalkScript, t.RotationRelax, t.Nudge),
                 ParseMediaId(t.MediaId), SegmentKind: t.SegmentKind?.ToString(), ShowId: personaAccessor.ActiveShowId),
-            SegmentGenerated s => new BoothLogAppendRequest("patter-aired", Summarize(s), PersonaId: null),
+            // SPEC F218.2 (STORY-532, PLAN T684): persona and show come off the event itself (the
+            // planner's own stamp for THIS segment), not the ambient accessor; the utterance id is
+            // deliberately NOT a booth_log column — the log stays narrative.
+            SegmentGenerated s => new BoothLogAppendRequest(
+                "patter-aired", Summarize(s), PersonaId: s.PersonaId, ShowId: s.ShowId),
             DegradationModeChanged d => new BoothLogAppendRequest("mode-changed", Summarize(d), PersonaId: null),
             HandoffPieceDropped h => new BoothLogAppendRequest("handoff-dropped", Summarize(h), PersonaId: null),
             RequestReceived => new BoothLogAppendRequest("request-received", "Request received", PersonaId: null),
@@ -163,9 +167,25 @@ sealed class BoothLogWriter(
         _ => $"Started track {t.MediaId}",
     };
 
-    static string Summarize(SegmentGenerated s) => string.IsNullOrWhiteSpace(s.Voice)
-        ? $"Patter aired ({s.Kind})"
-        : $"Patter aired ({s.Kind}, voice: {s.Voice})";
+    const int QuoteChars = 80;
+
+    static string Summarize(SegmentGenerated s)
+    {
+        var summary = string.IsNullOrWhiteSpace(s.Voice)
+            ? $"Patter aired ({s.Kind})"
+            : $"Patter aired ({s.Kind}, voice: {s.Voice})";
+
+        return string.IsNullOrWhiteSpace(s.Text) ? summary : $"{summary} \"{Quote(s.Text)}\"";
+    }
+
+    // First QuoteChars characters, never splitting a surrogate pair.
+    static string Quote(string text)
+    {
+        if (text.Length <= QuoteChars)
+            return text;
+
+        return text[..(char.IsHighSurrogate(text[QuoteChars - 1]) ? QuoteChars - 1 : QuoteChars)];
+    }
 
     static string Summarize(DegradationModeChanged d) =>
         $"LLM degradation: {d.Previous} → {d.New} ({d.Cause})";

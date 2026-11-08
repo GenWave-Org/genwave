@@ -33,6 +33,33 @@ public sealed partial class BreakPlanner
         return (stationVoice, null, null);
     }
 
+    // SPEC F218.1 (STORY-532, PLAN T684): stamps the ids the copy writer records an utterance under —
+    // persona, on-air show (null in a gap) and the ShiftKey string. Schedule knowledge stays HERE
+    // (Tts cannot reference Orchestration); the date comes from the resolver's own StationToday().
+    // No persona id, or no schedule resolver wired (no station date to key on), leaves the request
+    // unstamped, which the writer reads as "do not record".
+    SegmentRequest StampShift(SegmentRequest request, long? personaId)
+    {
+        if (personaId is not { } id || scheduleResolver is null)
+            return request;
+
+        // The resolver exposes no "date this resolution used", so take the date on both sides of the
+        // read and retry once if midnight rolled between them: date and segment then agree.
+        var today = scheduleResolver.StationToday();
+        var onAir = scheduleResolver.TryGetCurrent();
+        if (scheduleResolver.StationToday() != today)
+        {
+            today = scheduleResolver.StationToday();
+            onAir = scheduleResolver.TryGetCurrent();
+        }
+
+        var key = onAir?.Segment is { } segment
+            ? ShiftKey.Scheduled(id, segment.Day, segment.StartMinute, today)
+            : ShiftKey.Unscheduled(id, today);
+
+        return request with { PersonaId = id, ShowId = onAir?.Show?.Id, ShiftKeyText = key.ToString() };
+    }
+
     // PLAN T527 (SPEC F188.4/F189.6, round-2 review finding F1): resolves the SpeakerSnapshot a
     // slot's PersonaId names, memoized per plan via SpeakerResolution — null speakers (no
     // ISpeakerSnapshotSource wired) means no stamping at all, the ambient path stays byte-identical.
