@@ -1,5 +1,8 @@
 namespace GenWave.Tts;
 
+using GenWave.Core.Abstractions;
+using GenWave.Core.Domain;
+using GenWave.Core.Logging;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -34,6 +37,14 @@ using Microsoft.Extensions.Options;
 /// </para>
 ///
 /// <para>
+/// <b>Quirks (SPEC F218.7, PLAN T688).</b> Crosstalk is stocked ahead, so an exchange can air in a later
+/// shift than the one it was written in, and it may be discarded unaired. A <c>maxPerShift</c> spend
+/// written here would be wrong either way, so the selection carries no persona or shift key: capped
+/// quirks are excluded and nothing is spent. Plain quirks are still sampled (F71.3); capped ones belong
+/// to patter, whose render airs in its own shift.
+/// </para>
+///
+/// <para>
 /// Registered as a DI singleton with NO eager I/O in its constructor (Story125's zero-I/O invariant)
 /// — every dependency here is itself a cheap seam (an options monitor, a ring, a logger, an
 /// <see cref="IHttpClientFactory"/>), so constructing this class never touches the network.
@@ -46,7 +57,8 @@ public sealed class CrosstalkScriptWriter(
     LlmCallRecorder recorder,
     IDegradationModeReader degradationMode,
     ILogger<CrosstalkScriptWriter> logger,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    IQuirkSelector? quirkSelector = null)
 {
     /// <summary>
     /// Headroom the whole-script generation cap carries OVER <see cref="CrosstalkOptions.DurationTargetSeconds"/>'s
@@ -116,8 +128,12 @@ public sealed class CrosstalkScriptWriter(
 
         var durationTargetSeconds = crosstalkOptions.CurrentValue.DurationTargetSeconds;
 
+        var hostQuirks = await SelectQuirksAsync(request.HostCard, ct);
+        var neighborQuirks = await SelectQuirksAsync(request.NeighborCard, ct);
+
         var systemPrompt = CrosstalkPromptBuilder.BuildSystemPrompt(
-            request.HostCard, request.NeighborCard, durationTargetSeconds, request.StationLocalNow);
+            request.HostCard, request.NeighborCard, durationTargetSeconds, request.StationLocalNow,
+            hostQuirks, neighborQuirks);
         var userPrompt = CrosstalkPromptBuilder.BuildUserContent(
             request, LlmPromptBuilder.BuildStationClockLine(request.StationLocalNow));
 
@@ -196,6 +212,33 @@ public sealed class CrosstalkScriptWriter(
                 "Crosstalk exchange discarded (persona: {PersonaName}): {Detail}",
                 personaName.ReplaceLineEndings(" "), detail.ReplaceLineEndings(" "));
             return new CrosstalkWriteResult.Discarded(detail, cause, generationAttempted);
+        }
+    }
+
+    /// <summary>
+    /// One card's quirks with no persona or shift key (spend: true). That is the IQuirkSelector contract's
+    /// on-air-untracked path: it excludes capped quirks and writes no spend row. Do not "fix" it to
+    /// spend: false, which is the preview path and would roll capped quirks in.
+    /// Null (no selector wired) lets the prompt builder sample plain. A selector fault costs this card its quirks, never the exchange.
+    /// </summary>
+    async Task<QuirkSelection?> SelectQuirksAsync(PersonaCard card, CancellationToken ct)
+    {
+        if (quirkSelector is null)
+            return null;
+
+        try
+        {
+            return await quirkSelector.SelectAsync(personaId: null, card, shiftKey: null, spend: true, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Quirk selection failed for crosstalk card {Card}; it airs without quirks",
+                LogSanitize.Strip(card.Name));
+            return QuirkSelection.None;
         }
     }
 

@@ -163,6 +163,10 @@ internal static class CrosstalkWorkerHarness
     /// afterward. Defaults to a fresh, unobserved ring — every pre-T330 fact that never cared about
     /// the ring at all keeps compiling and passing unchanged.
     /// </param>
+    /// <param name="quirkSelector">SPEC F218.7 (PLAN T688): the selector the script writer is built with;
+    /// null builds the writer without one, as before.</param>
+    /// <param name="card">Replaces the default quirk-less card for every cast persona.</param>
+    /// <param name="postedPrompts">When supplied, receives each posted system prompt in arrival order.</param>
     /// <param name="causeCounters">The SPEC F139.2 sibling of <paramref name="callRing"/> — same
     /// "supply your own to observe it, otherwise get a fresh unobserved one" shape.</param>
     public static async Task<(
@@ -171,7 +175,8 @@ internal static class CrosstalkWorkerHarness
         BuildAsync(
             DateTimeOffset now, string showSlug, string showName, string? replyContent = null,
             string llmEndpoint = "http://fake-llm.local", LlmCallRing? callRing = null,
-            LlmCallCauseCounters? causeCounters = null)
+            LlmCallCauseCounters? causeCounters = null, IQuirkSelector? quirkSelector = null,
+            PersonaCard? card = null, List<string>? postedPrompts = null)
     {
         var timeProvider = new FakeTimeProvider(now);
         var gate = new OnAirRenderGate();
@@ -191,8 +196,8 @@ internal static class CrosstalkWorkerHarness
         await scheduleResolver.ResolveAsync(CancellationToken.None);
 
         var personaStore = new FakePersonaCardStore();
-        personaStore.Cards[10] = MakeCard("Host DJ");
-        personaStore.Cards[20] = MakeCard("Next DJ");
+        personaStore.Cards[10] = card ?? MakeCard("Host DJ");
+        personaStore.Cards[20] = card ?? MakeCard("Next DJ");
         var planner = new CrosstalkPlanner(
             personaStore, new FakeCrosstalkScopeProvider([showSlug]), NullLogger<CrosstalkPlanner>.Instance);
 
@@ -200,10 +205,18 @@ internal static class CrosstalkWorkerHarness
         {
             choices = new[] { new { message = new { content = replyContent ?? WellFormedReply }, finish_reason = "stop" } },
         });
-        var llmHandler = new FakeHttpMessageHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        var llmHandler = new FakeHttpMessageHandler(async (request, _) =>
         {
-            Content = new StringContent(wireResponse, System.Text.Encoding.UTF8, "application/json"),
-        }));
+            if (postedPrompts is not null && request.Content is not null)
+            {
+                var body = await request.Content.ReadAsStringAsync();
+                postedPrompts.Add(JsonDocument.Parse(body).RootElement.GetProperty("messages")[0].GetProperty("content").GetString() ?? "");
+            }
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(wireResponse, System.Text.Encoding.UTF8, "application/json"),
+            };
+        });
         // SPEC F139.1 (PLAN T330): ONE shared LlmOptions monitor for both the script writer and the
         // worker itself below — the worker's own CanceledByWindow ring stamp reads Model from this
         // SAME monitor, so a test never sees two different "Llm:Model" answers depending on which
@@ -227,7 +240,8 @@ internal static class CrosstalkWorkerHarness
             recorder,
             degradationModeReader,
             NullLogger<CrosstalkScriptWriter>.Instance,
-            timeProvider);
+            timeProvider,
+            quirkSelector);
 
         var synthesizer = new BlockingTtsSynthesizer();
         var cacheRoot = Directory.CreateDirectory(Path.Combine(SharedTempRoot, Guid.NewGuid().ToString("N"))).FullName;

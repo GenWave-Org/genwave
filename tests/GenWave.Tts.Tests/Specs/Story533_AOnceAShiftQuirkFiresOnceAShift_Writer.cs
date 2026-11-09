@@ -33,20 +33,6 @@ public static class FeatureAOnceAShiftQuirkFiresOnceAShiftWriter
         }
     }
 
-    sealed class RecordingLedger : IQuirkSpendLedger
-    {
-        public List<string> Spends { get; } = [];
-
-        public Task<int> CountSpendsAsync(long personaId, string content, CancellationToken ct) =>
-            Task.FromResult(Spends.Count(s => s == content));
-
-        public Task RecordSpendAsync(long personaId, string content, CancellationToken ct)
-        {
-            Spends.Add(content);
-            return Task.CompletedTask;
-        }
-    }
-
     public sealed class ScenarioOnAirSelectsBeforeTheRenderIsDispatched
     {
         // Given an on-air break request for persona 7 carrying a shift key
@@ -91,7 +77,7 @@ public static class FeatureAOnceAShiftQuirkFiresOnceAShiftWriter
         // Then  the capped quirk is not in the prompt
         // And   no spend is recorded
 
-        readonly RecordingLedger ledger = new();
+        readonly RecordingQuirkLedger ledger = new();
         string? systemPrompt;
 
         public ScenarioAnAnnouncementWithoutAShiftKeyCannotAirACappedQuirk()
@@ -117,7 +103,7 @@ public static class FeatureAOnceAShiftQuirkFiresOnceAShiftWriter
         // When  an on-air break request carrying a shift key is written
         // Then  exactly one spend row for that quirk and shift is recorded (the preview sibling in Host.Tests records none)
 
-        readonly RecordingLedger ledger = new();
+        readonly RecordingQuirkLedger ledger = new();
 
         public ScenarioOnAirWithAShiftKeySpendsTheCappedQuirk()
         {

@@ -14,6 +14,7 @@ using System.Net.Http.Json;
 using System.Text;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.Host.Tests.Fakes;
 using GenWave.Memory;
 using GenWave.Tts;
 using Microsoft.AspNetCore.Hosting;
@@ -24,20 +25,6 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 
 namespace GenWave.Host.Tests.Specs;
-
-file sealed class RecordingSpendLedger : IQuirkSpendLedger
-{
-    public List<string> Spends { get; } = [];
-
-    public Task<int> CountSpendsAsync(long personaId, string content, CancellationToken ct) =>
-        Task.FromResult(Spends.Count(s => s == content));
-
-    public Task RecordSpendAsync(long personaId, string content, CancellationToken ct)
-    {
-        Spends.Add(content);
-        return Task.CompletedTask;
-    }
-}
 
 /// <summary>Delegates to the real selector and remembers the spend flag of every call.</summary>
 file sealed class SpyQuirkSelector(IQuirkSelector inner) : IQuirkSelector
@@ -67,7 +54,7 @@ file sealed class QuirkPreviewWebFactory : WebApplicationFactory<Program>
 {
     internal const string AdminPassword = "test-password-x7z";
 
-    internal RecordingSpendLedger Ledger { get; } = new();
+    internal RecordingQuirkLedger Ledger { get; } = new();
     internal SpyQuirkSelector? Spy { get; private set; }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)

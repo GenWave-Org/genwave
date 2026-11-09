@@ -63,6 +63,23 @@ static class QuirkSpecHarness
             new FakeDegradationModeReader(), quirkSelector: selector);
     }
 
+    /// <summary>An HTTP factory that answers every completion with <paramref name="reply"/> and appends each posted system prompt to <paramref name="prompts"/>.</summary>
+    public static SingleHandlerHttpClientFactory CapturingHttp(List<string> prompts, string reply) =>
+        new(new FakeHttpMessageHandler(async (req, _) =>
+        {
+            if (req.Content is { } content)
+            {
+                var body = await content.ReadAsStringAsync();
+                prompts.Add(JsonDocument.Parse(body).RootElement.GetProperty("messages")[0].GetProperty("content").GetString() ?? "");
+            }
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    JsonSerializer.Serialize(new { choices = new[] { new { message = new { content = reply } } } }),
+                    Encoding.UTF8, "application/json"),
+            };
+        }));
+
     /// <summary>Renders one break and returns the system prompt the LLM was sent.</summary>
     public static string PromptFor(PersonaCard card, IQuirkSelector selector, string? shiftKeyText)
     {
