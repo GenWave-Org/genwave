@@ -31,4 +31,8 @@
     <ProjectReference Include="..\..\src\GenWave.Memory\GenWave.Memory.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\..\tools\PatterBench\PatterBench.csproj" />
+  </ItemGroup>
+
 </Project>

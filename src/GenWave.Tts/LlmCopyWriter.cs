@@ -1012,9 +1012,6 @@ public sealed class LlmCopyWriter(
             IReadOnlyList<string> recentLines = blockLineCount > 0
                 ? recentEntries.Take(blockLineCount).Select(e => e.Text).ToList()
                 : [];
-            systemPrompt = LlmPromptBuilder.BuildSystemPrompt(
-                LlmPromptBuilder.BuildPersonaSection(persona, card, mentionOwnName, quirkSelection, recentLines), cfg.MaxCopyChars, stationLocalNow);
-
             // Read HERE — after WaitAsync above, i.e. already inside the single-flight critical
             // section — not by the caller before this method was ever invoked (SPEC F83.1, T65
             // review finding): Orchestrator.EnqueuePatterAsync starts a unit's BackAnnounce and
@@ -1036,12 +1033,16 @@ public sealed class LlmCopyWriter(
             // all). requiredCore (LOW-5: the same local callKind/factBlock above already derive from)
             // is non-null on exactly one caller (WriteAnnouncementAsync), so this branch can never
             // fire for an ordinary WriteAsync/WritePreviewAsync call.
-            userPrompt = requiredCore is { } message
-                ? LlmPromptBuilder.BuildAnnouncementUserContent(
-                    request, LlmPromptBuilder.BuildStationClockLine(stationLocalNow), message)
-                : LlmPromptBuilder.BuildUserContent(
-                    request, LlmPromptBuilder.BuildStationClockLine(stationLocalNow), previouslyVoicedTasteNotes,
-                    patterFact?.Fact, showFlavorFact);
+            var composed = BreakPromptComposer.Compose(new BreakPromptInputs(
+                request, persona, card, mentionOwnName, quirkSelection, recentLines, cfg.MaxCopyChars,
+                stationLocalNow, previouslyVoicedTasteNotes)
+            {
+                AnnouncementMessage = requiredCore,
+                PatterFact = patterFact?.Fact,
+                ShowFlavor = showFlavorFact,
+            });
+            systemPrompt = composed.System;
+            userPrompt = composed.User;
 
             // No boot-frozen BaseAddress (F36.2) — the endpoint is read from CurrentValue above and an
             // absolute URI is built per call (EndpointUri preserves a subpath in Llm:Endpoint, e.g.
@@ -1311,7 +1312,7 @@ public sealed class LlmCopyWriter(
     /// gate covers.
     /// </para>
     /// </summary>
-    static ClaimCheckResult CheckTruthGate(
+    internal static ClaimCheckResult CheckTruthGate(
         string copy, string? factBlock, DateTimeOffset stationLocalNow, string? trackTitle, string? stationName,
         string? requiredCore = null)
     {
@@ -1406,7 +1407,7 @@ public sealed class LlmCopyWriter(
     /// sent the 2026-08-24 bench morning at the endpoint and max_tokens for a failure only
     /// <c>Llm:ReasoningEffort</c> fixes. Every other reply runs the unchanged hygiene pass.
     /// </summary>
-    static LlmCopyCleanupResult CleanupOf(CompletionReply reply, int maxCopyChars) =>
+    internal static LlmCopyCleanupResult CleanupOf(CompletionReply reply, int maxCopyChars) =>
         reply.IsReasoningOnly
             ? new LlmCopyCleanupResult.ReasoningOnly(reply.ReasoningChars, reply.FinishReason)
             : CleanCopy(reply.Content, maxCopyChars);
@@ -1467,7 +1468,7 @@ public sealed class LlmCopyWriter(
     /// by <see cref="WriteAsync"/> and <see cref="WritePreviewAsync"/> so the two can never read the
     /// closed hierarchy differently.
     /// </summary>
-    static string? TextOf(LlmCopyCleanupResult cleanup) => cleanup switch
+    internal static string? TextOf(LlmCopyCleanupResult cleanup) => cleanup switch
     {
         LlmCopyCleanupResult.Fits fits => fits.Text,
         LlmCopyCleanupResult.Trimmed trimmed => trimmed.Text,
