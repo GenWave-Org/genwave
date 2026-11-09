@@ -14,4 +14,8 @@ public sealed record DockerContainerInspect
 
     [JsonPropertyName("State")]
     public DockerInspectState? State { get; init; }
+
+    /// <summary>Container config; only its labels are read (gh-#629 self-inspect).</summary>
+    [JsonPropertyName("Config")]
+    public DockerInspectConfig? Config { get; init; }
 }
