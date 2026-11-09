@@ -82,6 +82,7 @@ sealed class BoothLogWriter(
                 "patter-aired", Summarize(s), PersonaId: s.PersonaId, ShowId: s.ShowId),
             DegradationModeChanged d => new BoothLogAppendRequest("mode-changed", Summarize(d), PersonaId: null),
             HandoffPieceDropped h => new BoothLogAppendRequest("handoff-dropped", Summarize(h), PersonaId: null),
+            RepeatCaught r => new BoothLogAppendRequest("repeat-caught", Summarize(r), PersonaId: r.PersonaId),
             RequestReceived => new BoothLogAppendRequest("request-received", "Request received", PersonaId: null),
             RequestEvicted => new BoothLogAppendRequest("request-evicted", "Request evicted (pending cap)", PersonaId: null),
             RequestExpired => new BoothLogAppendRequest("request-expired", "Request expired", PersonaId: null),
@@ -189,6 +190,8 @@ sealed class BoothLogWriter(
 
     static string Summarize(DegradationModeChanged d) =>
         $"LLM degradation: {d.Previous} → {d.New} ({d.Cause})";
+
+    static string Summarize(RepeatCaught r) => $"Repeat caught: \"{r.Phrase}\"";
 
     static string Summarize(HandoffPieceDropped h) => $"Handoff {h.Kind} dropped ({h.Cause})";
 }

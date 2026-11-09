@@ -36,9 +36,11 @@ static class QuirkSpecHarness
 
     public static LlmCopyWriter WriterFor(
         PersonaCard card, IQuirkSelector selector, Func<string, Task>? onSystemPrompt = null, Action? onHttp = null,
-        IUtteranceStore? utteranceStore = null, MemoryBudget? memoryBudget = null)
+        IUtteranceStore? utteranceStore = null, MemoryBudget? memoryBudget = null,
+        IHttpClientFactory? httpOverride = null, IRepetitionCheck? repetitionCheck = null,
+        IStationEventSink? events = null, LlmCallRecorder? recorder = null, LlmCopyStatusHolder? statusHolder = null)
     {
-        var http = new SingleHandlerHttpClientFactory(new FakeHttpMessageHandler(async (req, _) =>
+        IHttpClientFactory http = httpOverride ?? new SingleHandlerHttpClientFactory(new FakeHttpMessageHandler(async (req, _) =>
         {
             onHttp?.Invoke();
             if (req.Content is { } content && onSystemPrompt is not null)
@@ -57,12 +59,36 @@ static class QuirkSpecHarness
         return new LlmCopyWriter(
             new TemplateCopyWriter(new PatterTemplateRenderer()), http,
             new TestOptionsMonitor<LlmOptions>(new LlmOptions { Endpoint = "http://fake-llm.local", Model = "m", TimeoutSeconds = 5, MaxCopyChars = 450 }),
-            new LlmCopyStatusHolder(), new FakeActivePersonaAccessor { Card = card }, NullLogger<LlmCopyWriter>.Instance, TimeProvider.System,
-            new LlmCallRecorder(
-                new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions())),
-                new LlmCallCauseCounters(TimeProvider.System)),
-            new FakeDegradationModeReader(), utteranceStore: utteranceStore, quirkSelector: selector, memoryBudget: memoryBudget);
+            statusHolder ?? new LlmCopyStatusHolder(), new FakeActivePersonaAccessor { Card = card }, NullLogger<LlmCopyWriter>.Instance, TimeProvider.System,
+            recorder ?? NewRecorder(),
+            new FakeDegradationModeReader(), utteranceStore: utteranceStore, quirkSelector: selector, memoryBudget: memoryBudget,
+            repetitionCheck: repetitionCheck, events: events);
     }
+
+    public static LlmCallRecorder NewRecorder(LlmCallCauseCounters? counters = null) =>
+        new(new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions())), counters ?? new LlmCallCauseCounters(TimeProvider.System));
+
+    /// <summary>
+    /// An HTTP factory that answers the Nth completion with <paramref name="replies"/>[N] (the last reply
+    /// repeats once they run out) and appends each posted USER prompt to <paramref name="userPrompts"/>.
+    /// </summary>
+    public static SingleHandlerHttpClientFactory ScriptedHttp(List<string> userPrompts, params string[] replies) =>
+        new(new FakeHttpMessageHandler(async (req, _) =>
+        {
+            if (req.Content is { } content)
+            {
+                var body = await content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(body);
+                userPrompts.Add(doc.RootElement.GetProperty("messages")[1].GetProperty("content").GetString() ?? "");
+            }
+            var reply = replies[Math.Max(0, Math.Min(userPrompts.Count - 1, replies.Length - 1))];
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    JsonSerializer.Serialize(new { choices = new[] { new { message = new { content = reply } } } }),
+                    Encoding.UTF8, "application/json"),
+            };
+        }));
 
     /// <summary>An HTTP factory that answers every completion with <paramref name="reply"/> and appends each posted system prompt to <paramref name="prompts"/>.</summary>
     public static SingleHandlerHttpClientFactory CapturingHttp(List<string> prompts, string reply) =>

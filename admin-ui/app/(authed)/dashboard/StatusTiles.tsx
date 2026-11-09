@@ -74,6 +74,7 @@ const DOMINANT_CAUSE_NOUNS: Record<string, [singular: string, plural: string]> =
   canceledbywindow: ["break-window cancellation", "break-window cancellations"],
   emptycompletion: ["empty reply", "empty replies"],
   malformedresponse: ["malformed reply", "malformed replies"],
+  repeat: ["repeated phrase", "repeated phrases"],
 };
 
 /**

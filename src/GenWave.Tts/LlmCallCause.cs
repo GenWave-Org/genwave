@@ -109,4 +109,12 @@ public enum LlmCallCause
     /// <see cref="EmptyCompletion"/> instead.
     /// </summary>
     MalformedResponse,
+
+    /// <summary>
+    /// SPEC F218.13 (STORY-534, PLAN T693): the copy cleared hygiene and the truth gate but repeated a
+    /// recent line or a spent quirk (<see cref="GenWave.Core.Abstractions.IRepetitionCheck"/>), so
+    /// <see cref="LlmCopyWriter"/>'s ladder re-asked once. Stamped on the call whose copy was caught,
+    /// and on a re-ask that repeated again (the template airs instead).
+    /// </summary>
+    Repeat,
 }

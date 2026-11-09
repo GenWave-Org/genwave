@@ -9,6 +9,8 @@ namespace GenWave.Tts.Tests.Specs;
 
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.Core.Events;
+using GenWave.Memory;
 using GenWave.Tts.Tests.Fakes;
 
 public static class FeatureTheDjDoesNotSayThatAgainWriter
@@ -44,28 +46,111 @@ public static class FeatureTheDjDoesNotSayThatAgainWriter
         // Given a fake LLM whose first copy repeats and second does not
         // When  WriteAsync runs
 
-        [Fact(Skip = "pending: T693 — see docs/PLAN.md")]
-        public void TheSecondCopyIsStoredAndRendered() => Assert.Fail("pending: T693 — the second copy is stored and rendered");
+        [Fact]
+        public void TheSecondCopyIsRendered() =>
+            Assert.Equal(Arrange.Fresh, Arrange.Run(Arrange.Repeating, Arrange.Fresh).Copy.Text);
 
-        [Fact(Skip = "pending: T693 — see docs/PLAN.md")]
-        public void TheLLMWasCalledExactlyTwice() => Assert.Fail("pending: T693 — the LLM was called exactly twice");
+        [Fact]
+        public void TheSecondCopyIsStoredAsNonFallback() =>
+            Assert.Equal([(Arrange.Fresh, false)], Arrange.Run(Arrange.Repeating, Arrange.Fresh).Store.Recorded.Select(u => (u.Text, u.Fallback)));
 
-        [Fact(Skip = "pending: T693 — see docs/PLAN.md")]
-        public void TheReAskPromptNamesTheOffendingPhraseAfterDoNotSay() => Assert.Fail("pending: T693 — the re-ask prompt names the offending phrase after \"do not say:\"");
+        [Fact]
+        public void TheLLMWasCalledExactlyTwice() =>
+            Assert.Equal(2, Arrange.Run(Arrange.Repeating, Arrange.Fresh).UserPrompts.Count);
+
+        [Fact]
+        public void TheReAskPromptNamesTheOffendingPhraseAfterDoNotSay()
+        {
+            var reAsk = Arrange.Run(Arrange.Repeating, Arrange.Fresh).UserPrompts[1];
+
+            Assert.Contains("do not say: \"a golden hour groove from the vault\"", reAsk);
+        }
+
+        [Fact]
+        public void ATruthGateReAskFollowedByARepeatingReAskGivesTheTemplateAfterExactlyTwoCalls() =>
+            // The first copy lies about the day, the re-ask clears truth but repeats: still one extra call only.
+            Assert.Equal(2, Arrange.Run(Arrange.WrongDay, Arrange.Repeating).UserPrompts.Count);
+
+        [Fact]
+        public void ATruthGateReAskFollowedByARepeatingReAskStoresTheFallback() =>
+            Assert.True(Arrange.Run(Arrange.WrongDay, Arrange.Repeating).Store.Recorded.Single().Fallback);
+
+        [Fact]
+        public void AQuirkSelectedThisBreakMakesOneCall() =>
+            Assert.Single(Arrange.QuirkRun(selected: true).UserPrompts);
+
+        [Fact]
+        public void AQuirkSelectedThisBreakAirsItsCatchphrase() =>
+            Assert.Equal(Arrange.CatchphraseCopy, Arrange.QuirkRun(selected: true).Copy.Text);
+
+        [Fact]
+        public void ACappedQuirkNotSelectedThisBreakIsCaught() =>
+            Assert.Equal(2, Arrange.QuirkRun(selected: false).UserPrompts.Count);
+
+        [Fact]
+        public void ACappedQuirkNotSelectedThisBreakIsNamedInTheReAsk() =>
+            Assert.Contains("do not say: \"officially a banger, log it\"", Arrange.QuirkRun(selected: false).UserPrompts[1]);
+
+        [Fact]
+        public async Task APreviewNeverReAsksOnARepeatResult()
+        {
+            var result = await PreviewOnARepeat();
+
+            Assert.Equal(new PersonaPreviewResult.Success(Arrange.Repeating), result.Result);
+        }
+
+        [Fact]
+        public async Task APreviewNeverReAsksOnARepeatCallCount()
+        {
+            var result = await PreviewOnARepeat();
+
+            Assert.Single(result.Prompts);
+        }
+
+        [Fact]
+        public async Task APreviewNeverReAsksOnARepeatEvents()
+        {
+            var result = await PreviewOnARepeat();
+
+            Assert.Empty(result.Events.Events);
+        }
+
+        static async Task<(PersonaPreviewResult Result, List<string> Prompts, RecordingStationEventSink Events)> PreviewOnARepeat()
+        {
+            var prompts = new List<string>();
+            var events = new RecordingStationEventSink();
+            var writer = Arrange.Writer(prompts, [Arrange.Repeating], new RecordingUtteranceStore { Seeded = { Arrange.Entry(1, Arrange.Recent) } }, events);
+
+            var result = await writer.WritePreviewAsync(QuirkSpecHarness.Request(null), personaOverride: null, CancellationToken.None);
+            return (result, prompts, events);
+        }
     }
 
     // AC6 — the catch is logged
-    // entry point: BoothLogWriter via the event bus (repeat-caught)
+    // entry point: BoothLogWriter via the event bus (repeat-caught); the mapping facts live in
+    // tests/GenWave.MediaLibrary.Tests/Specs/Story534_RepeatCaughtBoothRow.cs
     public sealed class ScenarioTheCatchIsLogged
     {
         // Given a caught repeat
         // When  the re-ask is issued
 
-        [Fact(Skip = "pending: T693 — see docs/PLAN.md")]
-        public void ABoothLogRowKindRepeatCaughtNamesThePersonaAndThePhrase() => Assert.Fail("pending: T693 — a booth-log row kind repeat-caught names the persona and the phrase");
+        [Fact]
+        public void ABoothLogRowKindRepeatCaughtNamesThePersonaAndThePhrase()
+        {
+            var run = Arrange.Run(Arrange.Repeating, Arrange.Fresh);
 
-        [Fact(Skip = "pending: T693 — see docs/PLAN.md")]
-        public void TheLLMCallRecorderCountsOneCallWithCauseRepeat() => Assert.Fail("pending: T693 — the LLM call recorder counts one call with cause repeat");
+            Assert.Equal(
+                [(QuirkSpecHarness.PersonaId, "a golden hour groove from the vault")],
+                run.Events.Events.OfType<RepeatCaught>().Select(e => (e.PersonaId, e.Phrase)));
+        }
+
+        [Fact]
+        public void TheLLMCallRecorderCountsOneCallWithCauseRepeat()
+        {
+            var run = Arrange.Run(Arrange.Repeating, Arrange.Fresh);
+
+            Assert.Equal(1, run.Counters.Snapshot().Where(c => c.Cause == LlmCallCause.Repeat).Sum(c => c.Count));
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -78,14 +163,41 @@ public static class FeatureTheDjDoesNotSayThatAgainWriter
         // Given a fake LLM that returns the same repeating copy twice
         // When  WriteAsync runs
 
-        [Fact(Skip = "pending: T693 — see docs/PLAN.md")]
-        public void TheTemplateFallbackIsRendered() => Assert.Fail("pending: T693 — the template fallback is rendered");
+        [Fact]
+        public void TheTemplateFallbackIsRendered() =>
+            Assert.Equal("Coming up: Astral Plane by Valerie June.", Arrange.Run(Arrange.Repeating, Arrange.Repeating).Copy.Text);
 
-        [Fact(Skip = "pending: T693 — see docs/PLAN.md")]
-        public void TheStoredUtteranceHasFallbackTrue() => Assert.Fail("pending: T693 — the stored utterance has fallback = true");
+        [Fact]
+        public void TheTemplateFallbackIsNotFreshPerAiring() =>
+            Assert.False(Arrange.Run(Arrange.Repeating, Arrange.Repeating).Copy.FreshPerAiring);
 
-        [Fact(Skip = "pending: T693 — see docs/PLAN.md")]
-        public void TheLLMWasCalledExactlyTwice() => Assert.Fail("pending: T693 — the LLM was called exactly twice");
+        [Fact]
+        public void ADoubleTruthGateRejectStillRecordsAFailedAttempt() =>
+            Assert.Equal(1, Arrange.Run(Arrange.WrongDay, Arrange.WrongDay).Status.ConsecutiveFailureCount);
+
+        [Fact]
+        public void ATruthGateRejectThenARepeatingReAskRecordsNoFailure() =>
+            Assert.Equal(0, Arrange.Run(Arrange.WrongDay, Arrange.Repeating).Status.ConsecutiveFailureCount);
+
+        [Fact]
+        public void ARepeatThenAReAskThatFailsTruthRecordsAFailure() =>
+            Assert.Equal(1, Arrange.Run(Arrange.Repeating, Arrange.WrongDay).Status.ConsecutiveFailureCount);
+
+        [Fact]
+        public void ADoubleRepeatDoesNotRecordAFailedAttempt() =>
+            Assert.Equal(0, Arrange.Run(Arrange.Repeating, Arrange.Repeating).Status.ConsecutiveFailureCount);
+
+        [Fact]
+        public void TheStoredUtteranceHasFallbackTrue() =>
+            Assert.True(Arrange.Run(Arrange.Repeating, Arrange.Repeating).Store.Recorded.Single().Fallback);
+
+        [Fact]
+        public void TheLLMWasCalledExactlyTwice() =>
+            Assert.Equal(2, Arrange.Run(Arrange.Repeating, Arrange.Repeating).UserPrompts.Count);
+
+        [Fact]
+        public void EachCaughtAttemptIsLogged() =>
+            Assert.Equal(2, Arrange.Run(Arrange.Repeating, Arrange.Repeating).Events.Events.OfType<RepeatCaught>().Count());
     }
 
     // AC8 — memory off, block off
@@ -106,8 +218,13 @@ public static class FeatureTheDjDoesNotSayThatAgainWriter
         // Given a zero memory budget
         // When  WriteAsync runs
 
-        [Fact(Skip = "pending: T693 — see docs/PLAN.md")]
-        public void ThePostCheckStillRuns() => Assert.Fail("pending: T693 — the post-check still runs");
+        [Fact]
+        public void ThePostCheckStillRuns()
+        {
+            var run = Arrange.Run(Arrange.Repeating, Arrange.Fresh, MemoryBudget.Off);
+
+            Assert.Equal(2, run.UserPrompts.Count);
+        }
     }
 
     // F218.10 / F218.12 (re-ask half) - the block is bounded; the re-ask names phrases
@@ -128,6 +245,13 @@ public static class FeatureTheDjDoesNotSayThatAgainWriter
                 LlmPromptBuilder.BuildRepeatReAsk("Original prompt.", ["golden hour", "back to back"]));
     }
 
+    sealed class FixedSelector(QuirkSelection selection) : IQuirkSelector
+    {
+        public Task<QuirkSelection> SelectAsync(
+            long? personaId, PersonaCard? card, ShiftKey? shiftKey, bool spend, CancellationToken ct) =>
+            Task.FromResult(selection);
+    }
+
     sealed class NoQuirkSelector : IQuirkSelector
     {
         public Task<QuirkSelection> SelectAsync(
@@ -135,8 +259,59 @@ public static class FeatureTheDjDoesNotSayThatAgainWriter
             Task.FromResult(QuirkSelection.None);
     }
 
+    sealed record Outcome(
+        SegmentCopy Copy, List<string> UserPrompts, RecordingUtteranceStore Store,
+        RecordingStationEventSink Events, LlmCallCauseCounters Counters, LlmCopyStatusHolder Status);
+
     static class Arrange
     {
+        public const string Recent = "Here comes a golden hour groove from the vault tonight.";
+        public const string Repeating = "Settle in for a golden hour groove from the vault, folks.";
+        public const string Fresh = "Next up, a real stunner for the late shift.";
+        /// <summary>Names a weekday three days off, wrong in every timezone.</summary>
+        public static readonly string WrongDay = $"Happy {DateTime.UtcNow.AddDays(3).DayOfWeek}, and here is a real stunner for the late shift.";
+
+        static SegmentRequest StampedRequest() => QuirkSpecHarness.Request(
+            ShiftKey.Unscheduled(QuirkSpecHarness.PersonaId, new DateOnly(2026, 11, 9)).ToString());
+        public const string Quirk = "Say \"officially a banger, log it\" when a track slaps";
+        public const string CatchphraseCopy = "That one is officially a banger, log it, and now the next.";
+
+        /// <summary>The WriteAsync call fed these replies in order, with one stored recent line that the first reply repeats.</summary>
+        public static Outcome Run(string first, string second, MemoryBudget? budget = null)
+        {
+            var prompts = new List<string>();
+            var store = new RecordingUtteranceStore { Seeded = { Entry(1, Recent) } };
+            var events = new RecordingStationEventSink();
+            var counters = new LlmCallCauseCounters(TimeProvider.System);
+            var status = new LlmCopyStatusHolder();
+            var writer = Writer(prompts, [first, second], store, events, budget, counters, statusHolder: status);
+            var copy = writer.WriteAsync(StampedRequest(), CancellationToken.None).GetAwaiter().GetResult();
+            return new Outcome(copy, prompts, store, events, counters, status);
+        }
+
+        public static LlmCopyWriter Writer(
+            List<string> prompts, string[] replies, RecordingUtteranceStore store, RecordingStationEventSink events,
+            MemoryBudget? budget = null, LlmCallCauseCounters? counters = null, IQuirkSelector? selector = null,
+            PersonaCard? card = null, LlmCopyStatusHolder? statusHolder = null) =>
+            QuirkSpecHarness.WriterFor(
+                card ?? QuirkSpecHarness.Card([], null), selector ?? new NoQuirkSelector(),
+                utteranceStore: store, memoryBudget: budget,
+                httpOverride: QuirkSpecHarness.ScriptedHttp(prompts, replies), repetitionCheck: new RepetitionCheck(),
+                events: events, recorder: QuirkSpecHarness.NewRecorder(counters), statusHolder: statusHolder);
+
+        /// <summary>A capped quirk whose key phrase the reply says, either selected for this break or not.</summary>
+        public static Outcome QuirkRun(bool selected)
+        {
+            var prompts = new List<string>();
+            var store = new RecordingUtteranceStore();
+            var events = new RecordingStationEventSink();
+            var card = QuirkSpecHarness.Card([Quirk], [new QuirkRule(Quirk, MaxPerShift: 1, PerBreakChance: 1.0)]);
+            var selection = selected ? new QuirkSelection([Quirk], [Quirk]) : QuirkSelection.None;
+            var writer = Writer(prompts, [CatchphraseCopy, Fresh], store, events, selector: new FixedSelector(selection), card: card);
+            var copy = writer.WriteAsync(QuirkSpecHarness.Request(null), CancellationToken.None).GetAwaiter().GetResult();
+            return new Outcome(copy, prompts, store, events, new LlmCallCauseCounters(TimeProvider.System), new LlmCopyStatusHolder());
+        }
+
         public static string Line(int i) => i % 2 == 0 ? $"Line {i} " + new string('y', 300) : $"Line {i} short.";
 
         public static UtteranceEntry Entry(int i, string text) =>

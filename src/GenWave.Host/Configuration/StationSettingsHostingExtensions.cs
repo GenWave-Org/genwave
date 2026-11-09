@@ -107,6 +107,10 @@ static class StationSettingsHostingExtensions
         // the spend ledger comes from AddPersonaMemoryStore above.
         builder.Services.AddSingleton<IQuirkSelector, QuirkSelector>();
 
+        // Repetition check (SPEC F218.11, STORY-534, PLAN T693) — pure; LlmCopyWriter resolves it
+        // optionally and runs it after the truth gate, memory on or off.
+        builder.Services.AddSingleton<IRepetitionCheck, RepetitionCheck>();
+
         // Format-clock schedule store + resolver (SPEC F91.1, F91.3; STORY-240/241, PLAN T118-T120) —
         // same station_svc connection string as every registration above; station.segment_schedule
         // lives in the same schema. ScheduleRepository ships dark since T118 (AddScheduleStore itself

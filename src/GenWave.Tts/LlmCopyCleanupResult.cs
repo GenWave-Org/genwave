@@ -62,4 +62,11 @@ internal abstract record LlmCopyCleanupResult
     /// WARN can also name the still-unsupported claim.
     /// </summary>
     public sealed record TruthGateRejected(IReadOnlyList<ClaimViolation> Violations) : LlmCopyCleanupResult;
+
+    /// <summary>
+    /// The ladder's floor for a re-ask that passed hygiene and the truth gate but still repeated
+    /// (SPEC F218.12, PLAN T693): <see cref="Phrases"/> are the still-repeated phrases. Never airs; the
+    /// caller degrades to the template rung like any other reject.
+    /// </summary>
+    public sealed record RepeatRejected(IReadOnlyList<string> Phrases) : LlmCopyCleanupResult;
 }
