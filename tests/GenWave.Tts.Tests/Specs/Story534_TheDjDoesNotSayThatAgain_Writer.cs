@@ -7,6 +7,10 @@
 
 namespace GenWave.Tts.Tests.Specs;
 
+using GenWave.Core.Abstractions;
+using GenWave.Core.Domain;
+using GenWave.Tts.Tests.Fakes;
+
 public static class FeatureTheDjDoesNotSayThatAgainWriter
 {
     // ---------------------------------------------------------------------
@@ -20,11 +24,17 @@ public static class FeatureTheDjDoesNotSayThatAgainWriter
         // Given a persona with 8 stored utterances and a non-zero memory budget
         // When  the prompt is built
 
-        [Fact(Skip = "pending: T692 — see docs/PLAN.md")]
-        public void ItContainsARecentLinesDoNotReuseTheirPhrasingBlock() => Assert.Fail("pending: T692 — it contains a \"Recent lines, do not reuse their phrasing\" block");
+        [Fact]
+        public void ItContainsARecentLinesDoNotReuseTheirPhrasingBlock() =>
+            Assert.Contains("Recent lines, do not reuse their phrasing", Arrange.Prompt(Arrange.Eight(), MemoryBudget.Standard));
 
-        [Fact(Skip = "pending: T692 — see docs/PLAN.md")]
-        public void TheBlockListsThe6NewestUtterancesEachTrimmedTo160Characters() => Assert.Fail("pending: T692 — the block lists the 6 newest utterances, each trimmed to 160 characters");
+        [Fact]
+        public void TheBlockListsThe6NewestUtterancesEachTrimmedTo160Characters()
+        {
+            var block = Arrange.Block(Arrange.Prompt(Arrange.Eight(), MemoryBudget.Standard));
+            var expected = Enumerable.Range(1, 6).Select(i => "- " + Arrange.Line(i)[..Math.Min(160, Arrange.Line(i).Length)]);
+            Assert.Equal(expected, block);
+        }
     }
 
     // AC5 — one re-ask, then fresh copy airs
@@ -84,8 +94,9 @@ public static class FeatureTheDjDoesNotSayThatAgainWriter
         // Given a zero memory budget
         // When  the prompt is built
 
-        [Fact(Skip = "pending: T692 — see docs/PLAN.md")]
-        public void NoRecentLinesBlockIsPresent() => Assert.Fail("pending: T692 — no recent-lines block is present");
+        [Fact]
+        public void NoRecentLinesBlockIsPresent() =>
+            Assert.DoesNotContain("Recent lines", Arrange.Prompt(Arrange.Eight(), MemoryBudget.Off));
     }
 
     // AC8 — memory off, the post-check still runs
@@ -97,5 +108,59 @@ public static class FeatureTheDjDoesNotSayThatAgainWriter
 
         [Fact(Skip = "pending: T693 — see docs/PLAN.md")]
         public void ThePostCheckStillRuns() => Assert.Fail("pending: T693 — the post-check still runs");
+    }
+
+    // F218.10 / F218.12 (re-ask half) - the block is bounded; the re-ask names phrases
+    public sealed class ScenarioThePromptStaysBounded
+    {
+        [Fact]
+        public void TheRecentLinesBlockIsAtMost6TimesTheLineCapPlusOverhead()
+        {
+            var long6 = Enumerable.Range(1, 6).Select(i => Arrange.Entry(i, new string('x', 500))).ToList();
+            var block = Arrange.Block(Arrange.Prompt(long6, MemoryBudget.Standard));
+            Assert.Equal(6 * (2 + 160) + 5, string.Join('\n', block).Length);
+        }
+
+        [Fact]
+        public void TheRepeatReAskAppendsDoNotSayWithEachQuotedPhraseInHitOrder() =>
+            Assert.EndsWith(
+                "\n\ndo not say: \"golden hour\", \"back to back\"",
+                LlmPromptBuilder.BuildRepeatReAsk("Original prompt.", ["golden hour", "back to back"]));
+    }
+
+    sealed class NoQuirkSelector : IQuirkSelector
+    {
+        public Task<QuirkSelection> SelectAsync(
+            long? personaId, PersonaCard? card, ShiftKey? shiftKey, bool spend, CancellationToken ct) =>
+            Task.FromResult(QuirkSelection.None);
+    }
+
+    static class Arrange
+    {
+        public static string Line(int i) => i % 2 == 0 ? $"Line {i} " + new string('y', 300) : $"Line {i} short.";
+
+        public static UtteranceEntry Entry(int i, string text) =>
+            new(i, QuirkSpecHarness.PersonaId, null, UtteranceKind.Patter, "LeadIn", ShiftKey.Unscheduled(QuirkSpecHarness.PersonaId, new DateOnly(2026, 11, 9)), text, false, DateTimeOffset.UnixEpoch, null);
+
+        /// <summary>Eight utterances, newest first (Line 1 is newest).</summary>
+        public static List<UtteranceEntry> Eight() => Enumerable.Range(1, 8).Select(i => Entry(i, Line(i))).ToList();
+
+        public static string Prompt(List<UtteranceEntry> stored, MemoryBudget budget)
+        {
+            var store = new RecordingUtteranceStore();
+            store.Seeded.AddRange(stored);
+            string? prompt = null;
+            QuirkSpecHarness.WriterFor(
+                    QuirkSpecHarness.Card([], null), new NoQuirkSelector(),
+                    onSystemPrompt: p => { prompt = p; return Task.CompletedTask; },
+                    utteranceStore: store, memoryBudget: budget)
+                .WriteAsync(QuirkSpecHarness.Request(null), CancellationToken.None).GetAwaiter().GetResult();
+            return prompt ?? throw new InvalidOperationException("No completion request was captured");
+        }
+
+        /// <summary>The "- " lines directly under the heading.</summary>
+        public static List<string> Block(string prompt) =>
+            prompt.Split('\n').SkipWhile(l => !l.StartsWith("Recent lines", StringComparison.Ordinal)).Skip(1)
+                .TakeWhile(l => l.StartsWith("- ", StringComparison.Ordinal)).ToList();
     }
 }

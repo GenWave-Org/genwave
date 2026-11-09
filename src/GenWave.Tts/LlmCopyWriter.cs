@@ -131,7 +131,8 @@ public sealed class LlmCopyWriter(
     IContextPatterFactSource? patterFactSource = null,
     IShowFlavorLineSource? showFlavorLineSource = null,
     IUtteranceStore? utteranceStore = null,
-    IQuirkSelector? quirkSelector = null)
+    IQuirkSelector? quirkSelector = null,
+    MemoryBudget? memoryBudget = null) // T699 supplies this from the context probe; Off until then
     : ISegmentCopyWriter, IPersonaPreviewWriter, IAnnouncementCopyWriter
 {
     /// <summary>Name of the <see cref="IHttpClientFactory"/> client this writer resolves (registered in Program.cs).</summary>
@@ -807,6 +808,32 @@ public sealed class LlmCopyWriter(
         }
     }
 
+    /// <summary>
+    /// The persona's newest utterance texts for the recent-lines block (F218.10), newest first. Empty when
+    /// the memory budget is zero, there is no store or persona, or the read faults (F12.4: costs the block, not the segment).
+    /// </summary>
+    async Task<IReadOnlyList<string>> ReadRecentLinesAsync(SegmentRequest request, CancellationToken ct)
+    {
+        var take = (memoryBudget ?? MemoryBudget.Off).RecentLines;
+        if (take <= 0 || utteranceStore is null || request.PersonaId is not { } personaId)
+            return [];
+
+        try
+        {
+            var entries = await utteranceStore.RecentAsync(personaId, take, ct);
+            return entries.Take(take).Select(e => e.Text).ToList();
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Recent-lines read failed for {Kind}; this break airs without the block", request.Kind);
+            return [];
+        }
+    }
+
     async Task<LlmCopyCleanupResult> RequestCleanedCompletionAsync(
         LlmOptions cfg, SegmentRequest request, Persona? persona, PersonaCard? card,
         bool updateTasteMemory, bool spendQuirks, ContextPatterFact? patterFact, ShowFlavorFact? showFlavorFact,
@@ -914,8 +941,9 @@ public sealed class LlmCopyWriter(
             // on-air path (segments and announcements) and false only for the preview; an on-air
             // request without a shift key cannot record a spend, so the selector keeps capped quirks out.
             var quirkSelection = await SelectQuirksAsync(request, card, spend: spendQuirks, ct);
+            var recentLines = await ReadRecentLinesAsync(request, ct);
             systemPrompt = LlmPromptBuilder.BuildSystemPrompt(
-                LlmPromptBuilder.BuildPersonaSection(persona, card, mentionOwnName, quirkSelection), cfg.MaxCopyChars, stationLocalNow);
+                LlmPromptBuilder.BuildPersonaSection(persona, card, mentionOwnName, quirkSelection, recentLines), cfg.MaxCopyChars, stationLocalNow);
 
             // Read HERE — after WaitAsync above, i.e. already inside the single-flight critical
             // section — not by the caller before this method was ever invoked (SPEC F83.1, T65

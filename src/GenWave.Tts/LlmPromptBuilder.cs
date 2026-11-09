@@ -258,10 +258,13 @@ static class LlmPromptBuilder
     /// otherwise" half of F35.2, not just the no-persona case).
     /// <paramref name="mentionOwnName"/> (gh-#150) appends the say-your-own-name line (see
     /// <see cref="BuildSelfNameMentionLine"/>) — a rolled-true break's request, honored only when
-    /// there is an actual persona section for it to ride on.
+    /// there is an actual persona section for it to ride on. <paramref name="recentLines"/> (F218.10)
+    /// rides the same way: only on an existing persona section, so a persona with no soul and no
+    /// quirks gets no block and the neutral scaffold stays neutral.
     /// </summary>
     public static string? BuildPersonaSection(
-        Persona? persona, PersonaCard? card, bool mentionOwnName = false, QuirkSelection? selection = null)
+        Persona? persona, PersonaCard? card, bool mentionOwnName = false, QuirkSelection? selection = null,
+        IReadOnlyList<string>? recentLines = null)
     {
         var lines = new List<string>();
 
@@ -276,6 +279,10 @@ static class LlmPromptBuilder
             lines.AddRange(BuildQuirksBlock(sampled, selection?.CappedLines ?? []));
         }
 
+        // T692 (F218.10): a rider like the name line below - never a section by itself.
+        if (recentLines is { Count: > 0 } && lines.Count > 0)
+            lines.AddRange(BuildRecentLinesBlock(recentLines));
+
         // gh-#150: the name line is a rider on an actual persona section, never a section by
         // itself — a persona with no soul and no quirks stays on the neutral scaffold (the
         // "neutral otherwise" half of F35.2 above) even on a rolled-true break.
@@ -284,6 +291,30 @@ static class LlmPromptBuilder
 
         return lines.Count == 0 ? null : string.Join('\n', lines);
     }
+
+    /// <summary>SPEC F218.10 - heading of the recent-lines block. Public so a spec pins it.</summary>
+    public const string RecentLinesHeading = "Recent lines, do not reuse their phrasing:";
+
+    /// <summary>SPEC F218.10 - each recent line is cut to this many characters (no ellipsis).</summary>
+    public const int RecentLineMaxChars = 160;
+
+    /// <summary>
+    /// SPEC F218.10 - the heading, then one "- " line per utterance in the order given (newest first),
+    /// each trimmed to <see cref="RecentLineMaxChars"/>. Callers cap the count (MemoryBudget.RecentLines).
+    /// </summary>
+    public static IReadOnlyList<string> BuildRecentLinesBlock(IReadOnlyList<string> recentLines)
+    {
+        var block = new List<string> { RecentLinesHeading };
+        block.AddRange(recentLines.Select(t => "- " + (t.Length <= RecentLineMaxChars ? t : t[..RecentLineMaxChars])));
+        return block;
+    }
+
+    /// <summary>
+    /// SPEC F218.12 (re-ask half, wired by T693) - the original user prompt plus a
+    /// <c>do not say: "a", "b"</c> line naming the offending phrases in hit order.
+    /// </summary>
+    public static string BuildRepeatReAsk(string originalUserPrompt, IReadOnlyList<string> phrases) =>
+        $"{originalUserPrompt}\n\ndo not say: {string.Join(", ", phrases.Select(p => $"\"{p}\""))}";
 
     /// <summary>
     /// The quirks block of the persona section, owned here so a spec asserts the exact lines the

@@ -35,7 +35,8 @@ static class QuirkSpecHarness
         };
 
     public static LlmCopyWriter WriterFor(
-        PersonaCard card, IQuirkSelector selector, Func<string, Task>? onSystemPrompt = null, Action? onHttp = null)
+        PersonaCard card, IQuirkSelector selector, Func<string, Task>? onSystemPrompt = null, Action? onHttp = null,
+        IUtteranceStore? utteranceStore = null, MemoryBudget? memoryBudget = null)
     {
         var http = new SingleHandlerHttpClientFactory(new FakeHttpMessageHandler(async (req, _) =>
         {
@@ -60,7 +61,7 @@ static class QuirkSpecHarness
             new LlmCallRecorder(
                 new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions())),
                 new LlmCallCauseCounters(TimeProvider.System)),
-            new FakeDegradationModeReader(), quirkSelector: selector);
+            new FakeDegradationModeReader(), utteranceStore: utteranceStore, quirkSelector: selector, memoryBudget: memoryBudget);
     }
 
     /// <summary>An HTTP factory that answers every completion with <paramref name="reply"/> and appends each posted system prompt to <paramref name="prompts"/>.</summary>

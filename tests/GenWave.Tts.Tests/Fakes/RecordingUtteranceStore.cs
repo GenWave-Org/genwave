@@ -13,6 +13,9 @@ public sealed class RecordingUtteranceStore : IUtteranceStore
 
     public IReadOnlyList<NewUtterance> Recorded => recorded;
 
+    /// <summary>What <see cref="RecentAsync"/> answers, newest first.</summary>
+    public List<UtteranceEntry> Seeded { get; } = [];
+
     public Task<long> RecordAsync(NewUtterance utterance, CancellationToken ct)
     {
         recorded.Add(utterance);
@@ -22,7 +25,7 @@ public sealed class RecordingUtteranceStore : IUtteranceStore
     public Task MarkAiredAsync(long id, CancellationToken ct) => Task.CompletedTask;
 
     public Task<IReadOnlyList<UtteranceEntry>> RecentAsync(long personaId, int take, CancellationToken ct) =>
-        Task.FromResult<IReadOnlyList<UtteranceEntry>>([]);
+        Task.FromResult<IReadOnlyList<UtteranceEntry>>(Seeded.Where(e => e.PersonaId == personaId).Take(take).ToList());
 
     public Task<int> SweepAsync(CancellationToken ct) => Task.FromResult(0);
 }
