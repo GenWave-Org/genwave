@@ -401,7 +401,8 @@ public sealed class CrosstalkStockWorker(
         {
             var request = new CrosstalkExchangeRequest(
                 cast.HostCard, cast.NeighborCard, identityProvider.Current.Name, attempt.Show.Name,
-                Daypart: null, stationClock.LocalNow);
+                Daypart: null, stationClock.LocalNow,
+                cast.Cast.HostPersonaId, cast.Cast.NeighborPersonaId, attempt.Show.Id);
 
             var writeResult = await scriptWriter.WriteExchangeAsync(request, workCts.Token);
             if (writeResult is not CrosstalkWriteResult.Accepted accepted)

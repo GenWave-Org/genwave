@@ -58,8 +58,14 @@ public sealed class CrosstalkScriptWriter(
     IDegradationModeReader degradationMode,
     ILogger<CrosstalkScriptWriter> logger,
     TimeProvider timeProvider,
-    IQuirkSelector? quirkSelector = null)
+    IQuirkSelector? quirkSelector = null,
+    IRepetitionCheck? repetitionCheck = null, // T694: absent means no per-speaker check, as before
+    IUtteranceStore? utteranceStore = null, // T694: absent means no stored lines
+    IStationEventSink? events = null) // T694: absent means no repeat-caught rows
 {
+    readonly CrosstalkLineMemory memory = new(
+        repetitionCheck, utteranceStore, events ?? NoOpStationEventSink.Instance, logger);
+
     /// <summary>
     /// Headroom the whole-script generation cap carries OVER <see cref="CrosstalkOptions.DurationTargetSeconds"/>'s
     /// own char estimate (SPEC F127.3, T283 paper-audition reconciliation, gh-#385). The cap exists
@@ -137,6 +143,8 @@ public sealed class CrosstalkScriptWriter(
         var userPrompt = CrosstalkPromptBuilder.BuildUserContent(
             request, LlmPromptBuilder.BuildStationClockLine(request.StationLocalNow));
 
+        var histories = await memory.ReadHistoriesAsync(request, ct);
+
         try
         {
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -154,37 +162,45 @@ public sealed class CrosstalkScriptWriter(
             // starved a multi-line script on the first live run; see DeriveScriptGenerationCap's own
             // remarks). Still reuses LlmCopyWriter.DeriveMaxTokens's chars-to-tokens shape
             // (divisor/floor/ceiling) rather than a second, independently-tuned formula.
-            var reply = await LlmCopyWriter.PostChatCompletionAsync(
-                http, requestUri, cfg, systemPrompt, userPrompt, DeriveScriptGenerationCap(durationTargetSeconds),
-                timeoutCts.Token);
-            var raw = reply.Content;
+            var cap = DeriveScriptGenerationCap(durationTargetSeconds);
+            var (raw, result) = await PostAndParseAsync(
+                http, requestUri, cfg, systemPrompt, userPrompt, cap, request, durationTargetSeconds, timeoutCts.Token);
 
-            // SPEC F127.4, F127.11 (gh-#424 class, one seam over): a completion the backend cut
-            // short at its own max_tokens cap leaves a truncated last line that can still PARSE
-            // cleanly (a chopped sentence still matches the HOST:/NEIGHBOR: line shape) and would
-            // otherwise air mid-word — so this is checked BEFORE Parse ever runs, not left for the
-            // parser to maybe catch by accident. finish_reason is the OpenAI/ollama-compatible
-            // signal for exactly this (see ChatCompletionChoice.FinishReason's own remarks); "stop"
-            // (or a missing field, from an endpoint that predates it) never trips this check.
-            if (reply.FinishReason == "length")
+            if (result is CrosstalkWriteResult.Accepted first)
             {
-                return Discard(
-                    "the completion was cut short by max_tokens (finish_reason: length) — a truncated reply is never aired",
-                    LlmCallCause.OverLength, personaName, startedAt, mode, systemPrompt, userPrompt, cfg.Model, raw);
+                var hits = memory.FindRepeats(first.Script, request.StationName, histories);
+                if (hits.Count > 0)
+                {
+                    // SPEC F218.12/F218.14: exactly ONE re-ask, never a third call. The caught call gets its
+                    // own honest ring entry BEFORE the re-ask fires.
+                    memory.PublishCaught(hits);
+                    recorder.Record(
+                        personaName, systemPrompt, userPrompt, raw, startedAt, ElapsedMs(startedAt),
+                        LlmCallOutcome.Ok, statusDetail: null, mode, LlmCallCause.Repeat, cfg.Model, LlmCallKind.Crosstalk);
+
+                    // userPrompt/startedAt are REASSIGNED so a fault in the re-ask is attributed to it.
+                    userPrompt = LlmPromptBuilder.BuildRepeatReAsk(
+                        userPrompt, hits.SelectMany(h => h.Phrases).Distinct(StringComparer.Ordinal).ToList());
+                    startedAt = timeProvider.GetUtcNow();
+                    (raw, result) = await PostAndParseAsync(
+                        http, requestUri, cfg, systemPrompt, userPrompt, cap, request, durationTargetSeconds, timeoutCts.Token);
+                    if (result is CrosstalkWriteResult.Accepted reasked)
+                        result = DropStillRepeating(reasked, request, histories);
+                }
             }
 
-            var result = CrosstalkScriptParser.Parse(
-                raw, cfg.MaxCopyChars, durationTargetSeconds, request.StationLocalNow, request.StationName);
-            return result switch
+            switch (result)
             {
-                CrosstalkWriteResult.Accepted => Accept(
-                    result, personaName, systemPrompt, userPrompt, raw, startedAt, mode, cfg.Model),
-                // discarded.Cause was decided once, at the source, inside CrosstalkScriptParser.Parse's
-                // own reject branches (SPEC F139.1) — never re-derived here from discarded.Reason's text.
-                CrosstalkWriteResult.Discarded discarded => Discard(
-                    discarded.Reason, discarded.Cause, personaName, startedAt, mode, systemPrompt, userPrompt, cfg.Model, raw),
-                _ => throw new System.Diagnostics.UnreachableException($"Unhandled {nameof(CrosstalkWriteResult)} case."),
-            };
+                case CrosstalkWriteResult.Accepted accepted:
+                    await memory.StoreAsync(request, accepted.Script, ct);
+                    return Accept(accepted, personaName, systemPrompt, userPrompt, raw, startedAt, mode, cfg.Model);
+                // discarded.Cause was decided once, at the source (SPEC F139.1) — never re-derived from its text.
+                case CrosstalkWriteResult.Discarded discarded:
+                    return Discard(
+                        discarded.Reason, discarded.Cause, personaName, startedAt, mode, systemPrompt, userPrompt, cfg.Model, raw);
+                default:
+                    throw new System.Diagnostics.UnreachableException($"Unhandled {nameof(CrosstalkWriteResult)} case.");
+            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -213,6 +229,61 @@ public sealed class CrosstalkScriptWriter(
                 personaName.ReplaceLineEndings(" "), detail.ReplaceLineEndings(" "));
             return new CrosstalkWriteResult.Discarded(detail, cause, generationAttempted);
         }
+    }
+
+    /// <summary>
+    /// One completion: post, refuse a length-truncated reply (SPEC F127.4, F127.11, gh-#424 class — checked
+    /// BEFORE Parse, since a chopped last line can still parse), then parse. The raw reply rides along for the ring.
+    /// </summary>
+    async Task<(string Raw, CrosstalkWriteResult Result)> PostAndParseAsync(
+        HttpClient http, Uri requestUri, LlmOptions cfg, string systemPrompt, string userPrompt, int cap,
+        CrosstalkExchangeRequest request, int durationTargetSeconds, CancellationToken ct)
+    {
+        // The wire call is LlmCopyWriter.PostChatCompletionAsync, the ONE seam this writer and AdScriptWriter share.
+        var reply = await LlmCopyWriter.PostChatCompletionAsync(http, requestUri, cfg, systemPrompt, userPrompt, cap, ct);
+        var raw = reply.Content;
+        if (reply.FinishReason == "length")
+        {
+            return (raw, new CrosstalkWriteResult.Discarded(
+                "the completion was cut short by max_tokens (finish_reason: length) — a truncated reply is never aired",
+                LlmCallCause.OverLength));
+        }
+
+        return (raw, CrosstalkScriptParser.Parse(
+            raw, cfg.MaxCopyChars, durationTargetSeconds, request.StationLocalNow, request.StationName));
+    }
+
+    /// <summary>
+    /// SPEC F218.14: after the one re-ask, a line that still repeats its own speaker is dropped from the
+    /// exchange — never replaced by template text. The survivors must still be a two-voice exchange of at
+    /// least <see cref="CrosstalkScriptParser.MinLines"/> lines, else the whole exchange is discarded as
+    /// <see cref="LlmCallCause.Repeat"/>. Alternation is deliberately not re-checked: dropping one of A's lines from
+    /// H N H N leaves two N lines in a row (AC3 forces this), and the assembler handles a same-speaker pair
+    /// with the narrower F198.3 gap; a leading interjection still starts at 0 and its marker never reaches TTS.
+    /// </summary>
+    CrosstalkWriteResult DropStillRepeating(
+        CrosstalkWriteResult.Accepted reasked, CrosstalkExchangeRequest request,
+        IReadOnlyList<CrosstalkLineMemory.SpeakerHistory> histories)
+    {
+        var hits = memory.FindRepeats(reasked.Script, request.StationName, histories);
+        if (hits.Count == 0)
+            return reasked;
+
+        memory.PublishCaught(hits);
+        var dropped = hits.Select(h => h.LineIndex).ToHashSet();
+        var survivors = reasked.Script.Lines.Where((_, i) => !dropped.Contains(i)).ToList();
+
+        if (survivors.Count < CrosstalkScriptParser.MinLines)
+        {
+            return new CrosstalkWriteResult.Discarded(
+                $"{survivors.Count} lines were left after dropping repeated ones; at least {CrosstalkScriptParser.MinLines} are needed",
+                LlmCallCause.Repeat);
+        }
+
+        if (CrosstalkScriptParser.MissingSpeakerReason(survivors) is { } missing)
+            return new CrosstalkWriteResult.Discarded($"after dropping repeated lines, {missing}", LlmCallCause.Repeat);
+
+        return new CrosstalkWriteResult.Accepted(new CrosstalkAiredScript(survivors));
     }
 
     /// <summary>

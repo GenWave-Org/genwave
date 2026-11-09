@@ -349,6 +349,63 @@ public static class FeatureCrosstalkStockWorker
         }
     }
 
+    // ── PLAN T694 (SPEC F218.14): the worker names the cast in the request ─────────────────────────
+    // The script writer is the REAL one, so the worker's request is observable through the rows the
+    // writer stores: each aired line lands under the cast persona that spoke it, with the show's id.
+
+    sealed class RecordingLineStore : IUtteranceStore
+    {
+        readonly List<NewUtterance> recorded = [];
+
+        public IReadOnlyList<NewUtterance> Recorded
+        {
+            get { lock (recorded) return recorded.ToArray(); }
+        }
+
+        public Task<long> RecordAsync(NewUtterance utterance, CancellationToken ct)
+        {
+            lock (recorded) recorded.Add(utterance);
+            return Task.FromResult((long)recorded.Count);
+        }
+
+        public Task MarkAiredAsync(long id, CancellationToken ct) => Task.CompletedTask;
+
+        public Task<IReadOnlyList<UtteranceEntry>> RecentAsync(long personaId, int take, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<UtteranceEntry>>([]);
+
+        public Task<int> SweepAsync(CancellationToken ct) => Task.FromResult(0);
+    }
+
+    public sealed class ScenarioTheWorkerNamesTheCastAndShowInTheExchangeRequest : IAsyncLifetime
+    {
+        // Given a stocked show whose host block is persona 10 (show id 1) and whose neighbour is persona 20
+        // When  one tick writes an exchange (the assembler blocks in its first synth, after the lines are stored)
+
+        IReadOnlyList<(long PersonaId, long? ShowId)> stored = [];
+
+        public async Task InitializeAsync()
+        {
+            var now = new DateTimeOffset(2026, 1, 5, 12, 0, 0, TimeSpan.Zero); // a Monday noon
+            var store = new RecordingLineStore();
+            var (worker, gate, timeProvider, _, _, synthesizer) = await CrosstalkWorkerHarness.BuildAsync(
+                now, ShowSlug, ShowName, utteranceStore: store);
+
+            var tickTask = worker.TickOnceAsync(CancellationToken.None);
+            await synthesizer.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            stored = store.Recorded.Select(u => (u.PersonaId, u.ShowId)).ToList();
+
+            gate.Enter(); // end the blocked tick the same way the cancellation facts above do
+            timeProvider.Advance(TimeSpan.FromSeconds(3));
+            await tickTask.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void EachStoredLineCarriesItsCastPersonaAndTheShowId() =>
+            Assert.Equal<(long, long?)[]>([(10, 1), (20, 1), (10, 1)], stored.ToArray());
+    }
+
     // ── PLAN T286 review F1 (BLOCKING): the cooldown write + discrimination pin ────────────────────
     //
     // CrosstalkStockWorker.TickOnceAsync only charges DiscardCooldown for a GENUINE discard, never a

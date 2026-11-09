@@ -165,6 +165,7 @@ internal static class CrosstalkWorkerHarness
     /// </param>
     /// <param name="quirkSelector">SPEC F218.7 (PLAN T688): the selector the script writer is built with;
     /// null builds the writer without one, as before.</param>
+    /// <param name="utteranceStore">SPEC F218.14 (PLAN T694): the store the script writer records aired lines into; null builds the writer without one.</param>
     /// <param name="card">Replaces the default quirk-less card for every cast persona.</param>
     /// <param name="postedPrompts">When supplied, receives each posted system prompt in arrival order.</param>
     /// <param name="causeCounters">The SPEC F139.2 sibling of <paramref name="callRing"/> — same
@@ -176,7 +177,7 @@ internal static class CrosstalkWorkerHarness
             DateTimeOffset now, string showSlug, string showName, string? replyContent = null,
             string llmEndpoint = "http://fake-llm.local", LlmCallRing? callRing = null,
             LlmCallCauseCounters? causeCounters = null, IQuirkSelector? quirkSelector = null,
-            PersonaCard? card = null, List<string>? postedPrompts = null)
+            PersonaCard? card = null, List<string>? postedPrompts = null, IUtteranceStore? utteranceStore = null)
     {
         var timeProvider = new FakeTimeProvider(now);
         var gate = new OnAirRenderGate();
@@ -241,7 +242,8 @@ internal static class CrosstalkWorkerHarness
             degradationModeReader,
             NullLogger<CrosstalkScriptWriter>.Instance,
             timeProvider,
-            quirkSelector);
+            quirkSelector,
+            utteranceStore: utteranceStore);
 
         var synthesizer = new BlockingTtsSynthesizer();
         var cacheRoot = Directory.CreateDirectory(Path.Combine(SharedTempRoot, Guid.NewGuid().ToString("N"))).FullName;
