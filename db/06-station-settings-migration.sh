@@ -107,6 +107,16 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	  updated_at    timestamptz NOT NULL DEFAULT now()
 	);
 
+	-- F218 "DJs that remember" (STORY-532; mirrors db/50-utterance-memory-migration.sh): one shared
+	-- happening that N personas' persona_memory rows point at. Created BEFORE persona_memory because
+	-- persona_memory.event_id references it.
+	CREATE TABLE IF NOT EXISTS station.memory_event (
+	  id          serial      PRIMARY KEY,
+	  occurred_at timestamptz NOT NULL,
+	  kind        text        NOT NULL,               -- 'crosstalk' | 'handoff' | 'outing' (extracted, two DJs)
+	  summary     text        NOT NULL
+	);
+
 	-- Persona memory (SPEC F71.1, STORY-192): accrued/authored bits and callbacks a future
 	-- orchestrator task (STORY-194) records/recalls. FK CASCADE — deleting a persona deletes its
 	-- memory with it, never orphaned rows. The recall index is the spec'd shape verbatim:
@@ -117,10 +127,17 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	  persona_id    integer     NOT NULL REFERENCES station.persona (id) ON DELETE CASCADE,
 	  kind          text        NOT NULL,                                       -- e.g. 'bit', 'callback' — open, evolving set (F71.4)
 	  content       text        NOT NULL,
-	  source        text        NOT NULL CHECK (source IN ('authored', 'accrued')),  -- F71.6: authored rows are eviction-exempt
+	  -- F71.6: authored rows are eviction-exempt. F218 (db/50) widened the set to extracted|drafted; the
+	  -- inline CHECK keeps its auto-name persona_memory_source_check, which db/50's DROP CONSTRAINT targets.
+	  source        text        NOT NULL CHECK (source IN ('authored', 'accrued', 'extracted', 'drafted')),
 	  aired_count   integer     NOT NULL DEFAULT 0,
 	  last_aired_at timestamptz,                                                -- null = never aired
-	  created_at    timestamptz NOT NULL DEFAULT now()
+	  created_at    timestamptz NOT NULL DEFAULT now(),
+	  -- F218 (db/50): grow, never reshape.
+	  occurred_at   timestamptz,                                                -- when the remembered thing happened; null = timeless
+	  event_id      integer     REFERENCES station.memory_event (id) ON DELETE SET NULL, -- nullable-fk: only shared events have one
+	  approved_at   timestamptz,                                                -- drafted rows: null = pending, never recalled
+	  forgotten_at  timestamptz                                                 -- set = never recalled, never-mention for 7 days
 	);
 
 	CREATE INDEX IF NOT EXISTS persona_memory_recall
@@ -319,6 +336,29 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	  -- above the FK's own DO block for why that ALTER (not just this CREATE TABLE) is required.
 	  sponsor_id    bigint
 	);
+
+	-- F218 (STORY-532; mirrors db/50-utterance-memory-migration.sh): what each persona said on air, for
+	-- repeat suppression and memory extraction. Created after station.show, which it references.
+	DO $$
+	BEGIN
+	  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'utterance_kind' AND typnamespace = 'station'::regnamespace) THEN
+	    CREATE TYPE station.utterance_kind AS ENUM ('patter', 'crosstalk');
+	  END IF;
+	END $$;
+
+	CREATE TABLE IF NOT EXISTS station.utterance (
+	  id            serial      PRIMARY KEY,
+	  persona_id    integer     NOT NULL REFERENCES station.persona (id) ON DELETE CASCADE,
+	  show_id       integer     REFERENCES station.show (id) ON DELETE SET NULL, -- nullable-fk: unscheduled hours have no show
+	  kind          station.utterance_kind NOT NULL,
+	  segment_kind  text        NOT NULL,            -- LeadIn / BackAnnounce / SignOn / SignOff / ContextSegment / CrosstalkLine
+	  shift_key     text        NOT NULL,            -- gh-#293: persona|day|start|station-local date; date alone when unscheduled
+	  text          text        NOT NULL,            -- the LLM's accepted copy, before the TTS normaliser
+	  fallback      boolean     NOT NULL DEFAULT false,  -- template line aired instead (truth or repeat gate failed twice)
+	  written_at    timestamptz NOT NULL DEFAULT now(),
+	  aired_at      timestamptz                      -- null until the engine reports the file started
+	);
+	CREATE INDEX IF NOT EXISTS utterance_recent ON station.utterance (persona_id, written_at DESC);
 
 	-- The weekly format-clock grid (SPEC F91.1, F91.2; STORY-240, STORY-242; PLAN T118) that replaces
 	-- the single owner-toggled Station:Persona:ActiveId. day_of_week is System.DayOfWeek's own 0-6

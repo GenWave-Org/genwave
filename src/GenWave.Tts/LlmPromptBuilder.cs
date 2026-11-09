@@ -21,10 +21,6 @@ static class LlmPromptBuilder
     // Soul, per-field for the legacy Backstory/Style fallback).
     const int MaxSoulChars = 4000;
 
-    // F71.3 (STORY-193): "2-3 per generation, never all" — see SampleQuirks' own remarks.
-    const int MinSampledQuirks = 2;
-    const int MaxSampledQuirks = 3;
-
     /// <summary>
     /// Chars-per-word divisor used to derive the system prompt's stated word budget from
     /// <see cref="LlmOptions.MaxCopyChars"/> (SPEC F123.5, STORY-319, PLAN T264) — the SAME
@@ -44,13 +40,20 @@ static class LlmPromptBuilder
     const int CharsPerWordDivisor = 6;
 
     /// <summary>
-    /// gh-#188 — appended directly under the Quirks line (and only then): tells the model a
+    /// gh-#188 — appended after the Quirks line and any F218.8 annotation lines (and only then): tells the model a
     /// quirk's inline example ("item four-seven-one-two") demonstrates the bit's SHAPE, not a
     /// value to read on air. Public so a spec pins the exact wording next to where it is emitted.
     /// </summary>
     public const string QuirkExampleGuidance =
         "Any example inside a quirk illustrates its style - invent fresh specifics of your own " +
-        "each break, and never reuse an example's literal values on air.";
+        "each break, and keep an example's literal values off the air.";
+
+    /// <summary>
+    /// SPEC F218.8 - the positive annotation emitted directly under the Quirks line, once per
+    /// <see cref="QuirkSelection.CappedLines"/> entry: the break where a maxPerShift quirk is
+    /// chosen is its one moment of the shift. {0} is the quirk text. Public so a spec pins it.
+    /// </summary>
+    public const string CappedQuirkLandItFormat = "This is your one \"{0}\" of the shift - land it.";
 
     /// <summary>
     /// Baked house scaffold for the system prompt (SPEC F34.3): 1-2 spoken sentences, no stage
@@ -255,9 +258,13 @@ static class LlmPromptBuilder
     /// otherwise" half of F35.2, not just the no-persona case).
     /// <paramref name="mentionOwnName"/> (gh-#150) appends the say-your-own-name line (see
     /// <see cref="BuildSelfNameMentionLine"/>) — a rolled-true break's request, honored only when
-    /// there is an actual persona section for it to ride on.
+    /// there is an actual persona section for it to ride on. <paramref name="recentLines"/> (F218.10)
+    /// rides the same way: only on an existing persona section, so a persona with no soul and no
+    /// quirks gets no block and the neutral scaffold stays neutral.
     /// </summary>
-    public static string? BuildPersonaSection(Persona? persona, PersonaCard? card, bool mentionOwnName = false)
+    public static string? BuildPersonaSection(
+        Persona? persona, PersonaCard? card, bool mentionOwnName = false, QuirkSelection? selection = null,
+        IReadOnlyList<string>? recentLines = null)
     {
         var lines = new List<string>();
 
@@ -265,20 +272,16 @@ static class LlmPromptBuilder
         if (!string.IsNullOrEmpty(soul))
             lines.Add(soul);
 
-        if (card is { Quirks.Count: > 0 })
+        // selection (T686): already chosen by IQuirkSelector; null = sample here as before.
+        var sampled = selection?.Lines ?? (card is { Quirks.Count: > 0 } ? SampleQuirks(card.Quirks) : []);
+        if (sampled.Count > 0)
         {
-            var sampled = SampleQuirks(card.Quirks);
-            if (sampled.Count > 0)
-            {
-                lines.Add($"Quirks: {string.Join("; ", sampled)}");
-
-                // gh-#188: quirk examples exert gravitational pull — The Archivist's "invented
-                // catalog number: 'item four-seven-one-two'" aired that literal number break
-                // after break. Only emitted when quirks are shown: a quirk-less prompt stays
-                // byte-identical to its pre-gh-#188 shape.
-                lines.Add(QuirkExampleGuidance);
-            }
+            lines.AddRange(BuildQuirksBlock(sampled, selection?.CappedLines ?? []));
         }
+
+        // T692 (F218.10): a rider like the name line below - never a section by itself.
+        if (recentLines is { Count: > 0 } && lines.Count > 0)
+            lines.AddRange(BuildRecentLinesBlock(recentLines));
 
         // gh-#150: the name line is a rider on an actual persona section, never a section by
         // itself — a persona with no soul and no quirks stays on the neutral scaffold (the
@@ -287,6 +290,47 @@ static class LlmPromptBuilder
             lines.Add(BuildSelfNameMentionLine(name));
 
         return lines.Count == 0 ? null : string.Join('\n', lines);
+    }
+
+    /// <summary>SPEC F218.10 - heading of the recent-lines block. Public so a spec pins it.</summary>
+    public const string RecentLinesHeading = "Recent lines, do not reuse their phrasing:";
+
+    /// <summary>SPEC F218.10 - each recent line is cut to this many characters (no ellipsis).</summary>
+    public const int RecentLineMaxChars = 160;
+
+    /// <summary>
+    /// SPEC F218.10 - the heading, then one "- " line per utterance in the order given (newest first),
+    /// each trimmed to <see cref="RecentLineMaxChars"/>. Callers cap the count (MemoryBudget.RecentLines).
+    /// </summary>
+    public static IReadOnlyList<string> BuildRecentLinesBlock(IReadOnlyList<string> recentLines)
+    {
+        var block = new List<string> { RecentLinesHeading };
+        block.AddRange(recentLines.Select(t => "- " + (t.Length <= RecentLineMaxChars ? t : t[..RecentLineMaxChars])));
+        return block;
+    }
+
+    /// <summary>
+    /// SPEC F218.12 (re-ask half, wired by T693) - the original user prompt plus a
+    /// <c>do not say: "a", "b"</c> line naming the offending phrases in hit order.
+    /// </summary>
+    public static string BuildRepeatReAsk(string originalUserPrompt, IReadOnlyList<string> phrases) =>
+        $"{originalUserPrompt}\n\ndo not say: {string.Join(", ", phrases.Select(p => $"\"{p}\""))}";
+
+    /// <summary>
+    /// The quirks block of the persona section, owned here so a spec asserts the exact lines the
+    /// prompt carries: the Quirks line, one F218.8 annotation per capped quirk, then
+    /// <see cref="QuirkExampleGuidance"/> (gh-#188). Callers only ask when there are quirks to show.
+    /// </summary>
+    public static IReadOnlyList<string> BuildQuirksBlock(
+        IReadOnlyList<string> quirks, IReadOnlyList<string> cappedLines)
+    {
+        var block = new List<string> { $"Quirks: {string.Join("; ", quirks)}" };
+        block.AddRange(cappedLines.Select(c => string.Format(CultureInfo.InvariantCulture, CappedQuirkLandItFormat, c)));
+        // gh-#188: quirk examples exert gravitational pull - The Archivist's "invented catalog number:
+        // 'item four-seven-one-two'" aired that literal number break after break. Only emitted when
+        // quirks are shown: a quirk-less prompt stays byte-identical to its pre-gh-#188 shape.
+        block.Add(QuirkExampleGuidance);
+        return block;
     }
 
     /// <summary>
@@ -375,25 +419,12 @@ static class LlmPromptBuilder
         text.Length <= maxChars ? text : text[..maxChars];
 
     /// <summary>
-    /// Samples 2-3 quirks from <paramref name="quirks"/>, never the full set once there are more
-    /// than <see cref="MaxSampledQuirks"/> to choose from (SPEC F71.3, pinned by test: a
-    /// five-quirk persona never sees all five in one prompt). Fewer than
-    /// <see cref="MaxSampledQuirks"/>+1 quirks on the card means there is nothing left to trim —
-    /// every one of them ships as-is. <see cref="Random.Shared"/> (thread-safe, no seed needed —
-    /// tests assert the 2-3 bound across many generations rather than an exact sequence); the
-    /// SELECTED subset is re-sorted back to the card's own original order before it reaches the
-    /// prompt, so the SET is random but the ORDER within any one prompt is always deterministic.
+    /// The no-selector fallback (SPEC F71.3): delegates to <see cref="QuirkSampling.Sample{T}"/>,
+    /// which owns the 2-3 sampling rule, with <see cref="Random.Shared"/>. On-air and preview
+    /// paths pass the <c>IQuirkSelector</c>'s lines instead (SPEC F218.7, PLAN T686).
     /// </summary>
-    static IReadOnlyList<string> SampleQuirks(IReadOnlyList<string> quirks)
-    {
-        if (quirks.Count <= MaxSampledQuirks)
-            return quirks;
-
-        var sampleSize = Random.Shared.Next(MinSampledQuirks, MaxSampledQuirks + 1);
-        var indices = Enumerable.Range(0, quirks.Count).ToArray();
-        Random.Shared.Shuffle(indices);
-        return indices.Take(sampleSize).Order().Select(i => quirks[i]).ToList();
-    }
+    static IReadOnlyList<string> SampleQuirks(IReadOnlyList<string> quirks) =>
+        QuirkSampling.Sample(quirks, Random.Shared);
 
     /// <summary>
     /// The DJ's clock (SPEC F71.8, gh-#13): every LLM prompt this writer builds — persona active or

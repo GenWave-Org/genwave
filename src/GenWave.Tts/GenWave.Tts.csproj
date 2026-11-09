@@ -19,5 +19,7 @@
     <InternalsVisibleTo Include="GenWave.Tts.Tests" />
     <!-- tools/VoiceOff reuses the internal KokoroVoicesResponse / EndpointUri. -->
     <InternalsVisibleTo Include="VoiceOff" />
+    <!-- tools/PatterBench posts through PostChatCompletionAsync and gates with CheckTruthGate, as the writer does. -->
+    <InternalsVisibleTo Include="PatterBench" />
   </ItemGroup>
 </Project>

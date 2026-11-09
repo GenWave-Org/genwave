@@ -157,4 +157,26 @@ public sealed record SegmentRequest(
     /// </para>
     /// </summary>
     public SpeakerSnapshot? Speaker { get; init; }
+
+    /// <summary>
+    /// SPEC F218.1 (STORY-532, PLAN T684) — id of the persona the Orchestration planner resolved for
+    /// this request (the SAME read that resolved <see cref="Voice"/>), or <see langword="null"/> when
+    /// none is active. The copy writer records an utterance only when this is set.
+    /// Init-only body property, not a positional parameter (published-arity precedent: <see cref="CrosstalkAiredThisBreak"/>).
+    /// </summary>
+    public long? PersonaId { get; init; }
+
+    /// <summary>
+    /// SPEC F218.1 — id of the on-air show when the request was planned, <see langword="null"/> when
+    /// no schedule segment carried a show. Same init-only discipline as <see cref="PersonaId"/>.
+    /// </summary>
+    public long? ShowId { get; init; }
+
+    /// <summary>
+    /// SPEC F218.1 — the planner-built shift key in its string form (<c>GenWave.Core.Domain.ShiftKey.ToString()</c>),
+    /// parsed back by the copy writer. The schedule knowledge (day, start minute, station date) lives in
+    /// Orchestration; this string is how it crosses to Tts without a layering breach.
+    /// <see langword="null"/> means "do not record". Same init-only discipline as <see cref="PersonaId"/>.
+    /// </summary>
+    public string? ShiftKeyText { get; init; }
 }

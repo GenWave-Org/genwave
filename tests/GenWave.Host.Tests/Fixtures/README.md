@@ -208,3 +208,15 @@ fail at the commit that regenerates it — "never hand-edit" has no teeth there,
 to hand-edit, they need only regenerate. So account for every line of that diff by hand: additions
 must be exactly the contract change the PR intends, and **removals must be zero**. A removal is a
 breaking change and needs a major bump, not a new baseline. Put the two counts in the PR body.
+
+### ⏳ Pending-publication amendment (PLAN T683, F218.5)
+
+`QuirkRule` and `PersonaCard.QuirkRules` (SPEC F218.5, gh-#293 gh-#920) landed in
+`src/GenWave.Abstractions` BEFORE the package that carries them is published. This fixture stays
+byte-identical to the published 5.10.0 surface (never hand-edited); the gap is tolerated only in
+`Specs/Story431_SponsorSettingsAndRelease.cs` (`ThePackageSurfaceDiffVs5100IsEmpty`) and
+`GenWave.Architecture.Tests/Specs/Story483_OneVersionLaw.cs` (`ScenarioNoContractChange`), by the
+named, line-by-line allowlist `Support/PendingPublicationSurfaceAllowlist.cs`. Any addition not on
+that list, or any removal at all, still fails.
+🗑️ The next release cut regenerates this fixture from the newly published package, renames it, and
+deletes the allowlist in the same PR.

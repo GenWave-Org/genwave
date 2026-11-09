@@ -65,6 +65,7 @@
     <ProjectReference Include="..\..\src\GenWave.Core\GenWave.Core.csproj" />
     <ProjectReference Include="..\..\src\GenWave.Loudness\GenWave.Loudness.csproj" />
     <ProjectReference Include="..\..\src\GenWave.MediaLibrary\GenWave.MediaLibrary.csproj" />
+    <ProjectReference Include="..\..\src\GenWave.Memory\GenWave.Memory.csproj" />
     <ProjectReference Include="..\..\src\GenWave.Orchestration\GenWave.Orchestration.csproj" />
     <ProjectReference Include="..\..\src\GenWave.Plugins\GenWave.Plugins.csproj" />
     <ProjectReference Include="..\..\src\GenWave.Tts\GenWave.Tts.csproj" />

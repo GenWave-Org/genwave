@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- F218.27: the patter bench references GenWave.Tts only (the real prompt builder and truth gate).
+       It does not reference GenWave.Memory: the scoring is plain n-gram counting and lives here.
+       It is a developer tool; it never ships in a Dockerfile or compose file. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <RootNamespace>GenWave.PatterBench</RootNamespace>
+    <AssemblyName>PatterBench</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\GenWave.Tts\GenWave.Tts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="personas\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The specs drive Cli.RunAsync in-process. -->
+    <InternalsVisibleTo Include="GenWave.Memory.Tests" />
+    <InternalsVisibleTo Include="GenWave.Tts.Tests" />
+  </ItemGroup>
+
+</Project>

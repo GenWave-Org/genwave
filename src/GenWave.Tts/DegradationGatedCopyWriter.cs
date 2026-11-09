@@ -60,7 +60,7 @@ public sealed class DegradationGatedCopyWriter(
         };
 
         if (!attemptsLlm)
-            return await templateWriter.WriteAsync(request, ct);
+            return await llmWriter.RecordTemplateCopyAsync(request, await templateWriter.WriteAsync(request, ct), ct);
 
         var copy = await llmWriter.WriteAsync(request, ct);
 

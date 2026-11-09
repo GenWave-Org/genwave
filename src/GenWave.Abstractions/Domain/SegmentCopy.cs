@@ -12,4 +12,14 @@ namespace GenWave.Core.Domain;
 /// True when <paramref name="Text"/> is newly authored for this airing and must never be treated as a
 /// stable, forever-cacheable string; false for template copy (including an LLM writer's fallback).
 /// </param>
-public sealed record SegmentCopy(string Text, bool FreshPerAiring);
+public sealed record SegmentCopy(string Text, bool FreshPerAiring)
+{
+    /// <summary>
+    /// SPEC F218.1 (STORY-532, PLAN T684) — the <c>station.utterance</c> row the writer stored this copy
+    /// as, or <see langword="null"/> when nothing was recorded (a templated kind, no persona, a store
+    /// miss). Rides to the renderer so <see cref="Events.SegmentGenerated.UtteranceId"/> can name it.
+    /// An init-only body property, never a positional parameter, so the published constructor and
+    /// <c>Deconstruct</c> arity stay unchanged (the <see cref="SegmentRequest.CrosstalkAiredThisBreak"/> precedent).
+    /// </summary>
+    public long? UtteranceId { get; init; }
+}

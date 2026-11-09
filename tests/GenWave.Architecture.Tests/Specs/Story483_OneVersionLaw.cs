@@ -75,6 +75,11 @@ public static class FeatureOneVersionLaw
     {
         // Given: PublicSurface.Of(GenWave.Abstractions) vs the published-package fixture, both read
         // once here rather than inside either fact below (T590 review).
+        //
+        // PLAN T683 (SPEC F218.5): the one tolerated difference is PendingPublicationSurfaceAllowlist
+        // (QuirkRule + PersonaCard.QuirkRules, added ahead of the next package bump). Any other
+        // addition, and any removal, still fails; the next release cut regenerates the fixture and
+        // deletes the allowlist.
 
         const string DiffHeading = "GenWave.Abstractions public surface differs from the 5.10.0 baseline:";
 
@@ -85,7 +90,7 @@ public static class FeatureOneVersionLaw
         {
             baseline = PublicSurface.ReadBaseline(BaselinePath());
             var current = PublicSurface.Of(ProductionAssemblies.Abstractions);
-            diffLines = PublicSurface.DiffAgainst(current, baseline, DiffHeading);
+            diffLines = PublicSurface.DiffAgainst(current, baseline, DiffHeading, PendingPublicationSurfaceAllowlist.Lines);
         }
 
         static string BaselinePath() =>
@@ -104,7 +109,8 @@ public static class FeatureOneVersionLaw
         /// .ThePackageSurfaceDiffVs5100IsEmpty</c> (GenWave.Host.Tests) already runs — linked into this
         /// project (<see cref="PublicSurface"/>, the fixture file) rather than copied, so STORY-483's
         /// own acceptance criterion has its own green fact in the architecture suite without a second,
-        /// independently-maintained enumerator.</summary>
+        /// independently-maintained enumerator. Since PLAN T683 "unchanged" means "unchanged except
+        /// the lines on <see cref="PendingPublicationSurfaceAllowlist"/>".</summary>
         [Fact]
         public void AbstractionsSurfaceUnchanged() => Assert.Empty(diffLines);
     }

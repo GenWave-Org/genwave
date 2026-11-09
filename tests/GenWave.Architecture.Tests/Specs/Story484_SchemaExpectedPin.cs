@@ -1,6 +1,6 @@
 // STORY-484 — The schema journal (gh-#868 · SPEC F211.4 · PLAN T592)
 //
-// BDD specification — xUnit. AC6 (this file) and AC11/the mirror pin are all live. Each Given comment
+// BDD specification — xUnit. AC6 (this file), AC11 (db/06 exempt) and the mirror pin are all live. Each Given comment
 // names the arrange the scenario needs.
 
 using System.Diagnostics;
@@ -12,10 +12,9 @@ namespace GenWave.Architecture.Tests.Specs;
 public static class FeatureSchemaExpectedPin
 {
     /// <summary>
-    /// The station.schema_migration CREATE TABLE extraction/whitespace-normalisation shared by
+    /// The station.schema_migration CREATE TABLE extraction/whitespace-normalisation used by
     /// <see cref="ScenarioSchemaMigrationDdlIsMirroredByteIdentically"/> (migrate.sh vs. db/06, both
-    /// files in full) and <see cref="ScenarioMigrationsAreNotEdited"/> (migrate.sh's block vs. only the
-    /// lines db/06's diff added) — one definition of "the same DDL, whitespace aside" for both checks.
+    /// files in full) — one definition of "the same DDL, whitespace aside".
     /// </summary>
     static class SchemaMigrationDdl
     {
@@ -83,23 +82,24 @@ public static class FeatureSchemaExpectedPin
         /// <summary>
         /// AC11 — no existing migration script MODIFIED, RENAMED or DELETED (the journal lives in
         /// migrate.sh; a brand-new db/NN-*-migration.sh added on the branch is not an edit of an existing
-        /// one). Uses <c>--no-renames --diff-filter=a</c> (lowercase — excludes only pure Additions), not
-        /// <c>--diff-filter=M</c>: a rename with <c>--no-renames</c> shows as the old path deleted and the
-        /// new path added, and the exclude-Additions filter still lets the deletion of the old path
-        /// through, so a renamed-away or deleted existing script is caught the same as an edited one.
-        /// Diffs against the merge-base with <c>origin/main</c>, not main's own moving tip, so a branch
-        /// that's behind main never sees main's own later commits as "changed". db/06's own mirror
-        /// addition (SPEC F211.3's one sanctioned exception — the fresh-init table, not a data-shape
-        /// change to an existing migration) is excluded, but only when its diff is EXACTLY that: zero
-        /// removed lines, and the added lines — blank lines and comment-only lines dropped, whitespace
-        /// normalised — equal migrate.sh's own station.schema_migration CREATE TABLE block, character for
-        /// character. Any removed line, any added line outside that block (a GRANT, a second statement,
-        /// an unrelated edit), or added text that doesn't match migrate.sh's block exactly, fails db/06.
+        /// one). migrate.sh re-runs every db/*-migration.sh on every pass (the journal only records it), so an
+        /// edit to an old script lands mid-sequence on every box, fresh and upgraded alike; keeping old
+        /// scripts frozen keeps each one's behaviour fixed to what it did when it shipped, and puts every
+        /// schema change in a new, numbered script. Uses <c>--no-renames --diff-filter=a</c>
+        /// (lowercase — excludes only pure Additions), not <c>--diff-filter=M</c>: a rename with
+        /// <c>--no-renames</c> shows as the old path deleted and the new path added, and the
+        /// exclude-Additions filter still lets the deletion of the old path through, so a renamed-away or
+        /// deleted existing script is caught the same as an edited one. Diffs against the merge-base with
+        /// <c>origin/main</c>, not main's own moving tip, so a branch that's behind main never sees main's
+        /// own later commits as "changed". db/06 is exempt entirely (Dean, 2026-11-08): it is the fresh-init
+        /// mirror that test databases and fresh installs build from, and it must keep matching the newer
+        /// db/NN scripts, which re-apply idempotently after it. Its schema_migration CREATE is still pinned equal to migrate.sh's by
+        /// <see cref="ScenarioSchemaMigrationDdlIsMirroredByteIdentically"/>.
         /// </summary>
         [Fact]
         public void NoMigrationScriptChanged() => Assert.Empty(ChangedMigrationScripts.Value);
 
-        const string SchemaMigrationMirrorPath = "db/06-station-settings-migration.sh";
+        const string FreshInitMirrorPath = "db/06-station-settings-migration.sh";
 
         static readonly Lazy<string[]> ChangedMigrationScripts = new(() =>
         {
@@ -114,44 +114,9 @@ public static class FeatureSchemaExpectedPin
             return stdOut
                 .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .Where(path => path.EndsWith("-migration.sh", StringComparison.Ordinal))
-                .Where(path => !(path == SchemaMigrationMirrorPath && IsOnlyTheSchemaMigrationMirrorAddition(repoRoot, mergeBase)))
+                .Where(path => path != FreshInitMirrorPath)
                 .ToArray();
         });
-
-        /// <summary>
-        /// True only when db/06's whole diff against <paramref name="mergeBase"/> is pure addition (zero
-        /// removed lines) and the added lines — once blanks and comment-only (<c>--</c>) lines are
-        /// dropped and whitespace is normalised the same way <see cref="SchemaMigrationDdl.Normalize"/>
-        /// does — are EQUAL to migrate.sh's own normalised station.schema_migration CREATE TABLE block.
-        /// A GRANT, a comment-on, or any other statement riding alongside the mirror shows up as extra
-        /// added text the equality check doesn't expect, so it fails db/06 instead of waving it through.
-        /// </summary>
-        static bool IsOnlyTheSchemaMigrationMirrorAddition(string repoRoot, string mergeBase)
-        {
-            var (exitCode, stdOut, stdErr) =
-                RunGit(repoRoot, "diff", "--unified=0", mergeBase, "--", SchemaMigrationMirrorPath);
-            if (exitCode != 0)
-                throw new InvalidOperationException($"git diff of {SchemaMigrationMirrorPath} against {mergeBase} failed:\n{stdErr}");
-
-            var lines = stdOut.Split('\n');
-            var removedLines = lines.Where(line => line.StartsWith('-') && !line.StartsWith("---", StringComparison.Ordinal)).ToArray();
-            if (removedLines.Length > 0)
-                return false;
-
-            var addedContent = lines
-                .Where(line => line.StartsWith('+') && !line.StartsWith("+++", StringComparison.Ordinal))
-                .Select(line => line[1..].Trim())
-                .Where(line => line.Length > 0 && !line.StartsWith("--", StringComparison.Ordinal))
-                .ToArray();
-            if (addedContent.Length == 0)
-                return false;
-
-            var normalizedAdded = SchemaMigrationDdl.Normalize(string.Join(' ', addedContent));
-            var expectedMirror = SchemaMigrationDdl.Normalize(
-                SchemaMigrationDdl.ExtractBlock(File.ReadAllText(Path.Combine(repoRoot, "migrate.sh"))));
-
-            return normalizedAdded == expectedMirror;
-        }
 
         /// <summary>
         /// Resolves the merge-base with origin/main, fetching just enough history to find one. A full

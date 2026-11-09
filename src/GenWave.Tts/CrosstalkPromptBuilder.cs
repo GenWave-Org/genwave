@@ -86,9 +86,16 @@ static class CrosstalkPromptBuilder
     /// check (<see cref="CrosstalkExchangeRequest.StationLocalNow"/>) — one shared instant, never two
     /// separately-computed ones.
     /// </para>
+    ///
+    /// <para>
+    /// <paramref name="hostQuirks"/>/<paramref name="neighborQuirks"/> (PLAN T688) are each card's
+    /// <c>IQuirkSelector</c> pick; null keeps the builder's own plain sampling (a writer built
+    /// without a selector).
+    /// </para>
     /// </summary>
     public static string BuildSystemPrompt(
-        PersonaCard hostCard, PersonaCard neighborCard, int durationTargetSeconds, DateTimeOffset stationLocalNow)
+        PersonaCard hostCard, PersonaCard neighborCard, int durationTargetSeconds, DateTimeOffset stationLocalNow,
+        QuirkSelection? hostQuirks = null, QuirkSelection? neighborQuirks = null)
     {
         // Same spoken-rate estimate CrosstalkScriptParser.Parse applies to an accepted script — the
         // STATED word budget asks for what the duration gate will accept, no headroom added (unlike
@@ -116,8 +123,8 @@ static class CrosstalkPromptBuilder
             "Never mention a specific song, artist, or track - neither DJ knows what is playing " +
             "right now.";
 
-        var hostSection = LlmPromptBuilder.BuildPersonaSection(persona: null, hostCard);
-        var neighborSection = LlmPromptBuilder.BuildPersonaSection(persona: null, neighborCard);
+        var hostSection = LlmPromptBuilder.BuildPersonaSection(persona: null, hostCard, selection: hostQuirks);
+        var neighborSection = LlmPromptBuilder.BuildPersonaSection(persona: null, neighborCard, selection: neighborQuirks);
 
         var lines = new List<string> { scaffold };
         lines.Add($"{CrosstalkScriptParser.HostTag} persona:\n{hostSection ?? "(no defined persona)"}");

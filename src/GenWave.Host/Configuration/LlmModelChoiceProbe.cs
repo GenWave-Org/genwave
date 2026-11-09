@@ -24,6 +24,10 @@ internal sealed class LlmModelChoiceProbe(
     /// checks the allowlist against.</summary>
     public const string ProbeName = "llm";
 
+    /// <summary>F218.28 as amended 2026-11-09 (Dean: recommend, don't default — <c>Llm:Model</c> stays blank, F34.2):
+    /// picked by Dean from the PatterBench run in <c>tools/PatterBench/RESULTS.md</c>.</summary>
+    public const string RecommendedModel = "mistral-nemo:12b";
+
     public string Name => ProbeName;
 
     public string ScopeKey() => optionsMonitor.CurrentValue.Endpoint;
@@ -31,6 +35,15 @@ internal sealed class LlmModelChoiceProbe(
     public async Task<IReadOnlyList<SettingChoice>> FetchAsync(CancellationToken ct)
     {
         var modelIds = await modelLister.Value.ListModelsAsync(ct).ConfigureAwait(false);
-        return modelIds.Select(id => new SettingChoice(id, id)).ToList();
+        var choices = modelIds.Select(id => new SettingChoice(id, id)).ToList();
+
+        var recommendedAt = choices.FindIndex(c => string.Equals(c.Value, RecommendedModel, StringComparison.Ordinal));
+        if (recommendedAt >= 0)
+        {
+            choices.RemoveAt(recommendedAt);
+            choices.Insert(0, new SettingChoice(RecommendedModel, $"{RecommendedModel} (recommended)"));
+        }
+
+        return choices;
     }
 }

@@ -155,10 +155,8 @@ static partial class CrosstalkScriptParser
         // SPEC F139.1 (T330 review round 1 amendment): a missing HOST/NEIGHBOR turn is a malformed
         // SHAPE too — every line matched the speaker-tag format individually, but the exchange as a
         // whole never took the required two-voice shape.
-        if (lines.All(line => line.Speaker != CrosstalkSpeaker.Host))
-            return Discarded($"no {HostTag} line appeared — both speakers must be present", LlmCallCause.MalformedResponse);
-        if (lines.All(line => line.Speaker != CrosstalkSpeaker.Neighbor))
-            return Discarded($"no {NeighborTag} line appeared — both speakers must be present", LlmCallCause.MalformedResponse);
+        if (MissingSpeakerReason(lines) is { } missingSpeaker)
+            return Discarded(missingSpeaker, LlmCallCause.MalformedResponse);
 
         for (var i = 1; i < lines.Count; i++)
         {
@@ -226,6 +224,19 @@ static partial class CrosstalkScriptParser
         }
 
         return new CrosstalkWriteResult.Accepted(new CrosstalkAiredScript(lines));
+    }
+
+    /// <summary>
+    /// Why <paramref name="lines"/> is not a two-voice exchange, or null when both speakers appear. The ONE
+    /// rule <see cref="Parse"/> and the post-drop re-validation (PLAN T694) share.
+    /// </summary>
+    internal static string? MissingSpeakerReason(IReadOnlyList<CrosstalkAiredLine> lines)
+    {
+        if (lines.All(line => line.Speaker != CrosstalkSpeaker.Host))
+            return $"no {HostTag} line appeared — both speakers must be present";
+        if (lines.All(line => line.Speaker != CrosstalkSpeaker.Neighbor))
+            return $"no {NeighborTag} line appeared — both speakers must be present";
+        return null;
     }
 
     /// <summary>

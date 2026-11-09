@@ -6,7 +6,7 @@ namespace GenWave.Architecture.Tests.Specs;
 /// <summary>
 /// Feature: the convention laws. L3 (HttpClient/handler-family construction only at designated client
 /// seams — the SSRF-surface enumeration), L4-immutability (no mutable public state in Abstractions),
-/// L6 (Abstractions never references Core). L3 built at T212 (STORY-291 AC1, AC4's L3 half), moved off
+/// L6 (Abstractions never references Core; GenWave.Memory is a leaf behind Core ports). L3 built at T212 (STORY-291 AC1, AC4's L3 half), moved off
 /// ArchUnitNET onto <see cref="HttpClientMetadataScan"/> at the T212 review (F1: an ArchUnitNET-based
 /// scan cannot see a compiler-generated type nested inside another compiler-generated type — every
 /// async lambda body — so it stayed green over a stray HttpClient inside one).
@@ -47,6 +47,11 @@ namespace GenWave.Architecture.Tests.Specs;
 /// AC4's ORIGINAL scope was "every law's violations run red and name the offender" for L3, L4, and
 /// L6 alike — <see cref="ScenarioViolationsAreRedAndNamed"/> below is that proof for all three laws
 /// as of T213 (L4-immutability and L6 added alongside L3's own T212 proof).
+///
+/// <b>T689 (SPEC F218, STORY-533) extends L6</b> with two Memory facts: GenWave.Memory references no
+/// GenWave project but Core and Abstractions, and no production project but Host references Memory.
+/// Same AssemblyRef-table detector, so the same blind spot as the Story460 precedent: an unused
+/// <c>ProjectReference</c> compiles no AssemblyRef and only goes red on its first type use.
 /// </summary>
 public sealed class FeatureConventionLaws
 {
@@ -147,6 +152,52 @@ public sealed class FeatureConventionLaws
                 .ToList();
 
             DependencyLawAssert.AssertNone(violations, ExemptionBaseline.Entries);
+        }
+
+        // T689 (SPEC F218, STORY-533): GenWave.Memory is a leaf — ARCHITECTURE keeps it behind Core
+        // ports, so consumers (Tts) see IQuirkSelector / IUtteranceStore as Core types.
+        [Fact]
+        public void MemoryReferencesNoGenWaveProjectBeyondCoreAndAbstractions()
+        {
+            var violations = AssemblyReferenceScan
+                .ForbiddenReferences(
+                    ProductionAssemblies.Memory.Location,
+                    name => AssemblyReferenceScan.HasFamilyPrefix(name, "GenWave")
+                        && name is not ("GenWave.Core" or "GenWave.Abstractions" or "GenWave.Memory"))
+                .Select(reference => new LawViolation(
+                    LawId.L6,
+                    "GenWave.Memory",
+                    $"references \"{reference}\" — Memory is a leaf over Core and Abstractions only"))
+                .ToList();
+
+            DependencyLawAssert.AssertNone(violations, ExemptionBaseline.Entries);
+        }
+
+        [Fact]
+        public void OnlyHostReferencesMemoryAmongProductionProjects()
+        {
+            var violations = ProductionAssemblies.AllProductionAssemblies()
+                .Where(assembly => assembly != ProductionAssemblies.Memory && assembly != ProductionAssemblies.Host)
+                .SelectMany(assembly => AssemblyReferenceScan
+                    .ForbiddenReferences(assembly.Location, name => name == "GenWave.Memory")
+                    .Select(reference => new LawViolation(
+                        LawId.L6,
+                        assembly.GetName().Name ?? assembly.FullName ?? "unknown assembly",
+                        $"references \"{reference}\" — only the composition root (GenWave.Host) wires Memory; " +
+                        "everything else consumes its ports through GenWave.Core")))
+                .ToList();
+
+            DependencyLawAssert.AssertNone(violations, ExemptionBaseline.Entries);
+        }
+
+        [Fact]
+        public void TheMemoryScanSeesHostsRealReferenceToMemory()
+        {
+            // Probe: the detector turns red on a real reference, so the green above is not vacuous.
+            var hostReferences = AssemblyReferenceScan.ForbiddenReferences(
+                ProductionAssemblies.Host.Location, name => name == "GenWave.Memory");
+
+            Assert.Equal("GenWave.Memory", Assert.Single(hostReferences));
         }
     }
 

@@ -34,6 +34,11 @@ namespace GenWave.Core.Domain;
 /// supply the other half, with the card winning on conflict (F97.4). Additive and
 /// forward-compatible the same way <see cref="Taste"/> is: nullable, omitted from JSON when null, so
 /// every pre-F97 card and every reader that predates this field is unaffected.
+///
+/// <see cref="QuirkRules"/> (SPEC F218.5) is the structured twin of <see cref="Quirks"/>, additive the
+/// same way: nullable, omitted from JSON when null, so an old card round-trips byte-identically.
+/// <see cref="Quirks"/> stays authoritative for older readers; every rule's text also appears in it
+/// (the import route enforces this, <c>PersonaCardQuirkRulesValidator</c>).
 /// </summary>
 public sealed record PersonaCard(
     int SchemaVersion,
@@ -48,6 +53,24 @@ public sealed record PersonaCard(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<TasteRule>? Taste = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<PronunciationRule>? Pronunciations = null)
 {
+    /// <summary>
+    /// SPEC F218.5 (PLAN T683) — structured twin of <see cref="Quirks"/>; <see langword="null"/> on every
+    /// card built before this field existed, and then omitted from JSON so those cards round-trip
+    /// byte-identically. Writers keep it in lockstep with <see cref="Quirks"/>: every rule's text also
+    /// appears there.
+    ///
+    /// <para>
+    /// <b>Declared as an init-only body property, not a 12th primary-constructor parameter</b> — the
+    /// SAME precedent as <see cref="SegmentRequest.Speaker"/> (PLAN T524): this record already shipped
+    /// with an 11-arg <c>ctor</c> and <c>Deconstruct</c>, so every site that sets this uses an
+    /// object-initializer/<c>with</c> expression. <see cref="JsonPropertyOrderAttribute"/> keeps it
+    /// serialized after the positional members, i.e. last.
+    /// </para>
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyOrder(100)]
+    public IReadOnlyList<QuirkRule>? QuirkRules { get; init; }
+
     /// <summary>
     /// The only <see cref="SchemaVersion"/> major this codebase writes or, on import, accepts (SPEC
     /// F71.1, F79.2) — single source of truth for both writers: <c>LegacyPersonaCardMapper.BuildCard</c>

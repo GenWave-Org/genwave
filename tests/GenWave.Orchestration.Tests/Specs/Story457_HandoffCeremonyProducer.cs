@@ -141,6 +141,19 @@ public static class FeatureHandoffCeremonyProducer
             var signOn = harness.Queue.Peek(SpeechDeferralKind.SignOn);
             Assert.True(signOn is { Handoff.Voice: "af_alpha", Handoff.CounterpartName: null });
         }
+
+        /// <summary>SPEC F218.1 — the transition sign-on is stamped with the persona's id.</summary>
+        [Fact]
+        public async Task StampsTheSignOnWithTheIncomingPersonaId()
+        {
+            var store = new FakePersonaStore();
+            store.Add(MakePersona(10, "DJ Alpha", "af_alpha"));
+            var harness = Build(store, ShowXThenYSchedule(), JustBeforeNoon, TimeSpan.FromMinutes(10));
+
+            await harness.Producer.ArmAsync(Identity, harness.Time.GetUtcNow(), CancellationToken.None);
+
+            Assert.Equal(10L, harness.Queue.Peek(SpeechDeferralKind.SignOn)?.Handoff?.PersonaId);
+        }
     }
 
     public sealed class ScenarioShowThenGap
@@ -238,6 +251,28 @@ public static class FeatureHandoffCeremonyProducer
 
             var signOn = harness.Queue.Peek(SpeechDeferralKind.SignOn);
             Assert.True(signOn is { Handoff.Voice: "af_beta", Handoff.PersonaName: "DJ Beta", Handoff.CounterpartName: "DJ Alpha" });
+        }
+
+        /// <summary>SPEC F218.1 — the sign-off is stamped with the OUTGOING persona's id.</summary>
+        [Fact]
+        public async Task StampsTheSignOffWithTheOutgoingPersonaId()
+        {
+            var harness = Build(TwoDjStore(), TwoDjSchedule(), JustBeforeNoon, TimeSpan.FromMinutes(10));
+
+            await harness.Producer.ArmAsync(Identity, harness.Time.GetUtcNow(), CancellationToken.None);
+
+            Assert.Equal(10L, harness.Queue.Peek(SpeechDeferralKind.SignOff)?.Handoff?.PersonaId);
+        }
+
+        /// <summary>SPEC F218.1 — the sign-on is stamped with the INCOMING persona's id.</summary>
+        [Fact]
+        public async Task StampsTheSignOnWithTheIncomingPersonaId()
+        {
+            var harness = Build(TwoDjStore(), TwoDjSchedule(), JustBeforeNoon, TimeSpan.FromMinutes(10));
+
+            await harness.Producer.ArmAsync(Identity, harness.Time.GetUtcNow(), CancellationToken.None);
+
+            Assert.Equal(20L, harness.Queue.Peek(SpeechDeferralKind.SignOn)?.Handoff?.PersonaId);
         }
     }
 

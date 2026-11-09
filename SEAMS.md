@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **133 seams across 8 projects.**
+> **137 seams across 9 projects.**
 
 ## GenWave.Ads (2 seams)
 
@@ -118,7 +118,7 @@
 | `GenWave.Core.Abstractions.IEnergyAnalyzer` | `GenWave.Loudness.FfmpegEnergyAnalyzer` | Singleton | — |
 | `GenWave.Core.Abstractions.ILoudnessAnalyzer` | `GenWave.Loudness.FfmpegLoudnessAnalyzer` | Singleton | — |
 
-## GenWave.MediaLibrary (59 seams)
+## GenWave.MediaLibrary (61 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -166,6 +166,7 @@
 | `GenWave.Core.Abstractions.IPersonaTasteAccrualStore` | `GenWave.MediaLibrary.Station.PersonaTasteAccrualRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IPersonaTasteReader` | `GenWave.MediaLibrary.Station.PersonaTasteRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IPersonaTasteStore` | `GenWave.MediaLibrary.Station.PersonaTasteRepository` | Singleton | — |
+| `GenWave.Core.Abstractions.IQuirkSpendLedger` | `GenWave.MediaLibrary.Station.PersonaMemoryRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IRequestCatalogProbe` | `GenWave.MediaLibrary.Catalog.RequestCatalogProbeRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IRequestStore` | `GenWave.MediaLibrary.Station.RequestRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IRotFindingStore` | `GenWave.MediaLibrary.Garden.RotFindingRepository` | Singleton | — |
@@ -179,8 +180,16 @@
 | `GenWave.Core.Abstractions.IStationImageStore` | `GenWave.MediaLibrary.Station.StationImageRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IThemeStore` | `GenWave.MediaLibrary.Station.ThemeRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IThumbStore` | `GenWave.MediaLibrary.Garden.MediaThumbRepository` | Singleton | — |
+| `GenWave.Core.Abstractions.IUtteranceStore` | `GenWave.MediaLibrary.Station.UtteranceRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IVoicePackStore` | `GenWave.MediaLibrary.Station.VoicePackRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IYearLookup` | `GenWave.MediaLibrary.YearLookup.MusicBrainzYearLookup` | Singleton | — |
+
+## GenWave.Memory (2 seams)
+
+| Port | Adapter | Lifetime | Notes |
+|---|---|---|---|
+| `GenWave.Core.Abstractions.IQuirkSelector` | `GenWave.Memory.QuirkSelector` | Singleton | — |
+| `GenWave.Core.Abstractions.IRepetitionCheck` | `GenWave.Memory.RepetitionCheck` | Singleton | — |
 
 ## GenWave.Orchestration (9 seams)
 

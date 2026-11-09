@@ -246,6 +246,12 @@ public sealed class CachingScheduleResolver
     /// </summary>
     public ScheduleWeekSnapshot? TryGetCurrentWeekSnapshot() => snapshot;
 
+    /// <summary>
+    /// Station-local "today" — <see cref="ScheduleResolver.StationToday"/> verbatim, exposed so a shift key
+    /// (SPEC F218, PLAN T684) takes its date from the one clock the resolver itself uses.
+    /// </summary>
+    public DateOnly StationToday() => resolver.StationToday();
+
     void OnWeekChanged() => dirty = true;
 
     void OnSpecialsChanged() => specialsDirty = true;

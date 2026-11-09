@@ -20,6 +20,12 @@ using GenWave.Core.Domain;
 /// eventually vend, so the type this writer's prompt is built from has nothing for a future edit to
 /// accidentally interpolate a track into.
 /// </para>
+///
+/// <para>
+/// The optional persona/show ids (SPEC F218.14) name WHO each side is for the memory layer: a side with
+/// an id has its lines repeat-checked against, and stored under, that persona. Absent ids mean no check
+/// and no store for that side (callers that do not know the cast, e.g. specs).
+/// </para>
 /// </summary>
 public sealed record CrosstalkExchangeRequest(
     PersonaCard HostCard,
@@ -27,4 +33,7 @@ public sealed record CrosstalkExchangeRequest(
     string StationName,
     string? ShowName,
     string? Daypart,
-    DateTimeOffset StationLocalNow);
+    DateTimeOffset StationLocalNow,
+    long? HostPersonaId = null,
+    long? NeighborPersonaId = null,
+    long? ShowId = null);

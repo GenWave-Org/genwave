@@ -44,6 +44,7 @@ const CAUSE_LABELS: Record<string, string> = {
   canceledbywindow: "Canceled by window",
   emptycompletion: "Empty completion",
   malformedresponse: "Malformed response",
+  repeat: "Repeated phrase",
 };
 
 /** gh-#142: the MODE column is the F69/F70 degradation ladder, which nothing on the page said —

@@ -87,6 +87,11 @@ using GenWave.Core.Domain;
 /// when it does: the planner never independently RESOLVES a handoff counterpart's snapshot itself,
 /// it only aligns the one already captured here.
 /// </param>
+/// <param name="PersonaId">
+/// SPEC F218.1 (PLAN T684): id of the persona this piece speaks as, so the drained request can be
+/// stamped for the utterance log (each speaker's line is recorded under that speaker).
+/// <see langword="null"/> means the piece is not recorded.
+/// </param>
 public sealed record HandoffContext(
     string Voice,
     string? PersonaName,
@@ -96,4 +101,5 @@ public sealed record HandoffContext(
     string? ShowName = null,
     string? ShowFlavor = null,
     string? CounterpartShowName = null,
-    SpeakerSnapshot? Speaker = null);
+    SpeakerSnapshot? Speaker = null,
+    long? PersonaId = null);

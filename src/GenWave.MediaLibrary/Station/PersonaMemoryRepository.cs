@@ -27,8 +27,11 @@ namespace GenWave.MediaLibrary.Station;
 /// the <c>RecordAsync</c> transaction"); the eviction has no callers beyond this one write path, so a
 /// standalone DB function would be one more place to keep in sync for no shared reuse.
 /// </summary>
-sealed class PersonaMemoryRepository(Lazy<NpgsqlDataSource> dataSource, IOptions<PersonaMemoryOptions> options) : IPersonaMemory
+sealed class PersonaMemoryRepository(Lazy<NpgsqlDataSource> dataSource, IOptions<PersonaMemoryOptions> options)
+    : IPersonaMemory, IQuirkSpendLedger
 {
+    const string QuirkKind = "quirk";
+
     const string SelectColumns =
         """
         select id::bigint as id, persona_id::bigint as persona_id, kind, content, source,
@@ -159,6 +162,20 @@ sealed class PersonaMemoryRepository(Lazy<NpgsqlDataSource> dataSource, IOptions
 
         return rows.ToList();
     }
+
+    /// <summary>Exact-content count of this persona's quirk spend rows (see <see cref="IQuirkSpendLedger"/>).</summary>
+    public async Task<int> CountSpendsAsync(long personaId, string content, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        return await conn.QuerySingleAsync<int>(new CommandDefinition(
+            "select count(*)::int from station.persona_memory where persona_id = @personaId and kind = @QuirkKind and content = @content",
+            new { personaId, QuirkKind, content },
+            cancellationToken: ct));
+    }
+
+    /// <summary>Writes one accrued <c>quirk</c> row; the F71.6 cap evicts the oldest spends, never the newest.</summary>
+    public async Task RecordSpendAsync(long personaId, string content, CancellationToken ct) =>
+        await RecordAsync(personaId, QuirkKind, content, PersonaMemorySource.Accrued, ct);
 
     static string ToSourceText(PersonaMemorySource source) => source switch
     {

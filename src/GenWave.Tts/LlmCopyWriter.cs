@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.Core.Events;
 using GenWave.Core.Llm;
 
 /// <summary>
@@ -129,9 +130,19 @@ public sealed class LlmCopyWriter(
     IDegradationModeReader degradationMode,
     IStationClockProvider? stationClock = null,
     IContextPatterFactSource? patterFactSource = null,
-    IShowFlavorLineSource? showFlavorLineSource = null)
+    IShowFlavorLineSource? showFlavorLineSource = null,
+    IUtteranceStore? utteranceStore = null,
+    IQuirkSelector? quirkSelector = null,
+    MemoryBudget? memoryBudget = null, // T699 supplies this from the context probe; Off until then
+    IRepetitionCheck? repetitionCheck = null, // T693: absent means no post-check at all
+    IStationEventSink? events = null)
     : ISegmentCopyWriter, IPersonaPreviewWriter, IAnnouncementCopyWriter
 {
+    readonly IStationEventSink events = events ?? NoOpStationEventSink.Instance;
+
+    /// <summary>How many of the persona's newest non-template utterances the repetition check compares against (SPEC F218.11).</summary>
+    const int RepetitionWindow = 10;
+
     /// <summary>Name of the <see cref="IHttpClientFactory"/> client this writer resolves (registered in Program.cs).</summary>
     public const string HttpClientName = "Llm";
 
@@ -271,6 +282,56 @@ public sealed class LlmCopyWriter(
         kind is SegmentKind.LeadIn or SegmentKind.BackAnnounce or SegmentKind.SignOff or SegmentKind.SignOn
             or SegmentKind.ContextSegment;
 
+    /// <summary>
+    /// The template rung after an LLM miss (SPEC F218.1): same copy the plain fallback returns, run
+    /// through <see cref="RecordTemplateCopyAsync"/>.
+    /// </summary>
+    async Task<SegmentCopy> FallbackAndRecordAsync(SegmentRequest request, CancellationToken ct) =>
+        await RecordTemplateCopyAsync(request, await fallback.WriteAsync(request, ct), ct);
+
+    /// <summary>
+    /// The ONE seam for template copy that airs in an LLM's place (SPEC F218.1): stored with
+    /// <c>fallback = true</c>. Called by this writer's own miss path and by
+    /// <see cref="DegradationGatedCopyWriter"/> when degradation mode routes around the LLM. Kinds
+    /// that never air template copy (<see cref="TemplateCopyPolicy"/>) and kinds this writer does not
+    /// author are returned untouched.
+    /// </summary>
+    internal async Task<SegmentCopy> RecordTemplateCopyAsync(SegmentRequest request, SegmentCopy templated, CancellationToken ct) =>
+        IsLlmAuthored(request.Kind) && !TemplateCopyPolicy.NeverAirsTemplateCopy(request.Kind)
+            ? await RecordAsync(request, templated, fallbackCopy: true, ct)
+            : templated;
+
+    /// <summary>
+    /// SPEC F218.1 (STORY-532, PLAN T684) — stores <paramref name="copy"/> in the utterance log BEFORE
+    /// render, raw text as handed to the renderer, and returns it stamped with the new row id. A request
+    /// the planner left unstamped (no persona, no shift key) is not recorded. A store fault is logged
+    /// and costs only the record, never the segment (SPEC F12.4).
+    /// </summary>
+    async Task<SegmentCopy> RecordAsync(SegmentRequest request, SegmentCopy copy, bool fallbackCopy, CancellationToken ct)
+    {
+        if (utteranceStore is null || request.PersonaId is not { } personaId
+            || !ShiftKey.TryParse(request.ShiftKeyText, out var shiftKey))
+            return copy;
+
+        try
+        {
+            var id = await utteranceStore.RecordAsync(
+                new NewUtterance(
+                    personaId, request.ShowId, UtteranceKind.Patter, request.Kind.ToString(), shiftKey, copy.Text, fallbackCopy),
+                ct);
+            return copy with { UtteranceId = id };
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Utterance record failed for {Kind}; the segment airs unrecorded", request.Kind);
+            return copy;
+        }
+    }
+
     public async Task<SegmentCopy> WriteAsync(SegmentRequest request, CancellationToken ct)
     {
         // StationId/TimeDate stay templated — brand/time copy must be crisp, consistent, and
@@ -297,7 +358,7 @@ public sealed class LlmCopyWriter(
             // (F12.4), not escape past the fallback ladder toward the caller.
             cfg = optionsMonitor.CurrentValue;
             if (string.IsNullOrEmpty(cfg.Endpoint))
-                return await fallback.WriteAsync(request, ct);
+                return await FallbackAndRecordAsync(request, ct);
 
             // Resolved ONLY on this LLM path (F35.2) — templated kinds and the disabled writer
             // never call the accessor at all, so a persona plays no part in copy they never touch.
@@ -334,19 +395,35 @@ public sealed class LlmCopyWriter(
             // critical section (SPEC F83.1, T65 review finding); see that method's own remarks for
             // why the field can no longer be touched out here.
             var cleanup = await RequestCleanedCompletionAsync(
-                cfg, request, persona, card, updateTasteMemory: true, patterFact, showFlavorFact,
+                cfg, request, persona, card, updateTasteMemory: true, spendQuirks: true, patterFact, showFlavorFact,
                 queueWaitBudget: null, announcementMessage: null, ct);
             var cleaned = TextOf(cleanup);
             if (cleaned is null)
             {
-                statusHolder.Record(LlmAttemptOutcome.Failed, attemptedAt);
+                // A repeat is not an LLM failure: the model answered fine, it just echoed itself. Record
+                // it as Ok so a healthy model that repeats never feeds the F72 consecutive-failure walk-down
+                // into Soft mode; the template still airs below (fallback=true) either way. Recording Ok
+                // also clears any existing failure streak, which is deliberate: the endpoint answered.
+                statusHolder.Record(
+                    cleanup is LlmCopyCleanupResult.RepeatRejected ? LlmAttemptOutcome.Ok : LlmAttemptOutcome.Failed,
+                    attemptedAt);
                 // The reason NAMES the real cause (T331 review finding F3) — a truth-gate exhaustion
                 // is not "empty or exceeded Llm:MaxCopyChars": that wrong-lever WARN sent an operator
                 // at the endpoint/max-tokens settings for a failure those levers cannot fix. See
                 // DescribeNullTextReason's own remarks.
-                LogFailure(request, persona, cfg.Model, attemptedAt, exception: null,
-                    reason: DescribeNullTextReason(cleanup, cfg.ReasoningEffort));
-                return await fallback.WriteAsync(request, ct);
+                if (cleanup is LlmCopyCleanupResult.RepeatRejected)
+                {
+                    // Not an LLM failure, so not a WARN (F218.12): the template airs by design.
+                    logger.LogInformation(
+                        "Re-ask repeated for {PersonaName}; airing the template",
+                        (persona?.Name ?? "none").ReplaceLineEndings(" "));
+                }
+                else
+                {
+                    LogFailure(request, persona, cfg.Model, attemptedAt, exception: null,
+                        reason: DescribeNullTextReason(cleanup, cfg.ReasoningEffort));
+                }
+                return await FallbackAndRecordAsync(request, ct);
             }
 
             // A sentence-boundary salvage (SPEC F123.2-F123.4, STORY-319, PLAN T263) is a SUCCESS at
@@ -358,7 +435,7 @@ public sealed class LlmCopyWriter(
             statusHolder.Record(LlmAttemptOutcome.Ok, attemptedAt);
             // Only genuinely LLM-authored copy is fresh-per-airing (F34.6) — every fallback path
             // above returns the template writer's own SegmentCopy (FreshPerAiring: false) unchanged.
-            return new SegmentCopy(cleaned, FreshPerAiring: true);
+            return await RecordAsync(request, new SegmentCopy(cleaned, FreshPerAiring: true), fallbackCopy: false, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -374,7 +451,7 @@ public sealed class LlmCopyWriter(
             // carrying the exception type/status plus call context (F69.7).
             statusHolder.Record(LlmAttemptOutcome.Failed, attemptedAt);
             LogFailure(request, persona, cfg?.Model, attemptedAt, ex, reason: null);
-            return await fallback.WriteAsync(request, ct);
+            return await FallbackAndRecordAsync(request, ct);
         }
     }
 
@@ -425,7 +502,7 @@ public sealed class LlmCopyWriter(
             // remarks for why a preview must never be ABLE to consume either break-scoped slot, not
             // merely configured not to.
             var cleanup = await RequestCleanedCompletionAsync(
-                cfg, request, personaOverride, card: null, updateTasteMemory: false, patterFact: null,
+                cfg, request, personaOverride, card: null, updateTasteMemory: false, spendQuirks: false, patterFact: null,
                 showFlavorFact: null, queueWaitBudget: TimeSpan.FromSeconds(cfg.PreviewQueueWaitSeconds),
                 announcementMessage: null, ct);
             var cleaned = TextOf(cleanup);
@@ -576,7 +653,7 @@ public sealed class LlmCopyWriter(
             var card = await personaAccessor.ResolveCardAsync(ct);
 
             var cleanup = await RequestCleanedCompletionAsync(
-                cfg, request, persona, card, updateTasteMemory: false, patterFact: null, showFlavorFact: null,
+                cfg, request, persona, card, updateTasteMemory: false, spendQuirks: true, patterFact: null, showFlavorFact: null,
                 queueWaitBudget: null, announcementMessage: message, ct);
             var cleaned = TextOf(cleanup);
             if (cleaned is null)
@@ -728,9 +805,102 @@ public sealed class LlmCopyWriter(
             ? (showFlavorLineSource ?? NoOpShowFlavorLineSource.Instance).TryTakeDueShowLine()
             : null;
 
+    /// <summary>
+    /// The quirk selection for this render, or null to let the prompt builder sample plain as before (no
+    /// selector registered). A selector fault costs this break its quirks, never the segment (F12.4).
+    /// </summary>
+    async Task<QuirkSelection?> SelectQuirksAsync(
+        SegmentRequest request, PersonaCard? card, bool spend, CancellationToken ct)
+    {
+        if (quirkSelector is null)
+            return null;
+
+        ShiftKey.TryParse(request.ShiftKeyText, out var shiftKey);
+        try
+        {
+            var selection = await quirkSelector.SelectAsync(request.PersonaId, card, shiftKey, spend, ct);
+            return selection;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Quirk selection failed for {Kind}; this break airs without quirks", request.Kind);
+            return QuirkSelection.None;
+        }
+    }
+
+    /// <summary>
+    /// The persona's newest utterances, newest first, in ONE store read per render: enough for the
+    /// recent-lines block (<see cref="MemoryBudget.RecentLines"/>, F218.10) and, when
+    /// <paramref name="forRepetitionCheck"/>, for the repeat check's window (F218.11) even with memory
+    /// off. Empty when neither needs it, there is no store or persona, or the read faults (F12.4: costs
+    /// the block and the recents half of the check, not the segment).
+    /// </summary>
+    async Task<IReadOnlyList<UtteranceEntry>> ReadRecentEntriesAsync(
+        SegmentRequest request, bool forRepetitionCheck, CancellationToken ct)
+    {
+        var blockLines = (memoryBudget ?? MemoryBudget.Off).RecentLines;
+        var take = forRepetitionCheck ? Math.Max(RepetitionWindow, blockLines) : blockLines;
+        if (take <= 0 || utteranceStore is null || request.PersonaId is not { } personaId)
+            return [];
+
+        try
+        {
+            return await utteranceStore.RecentAsync(personaId, take, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Recent-lines read failed for {Kind}; this break airs without the block or the recents check", request.Kind);
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// SPEC F218.11 — phrases in <paramref name="copy"/> that repeat the persona's last
+    /// <see cref="RepetitionWindow"/> real (non-template) utterances or a spent <c>maxPerShift</c> quirk.
+    /// Spent = a capped rule on the card the selector did NOT hand this break: the selected ones were
+    /// only just spent for THIS render, so counting them would stop the catchphrase airing even once.
+    /// </summary>
+    IReadOnlyList<string> FindRepeats(
+        string copy, SegmentRequest request, string? personaName, IReadOnlyList<UtteranceEntry> recent,
+        PersonaCard? card, QuirkSelection? quirkSelection)
+    {
+        if (repetitionCheck is null)
+            return [];
+
+        var recentTexts = recent.Where(e => !e.Fallback).Take(RepetitionWindow).Select(e => e.Text).ToList();
+        // The exact shift spend count needs a port change, so a capped quirk not selected this break is
+        // treated as spent; an unselected capped quirk that airs would also bypass the cap (no spend recorded).
+        var cappedNotSelectedRules = quirkSelection is null
+            ? []
+            : (card?.QuirkRules ?? [])
+                .Where(r => r.MaxPerShift is not null && !quirkSelection.Lines.Contains(r.Text, StringComparer.Ordinal))
+                .Select(r => r.Text).ToList();
+
+        var result = repetitionCheck.Check(
+            copy,
+            new RepetitionContext(
+                recentTexts, cappedNotSelectedRules, personaName, request.StationName, request.Track?.Title, request.Track?.Artist));
+        return result.Hits.Select(h => h.Phrase).ToList();
+    }
+
+    /// <summary>One <c>repeat-caught</c> booth row per caught attempt (SPEC F218.13); needs a persona to name.</summary>
+    void PublishRepeatCaught(SegmentRequest request, IReadOnlyList<string> phrases)
+    {
+        if (request.PersonaId is { } personaId && phrases.Count > 0)
+            events.Publish(new RepeatCaught(personaId, string.Join(", ", phrases)));
+    }
+
     async Task<LlmCopyCleanupResult> RequestCleanedCompletionAsync(
         LlmOptions cfg, SegmentRequest request, Persona? persona, PersonaCard? card,
-        bool updateTasteMemory, ContextPatterFact? patterFact, ShowFlavorFact? showFlavorFact,
+        bool updateTasteMemory, bool spendQuirks, ContextPatterFact? patterFact, ShowFlavorFact? showFlavorFact,
         TimeSpan? queueWaitBudget, string? announcementMessage, CancellationToken ct)
     {
         // LOW-5 (PLAN T342 round 2, parameter-shape finding): announcementMessage carries FOUR
@@ -770,7 +940,7 @@ public sealed class LlmCopyWriter(
         // uniformly for every path keeps this the one recording point instead of two.
         //
         // startedAt is REASSIGNED, not read-only (T331 review finding F4b): it names WHICHEVER call
-        // is currently in flight, mirroring userPrompt's own reassignment below — RunTruthGateLadderAsync
+        // is currently in flight, mirroring userPrompt's own reassignment below — RunGateLadderAsync
         // moves it to a re-ask's own dispatch instant the moment that call actually fires, so the
         // catch-all far below (and this render's OWN success recording, if the ladder never fires at
         // all) both always attribute a fault/success to the call that actually produced it, never to
@@ -830,9 +1000,18 @@ public sealed class LlmCopyWriter(
             // BuildUserContent's station clock line below must provably read the SAME instant — the
             // identical discipline CopyClaims.CheckClock's own remarks already require of its caller.
             var stationLocalNow = StationLocalNow();
-            systemPrompt = LlmPromptBuilder.BuildSystemPrompt(
-                LlmPromptBuilder.BuildPersonaSection(persona, card, mentionOwnName), cfg.MaxCopyChars, stationLocalNow);
-
+            // T686 (F218.7): quirks are chosen HERE, inside the critical section, so a maxPerShift
+            // spend row is written before this render is dispatched. spendQuirks is true for every
+            // on-air path (segments and announcements) and false only for the preview; an on-air
+            // request without a shift key cannot record a spend, so the selector keeps capped quirks out.
+            var quirkSelection = await SelectQuirksAsync(request, card, spend: spendQuirks, ct);
+            // The repeat check is an on-air post-check: a preview (spendQuirks false) never re-asks or logs.
+            var checkRepeats = repetitionCheck is not null && spendQuirks;
+            var recentEntries = await ReadRecentEntriesAsync(request, checkRepeats, ct);
+            var blockLineCount = (memoryBudget ?? MemoryBudget.Off).RecentLines;
+            IReadOnlyList<string> recentLines = blockLineCount > 0
+                ? recentEntries.Take(blockLineCount).Select(e => e.Text).ToList()
+                : [];
             // Read HERE — after WaitAsync above, i.e. already inside the single-flight critical
             // section — not by the caller before this method was ever invoked (SPEC F83.1, T65
             // review finding): Orchestrator.EnqueuePatterAsync starts a unit's BackAnnounce and
@@ -854,12 +1033,16 @@ public sealed class LlmCopyWriter(
             // all). requiredCore (LOW-5: the same local callKind/factBlock above already derive from)
             // is non-null on exactly one caller (WriteAnnouncementAsync), so this branch can never
             // fire for an ordinary WriteAsync/WritePreviewAsync call.
-            userPrompt = requiredCore is { } message
-                ? LlmPromptBuilder.BuildAnnouncementUserContent(
-                    request, LlmPromptBuilder.BuildStationClockLine(stationLocalNow), message)
-                : LlmPromptBuilder.BuildUserContent(
-                    request, LlmPromptBuilder.BuildStationClockLine(stationLocalNow), previouslyVoicedTasteNotes,
-                    patterFact?.Fact, showFlavorFact);
+            var composed = BreakPromptComposer.Compose(new BreakPromptInputs(
+                request, persona, card, mentionOwnName, quirkSelection, recentLines, cfg.MaxCopyChars,
+                stationLocalNow, previouslyVoicedTasteNotes)
+            {
+                AnnouncementMessage = requiredCore,
+                PatterFact = patterFact?.Fact,
+                ShowFlavor = showFlavorFact,
+            });
+            systemPrompt = composed.System;
+            userPrompt = composed.User;
 
             // No boot-frozen BaseAddress (F36.2) — the endpoint is read from CurrentValue above and an
             // absolute URI is built per call (EndpointUri preserves a subpath in Llm:Endpoint, e.g.
@@ -894,7 +1077,7 @@ public sealed class LlmCopyWriter(
             // also the announcement flavor lane below — a call this method itself, not IsLlmAuthored,
             // routes here). Composed as ONE
             // check (CheckTruthGate below), never two chained ladder runs — the T331 reviewer ruling
-            // RunTruthGateLadderAsync's own remarks restate: a second ladder invocation could never
+            // RunGateLadderAsync's own remarks restate: a second ladder invocation could never
             // see the first's own re-ask reply, so a ContextSegment render facing BOTH a fact
             // violation and a clock violation must clear both in the SAME gate/re-ask cycle. factBlock
             // is non-null ONLY for a ContextSegment render carrying a non-empty fact block (F138.2's
@@ -924,10 +1107,22 @@ public sealed class LlmCopyWriter(
             // see that derivation's own remarks.
             if (TextOf(cleanup) is { } candidate)
             {
-                var ladderResult = await RunTruthGateLadderAsync(
-                    candidateText => CheckTruthGate(
-                        candidateText, factBlock, stationLocalNow, request.Track?.Title, request.StationName,
-                        requiredCore),
+                var ladderResult = await RunGateLadderAsync(
+                    candidateText =>
+                    {
+                        var truth = CheckTruthGate(
+                            candidateText, factBlock, stationLocalNow, request.Track?.Title, request.StationName,
+                            requiredCore);
+                        if (!truth.Passed)
+                            return new CopyGateVerdict(truth.Violations, []);
+
+                        // SPEC F218.11: only copy that cleared the truth gate is checked for repeats.
+                        return new CopyGateVerdict(
+                            [],
+                            checkRepeats
+                                ? FindRepeats(candidateText, request, personaName, recentEntries, card, quirkSelection)
+                                : []);
+                    },
                     LlmPromptBuilder.BuildTruthGateReaskLine, candidate, text);
                 if (ladderResult is not null)
                     return ladderResult;
@@ -964,7 +1159,7 @@ public sealed class LlmCopyWriter(
             //
             // PLAN T332 folds facts and clock into ONE call to this same ladder rather than a second
             // one (CheckTruthGate, the caller's own composite check, below) — never two chained
-            // ladder runs: a second RunTruthGateLadderAsync invocation could never see the first's
+            // ladder runs: a second RunGateLadderAsync invocation could never see the first's
             // own re-ask reply, so it could only ever check the ORIGINAL candidate a second time,
             // leaving whatever the first ladder's own re-ask actually said unchecked by the second
             // check entirely. Composing the two checks into one function, called once, is what keeps
@@ -974,20 +1169,24 @@ public sealed class LlmCopyWriter(
             // Plain // comments, not /// (T331 review finding): a local function's XML doc comment
             // never renders anywhere doc-gen actually reads it today, and would flag CS1587 the day
             // a future doc-gen pass enables XML output for this project.
-            async Task<LlmCopyCleanupResult?> RunTruthGateLadderAsync(
-                Func<string, ClaimCheckResult> check, Func<IReadOnlyList<ClaimViolation>, string> buildReaskLine,
+            async Task<LlmCopyCleanupResult?> RunGateLadderAsync(
+                Func<string, CopyGateVerdict> check, Func<IReadOnlyList<ClaimViolation>, string> buildReaskLine,
                 string firstCandidate, string firstRawText)
             {
                 var gateResult = check(firstCandidate);
                 if (gateResult.Passed)
                     return null;
 
+                // SPEC F218.12/F218.13 (PLAN T693): the SAME single re-ask serves the repeat check — a
+                // break never costs more than one extra call, whichever check trips it.
+                PublishRepeatCaught(request, gateResult.RepeatedPhrases);
+
                 // The rejected first call gets its own honest ring entry (SPEC F138.4: each call in
                 // the ladder is its own call with its own entry) BEFORE the re-ask fires — never
                 // silently folded into whichever entry the re-ask itself produces.
                 recorder.Record(
                     personaName, systemPrompt, userPrompt, firstRawText, startedAt, ElapsedMs(startedAt),
-                    LlmCallOutcome.Ok, statusDetail: null, mode, LlmCallCause.TruthGateReject, cfg.Model, callKind);
+                    LlmCallOutcome.Ok, statusDetail: null, mode, gateResult.RejectCause, cfg.Model, callKind);
 
                 // Exactly ONE re-ask (F138.4), naming the violation. userPrompt AND startedAt are both
                 // REASSIGNED (never shadowed by a new local) so a fault raised by THIS call — timeout,
@@ -998,7 +1197,9 @@ public sealed class LlmCopyWriter(
                 // whole ladder to this render's existing Llm:TimeoutSeconds budget — whatever the
                 // first call already spent is gone, and a budget that expires mid-reask throws
                 // OperationCanceledException exactly as it always would have for one call.
-                userPrompt = $"{userPrompt}\n{buildReaskLine(gateResult.Violations)}";
+                userPrompt = gateResult.FailedTruth
+                    ? $"{userPrompt}\n{buildReaskLine(gateResult.Violations)}"
+                    : LlmPromptBuilder.BuildRepeatReAsk(userPrompt, gateResult.RepeatedPhrases);
                 startedAt = timeProvider.GetUtcNow();
                 var reaskReply = await PostChatCompletionAsync(
                     http, requestUri, cfg, systemPrompt, userPrompt, DeriveMaxTokens(cfg.MaxCopyChars), timeoutCts.Token);
@@ -1011,11 +1212,11 @@ public sealed class LlmCopyWriter(
                 // "is { Passed: false }" at both the classify site and the final-return site below:
                 // reaskViolations is non-null exactly when the gate was actually checked AND failed.
                 var reaskGateResult = TextOf(reaskCleanup) is { } reaskCandidate ? check(reaskCandidate) : null;
-                var reaskViolations = reaskGateResult is { Passed: false } failed ? failed.Violations : null;
+                var reaskRejection = reaskGateResult is { Passed: false } failed ? failed : null;
 
-                var (reaskOutcome, reaskCause) = reaskViolations is null
+                var (reaskOutcome, reaskCause) = reaskRejection is null
                     ? ClassifyCleanup(reaskCleanup)
-                    : (LlmCallOutcome.Ok, LlmCallCause.TruthGateReject);
+                    : (LlmCallOutcome.Ok, reaskRejection.RejectCause);
                 recorder.Record(
                     personaName, systemPrompt, userPrompt, reaskText, startedAt, ElapsedMs(startedAt),
                     reaskOutcome, statusDetail: null, mode, reaskCause, cfg.Model, callKind);
@@ -1039,9 +1240,15 @@ public sealed class LlmCopyWriter(
                 // that passed hygiene but still failed the gate is the only case needing a synthetic
                 // TruthGateRejected instead of reaskCleanup itself: reaskCleanup there still carries
                 // real (unusable) text that must never reach TextOf.
-                return reaskViolations is { } violations
-                    ? new LlmCopyCleanupResult.TruthGateRejected(violations)
-                    : reaskCleanup;
+                if (reaskRejection is not null)
+                    PublishRepeatCaught(request, reaskRejection.RepeatedPhrases);
+
+                return reaskRejection switch
+                {
+                    null => reaskCleanup,
+                    { FailedTruth: true } => new LlmCopyCleanupResult.TruthGateRejected(reaskRejection.Violations),
+                    _ => new LlmCopyCleanupResult.RepeatRejected(reaskRejection.RepeatedPhrases),
+                };
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -1054,7 +1261,7 @@ public sealed class LlmCopyWriter(
         catch (Exception ex)
         {
             // userPrompt/startedAt name WHICHEVER call actually faulted (T331 review finding F4b): a
-            // fault raised by RunTruthGateLadderAsync's own re-ask is attributed to the re-ask's own
+            // fault raised by RunGateLadderAsync's own re-ask is attributed to the re-ask's own
             // prompt and dispatch instant, never the first call's, because both were REASSIGNED (not
             // shadowed) the moment that call fired — see this method's own startedAt remarks above.
             var (outcome, cause, detail) = ClassifyForRing(ex);
@@ -1070,7 +1277,7 @@ public sealed class LlmCopyWriter(
     }
 
     /// <summary>
-    /// The composite truth-gate check <see cref="RunTruthGateLadderAsync"/> gates on (SPEC F138.2,
+    /// The composite truth-gate check <see cref="RunGateLadderAsync"/> gates on (SPEC F138.2,
     /// F138.3, F144.3, STORY-350, STORY-351, PLAN T332, T342) — kept beside the ladder call site above,
     /// deliberately small and pure: a straight union of <see cref="CopyClaims.CheckFacts"/>'s
     /// violations (only when <paramref name="factBlock"/> is non-null — the context/announcement
@@ -1080,7 +1287,7 @@ public sealed class LlmCopyWriter(
     /// non-null — <see cref="CopyClaims.CheckContainment"/>'s own single violation, into ONE
     /// <see cref="ClaimCheckResult"/>. This is the whole reason a ContextSegment render can clear both
     /// claim families (and an announcement render all three) in a SINGLE gate/re-ask cycle instead of
-    /// chained ladder runs (the reviewer-ruled constraint <see cref="RunTruthGateLadderAsync"/>'s own
+    /// chained ladder runs (the reviewer-ruled constraint <see cref="RunGateLadderAsync"/>'s own
     /// remarks restate): the ladder only ever sees one <see cref="ClaimCheckResult"/>, never two, so it
     /// has no way to run twice even by accident. All three source checks stay <see cref="CopyClaims"/>'s
     /// own pure static functions of their arguments; this method adds no logic beyond composing their
@@ -1105,7 +1312,7 @@ public sealed class LlmCopyWriter(
     /// gate covers.
     /// </para>
     /// </summary>
-    static ClaimCheckResult CheckTruthGate(
+    internal static ClaimCheckResult CheckTruthGate(
         string copy, string? factBlock, DateTimeOffset stationLocalNow, string? trackTitle, string? stationName,
         string? requiredCore = null)
     {
@@ -1200,7 +1407,7 @@ public sealed class LlmCopyWriter(
     /// sent the 2026-08-24 bench morning at the endpoint and max_tokens for a failure only
     /// <c>Llm:ReasoningEffort</c> fixes. Every other reply runs the unchanged hygiene pass.
     /// </summary>
-    static LlmCopyCleanupResult CleanupOf(CompletionReply reply, int maxCopyChars) =>
+    internal static LlmCopyCleanupResult CleanupOf(CompletionReply reply, int maxCopyChars) =>
         reply.IsReasoningOnly
             ? new LlmCopyCleanupResult.ReasoningOnly(reply.ReasoningChars, reply.FinishReason)
             : CleanCopy(reply.Content, maxCopyChars);
@@ -1261,13 +1468,14 @@ public sealed class LlmCopyWriter(
     /// by <see cref="WriteAsync"/> and <see cref="WritePreviewAsync"/> so the two can never read the
     /// closed hierarchy differently.
     /// </summary>
-    static string? TextOf(LlmCopyCleanupResult cleanup) => cleanup switch
+    internal static string? TextOf(LlmCopyCleanupResult cleanup) => cleanup switch
     {
         LlmCopyCleanupResult.Fits fits => fits.Text,
         LlmCopyCleanupResult.Trimmed trimmed => trimmed.Text,
         LlmCopyCleanupResult.Rejected => null,
         LlmCopyCleanupResult.ReasoningOnly => null,
         LlmCopyCleanupResult.TruthGateRejected => null,
+        LlmCopyCleanupResult.RepeatRejected => null,
         _ => throw new UnreachableException($"Unhandled {nameof(LlmCopyCleanupResult)} case."),
     };
 
@@ -1309,6 +1517,8 @@ public sealed class LlmCopyWriter(
         LlmCopyCleanupResult.TruthGateRejected truthGate =>
             "the truth gate rejected the re-ask too (" +
             $"{string.Join(" and ", truthGate.Violations.Select(DescribeViolationForLog).Distinct(StringComparer.OrdinalIgnoreCase))})",
+        LlmCopyCleanupResult.RepeatRejected repeat =>
+            $"the re-ask repeated again ({string.Join(", ", repeat.Phrases)})",
         _ => throw new UnreachableException(
             $"{nameof(TextOf)} already returns non-null text for any other {nameof(LlmCopyCleanupResult)} case."),
     };

@@ -2,6 +2,7 @@ using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Host.Announcements;
 using GenWave.Host.Options;
+using GenWave.Memory;
 using GenWave.MediaLibrary.Station;
 using GenWave.Orchestration;
 
@@ -97,6 +98,18 @@ static class StationSettingsHostingExtensions
         // connection string, own lazy data source (see AddPersonaImportStore's own remarks). The
         // import route (PersonaController.Import) is its only consumer.
         builder.Services.AddPersonaImportStore(stationConnStr);
+
+        // Utterance log (SPEC F218, STORY-532, PLAN T682) — every accepted LLM-written DJ line;
+        // Memory:UtteranceRetentionDays (default 28) swept at insert. Same lazy station_svc story.
+        builder.Services.AddUtteranceStore(stationConnStr, builder.Configuration);
+
+        // Quirk selector (SPEC F218.7, STORY-533, PLAN T686) — LlmCopyWriter resolves it optionally;
+        // the spend ledger comes from AddPersonaMemoryStore above.
+        builder.Services.AddSingleton<IQuirkSelector, QuirkSelector>();
+
+        // Repetition check (SPEC F218.11, STORY-534, PLAN T693) — pure; LlmCopyWriter resolves it
+        // optionally and runs it after the truth gate, memory on or off.
+        builder.Services.AddSingleton<IRepetitionCheck, RepetitionCheck>();
 
         // Format-clock schedule store + resolver (SPEC F91.1, F91.3; STORY-240/241, PLAN T118-T120) —
         // same station_svc connection string as every registration above; station.segment_schedule

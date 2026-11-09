@@ -19,6 +19,7 @@ internal static class ProductionAssemblies
     public static readonly Assembly Abstractions = typeof(GenWave.Abstractions.Playout.EnergyRange).Assembly;
     public static readonly Assembly Plugins = typeof(GenWave.Plugins.PluginManifestDiscovery).Assembly;
     public static readonly Assembly Ads = typeof(GenWave.Ads.AdSpotPipeline).Assembly;
+    public static readonly Assembly Memory = typeof(GenWave.Memory.MemoryAssembly).Assembly;
     public static readonly Assembly Npgsql = typeof(global::Npgsql.NpgsqlConnection).Assembly;
     public static readonly Assembly Dapper = typeof(global::Dapper.SqlMapper).Assembly;
 
@@ -46,6 +47,9 @@ internal static class ProductionAssemblies
         // see GenWave.Ads.csproj's own comment) — framework-free by this law's own DIRECT-reference
         // detector (AssemblyReferenceScan's remarks), like every other inner project here.
         ("GenWave.Ads", Ads),
+        // GenWave.Memory joins at T682 (SPEC F218, STORY-532): references GenWave.Core (and, through it,
+        // GenWave.Abstractions) only — framework-free like every other inner project here.
+        ("GenWave.Memory", Memory),
     };
 
     /// <summary>Every GenWave production assembly, once (STORY-291 review carry-forward): L2 and L3
@@ -64,7 +68,7 @@ internal static class ProductionAssemblies
     /// two.</summary>
     public static IReadOnlyList<Assembly> AllProductionAssemblies() => new[]
     {
-        Core, Orchestration, Tts, Loudness, Context, MediaLibrary, Host, Abstractions, Plugins, Ads,
+        Core, Orchestration, Tts, Loudness, Context, MediaLibrary, Host, Abstractions, Plugins, Ads, Memory,
     };
 
     /// <summary>Whether <paramref name="name"/> resolves to something real in

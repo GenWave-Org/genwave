@@ -72,7 +72,7 @@ public static class FeatureSchemaJournal
     }
 
     /// <summary>The planted, always-failing migration AC9's fail-fast scenario plants — sorts LAST (after every real script), so fail-fast and --keep-going look identical through it (both run every real script first, then hit the failure).</summary>
-    internal const string FailingScript = "50-spec-fail-migration.sh";
+    internal const string FailingScript = "51-spec-fail-migration.sh";
 
     /// <summary>
     /// The planted, always-failing migration the --keep-going scenario plants. Sorts BEFORE db/49 (the
@@ -218,7 +218,7 @@ public static class FeatureSchemaJournal
     [Trait("Category", "Integration")]
     public sealed class ScenarioAFailedScript(FailedScriptFixture fixture) : IClassFixture<FailedScriptFixture>
     {
-        // Given: a temp db/ copy (Support/TempDir) with a 50-*-migration.sh that exits 1; ./migrate.sh
+        // Given: a temp db/ copy (Support/TempDir) with a 51-*-migration.sh that exits 1; ./migrate.sh
 
         /// <summary>AC9 — no row for the failed script</summary>
         [Fact]
@@ -381,7 +381,7 @@ public sealed class NoGwVersionFixture : IAsyncLifetime
     public Task DisposeAsync() => Task.CompletedTask;
 }
 
-/// <summary>AC9 arrange: the scratch repo with a planted failing 50-*-migration.sh, run fail-fast (the default).</summary>
+/// <summary>AC9 arrange: the scratch repo with a planted failing 51-*-migration.sh, run fail-fast (the default).</summary>
 public sealed class FailedScriptFixture : IAsyncLifetime
 {
     public IReadOnlyList<(string Script, DateTimeOffset AppliedAt, string? AppVersion)> Journal { get; private set; } = [];
