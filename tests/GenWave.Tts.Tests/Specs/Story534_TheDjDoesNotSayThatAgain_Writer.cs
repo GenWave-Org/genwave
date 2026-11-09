@@ -245,6 +245,41 @@ public static class FeatureTheDjDoesNotSayThatAgainWriter
                 LlmPromptBuilder.BuildRepeatReAsk("Original prompt.", ["golden hour", "back to back"]));
     }
 
+    // F218.11 follow-up — the writer hands the track's album and year to the repeat check
+    // entry point: LlmCopyWriter.WriteAsync
+    public sealed class ScenarioTheWriterPassesTrackFactsToTheCheck
+    {
+        // Given a 1959 track "Astral Plane" whose recent line holds its year words, or a track on the album
+        //       "Velvet Garden" whose recent line holds the album words
+        // When  the reply repeats only the year words and the title, or only the album words and filler
+
+        [Fact]
+        public async Task ARepeatOfOnlyTheYearWordsAndTheTitleMakesOneCall()
+        {
+            var prompts = new List<string>();
+            var store = new RecordingUtteranceStore { Seeded = { Arrange.Entry(1, "Back in nineteen fifty nine astral plane naturally") } };
+            var writer = Arrange.Writer(prompts, ["Back in nineteen fifty nine astral plane naturally"], store, new RecordingStationEventSink());
+            var track = new MediaItem("m1", "/media/x.mp3", "Astral Plane", default, "Valerie June", Album: "Big Thing", Year: 1959);
+
+            await writer.WriteAsync(QuirkSpecHarness.Request(null) with { Track = track }, CancellationToken.None);
+
+            Assert.Single(prompts);
+        }
+
+        [Fact]
+        public async Task ARepeatOfOnlyTheAlbumWordsAndFillerMakesOneCall()
+        {
+            var prompts = new List<string>();
+            var store = new RecordingUtteranceStore { Seeded = { Arrange.Entry(1, "Velvet garden of tonight") } };
+            var writer = Arrange.Writer(prompts, ["Velvet garden of tonight"], store, new RecordingStationEventSink());
+            var track = new MediaItem("m1", "/media/x.mp3", "Astral Plane", default, "Valerie June", Album: "Velvet Garden");
+
+            await writer.WriteAsync(QuirkSpecHarness.Request(null) with { Track = track }, CancellationToken.None);
+
+            Assert.Single(prompts);
+        }
+    }
+
     sealed class FixedSelector(QuirkSelection selection) : IQuirkSelector
     {
         public Task<QuirkSelection> SelectAsync(

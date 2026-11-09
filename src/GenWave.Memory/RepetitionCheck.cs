@@ -7,8 +7,12 @@ namespace GenWave.Memory;
 /// Default <see cref="IRepetitionCheck"/> (SPEC F218.11). Pure.
 /// <list type="bullet">
 /// <item>Utterance hit: a maximal run of at least <see cref="MinRunWords"/> consecutive words shared with a
-/// recent text (lowercased, punctuation stripped), kept only if some four-word window of it holds a word that is
-/// not a persona/station/title/artist word or a stop word. A longer run is one hit, named by the whole run.</item>
+/// recent text (lowercased, punctuation stripped), kept only if some four-word window of it holds enough fresh
+/// words: <see cref="MinFreshWordsNearTrackFacts"/> when the window holds a track fact (title, artist, album or
+/// year fact), else <see cref="MinFreshWords"/>. Fresh means not a stop word, not a persona/station/title/artist/album
+/// word or its "s"/"ed" form (stop words get no forms), and not a year fact. A year fact is a year digit token, or a
+/// year number word beside another year word or digit; a lone one ("this one is for you") is ordinary text.
+/// A longer run is one hit, named by the whole run.</item>
 /// <item>Quirk hit: the spent rule's key phrase (longest quoted span, else last four words). "At any length"
 /// means no minimum on the phrase itself: the candidate must hold a contiguous, in-order run of
 /// min(3, key-phrase words) of its words, so "banger, log it" hits "officially a banger, log it". Exclusions and
@@ -19,6 +23,12 @@ public sealed class RepetitionCheck : IRepetitionCheck
 {
     /// <summary>Shortest shared run that counts as a repeat.</summary>
     public const int MinRunWords = 4;
+
+    /// <summary>Fresh words a window with no track fact needs for its run to count.</summary>
+    public const int MinFreshWords = 1;
+
+    /// <summary>Fresh words a window holding a track fact needs; one is just a fact word plus filler.</summary>
+    public const int MinFreshWordsNearTrackFacts = 2;
 
     /// <summary>Words of a quirk key phrase the candidate must reproduce in order.</summary>
     public const int QuirkRunWords = 3;
@@ -39,9 +49,10 @@ public sealed class RepetitionCheck : IRepetitionCheck
         var seen = new HashSet<string>(StringComparer.Ordinal);
 
         var excluded = ExclusionWords(context);
+        var yearFacts = excluded.YearFacts(candidate);
         var runs = new List<Range>();
         foreach (var recent in context.RecentTexts)
-            runs.AddRange(SharedRuns(candidate, RepetitionText.Tokens(recent), excluded));
+            runs.AddRange(SharedRuns(candidate, RepetitionText.Tokens(recent), excluded, yearFacts));
 
         foreach (var range in OneHitPerStretch(runs))
         {
@@ -81,15 +92,26 @@ public sealed class RepetitionCheck : IRepetitionCheck
         return reported.OrderBy(r => r.Start.Value).ToList();
     }
 
-    static HashSet<string> ExclusionWords(RepetitionContext context)
+    static ExcludedWords ExclusionWords(RepetitionContext context)
     {
-        var set = new HashSet<string>(StopWords, StringComparer.Ordinal);
-        foreach (var name in new[] { context.PersonaName, context.StationName, context.TrackTitle, context.Artist })
-            set.UnionWith(RepetitionText.Tokens(name));
-        return set;
+        return new ExcludedWords(
+            StopWords,
+            NameWords(context.PersonaName, context.StationName),
+            NameWords(context.TrackTitle, context.Artist, context.Album),
+            YearWords.For(context.Year));
     }
 
-    static IEnumerable<Range> SharedRuns(string[] candidate, string[] recent, HashSet<string> excluded)
+    // Stop words are dropped first so they never grow "s"/"ed" forms ("it" must not exclude "its").
+    static HashSet<string> NameWords(params string?[] names)
+    {
+        var words = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var name in names)
+            words.UnionWith(RepetitionText.Tokens(name));
+        words.ExceptWith(StopWords);
+        return words;
+    }
+
+    static IEnumerable<Range> SharedRuns(string[] candidate, string[] recent, ExcludedWords excluded, bool[] yearFacts)
     {
         for (var i = 0; i < candidate.Length; i++)
             for (var j = 0; j < recent.Length; j++)
@@ -99,18 +121,27 @@ public sealed class RepetitionCheck : IRepetitionCheck
                 var len = 0;
                 while (i + len < candidate.Length && j + len < recent.Length && candidate[i + len] == recent[j + len])
                     len++;
-                if (len >= MinRunWords && HasFreshWindow(candidate.AsSpan(i, len), excluded))
+                if (len >= MinRunWords && HasFreshWindow(candidate, i, len, excluded, yearFacts))
                     yield return i..(i + len);
             }
     }
 
-    // A window is skipped only when every word is excluded; the run survives if any window does.
-    static bool HasFreshWindow(ReadOnlySpan<string> run, HashSet<string> excluded)
+    // The run survives if any four-word window has enough fresh words for what it holds.
+    static bool HasFreshWindow(string[] candidate, int start, int length, ExcludedWords excluded, bool[] yearFacts)
     {
-        for (var w = 0; w + MinRunWords <= run.Length; w++)
-            foreach (var token in run.Slice(w, MinRunWords))
-                if (!excluded.Contains(token))
-                    return true;
+        for (var w = start; w + MinRunWords <= start + length; w++)
+        {
+            var fresh = 0;
+            var nearTrackFacts = false;
+            for (var p = w; p < w + MinRunWords; p++)
+            {
+                if (excluded.IsFresh(candidate[p], yearFacts[p]))
+                    fresh++;
+                nearTrackFacts |= excluded.IsTrackFact(candidate[p], yearFacts[p]);
+            }
+            if (fresh >= (nearTrackFacts ? MinFreshWordsNearTrackFacts : MinFreshWords))
+                return true;
+        }
         return false;
     }
 

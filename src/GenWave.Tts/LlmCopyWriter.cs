@@ -887,7 +887,8 @@ public sealed class LlmCopyWriter(
         var result = repetitionCheck.Check(
             copy,
             new RepetitionContext(
-                recentTexts, cappedNotSelectedRules, personaName, request.StationName, request.Track?.Title, request.Track?.Artist));
+                recentTexts, cappedNotSelectedRules, personaName, request.StationName,
+                request.Track?.Title, request.Track?.Artist, request.Track?.Album, request.Track?.Year));
         return result.Hits.Select(h => h.Phrase).ToList();
     }
 

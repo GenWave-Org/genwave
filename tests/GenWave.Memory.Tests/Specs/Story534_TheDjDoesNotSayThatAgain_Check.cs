@@ -76,6 +76,123 @@ public static class FeatureTheDjDoesNotSayThatAgainCheck
         }
     }
 
+    // F218.11 follow-up — track facts are not repeats; real repeats still are
+    public sealed class ScenarioTrackFactsAreNotRepeats
+    {
+        // Given a recent line that names the current track (title, artist, album, year)
+        // When  the candidate shares a run made of those track facts plus at most one fresh word
+        static RepetitionContext DuranDuran(params string[] texts) =>
+            new(texts, [], null, null, "Do You Believe in Shame? (2010 Remaster)", "Duran Duran", "Big Thing", 2010);
+
+        const string LeadIn =
+            "Next, we have Duran Duran's 'Do You Believe in Shame?' Remastered in 2010. Quite the statement, wouldn't you agree?";
+
+        [Fact]
+        public void ABackAnnounceNamingThePossessiveArtistAndTitleIsNotAHit() =>
+            Assert.False(Check.Check("Duran Duran's Do You Believe in Shame, that was", DuranDuran(LeadIn)).IsHit);
+
+        [Fact]
+        public void ABackAnnounceSayingRemasteredForUsInIsNotAHit() =>
+            Assert.False(Check.Check("It was remastered for us in 2010, folks", DuranDuran("Remastered for us in 2010, here it is")).IsHit);
+
+        [Fact]
+        public void AYearInWordsPlusOneFillerWordIsNotAHit()
+        {
+            var context = new RepetitionContext(
+                ["a classic from nineteen fifty nine naturally"], [], Year: 1959);
+
+            Assert.False(Check.Check("nineteen fifty nine naturally, what a year", context).IsHit);
+        }
+
+        [Fact]
+        public void ASharedRunWithOnlyOneFreshWordIsNotAHit() =>
+            Assert.False(Check.Check("x of the dance floor", Titled("Dance", "y of the dance floor")).IsHit);
+
+        [Fact]
+        public void APossessiveFormOfANameWordDoesNotCountAsFresh() =>
+            Assert.False(Check.Check("duran durans shame tonight", ShameByDuranDuran("duran durans shame tonight")).IsHit);
+
+        [Fact]
+        public void AnAlbumWordDoesNotCountAsFresh()
+        {
+            var context = new RepetitionContext(["velvet garden of tonight"], [], Album: "Velvet Garden");
+
+            Assert.False(Check.Check("velvet garden of tonight", context).IsHit);
+        }
+
+        [Fact]
+        public void AZeroPaddedYearDoesNotCountAsFresh() =>
+            Assert.False(Check.Check("05 naturally in the", new RepetitionContext(["05 naturally in the"], [], Year: 2005)).IsHit);
+
+        static RepetitionContext Titled(string title, params string[] texts) =>
+            new(texts, [], null, null, title);
+
+        static RepetitionContext ShameByDuranDuran(params string[] texts) =>
+            new(texts, [], null, null, "Shame", "Duran Duran");
+    }
+
+    public sealed class ScenarioRealRepeatsAreStillCaught
+    {
+        // Given a recent line holding a persona phrasing run (a stock opener, a soak phrase)
+        // When  the candidate shares that run, even with track facts set
+        [Fact]
+        public void AStockOpenerWithNoTrackFactsIsAHit()
+        {
+            var result = Check.Check("Okay, this one is for you, friend.", Recent("Well this one is for you"));
+
+            Assert.Equal(["this one is for you"], result.Hits.Select(h => h.Phrase));
+        }
+
+        [Fact]
+        public void AStopWordTitleDoesNotGrowFormsThatHideARepeat()
+        {
+            // "its the one for" is the shortest run that goes red without the stop-word rule: only "its" is a form
+            // of the title word "it", leaving "one" as the lone fresh word. A longer text with a second fresh word
+            // (e.g. "so its the one for you") would pass either way, so it can't pin the rule.
+            var context = new RepetitionContext(["its the one for"], [], null, null, "Beat It");
+
+            Assert.True(Check.Check("its the one for", context).IsHit);
+        }
+
+        [Theory]
+        [InlineData(2001)]
+        [InlineData(1991)]
+        public void ALoneNumberWordInAStockOpenerIsNotATrackFact(int year)
+        {
+            var result = Check.Check("Okay, this one is for you", new RepetitionContext(["this one is for you"], [], Year: year));
+
+            Assert.Equal(["this one is for you"], result.Hits.Select(h => h.Phrase));
+        }
+
+        [Fact]
+        public void ALoneTenInAStockOpenerIsNotATrackFact()
+        {
+            var result = Check.Check("top ten for you all", new RepetitionContext(["top ten for you all"], [], Year: 2010));
+
+            Assert.Equal(["top ten for you all"], result.Hits.Select(h => h.Phrase));
+        }
+
+        [Fact]
+        public void AClashRunNamesThePhrase()
+        {
+            var result = Check.Check(
+                "Ladies and gentlemen, prepare for a clash of titans!",
+                Recent("Well, ladies and gentlemen prepare for a clash of two giants tonight"));
+
+            Assert.Equal(["ladies and gentlemen prepare for a clash of"], result.Hits.Select(h => h.Phrase));
+        }
+
+        [Fact]
+        public void ADisagreesRunIsAHit()
+        {
+            var result = Check.Check(
+                "This next track disagrees with everything I know.",
+                Recent("Careful, this next track disagrees with the last one."));
+
+            Assert.Equal(["this next track disagrees with"], result.Hits.Select(h => h.Phrase));
+        }
+    }
+
     // ---------------------------------------------------------------------
     // SAD PATH
     // ---------------------------------------------------------------------
