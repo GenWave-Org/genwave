@@ -65,6 +65,15 @@ static class PlayoutServiceCollectionExtensions
             // (PLAN T366's thumb-write endpoint) both resolve the SAME singleton instance without
             // depending on its IStationEventSink write side. See AiringTokenRing's own remarks.
             .AddSingleton<AiringTokenRing>()
+            // Utterance air time (SPEC F218.3, STORY-532, PLAN T685): SegmentGenerated remembers
+            // tts:<hash> -> utterance id; the engine-confirmed TrackAired, or the feeder's
+            // TrackProvenAired for a line that aired between polls, queues the aired_at stamp. See UtteranceAirEventSink's own remarks.
+            .AddSingleton(_ => Channel.CreateBounded<UtteranceAirSignal>(
+                new BoundedChannelOptions(64) { FullMode = BoundedChannelFullMode.Wait }))
+            .AddSingleton(sp => sp.GetRequiredService<Channel<UtteranceAirSignal>>().Reader)
+            .AddSingleton(sp => sp.GetRequiredService<Channel<UtteranceAirSignal>>().Writer)
+            .AddSingleton<UtteranceAirEventSink>()
+            .AddHostedService<UtteranceAirDrainService>()
             .AddSingleton<IAiringTokenResolver>(sp => sp.GetRequiredService<AiringTokenRing>())
             // The host's event-sink binding (gitea-#246): composes PlayHistoryEventSink
             // (TrackAired -> play history ring), the booth log's BoothLogWriter
@@ -95,6 +104,7 @@ static class PlayoutServiceCollectionExtensions
                     sp.GetRequiredService<AnnouncementPrivacyFlipEventSink>(),
                     sp.GetRequiredService<MediaRotationEventSink>(),
                     sp.GetRequiredService<AiringTokenRing>(),
+                    sp.GetRequiredService<UtteranceAirEventSink>(),
                 ],
                 sp.GetRequiredService<ILogger<CompositeStationEventSink>>()))
             // Persona-id -> worn-face token, memoized on a ≤30s TTL (SPEC F129.5, STORY-336, PLAN

@@ -39,6 +39,12 @@ public static class FeatureFeederBacklogResilience
         public void Publish(StationEvent evt) { if (evt is TrackAired t) Aired.Add(t); }
     }
 
+    sealed class ProvenSink : IStationEventSink
+    {
+        public List<TrackProvenAired> Proven { get; } = [];
+        public void Publish(StationEvent evt) { if (evt is TrackProvenAired p) Proven.Add(p); }
+    }
+
     static MediaItem Item(string id) =>
         new(id, $"/media/{id}.mp3", $"title-{id}", new Loudness(-16.0, -1.0, Measurable: true));
 
@@ -184,6 +190,82 @@ public static class FeatureFeederBacklogResilience
             // DurationMs never rides the engine annotate line (F50.2) — non-null is only reachable
             // via the feeder-owned push branch, so null here proves ownership was released too.
             Assert.Null(feeder.CurrentOnAir?.DurationMs);
+        }
+    }
+
+    public sealed class ScenarioAPredecessorProvenByALaterSiblingIsAnnounced
+    {
+        // The pushed tts id airs between two polls (no TrackAired ever), then the music id is
+        // observed: the predecessor is announced once as TrackProvenAired, never as TrackAired.
+        static async Task<ProvenSink> RunAsync()
+        {
+            var ttsSeg = new MediaItem("tts:seg", "/media/tts-seg.wav", "Segment",
+                new Loudness(-16.0, -1.0, Measurable: true), DurationMs: 4_000);
+            var sink = new ProvenSink();
+            var feeder = new PlayoutFeeder(
+                new FakeLiquidsoapControl(["safe", "m1"], Real("m1", "tts:seg")),
+                new FakeNextItemProvider(ttsSeg, Item("m1")), Rotation(1), events: sink);
+
+            await feeder.TickAsync(CancellationToken.None);   // boot → pushes chain [tts:seg, m1]
+            await feeder.TickAsync(CancellationToken.None);   // only m1 observed
+            return sink;
+        }
+
+        [Fact]
+        public async Task TheUnobservedIdIsAnnouncedExactlyOnce()
+        {
+            var sink = await RunAsync();
+
+            Assert.Equal(["tts:seg"], sink.Proven.Select(p => p.MediaId));
+        }
+
+        [Fact]
+        public async Task TheObservedIdItselfIsNeverAnnounced()
+        {
+            var sink = await RunAsync();
+
+            Assert.DoesNotContain(sink.Proven, p => p.MediaId == "m1");
+        }
+    }
+
+    public sealed class ScenarioAnEngineRestartSeversTheProofOfAnOlderBacklog
+    {
+        // A foreign-but-real advance keeps the older chain [tts:a, m1] queued (no strip), then the
+        // engine restarts (empty read) and a confirmed drain strips the NEXT chain [tts:c, m2].
+        // A fresh chain [tts:e, m3] is pushed and tts:e is observed. tts:a and m1 died with the
+        // restarted engine, so tts:e proves nothing about them: they must never be announced.
+        static async Task<ProvenSink> RunAsync()
+        {
+            MediaItem Tts(string id) => new(id, $"/media/{id}.wav", "Segment",
+                new Loudness(-16.0, -1.0, Measurable: true), DurationMs: 4_000);
+            var sink = new ProvenSink();
+            var feeder = new PlayoutFeeder(
+                new FakeLiquidsoapControl(["safe", "X", null, "tts:e"], Real("X", "tts:e")),
+                new FakeNextItemProvider(
+                    Tts("tts:a"), Item("m1"), Tts("tts:c"), Item("m2"), Tts("tts:e"), Item("m3")),
+                Rotation(1), events: sink);
+
+            await feeder.TickAsync(CancellationToken.None);   // boot (safe) → pushes [tts:a, m1]
+            await feeder.TickAsync(CancellationToken.None);   // foreign X airs → no strip; pushes [tts:c, m2]
+            await feeder.TickAsync(CancellationToken.None);   // engine restart (empty read) → confirmed drain strips [tts:c, m2]; pushes [tts:e, m3]
+            await feeder.TickAsync(CancellationToken.None);   // tts:e observed
+            return sink;
+        }
+
+        [Fact]
+        public async Task TheFirstUnobservedIdOfTheOlderBacklogIsNeverAnnounced()
+        {
+            var sink = await RunAsync();
+
+            Assert.DoesNotContain(sink.Proven, p => p.MediaId == "tts:a");
+        }
+
+        [Fact]
+        public async Task TheSecondUnobservedIdOfTheOlderBacklogIsNeverAnnounced()
+        {
+            var sink = await RunAsync();
+
+            Assert.DoesNotContain(sink.Proven, p => p.MediaId == "m1");
         }
     }
 

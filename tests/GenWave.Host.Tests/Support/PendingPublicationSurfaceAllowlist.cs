@@ -3,7 +3,8 @@ namespace GenWave.Host.Tests.Support;
 /// <summary>
 /// SPEC F218.5 / PLAN T683 (the T524 precedent): <c>QuirkRule</c> and
 /// <c>PersonaCard.QuirkRules</c> (and, PLAN T684, the init-only <c>PersonaId</c>/<c>ShowId</c>/<c>ShiftKeyText</c>/
-/// <c>UtteranceId</c>/<c>Text</c> members on <c>SegmentRequest</c>/<c>SegmentCopy</c>/<c>SegmentGenerated</c>) are an additive contract change that landed in
+/// <c>UtteranceId</c>/<c>Text</c> members on <c>SegmentRequest</c>/<c>SegmentCopy</c>/<c>SegmentGenerated</c>; and, PLAN T685,
+/// the new <c>TrackProvenAired</c> event published beside <c>TrackAired</c>) are an additive contract change that landed in
 /// <c>src/GenWave.Abstractions</c> BEFORE the package that carries it is published. The committed
 /// baseline fixture stays byte-identical to the published surface (never hand-edited); the gap is
 /// tolerated only by passing these EXACT added lines — named line by line, no wildcard — to
@@ -29,5 +30,10 @@ public static class PendingPublicationSurfaceAllowlist
         "GenWave.Core.Events.SegmentGenerated::PROPERTY System.Nullable<System.Int64> ShowId { public get; public init; }",
         "GenWave.Core.Events.SegmentGenerated::PROPERTY System.Nullable<System.Int64> UtteranceId { public get; public init; }",
         "GenWave.Core.Events.SegmentGenerated::PROPERTY System.String Text { public get; public init; }",
+        // PLAN T685: TrackProvenAired, a new additive event beside TrackAired (the feeder's "proven aired" signal).
+        "GenWave.Core.Events.TrackProvenAired::CTOR (System.String MediaId, System.DateTimeOffset ProvenAt)",
+        "GenWave.Core.Events.TrackProvenAired::PROPERTY System.DateTimeOffset ProvenAt { public get; public init; }",
+        "GenWave.Core.Events.TrackProvenAired::PROPERTY System.String MediaId { public get; public init; }",
+        "GenWave.Core.Events.TrackProvenAired::TYPE class : GenWave.Core.Events.StationEvent [System.IEquatable<GenWave.Core.Events.StationEvent>,System.IEquatable<GenWave.Core.Events.TrackProvenAired>]",
     ];
 }

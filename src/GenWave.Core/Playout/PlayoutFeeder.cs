@@ -157,7 +157,16 @@ public sealed class PlayoutFeeder(
     // exists for), and a live size cap in MarkPendingAir (last-resort backstop for an id that
     // genuinely never airs — an engine flush wiping the queue). FIFO order is also what keeps a
     // repeat push of the same id exactly-once: see DrainPendingAirUpTo's ordering note.
-    readonly Queue<string> pendingAirQueue = new();
+    //
+    // Each entry carries the engine epoch (airEpoch) it was pushed in. The epoch is bumped whenever
+    // the engine's queue is known to have been wiped (an engine restart, or a confirmed drain), so
+    // an entry left over from an older epoch can still be RELEASED (liveness is unchanged) but is
+    // never ANNOUNCED as proven aired by a sibling from a newer epoch: that sibling says nothing
+    // about a queue that no longer exists.
+    readonly Queue<PendingAir> pendingAirQueue = new();
+    int airEpoch;
+
+    readonly record struct PendingAir(string MediaId, int Epoch);
 
     /// <summary>
     /// How many CONSECUTIVE observe ticks the safe rotation must cover — while pushes are still
@@ -247,6 +256,7 @@ public sealed class PlayoutFeeder(
                 pendingDepartedOnAirId = onAirId;
                 onAirId = null;
                 prepared = 0;
+                airEpoch++;   // the engine restarted: its queue, and everything pushed before, is gone
             }
             onAirIsReal = false;
             booted = true;
@@ -324,7 +334,7 @@ public sealed class PlayoutFeeder(
                     // including) it (see DrainPendingAirUpTo), which also proves every earlier,
                     // still-pending push aired too, even one whose own advance was never
                     // individually observed (SPEC F57.1(d), gh-#88).
-                    DrainPendingAirUpTo(mediaId);
+                    DrainPendingAirUpTo(mediaId, advancedAt);
                 }
 
                 // Publish the advance (e.g. for PlayHistoryService's sink). The event carries only
@@ -396,7 +406,7 @@ public sealed class PlayoutFeeder(
             safeCoverTicks++;
             if (safeCoverTicks >= SafeCoverTicksBeforePushLossSignal && pendingAirQueue.Count > 0)
             {
-                var oldestPendingId = pendingAirQueue.Peek();
+                var oldestPendingId = pendingAirQueue.Peek().MediaId;
                 var oldestMeta = pushedMeta.GetValueOrDefault(oldestPendingId);
                 PushLoss = new PushLossSignal(
                     oldestPendingId, oldestMeta?.Title, oldestMeta?.Artist, pendingAirQueue.Count);
@@ -440,7 +450,11 @@ public sealed class PlayoutFeeder(
             // refill no-op above) — so it must NOT strip. Stripping on a foreign advance was gh-#88
             // review round 2's own near-miss: it would have re-broken the pick-survives-backlog
             // repro this claim exists to fix.
-            if (!onAirIsReal) ReleasePriorChainPendingAir(staleChain);
+            if (!onAirIsReal)
+            {
+                airEpoch++;   // confirmed drain: nothing pushed before this point is in the engine any more
+                ReleasePriorChainPendingAir(staleChain);
+            }
             foreach (var staleId in staleChain) ReleaseIfDead(staleId);
 
             // gh-#254: computed ONCE per refill, BEFORE anything is pulled — the items this very
@@ -555,13 +569,13 @@ public sealed class PlayoutFeeder(
     // live-tunability reason.
     void MarkPendingAir(string mediaId)
     {
-        pendingAirQueue.Enqueue(mediaId);
+        pendingAirQueue.Enqueue(new PendingAir(mediaId, airEpoch));
 
         var cap = Math.Max(MaxChainLength, rotationProvider.Current.RecentWindow) * PendingAirCapMultiplier;
         while (pendingAirQueue.Count > cap)
         {
             var evicted = pendingAirQueue.Dequeue();
-            ReleaseIfDead(evicted);
+            ReleaseIfDead(evicted.MediaId);
         }
     }
 
@@ -586,15 +600,24 @@ public sealed class PlayoutFeeder(
     // unobserved occurrence first. A later, independent re-push of the same id enqueues its own
     // fresh entry BEHIND the current one, so it is never touched by a drain that has already
     // finished — see MarkPendingAir, called strictly after any drain in the same tick.
-    void DrainPendingAirUpTo(string mediaId)
+    //
+    // Each predecessor released here (an id that is NOT mediaId) is announced as TrackProvenAired:
+    // its own advance was never observed, so no TrackAired exists for it, yet it is now proven to
+    // have aired. TrackAired's own semantics (booth log, play history) are deliberately untouched.
+    // Only predecessors from the SAME epoch as mediaId's entry are announced: an older-epoch
+    // predecessor was wiped with the engine queue it was pushed into, so it is released silently.
+    void DrainPendingAirUpTo(string mediaId, DateTimeOffset provenAt)
     {
-        if (!pendingAirQueue.Contains(mediaId)) return;
+        if (!pendingAirQueue.Any(p => p.MediaId == mediaId)) return;
 
+        var observedEpoch = pendingAirQueue.First(p => p.MediaId == mediaId).Epoch;
         while (pendingAirQueue.Count > 0)
         {
             var drained = pendingAirQueue.Dequeue();
-            ReleaseIfDead(drained);
-            if (drained == mediaId) break;
+            ReleaseIfDead(drained.MediaId);
+            if (drained.MediaId == mediaId) break;
+            if (drained.Epoch == observedEpoch)
+                events.Publish(new TrackProvenAired(drained.MediaId, provenAt));
         }
     }
 
@@ -608,9 +631,9 @@ public sealed class PlayoutFeeder(
         if (staleChain.Count == 0 || pendingAirQueue.Count == 0) return;
 
         var stale = new HashSet<string>(staleChain, StringComparer.Ordinal);
-        if (!pendingAirQueue.Any(stale.Contains)) return;
+        if (!pendingAirQueue.Any(p => stale.Contains(p.MediaId))) return;
 
-        var survivors = pendingAirQueue.Where(id => !stale.Contains(id)).ToArray();
+        var survivors = pendingAirQueue.Where(p => !stale.Contains(p.MediaId)).ToArray();
         pendingAirQueue.Clear();
         foreach (var survivor in survivors) pendingAirQueue.Enqueue(survivor);
     }
@@ -639,7 +662,7 @@ public sealed class PlayoutFeeder(
             totalMs += airingMs - boundedElapsedMs;
         }
 
-        foreach (var pendingId in pendingAirQueue)
+        foreach (var (pendingId, _) in pendingAirQueue)
         {
             if (pushedMeta.TryGetValue(pendingId, out var queued) && queued.DurationMs is int queuedMs)
                 totalMs += queuedMs;
@@ -654,7 +677,7 @@ public sealed class PlayoutFeeder(
     // checked by membership, not by count, so an id occupying multiple ring slots survives an older
     // occurrence's eviction (gitea-#229), and a backlogged push survives ring eviction until it airs.
     bool IsLive(string mediaId) =>
-        mediaId == onAirId || chainIds.Contains(mediaId) || recent.Contains(mediaId) || pendingAirQueue.Contains(mediaId);
+        mediaId == onAirId || chainIds.Contains(mediaId) || recent.Contains(mediaId) || pendingAirQueue.Any(p => p.MediaId == mediaId);
 
     // Removes mediaId's cached metadata once none of the F57.1 liveness claims hold. A no-op while
     // any claim still stands, or if the id was never cached to begin with.

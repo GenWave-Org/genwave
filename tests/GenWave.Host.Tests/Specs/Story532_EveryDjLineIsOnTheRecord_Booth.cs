@@ -8,9 +8,13 @@
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Core.Events;
+using GenWave.Host.Playout;
 using GenWave.Host.Tests.Fakes;
 using GenWave.MediaLibrary.Station;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -45,6 +49,110 @@ file static class PatterAiredHarness
 
         return Assert.Single(appender.Calls);
     }
+}
+
+/// <summary>
+/// Boots the real composition root (Program.cs, no DB) with only <see cref="IUtteranceStore"/>
+/// faked, starts the real <c>UtteranceAirDrainService</c>, and publishes through the container's
+/// real <see cref="IStationEventSink"/> — the same bus the feeder's TrackAired travels.
+/// </summary>
+file sealed class AirTimeHarness : IAsyncDisposable
+{
+    readonly AirTimeFactory factory;
+    readonly IHostedService drain;
+    readonly RecordingUtteranceStore store;
+
+    AirTimeHarness(AirTimeFactory factory, IHostedService drain, RecordingUtteranceStore store)
+    {
+        this.factory = factory;
+        this.drain = drain;
+        this.store = store;
+    }
+
+    /// <param name="startDrain">False leaves the drain loop stopped, so a queue's contents stay observable.</param>
+    public static async Task<AirTimeHarness> StartAsync(bool startDrain = true)
+    {
+        var store = new RecordingUtteranceStore();
+        var factory = new AirTimeFactory(store);
+        var drain = factory.Services.GetServices<IHostedService>()
+            .OfType<UtteranceAirDrainService>().Single();
+        if (startDrain) await drain.StartAsync(CancellationToken.None);
+        return new AirTimeHarness(factory, drain, store);
+    }
+
+    public void Publish(StationEvent evt) => factory.Services.GetRequiredService<IStationEventSink>().Publish(evt);
+
+    /// <summary>One line rendered and aired, drain stopped so the queues stay observable.</summary>
+    public static async Task<AirTimeHarness> StartWithOneAiredLineAsync()
+    {
+        var run = await StartAsync(startDrain: false);
+        run.Publish(new SegmentGenerated("tts:abc", "LeadIn", "af_heart") { UtteranceId = 42 });
+        run.Publish(new TrackAired("tts:abc", null, null, 0.0, DateTimeOffset.UtcNow, 4_000, SegmentKind: SegmentKind.LeadIn));
+        return run;
+    }
+
+    public T Resolve<T>() where T : notnull => factory.Services.GetRequiredService<T>();
+
+    public Task<long?> NextStampAsync(TimeSpan wait) => store.NextStampAsync(wait);
+
+    public async ValueTask DisposeAsync()
+    {
+        await drain.StopAsync(CancellationToken.None); // a no-op when never started
+        await factory.DisposeAsync();
+    }
+}
+
+file sealed class AirTimeFactory(IUtteranceStore store) : Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program>
+{
+    protected override void ConfigureWebHost(Microsoft.AspNetCore.Hosting.IWebHostBuilder builder)
+    {
+        builder.UseEnvironment("Development");
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
+        builder.UseSetting("ConnectionStrings:Station", "");
+        builder.UseSetting("Admin:Password", "test-password-story532-airtime");
+        builder.UseSetting("Station:Id", "genwave-1");
+        builder.UseSetting("Station:Name", "GWAV 108.8");
+        builder.UseSetting("Station:Voice", "af_heart");
+        builder.UseSetting("Station:Scope:LibraryIds:0", "1");
+
+        builder.ConfigureTestServices(services =>
+        {
+            // Keep only the air-time drain loop; no engine, feeder or other background reach.
+            var drain = services.First(d => d.ServiceType == typeof(IHostedService)
+                && d.ImplementationType == typeof(UtteranceAirDrainService));
+            services.RemoveAll<IHostedService>();
+            services.Add(drain);
+            services.AddSingleton(store);
+        });
+    }
+}
+
+file sealed class RecordingUtteranceStore : IUtteranceStore
+{
+    readonly System.Threading.Channels.Channel<long> stamps = System.Threading.Channels.Channel.CreateUnbounded<long>();
+
+    public async Task<long?> NextStampAsync(TimeSpan wait)
+    {
+        using var cts = new CancellationTokenSource(wait);
+        try
+        {
+            return await stamps.Reader.ReadAsync(cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+    }
+
+    public Task MarkAiredAsync(long id, CancellationToken ct)
+    {
+        stamps.Writer.TryWrite(id);
+        return Task.CompletedTask;
+    }
+
+    public Task<long> RecordAsync(NewUtterance utterance, CancellationToken ct) => throw new NotSupportedException();
+    public Task<IReadOnlyList<UtteranceEntry>> RecentAsync(long personaId, int take, CancellationToken ct) => throw new NotSupportedException();
+    public Task<int> SweepAsync(CancellationToken ct) => throw new NotSupportedException();
 }
 
 public static class FeatureEveryDjLineIsOnTheRecordBooth
@@ -106,8 +214,15 @@ public static class FeatureEveryDjLineIsOnTheRecordBooth
         // Given a stored utterance whose file the engine then starts
         // When  the engine reports a gw_tts="true" file started
 
-        [Fact(Skip = "pending: T685 — see docs/PLAN.md")]
-        public void ThatUtteranceSAiredAtIsSet() => Assert.Fail("pending: T685 — that utterance's aired_at is set");
+        [Fact]
+        public async Task ThatUtteranceSAiredAtIsSet()
+        {
+            await using var run = await AirTimeHarness.StartAsync();
+            run.Publish(new SegmentGenerated("tts:abc", "LeadIn", "af_heart") { UtteranceId = 42 });
+            run.Publish(new TrackAired("tts:abc", null, null, 0.0, DateTimeOffset.UtcNow, 4_000, SegmentKind: SegmentKind.LeadIn));
+
+            Assert.Equal(42L, await run.NextStampAsync(TimeSpan.FromSeconds(5)));
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -120,7 +235,104 @@ public static class FeatureEveryDjLineIsOnTheRecordBooth
         // Given a stored utterance whose render is later dropped
         // When  no engine event arrives
 
-        [Fact(Skip = "pending: T685 — see docs/PLAN.md")]
-        public void AiredAtStaysNull() => Assert.Fail("pending: T685 — aired_at stays null");
+        [Fact]
+        public async Task AiredAtStaysNull()
+        {
+            await using var run = await AirTimeHarness.StartAsync();
+            run.Publish(new SegmentGenerated("tts:dropped", "LeadIn", "af_heart") { UtteranceId = 43 });
+            // A different file airs; the dropped render's file never does.
+            run.Publish(new TrackAired("tts:other", null, null, 0.0, DateTimeOffset.UtcNow, 4_000, SegmentKind: SegmentKind.LeadIn));
+            // Channel order is FIFO: had the dropped render's 43 been queued, it would come out
+            // before 44. No fixed sleep; 5 s is only the ceiling for 44 to arrive.
+            run.Publish(new SegmentGenerated("tts:aired", "LeadIn", "af_heart") { UtteranceId = 44 });
+            run.Publish(new TrackAired("tts:aired", null, null, 0.0, DateTimeOffset.UtcNow, 4_000, SegmentKind: SegmentKind.LeadIn));
+
+            Assert.Equal(44L, await run.NextStampAsync(TimeSpan.FromSeconds(5)));
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // Support: the utterance queue shares nothing with other registrations
+    // ---------------------------------------------------------------------
+    public sealed class ScenarioTheUtteranceQueueHijacksNoOtherQueue
+    {
+        // The enrichment queue (Channel<long>) and the listener-request queue
+        // (ChannelReader<long>/ChannelWriter<long>) are resolved by closed generic type, so a
+        // bare long queue here would take them over. An aired line must reach neither.
+
+        [Fact]
+        public async Task TheEnrichmentQueueReceivesNothing()
+        {
+            await using var run = await AirTimeHarness.StartWithOneAiredLineAsync();
+
+            Assert.False(run.Resolve<System.Threading.Channels.Channel<long>>().Reader.TryRead(out _));
+        }
+
+        [Fact]
+        public async Task TheListenerRequestQueueReceivesNothing()
+        {
+            await using var run = await AirTimeHarness.StartWithOneAiredLineAsync();
+
+            Assert.False(run.Resolve<System.Threading.Channels.ChannelReader<long>>().TryRead(out _));
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // A line the feeder proves aired between two polls still gets its stamp
+    // ---------------------------------------------------------------------
+    public sealed class ScenarioAProvenLateLineIsStamped
+    {
+        // Given a stored utterance whose short file aired and departed between two polls
+        // When  the feeder proves it aired from a later observed sibling
+
+        [Fact]
+        public async Task AProvenLateLineStillGetsItsStamp()
+        {
+            await using var run = await AirTimeHarness.StartAsync();
+            run.Publish(new SegmentGenerated("tts:late", "LeadIn", "af_heart") { UtteranceId = 45 });
+            run.Publish(new TrackProvenAired("tts:late", DateTimeOffset.UtcNow));
+
+            Assert.Equal(45L, await run.NextStampAsync(TimeSpan.FromSeconds(5)));
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // Support: a re-rendered line that aired once survives eviction pressure
+    // ---------------------------------------------------------------------
+    public sealed class ScenarioAReRenderAfterAnAiringSurvivesEviction
+    {
+        readonly System.Threading.Channels.Channel<UtteranceAirSignal> queue;
+        readonly UtteranceAirEventSink sink;
+
+        // Given a cached line that rendered and aired once, then was re-rendered (new utterance)
+        //       as the second-oldest of a batch that overflows the pending bound by one
+        public ScenarioAReRenderAfterAnAiringSurvivesEviction()
+        {
+            queue = System.Threading.Channels.Channel.CreateUnbounded<UtteranceAirSignal>();
+            sink = new UtteranceAirEventSink(queue.Writer, Microsoft.Extensions.Logging.Abstractions.NullLogger<UtteranceAirEventSink>.Instance);
+
+            sink.Publish(new SegmentGenerated("tts:x", "LeadIn", "af_heart") { UtteranceId = 1 });
+            Air("tts:x");
+            queue.Reader.TryRead(out _);
+            sink.Publish(new SegmentGenerated("tts:f0", "LeadIn", "af_heart") { UtteranceId = 1_000 });
+            sink.Publish(new SegmentGenerated("tts:x", "LeadIn", "af_heart") { UtteranceId = 2 });
+            for (var i = 1; i < UtteranceAirEventSink.MaxPending; i++)
+                sink.Publish(new SegmentGenerated($"tts:f{i}", "LeadIn", "af_heart") { UtteranceId = 1_000 + i });
+            while (queue.Reader.TryRead(out _)) { }
+        }
+
+        // When  the re-rendered line airs
+
+        [Fact]
+        public void TheReRenderedLineStillGetsItsStamp()
+        {
+            Air("tts:x");
+
+            Assert.True(queue.Reader.TryRead(out var signal));
+            Assert.Equal(2L, signal.UtteranceId);
+        }
+
+        void Air(string mediaId) =>
+            sink.Publish(new TrackAired(mediaId, null, null, 0.0, DateTimeOffset.UtcNow, 4_000, SegmentKind: SegmentKind.LeadIn));
     }
 }
