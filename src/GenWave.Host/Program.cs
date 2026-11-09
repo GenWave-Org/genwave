@@ -255,7 +255,16 @@ builder.Services.AddSingleton<IListenerStatsSource>(sp => sp.GetRequiredService<
 // percentage needs), so 5s is generous without letting a wedged sidecar pin a Health-page poll.
 // DockerContainerStatsSource degrades to a well-formed `degraded: true` report on any failure —
 // GET /api/health/containers never 500s over a missing sidecar.
+// gh-#629: the roster is scoped to the station's compose project. COMPOSE_PROJECT_NAME (the
+// standard compose variable) is the override; absent that the source reads its own container's
+// compose label. ComposeProjectScope remembers the answer for the process lifetime.
 builder.Services.Configure<DockerStatsOptions>(cfg.GetSection(DockerStatsOptions.SectionName));
+builder.Services.PostConfigure<DockerStatsOptions>(options =>
+{
+    if (string.IsNullOrWhiteSpace(options.ComposeProject))
+        options.ComposeProject = cfg["COMPOSE_PROJECT_NAME"] ?? "";
+});
+builder.Services.AddSingleton<ComposeProjectScope>();
 builder.Services.AddHttpClient<DockerContainerStatsSource>(client => client.Timeout = TimeSpan.FromSeconds(5));
 
 // gh-#10 (plugin-readiness P1.4): the listener-count time series — one sample every

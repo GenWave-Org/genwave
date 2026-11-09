@@ -109,6 +109,7 @@ public static class FeatureContainerStatsSource
         new(
             new HttpClient(handler),
             new FakeOptionsMonitor<DockerStatsOptions>(new DockerStatsOptions { BaseUrl = baseUrl }),
+            new ComposeProjectScope(),
             NullLogger<DockerContainerStatsSource>.Instance);
 
     static FakeHttpMessageHandler HealthyStackHandler() =>
