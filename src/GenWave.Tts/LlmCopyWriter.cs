@@ -781,10 +781,10 @@ public sealed class LlmCopyWriter(
             : null;
 
     /// <summary>
-    /// The quirk lines for this render, or null to let the prompt builder sample plain as before (no
+    /// The quirk selection for this render, or null to let the prompt builder sample plain as before (no
     /// selector registered). A selector fault costs this break its quirks, never the segment (F12.4).
     /// </summary>
-    async Task<IReadOnlyList<string>?> SelectQuirkLinesAsync(
+    async Task<QuirkSelection?> SelectQuirksAsync(
         SegmentRequest request, PersonaCard? card, bool spend, CancellationToken ct)
     {
         if (quirkSelector is null)
@@ -794,7 +794,7 @@ public sealed class LlmCopyWriter(
         try
         {
             var selection = await quirkSelector.SelectAsync(request.PersonaId, card, shiftKey, spend, ct);
-            return selection.Lines;
+            return selection;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -803,7 +803,7 @@ public sealed class LlmCopyWriter(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Quirk selection failed for {Kind}; this break airs without quirks", request.Kind);
-            return [];
+            return QuirkSelection.None;
         }
     }
 
@@ -913,9 +913,9 @@ public sealed class LlmCopyWriter(
             // spend row is written before this render is dispatched. spendQuirks is true for every
             // on-air path (segments and announcements) and false only for the preview; an on-air
             // request without a shift key cannot record a spend, so the selector keeps capped quirks out.
-            var quirkLines = await SelectQuirkLinesAsync(request, card, spend: spendQuirks, ct);
+            var quirkSelection = await SelectQuirksAsync(request, card, spend: spendQuirks, ct);
             systemPrompt = LlmPromptBuilder.BuildSystemPrompt(
-                LlmPromptBuilder.BuildPersonaSection(persona, card, mentionOwnName, quirkLines), cfg.MaxCopyChars, stationLocalNow);
+                LlmPromptBuilder.BuildPersonaSection(persona, card, mentionOwnName, quirkSelection), cfg.MaxCopyChars, stationLocalNow);
 
             // Read HERE — after WaitAsync above, i.e. already inside the single-flight critical
             // section — not by the caller before this method was ever invoked (SPEC F83.1, T65

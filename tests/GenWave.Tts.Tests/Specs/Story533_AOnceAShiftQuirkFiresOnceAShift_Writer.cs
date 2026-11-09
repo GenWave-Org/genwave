@@ -5,18 +5,14 @@
 
 namespace GenWave.Tts.Tests.Specs;
 
-using System.Net;
-using System.Text;
-using System.Text.Json;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Memory;
 using GenWave.Tts.Tests.Fakes;
-using Microsoft.Extensions.Logging.Abstractions;
+using static GenWave.Tts.Tests.Fakes.QuirkSpecHarness;
 
 public static class FeatureAOnceAShiftQuirkFiresOnceAShiftWriter
 {
-    const long PersonaId = 7;
     const string CappedQuirk = "Signs off with a bird fact";
     static readonly ShiftKey Shift = ShiftKey.Scheduled(PersonaId, DayOfWeek.Tuesday, 360, new DateOnly(2026, 11, 10));
 
@@ -49,51 +45,6 @@ public static class FeatureAOnceAShiftQuirkFiresOnceAShiftWriter
             Spends.Add(content);
             return Task.CompletedTask;
         }
-    }
-
-    static PersonaCard Card(string quirk, QuirkRule? rule = null) =>
-        new(PersonaCard.CurrentSchemaVersion, "DJ Nova", "", "Soul line.", [quirk],
-            new VoiceSpec("kokoro", "af_heart", 1.0, "en"), 0.0, [], [])
-        {
-            QuirkRules = rule is null ? null : [rule],
-        };
-
-    static SegmentRequest Request(string? shiftKeyText) =>
-        new(SegmentKind.LeadIn, "af_heart", "GenWave",
-            new MediaItem("m1", "/media/x.mp3", "Astral Plane", default, "Valerie June"),
-            DateTimeOffset.UtcNow, "test-station")
-        {
-            PersonaId = PersonaId,
-            ShiftKeyText = shiftKeyText,
-        };
-
-    static LlmCopyWriter WriterFor(
-        PersonaCard card, IQuirkSelector selector, Func<string, Task>? onSystemPrompt = null, Action? onHttp = null)
-    {
-        var http = new SingleHandlerHttpClientFactory(new FakeHttpMessageHandler(async (req, _) =>
-        {
-            onHttp?.Invoke();
-            if (req.Content is { } content && onSystemPrompt is not null)
-            {
-                var body = await content.ReadAsStringAsync();
-                var prompt = JsonDocument.Parse(body).RootElement.GetProperty("messages")[0].GetProperty("content").GetString();
-                await onSystemPrompt(prompt ?? "");
-            }
-            return new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(
-                    JsonSerializer.Serialize(new { choices = new[] { new { message = new { content = "Coming up next a classic from the vault." } } } }),
-                    Encoding.UTF8, "application/json"),
-            };
-        }));
-        return new LlmCopyWriter(
-            new TemplateCopyWriter(new PatterTemplateRenderer()), http,
-            new TestOptionsMonitor<LlmOptions>(new LlmOptions { Endpoint = "http://fake-llm.local", Model = "m", TimeoutSeconds = 5, MaxCopyChars = 450 }),
-            new LlmCopyStatusHolder(), new FakeActivePersonaAccessor { Card = card }, NullLogger<LlmCopyWriter>.Instance, TimeProvider.System,
-            new LlmCallRecorder(
-                new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions())),
-                new LlmCallCauseCounters(TimeProvider.System)),
-            new FakeDegradationModeReader(), quirkSelector: selector);
     }
 
     public sealed class ScenarioOnAirSelectsBeforeTheRenderIsDispatched

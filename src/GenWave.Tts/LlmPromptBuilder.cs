@@ -40,13 +40,20 @@ static class LlmPromptBuilder
     const int CharsPerWordDivisor = 6;
 
     /// <summary>
-    /// gh-#188 — appended directly under the Quirks line (and only then): tells the model a
+    /// gh-#188 — appended after the Quirks line and any F218.8 annotation lines (and only then): tells the model a
     /// quirk's inline example ("item four-seven-one-two") demonstrates the bit's SHAPE, not a
     /// value to read on air. Public so a spec pins the exact wording next to where it is emitted.
     /// </summary>
     public const string QuirkExampleGuidance =
         "Any example inside a quirk illustrates its style - invent fresh specifics of your own " +
-        "each break, and never reuse an example's literal values on air.";
+        "each break, and keep an example's literal values off the air.";
+
+    /// <summary>
+    /// SPEC F218.8 - the positive annotation emitted directly under the Quirks line, once per
+    /// <see cref="QuirkSelection.CappedLines"/> entry: the break where a maxPerShift quirk is
+    /// chosen is its one moment of the shift. {0} is the quirk text. Public so a spec pins it.
+    /// </summary>
+    public const string CappedQuirkLandItFormat = "This is your one \"{0}\" of the shift - land it.";
 
     /// <summary>
     /// Baked house scaffold for the system prompt (SPEC F34.3): 1-2 spoken sentences, no stage
@@ -254,7 +261,7 @@ static class LlmPromptBuilder
     /// there is an actual persona section for it to ride on.
     /// </summary>
     public static string? BuildPersonaSection(
-        Persona? persona, PersonaCard? card, bool mentionOwnName = false, IReadOnlyList<string>? quirkLines = null)
+        Persona? persona, PersonaCard? card, bool mentionOwnName = false, QuirkSelection? selection = null)
     {
         var lines = new List<string>();
 
@@ -262,17 +269,11 @@ static class LlmPromptBuilder
         if (!string.IsNullOrEmpty(soul))
             lines.Add(soul);
 
-        // quirkLines (T686): already chosen by IQuirkSelector; null = sample here as before.
-        var sampled = quirkLines ?? (card is { Quirks.Count: > 0 } ? SampleQuirks(card.Quirks) : []);
+        // selection (T686): already chosen by IQuirkSelector; null = sample here as before.
+        var sampled = selection?.Lines ?? (card is { Quirks.Count: > 0 } ? SampleQuirks(card.Quirks) : []);
         if (sampled.Count > 0)
         {
-            lines.Add($"Quirks: {string.Join("; ", sampled)}");
-
-            // gh-#188: quirk examples exert gravitational pull — The Archivist's "invented
-            // catalog number: 'item four-seven-one-two'" aired that literal number break
-            // after break. Only emitted when quirks are shown: a quirk-less prompt stays
-            // byte-identical to its pre-gh-#188 shape.
-            lines.Add(QuirkExampleGuidance);
+            lines.AddRange(BuildQuirksBlock(sampled, selection?.CappedLines ?? []));
         }
 
         // gh-#150: the name line is a rider on an actual persona section, never a section by
@@ -282,6 +283,23 @@ static class LlmPromptBuilder
             lines.Add(BuildSelfNameMentionLine(name));
 
         return lines.Count == 0 ? null : string.Join('\n', lines);
+    }
+
+    /// <summary>
+    /// The quirks block of the persona section, owned here so a spec asserts the exact lines the
+    /// prompt carries: the Quirks line, one F218.8 annotation per capped quirk, then
+    /// <see cref="QuirkExampleGuidance"/> (gh-#188). Callers only ask when there are quirks to show.
+    /// </summary>
+    public static IReadOnlyList<string> BuildQuirksBlock(
+        IReadOnlyList<string> quirks, IReadOnlyList<string> cappedLines)
+    {
+        var block = new List<string> { $"Quirks: {string.Join("; ", quirks)}" };
+        block.AddRange(cappedLines.Select(c => string.Format(CultureInfo.InvariantCulture, CappedQuirkLandItFormat, c)));
+        // gh-#188: quirk examples exert gravitational pull - The Archivist's "invented catalog number:
+        // 'item four-seven-one-two'" aired that literal number break after break. Only emitted when
+        // quirks are shown: a quirk-less prompt stays byte-identical to its pre-gh-#188 shape.
+        block.Add(QuirkExampleGuidance);
+        return block;
     }
 
     /// <summary>
