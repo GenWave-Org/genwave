@@ -28,6 +28,7 @@
     <ProjectReference Include="..\..\src\GenWave.Core\GenWave.Core.csproj" />
     <ProjectReference Include="..\..\src\GenWave.Tts\GenWave.Tts.csproj" />
     <ProjectReference Include="..\..\src\GenWave.Loudness\GenWave.Loudness.csproj" />
+    <ProjectReference Include="..\..\src\GenWave.Memory\GenWave.Memory.csproj" />
   </ItemGroup>
 
 </Project>

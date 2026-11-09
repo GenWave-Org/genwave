@@ -21,10 +21,6 @@ static class LlmPromptBuilder
     // Soul, per-field for the legacy Backstory/Style fallback).
     const int MaxSoulChars = 4000;
 
-    // F71.3 (STORY-193): "2-3 per generation, never all" — see SampleQuirks' own remarks.
-    const int MinSampledQuirks = 2;
-    const int MaxSampledQuirks = 3;
-
     /// <summary>
     /// Chars-per-word divisor used to derive the system prompt's stated word budget from
     /// <see cref="LlmOptions.MaxCopyChars"/> (SPEC F123.5, STORY-319, PLAN T264) — the SAME
@@ -257,7 +253,8 @@ static class LlmPromptBuilder
     /// <see cref="BuildSelfNameMentionLine"/>) — a rolled-true break's request, honored only when
     /// there is an actual persona section for it to ride on.
     /// </summary>
-    public static string? BuildPersonaSection(Persona? persona, PersonaCard? card, bool mentionOwnName = false)
+    public static string? BuildPersonaSection(
+        Persona? persona, PersonaCard? card, bool mentionOwnName = false, IReadOnlyList<string>? quirkLines = null)
     {
         var lines = new List<string>();
 
@@ -265,19 +262,17 @@ static class LlmPromptBuilder
         if (!string.IsNullOrEmpty(soul))
             lines.Add(soul);
 
-        if (card is { Quirks.Count: > 0 })
+        // quirkLines (T686): already chosen by IQuirkSelector; null = sample here as before.
+        var sampled = quirkLines ?? (card is { Quirks.Count: > 0 } ? SampleQuirks(card.Quirks) : []);
+        if (sampled.Count > 0)
         {
-            var sampled = SampleQuirks(card.Quirks);
-            if (sampled.Count > 0)
-            {
-                lines.Add($"Quirks: {string.Join("; ", sampled)}");
+            lines.Add($"Quirks: {string.Join("; ", sampled)}");
 
-                // gh-#188: quirk examples exert gravitational pull — The Archivist's "invented
-                // catalog number: 'item four-seven-one-two'" aired that literal number break
-                // after break. Only emitted when quirks are shown: a quirk-less prompt stays
-                // byte-identical to its pre-gh-#188 shape.
-                lines.Add(QuirkExampleGuidance);
-            }
+            // gh-#188: quirk examples exert gravitational pull — The Archivist's "invented
+            // catalog number: 'item four-seven-one-two'" aired that literal number break
+            // after break. Only emitted when quirks are shown: a quirk-less prompt stays
+            // byte-identical to its pre-gh-#188 shape.
+            lines.Add(QuirkExampleGuidance);
         }
 
         // gh-#150: the name line is a rider on an actual persona section, never a section by
@@ -375,25 +370,12 @@ static class LlmPromptBuilder
         text.Length <= maxChars ? text : text[..maxChars];
 
     /// <summary>
-    /// Samples 2-3 quirks from <paramref name="quirks"/>, never the full set once there are more
-    /// than <see cref="MaxSampledQuirks"/> to choose from (SPEC F71.3, pinned by test: a
-    /// five-quirk persona never sees all five in one prompt). Fewer than
-    /// <see cref="MaxSampledQuirks"/>+1 quirks on the card means there is nothing left to trim —
-    /// every one of them ships as-is. <see cref="Random.Shared"/> (thread-safe, no seed needed —
-    /// tests assert the 2-3 bound across many generations rather than an exact sequence); the
-    /// SELECTED subset is re-sorted back to the card's own original order before it reaches the
-    /// prompt, so the SET is random but the ORDER within any one prompt is always deterministic.
+    /// The no-selector fallback (SPEC F71.3): delegates to <see cref="QuirkSampling.Sample{T}"/>,
+    /// which owns the 2-3 sampling rule, with <see cref="Random.Shared"/>. On-air and preview
+    /// paths pass the <c>IQuirkSelector</c>'s lines instead (SPEC F218.7, PLAN T686).
     /// </summary>
-    static IReadOnlyList<string> SampleQuirks(IReadOnlyList<string> quirks)
-    {
-        if (quirks.Count <= MaxSampledQuirks)
-            return quirks;
-
-        var sampleSize = Random.Shared.Next(MinSampledQuirks, MaxSampledQuirks + 1);
-        var indices = Enumerable.Range(0, quirks.Count).ToArray();
-        Random.Shared.Shuffle(indices);
-        return indices.Take(sampleSize).Order().Select(i => quirks[i]).ToList();
-    }
+    static IReadOnlyList<string> SampleQuirks(IReadOnlyList<string> quirks) =>
+        QuirkSampling.Sample(quirks, Random.Shared);
 
     /// <summary>
     /// The DJ's clock (SPEC F71.8, gh-#13): every LLM prompt this writer builds — persona active or

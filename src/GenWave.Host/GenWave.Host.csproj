@@ -4,6 +4,7 @@
     <ProjectReference Include="..\GenWave.Core\GenWave.Core.csproj" />
     <ProjectReference Include="..\GenWave.MediaLibrary\GenWave.MediaLibrary.csproj" />
     <ProjectReference Include="..\GenWave.Tts\GenWave.Tts.csproj" />
+    <ProjectReference Include="..\GenWave.Memory\GenWave.Memory.csproj" />
     <ProjectReference Include="..\GenWave.Orchestration\GenWave.Orchestration.csproj" />
     <ProjectReference Include="..\GenWave.Context\GenWave.Context.csproj" />
     <!-- ImageNormalizeService (PLAN T291) uses GenWave.Loudness.FfmpegProcess directly — the same

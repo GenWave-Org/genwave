@@ -130,7 +130,8 @@ public sealed class LlmCopyWriter(
     IStationClockProvider? stationClock = null,
     IContextPatterFactSource? patterFactSource = null,
     IShowFlavorLineSource? showFlavorLineSource = null,
-    IUtteranceStore? utteranceStore = null)
+    IUtteranceStore? utteranceStore = null,
+    IQuirkSelector? quirkSelector = null)
     : ISegmentCopyWriter, IPersonaPreviewWriter, IAnnouncementCopyWriter
 {
     /// <summary>Name of the <see cref="IHttpClientFactory"/> client this writer resolves (registered in Program.cs).</summary>
@@ -385,7 +386,7 @@ public sealed class LlmCopyWriter(
             // critical section (SPEC F83.1, T65 review finding); see that method's own remarks for
             // why the field can no longer be touched out here.
             var cleanup = await RequestCleanedCompletionAsync(
-                cfg, request, persona, card, updateTasteMemory: true, patterFact, showFlavorFact,
+                cfg, request, persona, card, updateTasteMemory: true, spendQuirks: true, patterFact, showFlavorFact,
                 queueWaitBudget: null, announcementMessage: null, ct);
             var cleaned = TextOf(cleanup);
             if (cleaned is null)
@@ -476,7 +477,7 @@ public sealed class LlmCopyWriter(
             // remarks for why a preview must never be ABLE to consume either break-scoped slot, not
             // merely configured not to.
             var cleanup = await RequestCleanedCompletionAsync(
-                cfg, request, personaOverride, card: null, updateTasteMemory: false, patterFact: null,
+                cfg, request, personaOverride, card: null, updateTasteMemory: false, spendQuirks: false, patterFact: null,
                 showFlavorFact: null, queueWaitBudget: TimeSpan.FromSeconds(cfg.PreviewQueueWaitSeconds),
                 announcementMessage: null, ct);
             var cleaned = TextOf(cleanup);
@@ -627,7 +628,7 @@ public sealed class LlmCopyWriter(
             var card = await personaAccessor.ResolveCardAsync(ct);
 
             var cleanup = await RequestCleanedCompletionAsync(
-                cfg, request, persona, card, updateTasteMemory: false, patterFact: null, showFlavorFact: null,
+                cfg, request, persona, card, updateTasteMemory: false, spendQuirks: true, patterFact: null, showFlavorFact: null,
                 queueWaitBudget: null, announcementMessage: message, ct);
             var cleaned = TextOf(cleanup);
             if (cleaned is null)
@@ -779,9 +780,36 @@ public sealed class LlmCopyWriter(
             ? (showFlavorLineSource ?? NoOpShowFlavorLineSource.Instance).TryTakeDueShowLine()
             : null;
 
+    /// <summary>
+    /// The quirk lines for this render, or null to let the prompt builder sample plain as before (no
+    /// selector registered). A selector fault costs this break its quirks, never the segment (F12.4).
+    /// </summary>
+    async Task<IReadOnlyList<string>?> SelectQuirkLinesAsync(
+        SegmentRequest request, PersonaCard? card, bool spend, CancellationToken ct)
+    {
+        if (quirkSelector is null)
+            return null;
+
+        ShiftKey.TryParse(request.ShiftKeyText, out var shiftKey);
+        try
+        {
+            var selection = await quirkSelector.SelectAsync(request.PersonaId, card, shiftKey, spend, ct);
+            return selection.Lines;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Quirk selection failed for {Kind}; this break airs without quirks", request.Kind);
+            return [];
+        }
+    }
+
     async Task<LlmCopyCleanupResult> RequestCleanedCompletionAsync(
         LlmOptions cfg, SegmentRequest request, Persona? persona, PersonaCard? card,
-        bool updateTasteMemory, ContextPatterFact? patterFact, ShowFlavorFact? showFlavorFact,
+        bool updateTasteMemory, bool spendQuirks, ContextPatterFact? patterFact, ShowFlavorFact? showFlavorFact,
         TimeSpan? queueWaitBudget, string? announcementMessage, CancellationToken ct)
     {
         // LOW-5 (PLAN T342 round 2, parameter-shape finding): announcementMessage carries FOUR
@@ -881,8 +909,13 @@ public sealed class LlmCopyWriter(
             // BuildUserContent's station clock line below must provably read the SAME instant — the
             // identical discipline CopyClaims.CheckClock's own remarks already require of its caller.
             var stationLocalNow = StationLocalNow();
+            // T686 (F218.7): quirks are chosen HERE, inside the critical section, so a maxPerShift
+            // spend row is written before this render is dispatched. spendQuirks is true for every
+            // on-air path (segments and announcements) and false only for the preview; an on-air
+            // request without a shift key cannot record a spend, so the selector keeps capped quirks out.
+            var quirkLines = await SelectQuirkLinesAsync(request, card, spend: spendQuirks, ct);
             systemPrompt = LlmPromptBuilder.BuildSystemPrompt(
-                LlmPromptBuilder.BuildPersonaSection(persona, card, mentionOwnName), cfg.MaxCopyChars, stationLocalNow);
+                LlmPromptBuilder.BuildPersonaSection(persona, card, mentionOwnName, quirkLines), cfg.MaxCopyChars, stationLocalNow);
 
             // Read HERE — after WaitAsync above, i.e. already inside the single-flight critical
             // section — not by the caller before this method was ever invoked (SPEC F83.1, T65

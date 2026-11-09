@@ -53,10 +53,13 @@ public static class PersonaServiceCollectionExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
-        return services.AddSingleton<IPersonaMemory>(sp =>
+        // One repository serves both contracts (the spend ledger rides the same table and cap).
+        services.AddSingleton(sp =>
             new PersonaMemoryRepository(
                 new Lazy<NpgsqlDataSource>(() => new NpgsqlDataSourceBuilder(connectionString).Build()),
                 sp.GetRequiredService<IOptions<PersonaMemoryOptions>>()));
+        services.AddSingleton<IQuirkSpendLedger>(sp => sp.GetRequiredService<PersonaMemoryRepository>());
+        return services.AddSingleton<IPersonaMemory>(sp => sp.GetRequiredService<PersonaMemoryRepository>());
     }
 
     /// <summary>
