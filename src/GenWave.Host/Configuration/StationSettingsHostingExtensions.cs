@@ -115,6 +115,10 @@ static class StationSettingsHostingExtensions
         // optionally and evaluates it on air only (absent = no taglines).
         builder.Services.AddSingleton<ITaglineLedger, TaglineLedger>();
 
+        // Sentence trimmer (SPEC F218.35, STORY-545, PLAN T714) — pure; LlmCopyWriter resolves it optionally
+        // and cuts the repeated sentences before it re-asks (absent = always re-ask).
+        builder.Services.AddSingleton<ISentenceTrimmer, SentenceTrimmer>();
+
         // Format-clock schedule store + resolver (SPEC F91.1, F91.3; STORY-240/241, PLAN T118-T120) —
         // same station_svc connection string as every registration above; station.segment_schedule
         // lives in the same schema. ScheduleRepository ships dark since T118 (AddScheduleStore itself

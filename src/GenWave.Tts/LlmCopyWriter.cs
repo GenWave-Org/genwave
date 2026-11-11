@@ -137,7 +137,8 @@ public sealed class LlmCopyWriter(
     MemoryBudget? memoryBudget = null, // T699 supplies this from the context probe; Off until then
     IRepetitionCheck? repetitionCheck = null, // T693: absent means no post-check at all
     IStationEventSink? events = null,
-    ITaglineLedger? taglineLedger = null) // T713: absent means no taglines, exactly the pre-ledger behaviour
+    ITaglineLedger? taglineLedger = null, // T713: absent means no taglines, exactly the pre-ledger behaviour
+    ISentenceTrimmer? sentenceTrimmer = null) // T714: absent means a repeat always re-asks, exactly the pre-trim behaviour
     : ISegmentCopyWriter, IPersonaPreviewWriter, IAnnouncementCopyWriter
 {
     readonly IStationEventSink events = events ?? NoOpStationEventSink.Instance;
@@ -918,11 +919,23 @@ public sealed class LlmCopyWriter(
             : [];
 
     /// <summary>One <c>repeat-caught</c> booth row per caught attempt (SPEC F218.13); needs a persona to name.</summary>
-    void PublishRepeatCaught(SegmentRequest request, IReadOnlyList<string> phrases)
+    void PublishRepeatCaught(SegmentRequest request, IReadOnlyList<string> phrases, RepeatOutcome outcome)
     {
         if (request.PersonaId is { } personaId && phrases.Count > 0)
-            events.Publish(new RepeatCaught(personaId, string.Join(", ", phrases)));
+            events.Publish(new RepeatCaught(personaId, string.Join(", ", phrases), outcome));
     }
+
+    /// <summary>
+    /// SPEC F218.35: the repeat-only <paramref name="verdict"/>'s copy with the repeated sentences cut, when that
+    /// is fit to air (see <see cref="RepeatTrim.Remainder"/>); null otherwise. A truth-gate verdict never trims.
+    /// </summary>
+    string? TrimmedRepeat(
+        string candidate, CopyGateVerdict verdict, SegmentRequest request, Func<string, CopyGateVerdict> check) =>
+        verdict.FailedTruth
+            ? null
+            : RepeatTrim.Remainder(
+                sentenceTrimmer, candidate, verdict.RepeatedPhrases, request.Track?.Title, request.Track?.Artist,
+                text => check(text).Passed);
 
     async Task<LlmCopyCleanupResult> RequestCleanedCompletionAsync(
         LlmOptions cfg, SegmentRequest request, Persona? persona, PersonaCard? card,
@@ -1174,7 +1187,8 @@ public sealed class LlmCopyWriter(
             return cleanup;
 
             // SPEC F138.4 (STORY-350, PLAN T331) — one truth-gate ladder run: gate
-            // firstCandidate against check, and on a violation, exactly ONE re-ask (its added
+            // firstCandidate against check; a repeat-only hit first tries the F218.35 sentence trim
+            // (remainder airs if usable), and otherwise exactly ONE re-ask, whose copy is trimmed the same way (its added
             // prompt line built by buildReaskLine), then reclassify. A LOCAL function (T331 review
             // finding — this method was pushing 190 lines with a SECOND ladder, PLAN T332's clock
             // check, landing at this exact seam next) — not a private instance method — because it
@@ -1209,7 +1223,18 @@ public sealed class LlmCopyWriter(
 
                 // SPEC F218.12/F218.13 (PLAN T693): the SAME single re-ask serves the repeat check — a
                 // break never costs more than one extra call, whichever check trips it.
-                PublishRepeatCaught(request, gateResult.RepeatedPhrases);
+                if (TrimmedRepeat(firstCandidate, gateResult, request, check) is { } trimmed)
+                {
+                    // F218.35: air what is left; no second call. The call itself was fine, so it records as it would uncaught.
+                    PublishRepeatCaught(request, gateResult.RepeatedPhrases, RepeatOutcome.Trimmed);
+                    var (trimOutcome, trimCause) = ClassifyCleanup(cleanup);
+                    recorder.Record(
+                        personaName, systemPrompt, userPrompt, firstRawText, startedAt, ElapsedMs(startedAt),
+                        trimOutcome, statusDetail: null, mode, trimCause, cfg.Model, callKind);
+                    return new LlmCopyCleanupResult.Fits(trimmed);
+                }
+
+                PublishRepeatCaught(request, gateResult.RepeatedPhrases, RepeatOutcome.ReAsked);
 
                 // The rejected first call gets its own honest ring entry (SPEC F138.4: each call in
                 // the ladder is its own call with its own entry) BEFORE the re-ask fires — never
@@ -1241,10 +1266,15 @@ public sealed class LlmCopyWriter(
                 // folds to ONE clear bool (T331 review finding) instead of re-deriving
                 // "is { Passed: false }" at both the classify site and the final-return site below:
                 // reaskViolations is non-null exactly when the gate was actually checked AND failed.
-                var reaskGateResult = TextOf(reaskCleanup) is { } reaskCandidate ? check(reaskCandidate) : null;
+                var reaskCandidate = TextOf(reaskCleanup);
+                var reaskGateResult = reaskCandidate is null ? null : check(reaskCandidate);
                 var reaskRejection = reaskGateResult is { Passed: false } failed ? failed : null;
+                // F218.35: the re-ask's copy gets the same cut before it is given up on.
+                var reaskTrimmed = reaskCandidate is not null && reaskRejection is not null
+                    ? TrimmedRepeat(reaskCandidate, reaskRejection, request, check)
+                    : null;
 
-                var (reaskOutcome, reaskCause) = reaskRejection is null
+                var (reaskOutcome, reaskCause) = reaskRejection is null || reaskTrimmed is not null
                     ? ClassifyCleanup(reaskCleanup)
                     : (LlmCallOutcome.Ok, reaskRejection.RejectCause);
                 recorder.Record(
@@ -1270,8 +1300,14 @@ public sealed class LlmCopyWriter(
                 // that passed hygiene but still failed the gate is the only case needing a synthetic
                 // TruthGateRejected instead of reaskCleanup itself: reaskCleanup there still carries
                 // real (unusable) text that must never reach TextOf.
+                if (reaskTrimmed is not null && reaskRejection is not null)
+                {
+                    PublishRepeatCaught(request, reaskRejection.RepeatedPhrases, RepeatOutcome.Trimmed);
+                    return new LlmCopyCleanupResult.Fits(reaskTrimmed);
+                }
+
                 if (reaskRejection is not null)
-                    PublishRepeatCaught(request, reaskRejection.RepeatedPhrases);
+                    PublishRepeatCaught(request, reaskRejection.RepeatedPhrases, RepeatOutcome.Template);
 
                 return reaskRejection switch
                 {

@@ -39,7 +39,8 @@ static class QuirkSpecHarness
         IUtteranceStore? utteranceStore = null, MemoryBudget? memoryBudget = null,
         IHttpClientFactory? httpOverride = null, IRepetitionCheck? repetitionCheck = null,
         IStationEventSink? events = null, LlmCallRecorder? recorder = null, LlmCopyStatusHolder? statusHolder = null,
-        ITaglineLedger? taglineLedger = null)
+        ITaglineLedger? taglineLedger = null, ISentenceTrimmer? sentenceTrimmer = null,
+        IStationClockProvider? stationClock = null)
     {
         IHttpClientFactory http = httpOverride ?? new SingleHandlerHttpClientFactory(new FakeHttpMessageHandler(async (req, _) =>
         {
@@ -63,7 +64,8 @@ static class QuirkSpecHarness
             statusHolder ?? new LlmCopyStatusHolder(), new FakeActivePersonaAccessor { Card = card }, NullLogger<LlmCopyWriter>.Instance, TimeProvider.System,
             recorder ?? NewRecorder(),
             new FakeDegradationModeReader(), utteranceStore: utteranceStore, quirkSelector: selector, memoryBudget: memoryBudget,
-            repetitionCheck: repetitionCheck, events: events, taglineLedger: taglineLedger);
+            stationClock: stationClock, repetitionCheck: repetitionCheck, events: events, taglineLedger: taglineLedger,
+            sentenceTrimmer: sentenceTrimmer);
     }
 
     public static LlmCallRecorder NewRecorder(LlmCallCauseCounters? counters = null) =>

@@ -52,4 +52,19 @@ public static class FeatureRepeatCaughtBoothRow
             Assert.Equal("Repeat caught: \"golden hour groove\"", row.Summary);
         }
     }
+
+    // F218.38 (STORY-545, T714) — the row ends with what the writer did about the catch
+    public sealed class ScenarioTheRowEndsWithTheOutcome
+    {
+        [Theory]
+        [InlineData(RepeatOutcome.Trimmed, "Repeat caught: \"golden hour groove\" — trimmed")]
+        [InlineData(RepeatOutcome.ReAsked, "Repeat caught: \"golden hour groove\" — re-asked")]
+        [InlineData(RepeatOutcome.Template, "Repeat caught: \"golden hour groove\" — template")]
+        public async Task TheSummaryEndsWithTheOutcome(RepeatOutcome outcome, string expected)
+        {
+            var row = await PublishAndCaptureAsync(new RepeatCaught(7, "golden hour groove", outcome));
+
+            Assert.Equal(expected, row.Summary);
+        }
+    }
 }

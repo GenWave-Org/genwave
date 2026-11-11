@@ -4,7 +4,7 @@ namespace GenWave.Host.Tests.Support;
 /// SPEC F218.5 / PLAN T683 (the T524 precedent): <c>QuirkRule</c> and
 /// <c>PersonaCard.QuirkRules</c> (and, PLAN T684, the init-only <c>PersonaId</c>/<c>ShowId</c>/<c>ShiftKeyText</c>/
 /// <c>UtteranceId</c>/<c>Text</c> members on <c>SegmentRequest</c>/<c>SegmentCopy</c>/<c>SegmentGenerated</c>; and, PLAN T685,
-/// the new <c>TrackProvenAired</c> event published beside <c>TrackAired</c>; and, PLAN T693, the new <c>RepeatCaught</c> event; and, PLAN T709, <c>QuirkRule.MaxPerHour</c>/<c>MinBreaksApart</c>) are an additive contract change that landed in
+/// the new <c>TrackProvenAired</c> event published beside <c>TrackAired</c>; and, PLAN T693/T714, the new <c>RepeatCaught</c> event and its <c>RepeatOutcome</c>; and, PLAN T709, <c>QuirkRule.MaxPerHour</c>/<c>MinBreaksApart</c>) are an additive contract change that landed in
 /// <c>src/GenWave.Abstractions</c> BEFORE the package that carries it is published. The committed
 /// baseline fixture stays byte-identical to the published surface (never hand-edited); the gap is
 /// tolerated only by passing these EXACT added lines — named line by line, no wildcard — to
@@ -29,10 +29,17 @@ public static class PendingPublicationSurfaceAllowlist
         "GenWave.Core.Domain.SegmentRequest::PROPERTY System.Nullable<System.Int64> ShowId { public get; public init; }",
         "GenWave.Core.Domain.SegmentRequest::PROPERTY System.String ShiftKeyText { public get; public init; }",
         // PLAN T693: RepeatCaught, a new additive event (the repeat check's booth-log signal).
-        "GenWave.Core.Events.RepeatCaught::CTOR (System.Int64 PersonaId, System.String Phrase)",
+        "GenWave.Core.Events.RepeatCaught::CTOR (System.Int64 PersonaId, System.String Phrase, System.Nullable<GenWave.Core.Events.RepeatOutcome> Outcome = null)",
+        "GenWave.Core.Events.RepeatCaught::PROPERTY System.Nullable<GenWave.Core.Events.RepeatOutcome> Outcome { public get; public init; }",
         "GenWave.Core.Events.RepeatCaught::PROPERTY System.Int64 PersonaId { public get; public init; }",
         "GenWave.Core.Events.RepeatCaught::PROPERTY System.String Phrase { public get; public init; }",
         "GenWave.Core.Events.RepeatCaught::TYPE class : GenWave.Core.Events.StationEvent [System.IEquatable<GenWave.Core.Events.RepeatCaught>,System.IEquatable<GenWave.Core.Events.StationEvent>]",
+        // PLAN T714: RepeatOutcome, the F218.38 outcome the repeat-caught row ends with.
+        "GenWave.Core.Events.RepeatOutcome::FIELD System.Int32 value__",
+        "GenWave.Core.Events.RepeatOutcome::FIELD static GenWave.Core.Events.RepeatOutcome ReAsked const = 1",
+        "GenWave.Core.Events.RepeatOutcome::FIELD static GenWave.Core.Events.RepeatOutcome Template const = 2",
+        "GenWave.Core.Events.RepeatOutcome::FIELD static GenWave.Core.Events.RepeatOutcome Trimmed const = 0",
+        "GenWave.Core.Events.RepeatOutcome::TYPE enum : none [System.IComparable,System.IConvertible,System.IFormattable,System.ISpanFormattable]",
         "GenWave.Core.Events.SegmentGenerated::PROPERTY System.Nullable<System.Int64> PersonaId { public get; public init; }",
         "GenWave.Core.Events.SegmentGenerated::PROPERTY System.Nullable<System.Int64> ShowId { public get; public init; }",
         "GenWave.Core.Events.SegmentGenerated::PROPERTY System.Nullable<System.Int64> UtteranceId { public get; public init; }",
