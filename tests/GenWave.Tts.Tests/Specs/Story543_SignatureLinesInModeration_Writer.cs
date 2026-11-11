@@ -4,6 +4,8 @@
 // facts, watches them fail, then makes them pass.
 // entry point: LlmCopyWriter.WriteAsync with a fake LLM and fake utterance store (the production air path)
 
+using GenWave.Core.Domain;
+
 namespace GenWave.Tts.Tests.Specs;
 
 public static class FeatureSignatureLinesInModerationWriter
@@ -12,17 +14,28 @@ public static class FeatureSignatureLinesInModerationWriter
     // HAPPY PATH
     // ---------------------------------------------------------------------
 
+    const string YearsQuirk = "Cites years the way other people cite scores: 'nineteen fifty-nine, naturally'";
+    const string YearsSpan = "nineteen fifty-nine, naturally";
+
+    static IReadOnlyList<string> QuirksBlock(bool yearsAvailable) =>
+        LlmPromptBuilder.BuildQuirksBlock([YearsQuirk, "Admits, rarely and grandly, when he is wrong"], [],
+            [new TaglineStatus(YearsSpan, yearsAvailable, YearsQuirk)]);
+
     // AC7 — a spent tagline leaves the prompt
     public sealed class ScenarioASpentTaglineLeavesThePrompt
     {
         // Given the tagline "nineteen fifty-nine, naturally" is unavailable
         // When  the prompt is built
+        readonly IReadOnlyList<string> block = QuirksBlock(yearsAvailable: false);
 
-        [Fact(Skip = "pending: T712 — see docs/PLAN.md")]
-        public void TheQuirksLineReadsCitesYearsTheWayOtherPeopleCiteScoresWithoutTheQuote() => Assert.Fail("pending: T712 — the quirks line reads \"Cites years the way other people cite scores\" without the quote");
+        [Fact]
+        public void TheQuirksLineReadsCitesYearsTheWayOtherPeopleCiteScoresWithoutTheQuote() =>
+            Assert.Equal("Quirks: Cites years the way other people cite scores: '…'; Admits, rarely and grandly, when he is wrong", block[0]);
 
-        [Fact(Skip = "pending: T712 — see docs/PLAN.md")]
-        public void OneLineReadsSaidLatelySkipThisBreakNineteenFiftyNineNaturally() => Assert.Fail("pending: T712 — one line reads: Said lately, skip this break: \"nineteen fifty-nine, naturally\"");
+        [Fact]
+        public void OneLineReadsSaidLatelySkipThisBreakNineteenFiftyNineNaturally() =>
+            Assert.Equal("Said lately, skip this break: \"nineteen fifty-nine, naturally\"",
+                Assert.Single(block, l => l.StartsWith(LlmPromptBuilder.SaidLatelyPrefix, StringComparison.Ordinal)));
     }
 
     // AC8 — an available tagline is untouched
@@ -30,12 +43,94 @@ public static class FeatureSignatureLinesInModerationWriter
     {
         // Given every tagline is available
         // When  the prompt is built
+        readonly IReadOnlyList<string> block = QuirksBlock(yearsAvailable: true);
 
-        [Fact(Skip = "pending: T712 — see docs/PLAN.md")]
-        public void TheQuirksLineCarriesTheQuotedSpanAsWritten() => Assert.Fail("pending: T712 — the quirks line carries the quoted span as written");
+        [Fact]
+        public void TheQuirksLineCarriesTheQuotedSpanAsWritten() =>
+            Assert.Equal($"Quirks: {YearsQuirk}; Admits, rarely and grandly, when he is wrong", block[0]);
 
-        [Fact(Skip = "pending: T712 — see docs/PLAN.md")]
-        public void NoSaidLatelyLineIsPresent() => Assert.Fail("pending: T712 — no \"Said lately\" line is present");
+        [Fact]
+        public void NoSaidLatelyLineIsPresent() =>
+            Assert.DoesNotContain(block, l => l.Contains("Said lately", StringComparison.Ordinal));
+    }
+
+    // T712 round 2 — placeholder edge cases
+    public sealed class ScenarioASpentCappedQuirkNeverShowsTheSpentPhrase
+    {
+        readonly IReadOnlyList<string> block = LlmPromptBuilder.BuildQuirksBlock([YearsQuirk], [YearsQuirk],
+            [new TaglineStatus(YearsSpan, false, YearsQuirk)]);
+
+        [Fact]
+        public void TheSpanAppearsOnlyOnTheSaidLatelyLine() =>
+            Assert.Equal(1, string.Join("\n", block).Split(YearsSpan).Length - 1);
+    }
+
+    public sealed class ScenarioAQuirkThatIsOnlyAQuotedSpan
+    {
+        readonly IReadOnlyList<string> block = LlmPromptBuilder.BuildQuirksBlock(["'go on, then'", "Sighs"], [],
+            [new TaglineStatus("go on, then", false, "'go on, then'")]);
+
+        [Fact]
+        public void ItBecomesThePlaceholderNotAnEmptyEntry() => Assert.Equal("Quirks: '…'; Sighs", block[0]);
+    }
+
+    public sealed class ScenarioASpanSpentTwiceIsListedOnce
+    {
+        const string Other = "Opens with 'nineteen fifty-nine, naturally' sometimes";
+        readonly IReadOnlyList<string> block = LlmPromptBuilder.BuildQuirksBlock([YearsQuirk, Other], [],
+        [
+            new TaglineStatus(YearsSpan, false, YearsQuirk),
+            new TaglineStatus(YearsSpan, false, Other),
+            new TaglineStatus(YearsSpan, false, null),
+        ]);
+
+        [Fact]
+        public void TheSaidLatelyLineNamesItOnce() =>
+            Assert.Equal("Said lately, skip this break: \"nineteen fifty-nine, naturally\"",
+                Assert.Single(block, l => l.StartsWith(LlmPromptBuilder.SaidLatelyPrefix, StringComparison.Ordinal)));
+    }
+
+    public sealed class ScenarioASpentSpanWhoseQuirkWasNotSampled
+    {
+        readonly IReadOnlyList<string> block = LlmPromptBuilder.BuildQuirksBlock(["Sighs"], [],
+            [new TaglineStatus(YearsSpan, false, YearsQuirk)]);
+
+        [Fact]
+        public void ItIsAbsentFromTheSaidLatelyLine() =>
+            Assert.DoesNotContain(block, l => l.Contains("Said lately", StringComparison.Ordinal));
+    }
+
+    public sealed class ScenarioABareMatchEarlierThanTheQuotedSpan
+    {
+        readonly IReadOnlyList<string> block = LlmPromptBuilder.BuildQuirksBlock(["Says go on, then 'go on'"], [],
+            [new TaglineStatus("go on", false, "Says go on, then 'go on'")]);
+
+        [Fact]
+        public void TheQuotedOccurrenceIsTheOneReplaced() =>
+            Assert.Equal("Quirks: Says go on, then '…'", block[0]);
+    }
+
+    public sealed class ScenarioAnUnrelatedQuoteSitsBeforeTheSpan
+    {
+        const string Quirk = "Says 'a' go on 'b' then 'go on'";
+        readonly IReadOnlyList<string> block = LlmPromptBuilder.BuildQuirksBlock([Quirk], [],
+            [new TaglineStatus("go on", false, Quirk)]);
+
+        [Fact]
+        public void OnlyTheQuoteTouchingTheSpanIsReplaced() =>
+            Assert.Equal("Quirks: Says 'a' go on 'b' then '…'", block[0]);
+    }
+
+    public sealed class ScenarioASpentCardTaglineIsListed
+    {
+        const string Tagline = "Every record is a footnote to another record.";
+        readonly IReadOnlyList<string> block = LlmPromptBuilder.BuildQuirksBlock(["Sighs"], [],
+            [new TaglineStatus(Tagline, false, null)]);
+
+        [Fact]
+        public void TheSaidLatelyLineNamesIt() =>
+            Assert.Equal($"Said lately, skip this break: \"{Tagline}\"",
+                Assert.Single(block, l => l.StartsWith(LlmPromptBuilder.SaidLatelyPrefix, StringComparison.Ordinal)));
     }
 
     // AC9 — inside quota it is not a repeat

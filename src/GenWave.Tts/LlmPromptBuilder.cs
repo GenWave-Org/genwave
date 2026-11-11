@@ -260,11 +260,12 @@ static class LlmPromptBuilder
     /// <see cref="BuildSelfNameMentionLine"/>) — a rolled-true break's request, honored only when
     /// there is an actual persona section for it to ride on. <paramref name="recentLines"/> (F218.10)
     /// rides the same way: only on an existing persona section, so a persona with no soul and no
-    /// quirks gets no block and the neutral scaffold stays neutral.
+    /// quirks gets no block and the neutral scaffold stays neutral. <paramref name="taglines"/>
+    /// (F218.32) is passed through to <see cref="BuildQuirksBlock"/>.
     /// </summary>
     public static string? BuildPersonaSection(
         Persona? persona, PersonaCard? card, bool mentionOwnName = false, QuirkSelection? selection = null,
-        IReadOnlyList<string>? recentLines = null)
+        IReadOnlyList<string>? recentLines = null, IReadOnlyList<TaglineStatus>? taglines = null)
     {
         var lines = new List<string>();
 
@@ -276,7 +277,7 @@ static class LlmPromptBuilder
         var sampled = selection?.Lines ?? (card is { Quirks.Count: > 0 } ? SampleQuirks(card.Quirks) : []);
         if (sampled.Count > 0)
         {
-            lines.AddRange(BuildQuirksBlock(sampled, selection?.CappedLines ?? []));
+            lines.AddRange(BuildQuirksBlock(sampled, selection?.CappedLines ?? [], taglines));
         }
 
         // T692 (F218.10): a rider like the name line below - never a section by itself.
@@ -318,20 +319,35 @@ static class LlmPromptBuilder
 
     /// <summary>
     /// The quirks block of the persona section, owned here so a spec asserts the exact lines the
-    /// prompt carries: the Quirks line, one F218.8 annotation per capped quirk, then
-    /// <see cref="QuirkExampleGuidance"/> (gh-#188). Callers only ask when there are quirks to show.
+    /// prompt carries: the Quirks line, one F218.8 annotation per capped quirk, the optional
+    /// <see cref="SaidLatelyPrefix"/> line (F218.32), then <see cref="QuirkExampleGuidance"/> (gh-#188).
+    /// A spent tagline span shows as <see cref="TaglineQuirkText.Placeholder"/> in the Quirks line and
+    /// annotations. Callers only ask when there are quirks to show.
     /// </summary>
     public static IReadOnlyList<string> BuildQuirksBlock(
-        IReadOnlyList<string> quirks, IReadOnlyList<string> cappedLines)
+        IReadOnlyList<string> quirks, IReadOnlyList<string> cappedLines,
+        IReadOnlyList<TaglineStatus>? taglines = null)
     {
-        var block = new List<string> { $"Quirks: {string.Join("; ", quirks)}" };
-        block.AddRange(cappedLines.Select(c => string.Format(CultureInfo.InvariantCulture, CappedQuirkLandItFormat, c)));
+        var spent = taglines?.Where(t => !t.Available).ToList() ?? [];
+        string Shown(string quirk) => spent.Where(t => t.QuirkText == quirk)
+            .Aggregate(quirk, (text, t) => TaglineQuirkText.Replace(text, t.Span));
+        var block = new List<string> { $"Quirks: {string.Join("; ", quirks.Select(Shown))}" };
+        block.AddRange(cappedLines.Select(c => string.Format(CultureInfo.InvariantCulture, CappedQuirkLandItFormat, Shown(c))));
+        // SPEC F218.32: the model can only reach for what it was shown - a spent span is listed when it is the
+        // card's tagline or its quirk is in this break's sample; each span once.
+        var skip = spent.Where(t => t.QuirkText is null || quirks.Contains(t.QuirkText))
+            .Select(t => t.Span).Distinct(StringComparer.Ordinal).ToList();
+        if (skip.Count > 0)
+            block.Add(SaidLatelyPrefix + string.Join(", ", skip.Select(s => $"\"{s}\"")));
         // gh-#188: quirk examples exert gravitational pull - The Archivist's "invented catalog number:
         // 'item four-seven-one-two'" aired that literal number break after break. Only emitted when
         // quirks are shown: a quirk-less prompt stays byte-identical to its pre-gh-#188 shape.
         block.Add(QuirkExampleGuidance);
         return block;
     }
+
+    /// <summary>SPEC F218.32 - prefix of the line listing taglines to skip this break. Public so a spec pins it.</summary>
+    public const string SaidLatelyPrefix = "Said lately, skip this break: ";
 
     /// <summary>
     /// The persona's on-air name for <see cref="BuildSelfNameMentionLine"/>, card-first with the
