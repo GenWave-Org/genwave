@@ -106,4 +106,34 @@ public static class FeatureEveryDjLineIsOnTheRecordStore
             Assert.Equal(["A new line."], texts);
         }
     }
+
+    // F218.31 — the hourly quota reads a time window, not a row count
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioSinceReadsOnlyTheWindowNewestFirst(DatabaseFixture db)
+    {
+        // Given lines written 90, 50 and 10 minutes ago
+        // When  the store is read since 60 minutes ago
+
+        [Fact]
+        public async Task OnlyTheTwoInsideTheWindowComeBackNewestFirst()
+        {
+            await db.ResetStationAsync();
+            var repo = new UtteranceFixture(db);
+            var personaId = await repo.InsertPersonaAsync("Window DJ");
+            var key = ShiftKey.Unscheduled(personaId, new DateOnly(2026, 11, 8));
+            foreach (var (text, minutesAgo) in new[] { ("ninety", 90), ("fifty", 50), ("ten", 10) })
+            {
+                var id = await repo.Store.RecordAsync(Line(personaId, key, text), CancellationToken.None);
+                await using var conn = await db.StationDataSource.OpenConnectionAsync();
+                await conn.ExecuteAsync(
+                    "update station.utterance set written_at = now() - make_interval(mins => @minutesAgo) where id = @id",
+                    new { minutesAgo, id });
+            }
+
+            var texts = (await repo.Store.SinceAsync(personaId, DateTimeOffset.UtcNow.AddMinutes(-60), CancellationToken.None)).Select(e => e.Text);
+
+            Assert.Equal(["ten", "fifty"], texts);
+        }
+    }
 }

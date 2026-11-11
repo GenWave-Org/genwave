@@ -5,6 +5,9 @@
 // entry point: LlmCopyWriter.WriteAsync with a fake LLM and fake utterance store (the production air path)
 
 using GenWave.Core.Domain;
+using GenWave.Core.Events;
+using GenWave.Memory;
+using GenWave.Tts.Tests.Fakes;
 
 namespace GenWave.Tts.Tests.Specs;
 
@@ -138,12 +141,27 @@ public static class FeatureSignatureLinesInModerationWriter
     {
         // Given one earlier use, five utterances ago, and a copy that says the tagline again
         // When  WriteAsync runs on air
+        readonly TaglineRun run = TaglineRun.Arrange(usedAt: [5], copy: TaglineRun.CopyWithTagline);
 
-        [Fact(Skip = "pending: T713 — see docs/PLAN.md")]
-        public void TheCopyIsStoredAndRenderedUnchanged() => Assert.Fail("pending: T713 — the copy is stored and rendered unchanged");
+        [Fact]
+        public void TheCopyIsStoredAndRenderedUnchanged() =>
+            Assert.Equal(
+                (TaglineRun.CopyWithTagline, TaglineRun.CopyWithTagline),
+                (run.Copy.Text, Assert.Single(run.Store.Recorded).Text));
 
-        [Fact(Skip = "pending: T713 — see docs/PLAN.md")]
-        public void NoRepeatCaughtRowIsWritten() => Assert.Fail("pending: T713 — no repeat-caught row is written");
+        [Fact]
+        public void NoRepeatCaughtRowIsWritten() => Assert.Empty(run.Events.Events.OfType<RepeatCaught>());
+    }
+
+    // AC9 — a lead shared with the history, before an in-quota tagline, is not a repeat
+    public sealed class ScenarioASharedLeadBeforeAnInQuotaTaglineIsNotARepeat
+    {
+        // Given one earlier use ("Settle in. <tagline> Number 5.") and a copy that opens "Settle in." before the tagline
+        // When  WriteAsync runs on air
+        readonly TaglineRun run = TaglineRun.Arrange(usedAt: [5], copy: "Settle in. " + TaglineRun.Tagline + " Next up.");
+
+        [Fact]
+        public void NoRepeatCaughtRowIsWritten() => Assert.Empty(run.Events.Events.OfType<RepeatCaught>());
     }
 
     // ---------------------------------------------------------------------
@@ -156,7 +174,26 @@ public static class FeatureSignatureLinesInModerationWriter
         // Given the tagline is unavailable and the copy says it anyway
         // When  the repetition check runs
 
-        [Fact(Skip = "pending: T713 — see docs/PLAN.md")]
-        public void ItReportsOneHitNamingTheTagline() => Assert.Fail("pending: T713 — it reports one hit naming the tagline");
+        readonly TaglineRun run = TaglineRun.Arrange(usedAt: [1, 2], copy: TaglineRun.CopyWithTagline);
+
+        [Fact]
+        public void ItReportsOneHitNamingTheTagline() =>
+            Assert.Equal([TaglineRun.Tagline], Assert.Single(run.Events.Events.OfType<RepeatCaught>()).Phrase.Split(", ", StringSplitOptions.None));
+    }
+
+    // F218.31 — the quota counts the whole rolling hour, not the newest ten lines.
+    public sealed class ScenarioUsesBeyondTheNewestTenStillCountTowardTheHour
+    {
+        // Given 12 utterances 4 minutes apart, the tagline used 44 and 48 minutes ago (beyond the newest ten)
+        // When  WriteAsync runs on air with a copy that says the tagline
+        readonly TaglineRun run = TaglineRun.Arrange(usedAt: [11, 12], copy: TaglineRun.CopyWithTagline, entries: 12, minutesApart: 4);
+
+        [Fact]
+        public void ExactlyOneRepeatCaughtNamesTheTagline() =>
+            Assert.Equal([TaglineRun.Tagline], Assert.Single(run.Events.Events.OfType<RepeatCaught>()).Phrase.Split(", ", StringSplitOptions.None));
+
+        [Fact]
+        public void TheFirstPromptCarriesTheSaidLatelyLine() =>
+            Assert.Contains(LlmPromptBuilder.SaidLatelyPrefix + $"\"{TaglineRun.Tagline}\"", run.SystemPrompts[0], StringComparison.Ordinal);
     }
 }

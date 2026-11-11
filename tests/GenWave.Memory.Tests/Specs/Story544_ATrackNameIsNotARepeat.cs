@@ -151,4 +151,103 @@ public static class FeatureATrackNameIsNotARepeat
         [Fact]
         public void TheCheckReportsOneHit() => Assert.Single(result.Hits);
     }
+
+    // STORY-543 (F218.33): tagline quota facts below.
+    const string Tagline = "Every record is a footnote to another record.";
+
+    // F218.33 — an allowed tagline does not excuse a different genuine repeat in the same copy.
+    public sealed class ScenarioAnAllowedTaglineDoesNotHideAnotherRepeat
+    {
+        // Given the tagline allowed and a recent utterance "we shall now proceed with the grand finale"
+        // When  the copy says the tagline and then "proceed with the grand finale"
+        readonly RepetitionResult result = Check.Check(
+            Tagline + " Now we proceed with the grand finale.",
+            new RepetitionContext(["we shall now proceed with the grand finale", Tagline], [], AllowedPhrases: [Tagline]));
+
+        [Fact]
+        public void TheRepeatStillHits() => Assert.Equal(["proceed with the grand finale"], result.Hits.Select(h => h.Phrase));
+    }
+
+    // F218.33 — a run touching an unavailable tagline folds into that one hit.
+    public sealed class ScenarioARunTouchingAnUnavailableTaglineIsOneHit
+    {
+        // Given the tagline unavailable and a recent utterance holding it
+        // When  the copy says it
+        readonly RepetitionResult result = Check.Check(
+            "Settle in. " + Tagline + " Next up.",
+            new RepetitionContext(["Settle in. " + Tagline], [], UnavailablePhrases: [Tagline]));
+
+        [Fact]
+        public void TheCheckReportsOneHit() => Assert.Single(result.Hits);
+    }
+
+    // F218.33 — a partial use (3+ contiguous tagline words) in quota is not a hit.
+    public sealed class ScenarioAPartialAllowedTaglineIsNotAHit
+    {
+        // Given the tagline allowed and recent holding it
+        // When  the copy says "every record is a footnote to another"
+        readonly RepetitionResult result = Check.Check(
+            "Remember, every record is a footnote to another, always.",
+            new RepetitionContext([Tagline], [], AllowedPhrases: [Tagline]));
+
+        [Fact]
+        public void TheCheckReportsNoHit() => Assert.False(result.IsHit);
+    }
+
+    // F218.33 — "A tagline use inside quota is never a hit", even when the shared run reaches past it.
+    public sealed class ScenarioAnAllowedTaglineWithAdjacentSharedWordsIsNotAHit
+    {
+        // Given the tagline allowed and recent holding "Settle in. <tagline> Number 5."
+        // When  the copy says "Settle in. <tagline> Next up."
+        readonly RepetitionResult result = Check.Check(
+            "Settle in. " + Tagline + " Next up.",
+            new RepetitionContext(["Settle in. " + Tagline + " Number 5."], [], AllowedPhrases: [Tagline]));
+
+        [Fact]
+        public void TheCheckReportsNoHit() => Assert.False(result.IsHit);
+    }
+
+    // F218.33 — a partial use of an unavailable tagline is one hit, named as the tagline is written.
+    public sealed class ScenarioAPartialUnavailableTaglineIsOneNamedHit
+    {
+        // Given the tagline unavailable and recent holding it
+        // When  the copy says "every record is a footnote to another"
+        readonly RepetitionResult result = Check.Check(
+            "Remember, every record is a footnote to another, always.",
+            new RepetitionContext([Tagline], [], UnavailablePhrases: [Tagline]));
+
+        [Fact]
+        public void TheHitNamesTheTagline() => Assert.Equal([Tagline], result.Hits.Select(h => h.Phrase));
+    }
+
+    // F218.33 — an unavailable tagline hits even when its earlier use is outside RecentTexts.
+    public sealed class ScenarioAnUnavailableTaglineHitsWithoutRecentText
+    {
+        // Given the tagline unavailable and no recent utterance holding it
+        // When  the copy says it
+        readonly RepetitionResult result = Check.Check(
+            "Settle in. " + Tagline,
+            new RepetitionContext(["something else entirely"], [], UnavailablePhrases: [Tagline]));
+
+        [Fact]
+        public void TheCheckReportsOneHit() => Assert.Single(result.Hits);
+    }
+
+    // F218.33 — a separate repeat touching an unavailable tagline is not swallowed by it.
+    public sealed class ScenarioARepeatBesideAnUnavailableTaglineStillHits
+    {
+        const string Tail = "and the crowd went home happy tonight";
+
+        // Given the tagline unavailable and a recent utterance holding it plus a longer sentence
+        // When  the copy says the tagline and the same sentence straight after
+        readonly RepetitionResult result = Check.Check(
+            Tagline + " " + Tail,
+            new RepetitionContext([Tagline + " " + Tail], [], UnavailablePhrases: [Tagline]));
+
+        [Fact]
+        public void TheTaglineAndTheRepeatAreTwoHits() => Assert.Equal(2, result.Hits.Count);
+
+        [Fact]
+        public void OneHitIsTheTaglineAsWritten() => Assert.Contains(Tagline, result.Hits.Select(h => h.Phrase));
+    }
 }

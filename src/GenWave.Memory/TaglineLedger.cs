@@ -19,7 +19,7 @@ public sealed class TaglineLedger : ITaglineLedger
     public const int DefaultMinBreaksApart = 3;
 
     /// <summary>The rolling window the hourly quota counts over.</summary>
-    public static readonly TimeSpan Window = TimeSpan.FromMinutes(60);
+    public static readonly TimeSpan Window = ITaglineLedger.RollingWindow;
 
     const int MinTaglineWords = 2;
 

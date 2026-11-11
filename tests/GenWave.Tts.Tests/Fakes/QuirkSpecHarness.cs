@@ -38,7 +38,8 @@ static class QuirkSpecHarness
         PersonaCard card, IQuirkSelector selector, Func<string, Task>? onSystemPrompt = null, Action? onHttp = null,
         IUtteranceStore? utteranceStore = null, MemoryBudget? memoryBudget = null,
         IHttpClientFactory? httpOverride = null, IRepetitionCheck? repetitionCheck = null,
-        IStationEventSink? events = null, LlmCallRecorder? recorder = null, LlmCopyStatusHolder? statusHolder = null)
+        IStationEventSink? events = null, LlmCallRecorder? recorder = null, LlmCopyStatusHolder? statusHolder = null,
+        ITaglineLedger? taglineLedger = null)
     {
         IHttpClientFactory http = httpOverride ?? new SingleHandlerHttpClientFactory(new FakeHttpMessageHandler(async (req, _) =>
         {
@@ -62,7 +63,7 @@ static class QuirkSpecHarness
             statusHolder ?? new LlmCopyStatusHolder(), new FakeActivePersonaAccessor { Card = card }, NullLogger<LlmCopyWriter>.Instance, TimeProvider.System,
             recorder ?? NewRecorder(),
             new FakeDegradationModeReader(), utteranceStore: utteranceStore, quirkSelector: selector, memoryBudget: memoryBudget,
-            repetitionCheck: repetitionCheck, events: events);
+            repetitionCheck: repetitionCheck, events: events, taglineLedger: taglineLedger);
     }
 
     public static LlmCallRecorder NewRecorder(LlmCallCauseCounters? counters = null) =>
@@ -72,7 +73,7 @@ static class QuirkSpecHarness
     /// An HTTP factory that answers the Nth completion with <paramref name="replies"/>[N] (the last reply
     /// repeats once they run out) and appends each posted USER prompt to <paramref name="userPrompts"/>.
     /// </summary>
-    public static SingleHandlerHttpClientFactory ScriptedHttp(List<string> userPrompts, params string[] replies) =>
+    public static SingleHandlerHttpClientFactory ScriptedHttp(List<string> userPrompts, string[] replies, List<string>? systemPrompts = null) =>
         new(new FakeHttpMessageHandler(async (req, _) =>
         {
             if (req.Content is { } content)
@@ -80,6 +81,7 @@ static class QuirkSpecHarness
                 var body = await content.ReadAsStringAsync();
                 using var doc = JsonDocument.Parse(body);
                 userPrompts.Add(doc.RootElement.GetProperty("messages")[1].GetProperty("content").GetString() ?? "");
+                systemPrompts?.Add(doc.RootElement.GetProperty("messages")[0].GetProperty("content").GetString() ?? "");
             }
             var reply = replies[Math.Max(0, Math.Min(userPrompts.Count - 1, replies.Length - 1))];
             return new HttpResponseMessage(HttpStatusCode.OK)

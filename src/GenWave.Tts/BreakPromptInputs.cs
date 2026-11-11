@@ -26,4 +26,7 @@ internal sealed record BreakPromptInputs(
 
     /// <summary>The due show-flavor line, when the break carries one (F116.3).</summary>
     public ShowFlavorFact? ShowFlavor { get; init; }
+
+    /// <summary>Tagline statuses for an on-air break (F218.32); empty for a preview or the bench.</summary>
+    public IReadOnlyList<TaglineStatus> Taglines { get; init; } = [];
 }

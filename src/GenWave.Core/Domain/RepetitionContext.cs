@@ -14,6 +14,8 @@ namespace GenWave.Core.Domain;
 /// <param name="CrossingTrackTitle">Title of the track the break crosses from (the one before); same.</param>
 /// <param name="CrossingTrackArtist">Artist of the crossing track; same.</param>
 /// <param name="Year">Current track year; its digits, and its number words when paired, never make a repeat on their own.</param>
+/// <param name="AllowedPhrases">Taglines in quota this break (F218.33): a use of one of these is never a hit; a shared run touching it is cut at the use, and only a part outside it of MinRunWords or more words (still a repeat run) hits. A use is the T691 key-run rule: min(3, tagline words) or more contiguous tagline words, whole or partial, on normalised words.</param>
+/// <param name="UnavailablePhrases">Taglines over quota or cooling down (F218.33): copy that uses one (same key-run rule) is a hit named by the phrase as written, even if its earlier uses fall outside <paramref name="RecentTexts"/>; a shared run touching it is cut at the tagline: the part outside it stays its own hit if it is still a repeat run (MinRunWords or more words), else it is folded into the tagline's hit.</param>
 public sealed record RepetitionContext(
     IReadOnlyList<string> RecentTexts,
     IReadOnlyList<string> SpentQuirkRules,
@@ -24,4 +26,6 @@ public sealed record RepetitionContext(
     string? Album = null,
     int? Year = null,
     string? CrossingTrackTitle = null,
-    string? CrossingTrackArtist = null);
+    string? CrossingTrackArtist = null,
+    IReadOnlyList<string>? AllowedPhrases = null,
+    IReadOnlyList<string>? UnavailablePhrases = null);

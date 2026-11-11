@@ -8,6 +8,9 @@ namespace GenWave.Core.Abstractions;
 /// </summary>
 public interface ITaglineLedger
 {
+    /// <summary>The rolling window the hourly quota counts over; callers read at least this much history.</summary>
+    static readonly TimeSpan RollingWindow = TimeSpan.FromMinutes(60);
+
     /// <summary>
     /// One status per tagline of <paramref name="card"/>. Uses are read from <paramref name="recent"/> (the
     /// persona's utterances; <c>fallback</c> rows never count). <paramref name="spentShiftQuirks"/> are the

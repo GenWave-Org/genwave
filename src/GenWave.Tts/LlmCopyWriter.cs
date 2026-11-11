@@ -136,7 +136,8 @@ public sealed class LlmCopyWriter(
     IQuirkSelector? quirkSelector = null,
     MemoryBudget? memoryBudget = null, // T699 supplies this from the context probe; Off until then
     IRepetitionCheck? repetitionCheck = null, // T693: absent means no post-check at all
-    IStationEventSink? events = null)
+    IStationEventSink? events = null,
+    ITaglineLedger? taglineLedger = null) // T713: absent means no taglines, exactly the pre-ledger behaviour
     : ISegmentCopyWriter, IPersonaPreviewWriter, IAnnouncementCopyWriter
 {
     readonly IStationEventSink events = events ?? NoOpStationEventSink.Instance;
@@ -815,15 +816,15 @@ public sealed class LlmCopyWriter(
     /// <summary>
     /// The persona's newest utterances, newest first, in ONE store read per render: enough for the
     /// recent-lines block (<see cref="MemoryBudget.RecentLines"/>, F218.10) and, when
-    /// <paramref name="forRepetitionCheck"/>, for the repeat check's window (F218.11) even with memory
+    /// <paramref name="needHistory"/>, for the repeat check's window (F218.11) even with memory
     /// off. Empty when neither needs it, there is no store or persona, or the read faults (F12.4: costs
     /// the block and the recents half of the check, not the segment).
     /// </summary>
     async Task<IReadOnlyList<UtteranceEntry>> ReadRecentEntriesAsync(
-        SegmentRequest request, bool forRepetitionCheck, CancellationToken ct)
+        SegmentRequest request, bool needHistory, CancellationToken ct)
     {
         var blockLines = (memoryBudget ?? MemoryBudget.Off).RecentLines;
-        var take = forRepetitionCheck ? Math.Max(RepetitionWindow, blockLines) : blockLines;
+        var take = needHistory ? Math.Max(RepetitionWindow, blockLines) : blockLines;
         if (take <= 0 || utteranceStore is null || request.PersonaId is not { } personaId)
             return [];
 
@@ -843,6 +844,33 @@ public sealed class LlmCopyWriter(
     }
 
     /// <summary>
+    /// What the tagline ledger counts (F218.31): every line the persona wrote inside <see cref="ITaglineLedger.RollingWindow"/>
+    /// plus the newest reads already in hand (so the "last 3 utterances" rule still holds for a quiet persona).
+    /// A faulted read degrades to the newest reads alone, like <see cref="ReadRecentEntriesAsync"/>.
+    /// </summary>
+    async Task<IReadOnlyList<UtteranceEntry>> ReadTaglineEntriesAsync(
+        SegmentRequest request, IReadOnlyList<UtteranceEntry> newest, bool needed, CancellationToken ct)
+    {
+        if (!needed || utteranceStore is null || request.PersonaId is not { } personaId)
+            return newest;
+
+        try
+        {
+            var inWindow = await utteranceStore.SinceAsync(personaId, timeProvider.GetUtcNow() - ITaglineLedger.RollingWindow, ct);
+            return inWindow.Concat(newest).DistinctBy(e => e.Id).OrderByDescending(e => e.WrittenAt).ThenByDescending(e => e.Id).ToList();
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Tagline-window read failed for {Kind}; the ledger sees only the newest lines", request.Kind);
+            return newest;
+        }
+    }
+
+    /// <summary>
     /// SPEC F218.11 — phrases in <paramref name="copy"/> that repeat the persona's last
     /// <see cref="RepetitionWindow"/> real (non-template) utterances or a spent <c>maxPerShift</c> quirk.
     /// Spent = a capped rule on the card the selector did NOT hand this break: the selected ones were
@@ -850,28 +878,44 @@ public sealed class LlmCopyWriter(
     /// </summary>
     IReadOnlyList<string> FindRepeats(
         string copy, SegmentRequest request, string? personaName, IReadOnlyList<UtteranceEntry> recent,
-        PersonaCard? card, QuirkSelection? quirkSelection)
+        PersonaCard? card, QuirkSelection? quirkSelection, IReadOnlyList<TaglineStatus> taglines)
     {
         if (repetitionCheck is null)
             return [];
 
         var recentTexts = recent.Where(e => !e.Fallback).Take(RepetitionWindow).Select(e => e.Text).ToList();
-        // The exact shift spend count needs a port change, so a capped quirk not selected this break is
-        // treated as spent; an unselected capped quirk that airs would also bypass the cap (no spend recorded).
-        var cappedNotSelectedRules = quirkSelection is null
+        var result = repetitionCheck.Check(
+            copy,
+            new RepetitionContext(
+                recentTexts, CappedNotSelectedRules(card, quirkSelection), personaName, request.StationName,
+                request.Track?.Title, request.Track?.Artist, request.Track?.Album, request.Track?.Year,
+                request.CrossingTrackTitle, request.CrossingTrackArtist,
+                AllowedPhrases: taglines.Where(t => t.Available).Select(t => t.Span).ToList(),
+                UnavailablePhrases: taglines.Where(t => !t.Available).Select(t => t.Span).ToList()));
+        return result.Hits.Select(h => h.Phrase).ToList();
+    }
+
+    /// <summary>
+    /// The capped (<c>maxPerShift</c>) rules the selector did NOT hand this break, treated as spent for the shift.
+    /// The exact shift spend count needs a port change; an unselected capped quirk that airs would also bypass
+    /// the cap (no spend recorded). Shared by the repeat check and the tagline ledger so they cannot disagree:
+    /// the selector already wrote THIS break's spend row, so a rule it just selected must stay available.
+    /// </summary>
+    static IReadOnlyList<string> CappedNotSelectedRules(PersonaCard? card, QuirkSelection? quirkSelection) =>
+        quirkSelection is null
             ? []
             : (card?.QuirkRules ?? [])
                 .Where(r => r.MaxPerShift is not null && !quirkSelection.Lines.Contains(r.Text, StringComparer.Ordinal))
                 .Select(r => r.Text).ToList();
 
-        var result = repetitionCheck.Check(
-            copy,
-            new RepetitionContext(
-                recentTexts, cappedNotSelectedRules, personaName, request.StationName,
-                request.Track?.Title, request.Track?.Artist, request.Track?.Album, request.Track?.Year,
-                request.CrossingTrackTitle, request.CrossingTrackArtist));
-        return result.Hits.Select(h => h.Phrase).ToList();
-    }
+    /// <summary>
+    /// SPEC F218.30–.31: tagline statuses for this on-air break, or none (preview, no ledger, no card). Pure; no I/O.
+    /// </summary>
+    IReadOnlyList<TaglineStatus> EvaluateTaglines(
+        PersonaCard? card, QuirkSelection? quirkSelection, IReadOnlyList<UtteranceEntry> recent, bool onAir) =>
+        onAir && taglineLedger is not null && card is not null
+            ? taglineLedger.Evaluate(card, recent, CappedNotSelectedRules(card, quirkSelection), timeProvider.GetUtcNow())
+            : [];
 
     /// <summary>One <c>repeat-caught</c> booth row per caught attempt (SPEC F218.13); needs a persona to name.</summary>
     void PublishRepeatCaught(SegmentRequest request, IReadOnlyList<string> phrases)
@@ -989,7 +1033,10 @@ public sealed class LlmCopyWriter(
             var quirkSelection = await SelectQuirksAsync(request, card, spend: spendQuirks, ct);
             // The repeat check is an on-air post-check: a preview (spendQuirks false) never re-asks or logs.
             var checkRepeats = repetitionCheck is not null && spendQuirks;
-            var recentEntries = await ReadRecentEntriesAsync(request, checkRepeats, ct);
+            var useTaglines = spendQuirks && taglineLedger is not null;
+            var recentEntries = await ReadRecentEntriesAsync(request, checkRepeats || useTaglines, ct);
+            var taglines = EvaluateTaglines(
+                card, quirkSelection, await ReadTaglineEntriesAsync(request, recentEntries, useTaglines, ct), onAir: spendQuirks);
             var blockLineCount = (memoryBudget ?? MemoryBudget.Off).RecentLines;
             IReadOnlyList<string> recentLines = blockLineCount > 0
                 ? recentEntries.Take(blockLineCount).Select(e => e.Text).ToList()
@@ -1019,6 +1066,7 @@ public sealed class LlmCopyWriter(
                 request, persona, card, mentionOwnName, quirkSelection, recentLines, cfg.MaxCopyChars,
                 stationLocalNow, previouslyVoicedTasteNotes)
             {
+                Taglines = taglines,
                 AnnouncementMessage = requiredCore,
                 PatterFact = patterFact?.Fact,
                 ShowFlavor = showFlavorFact,
@@ -1102,7 +1150,7 @@ public sealed class LlmCopyWriter(
                         return new CopyGateVerdict(
                             [],
                             checkRepeats
-                                ? FindRepeats(candidateText, request, personaName, recentEntries, card, quirkSelection)
+                                ? FindRepeats(candidateText, request, personaName, recentEntries, card, quirkSelection, taglines)
                                 : []);
                     },
                     LlmPromptBuilder.BuildTruthGateReaskLine, candidate, text);

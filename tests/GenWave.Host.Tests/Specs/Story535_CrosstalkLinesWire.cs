@@ -29,6 +29,9 @@ file sealed class LineStore(IReadOnlyList<UtteranceEntry> seeded) : IUtteranceSt
     public Task<IReadOnlyList<UtteranceEntry>> RecentAsync(long personaId, int take, CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<UtteranceEntry>>(seeded.Where(e => e.PersonaId == personaId).Take(take).ToList());
 
+    public Task<IReadOnlyList<UtteranceEntry>> SinceAsync(long personaId, DateTimeOffset since, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<UtteranceEntry>>([]);
+
     public Task<int> SweepAsync(CancellationToken ct) => Task.FromResult(0);
 }
 

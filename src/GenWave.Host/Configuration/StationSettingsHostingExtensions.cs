@@ -111,6 +111,10 @@ static class StationSettingsHostingExtensions
         // optionally and runs it after the truth gate, memory on or off.
         builder.Services.AddSingleton<IRepetitionCheck, RepetitionCheck>();
 
+        // Tagline ledger (SPEC F218.30–.31, STORY-543, PLAN T713) — pure; LlmCopyWriter resolves it
+        // optionally and evaluates it on air only (absent = no taglines).
+        builder.Services.AddSingleton<ITaglineLedger, TaglineLedger>();
+
         // Format-clock schedule store + resolver (SPEC F91.1, F91.3; STORY-240/241, PLAN T118-T120) —
         // same station_svc connection string as every registration above; station.segment_schedule
         // lives in the same schema. ScheduleRepository ships dark since T118 (AddScheduleStore itself

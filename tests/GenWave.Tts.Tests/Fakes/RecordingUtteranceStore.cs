@@ -27,5 +27,9 @@ public sealed class RecordingUtteranceStore : IUtteranceStore
     public Task<IReadOnlyList<UtteranceEntry>> RecentAsync(long personaId, int take, CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<UtteranceEntry>>(Seeded.Where(e => e.PersonaId == personaId).Take(take).ToList());
 
+    public Task<IReadOnlyList<UtteranceEntry>> SinceAsync(long personaId, DateTimeOffset since, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<UtteranceEntry>>(
+            Seeded.Where(e => e.PersonaId == personaId && e.WrittenAt >= since).OrderByDescending(e => e.WrittenAt).ToList());
+
     public Task<int> SweepAsync(CancellationToken ct) => Task.FromResult(0);
 }

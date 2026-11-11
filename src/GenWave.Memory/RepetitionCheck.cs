@@ -17,6 +17,12 @@ namespace GenWave.Memory;
 /// means no minimum on the phrase itself: the candidate must hold a contiguous, in-order run of
 /// min(3, key-phrase words) of its words, so "banger, log it" hits "officially a banger, log it". Exclusions and
 /// stop words do not apply; the hit names the phrase as written in the rule.</item>
+/// <item>Taglines (F218.33): a phrase is used where the candidate holds a stretch of min(3, phrase words) or more
+/// contiguous phrase words (the key-run rule the <see cref="TaglineLedger"/> counts by), whole or partial. An allowed
+/// phrase's use is never a hit; an unavailable phrase's use is a quirk-style hit named as
+/// written. A run touching either use is cut at it: the words outside it still hit as their own run when they
+/// number <see cref="MinRunWords"/> or more (and pass the freshness test), else the run is absorbed into the tagline's use.
+/// A run reaching past an allowed use by a word or two therefore gives no hit.</item>
 /// </list>
 /// </summary>
 public sealed class RepetitionCheck : IRepetitionCheck
@@ -57,6 +63,15 @@ public sealed class RepetitionCheck : IRepetitionCheck
         foreach (var recent in context.RecentTexts)
             runs.AddRange(SharedRuns(candidate, RepetitionText.Tokens(recent), excluded, yearFacts));
 
+        var allowed = PhraseRanges(candidate, context.AllowedPhrases);
+        var unavailable = PhraseRanges(candidate, context.UnavailablePhrases);
+        var cuts = allowed.Concat(unavailable).ToList();
+        runs = runs
+            .SelectMany(run => OutsideRanges(run, cuts))
+            .Where(part => part.End.Value - part.Start.Value >= MinRunWords
+                && HasFreshWindow(candidate, part.Start.Value, part.End.Value - part.Start.Value, excluded, yearFacts))
+            .ToList();
+
         foreach (var range in OneHitPerStretch(runs))
         {
             var phrase = string.Join(' ', candidate[range]);
@@ -71,7 +86,56 @@ public sealed class RepetitionCheck : IRepetitionCheck
                 hits.Add(new RepetitionHit(key));
         }
 
+        foreach (var phrase in context.UnavailablePhrases ?? [])
+        {
+            var key = RepetitionText.Tokens(phrase);
+            if (ContainsKeyRun(candidate, key) && seen.Add("quirk:" + phrase))
+                hits.Add(new RepetitionHit(phrase));
+        }
+
         return hits.Count == 0 ? RepetitionResult.None : new RepetitionResult(hits);
+    }
+
+    // Where each phrase is used in the candidate, by the key-run rule: the maximal stretches of candidate words that
+    // match contiguous words of the phrase, at least min(QuirkRunWords, phrase words) long. A whole phrase is one such stretch.
+    static List<Range> PhraseRanges(string[] candidate, IReadOnlyList<string>? phrases)
+    {
+        var ranges = new List<Range>();
+        foreach (var phrase in phrases ?? [])
+        {
+            var key = RepetitionText.Tokens(phrase);
+            var size = Math.Min(QuirkRunWords, key.Length);
+            for (var c = 0; size > 0 && c < candidate.Length; c++)
+            {
+                var longest = 0;
+                for (var k = 0; k < key.Length; k++)
+                {
+                    var len = 0;
+                    while (c + len < candidate.Length && k + len < key.Length && candidate[c + len] == key[k + len])
+                        len++;
+                    longest = Math.Max(longest, len);
+                }
+                if (longest >= size && !ranges.Any(r => r.Start.Value <= c && c + longest <= r.End.Value))
+                    ranges.Add(c..(c + longest));
+            }
+        }
+        return ranges;
+    }
+
+    // The stretches of a run left once the allowed and unavailable tagline ranges are cut out. A run touching a tagline keeps only
+    // what lies outside it; a run wholly inside yields nothing (an allowed use is never a hit; an unavailable one gets its named hit below). Callers drop short parts.
+    static IEnumerable<Range> OutsideRanges(Range run, List<Range> cuts)
+    {
+        var start = run.Start.Value;
+        foreach (var cut in cuts.Where(c => c.Start.Value < run.End.Value && run.Start.Value < c.End.Value)
+                     .OrderBy(c => c.Start.Value))
+        {
+            if (cut.Start.Value > start)
+                yield return start..cut.Start.Value;
+            start = Math.Max(start, cut.End.Value);
+        }
+        if (start < run.End.Value)
+            yield return start..run.End.Value;
     }
 
     // Longest first; a run inside a reported range is dropped, an overlapping one is merged into the union.

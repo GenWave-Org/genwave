@@ -373,6 +373,9 @@ public static class FeatureCrosstalkStockWorker
         public Task<IReadOnlyList<UtteranceEntry>> RecentAsync(long personaId, int take, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<UtteranceEntry>>([]);
 
+        public Task<IReadOnlyList<UtteranceEntry>> SinceAsync(long personaId, DateTimeOffset since, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<UtteranceEntry>>([]);
+
         public Task<int> SweepAsync(CancellationToken ct) => Task.FromResult(0);
     }
 
