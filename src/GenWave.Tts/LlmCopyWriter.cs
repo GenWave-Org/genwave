@@ -6,6 +6,7 @@ using System.Net.Http.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using GenWave.Core;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Core.Events;
@@ -234,27 +235,6 @@ public sealed class LlmCopyWriter(
     static readonly Regex PreambleMetaWordPattern = new(
         @"(?i)\b(here[’']?s?|copy|response|sure|certainly|okay|lead[- ]in|back[- ]announce|announcement)\b",
         RegexOptions.Compiled);
-
-    // SPEC F123.2 (STORY-319, PLAN T263) — a sentence boundary, kept deliberately simple: a
-    // terminator, one optional closing quote mark, then whitespace or end-of-text. The regex is
-    // ONLY the candidate finder; whether a `.` candidate is actually a sentence's end (and not an
-    // abbreviation's period) is decided per-candidate by IsAbbreviationBoundary below — see that
-    // method's own remarks (F123.2 review finding, gh-#277 follow-up: "from St." airing for St.
-    // Vincent) for why that check lives in code rather than growing this pattern.
-    static readonly Regex SentenceBoundaryPattern = new(@"[.!?][""'”’]?(?=\s|$)", RegexOptions.Compiled);
-
-    // Abbreviations whose trailing period is never a sentence's end (SPEC F123.2 review finding):
-    // "St. Vincent", "Dr. Dre", "Mt. Joy" all read the period as mid-title, not a boundary to cut
-    // at. Checked case-insensitively against the word immediately before the candidate period —
-    // see IsAbbreviationBoundary. Deliberately a short, curated list (not a general abbreviation
-    // dictionary): each entry is a real title-adjacent abbreviation this station's copy has
-    // actually produced, and the bias throughout this salvage is toward OVER-rejecting a boundary
-    // (a shorter blurb beats airing a chopped abbreviation) rather than exhaustively cataloging
-    // every abbreviation in English.
-    static readonly HashSet<string> KnownAbbreviations = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "Dr", "Mr", "Mrs", "Ms", "St", "Mt", "Sgt", "Jr", "Sr", "Ft", "Bros", "vs", "etc", "approx", "feat",
-    };
 
     /// <summary>
     /// Single source of truth for exactly which <see cref="SegmentKind"/> values this writer calls
@@ -1624,9 +1604,9 @@ public sealed class LlmCopyWriter(
     /// <summary>
     /// SPEC F123.2 (STORY-319, PLAN T263) — salvages over-length copy by cutting at the LAST complete
     /// sentence that still fits under <paramref name="maxChars"/>, never mid-sentence: every candidate
-    /// cut point comes from <see cref="SentenceBoundaryPattern"/>, so the returned text always ends
+    /// cut point comes from <see cref="SentenceBoundaries.CutPoints"/>, so the returned text always ends
     /// exactly at a terminator (plus its optional closing quote), by construction. A candidate whose
-    /// period is an abbreviation's or a lone initial's (see <see cref="IsAbbreviationBoundary"/>) is
+    /// period is an abbreviation's or a lone initial's (see <see cref="SentenceBoundaries"/>) is
     /// skipped — not treated as a reject-everything signal — so the cut FALLS THROUGH to whichever
     /// earlier candidate already fit (review finding: the "St. Vincent" shape has a genuine sentence
     /// boundary before the abbreviation period, and discarding it in favor of the later, wrong one
@@ -1637,14 +1617,10 @@ public sealed class LlmCopyWriter(
     static string? TrimToLastCompleteSentence(string text, int maxChars)
     {
         string? lastFit = null;
-        foreach (Match match in SentenceBoundaryPattern.Matches(text))
+        foreach (var cutAt in SentenceBoundaries.CutPoints(text))
         {
-            var cutAt = match.Index + match.Length;
             if (cutAt > maxChars)
-                break;   // matches occur in text order — every later one only extends further
-
-            if (IsAbbreviationBoundary(text, match.Index))
-                continue;   // not a real sentence end — keep whatever earlier candidate already fit
+                break;   // cut points occur in text order — every later one only extends further
 
             lastFit = text[..cutAt];
         }
@@ -1653,49 +1629,9 @@ public sealed class LlmCopyWriter(
     }
 
     /// <summary>
-    /// Rejects a candidate boundary whose terminator is an abbreviation's or a lone initial's period
-    /// (SPEC F123.2 review finding) — <c>!</c>/<c>?</c> never carry this ambiguity and are never
-    /// rejected here. Two shapes are checked against the word immediately before the period (the
-    /// maximal run of letters scanning backward, stopping at the first non-letter — this is exactly
-    /// the "S" in "U.S." too, since the internal period between "U" and "S" is itself a non-letter):
-    /// a known abbreviation (<see cref="KnownAbbreviations"/>, case-insensitive — "St.", "Dr."), or a
-    /// LONE INITIAL — a single letter whose own preceding character is neither a letter nor an
-    /// apostrophe. That apostrophe exclusion is deliberate: without it, a contraction's own final
-    /// letter ("don't.", "isn't.") would misread as a one-letter "initial", since the character
-    /// immediately before it is punctuation, not a letter — the apostrophe is what tells the two
-    /// shapes apart. "U.S." falls out of the SAME lone-initial check with no separate rule: the
-    /// character before the "S" is the internal period, which is neither a letter nor an apostrophe.
-    /// </summary>
-    static bool IsAbbreviationBoundary(string text, int terminatorIndex)
-    {
-        if (text[terminatorIndex] != '.')
-            return false;
-
-        var wordEnd = terminatorIndex;
-        var wordStart = wordEnd;
-        while (wordStart > 0 && char.IsLetter(text[wordStart - 1]))
-            wordStart--;
-
-        if (wordStart == wordEnd)
-            return false;   // nothing letter-like immediately precedes the period at all
-
-        var word = text[wordStart..wordEnd];
-        if (KnownAbbreviations.Contains(word))
-            return true;
-
-        if (word.Length != 1)
-            return false;
-
-        var beforeWordIndex = wordStart - 1;
-        return beforeWordIndex < 0 || !IsApostrophe(text[beforeWordIndex]);
-    }
-
-    static bool IsApostrophe(char c) => c is '\'' or '’';
-
-    /// <summary>
     /// Folds the curly apostrophe (U+2019, RIGHT SINGLE QUOTATION MARK) to the straight ASCII one
-    /// (U+0027) — the SAME single-glyph pair <see cref="IsApostrophe"/> already treats as one mark,
-    /// char-by-char, in <see cref="IsAbbreviationBoundary"/> above, mirrored here as a whole-string
+    /// (U+0027) — the same pair <see cref="SentenceBoundaries"/> treats as one apostrophe,
+    /// char-by-char, mirrored here as a whole-string
     /// fold rather than a second, differently-shaped apostrophe rule. Internal (HIGH-1, PLAN T342
     /// review) — <see cref="CopyClaims.CheckContainment"/> is the second caller, reusing this exact
     /// discipline so its own substring test folds BOTH the aired copy and the owner's required core
