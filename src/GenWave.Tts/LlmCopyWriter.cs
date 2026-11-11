@@ -888,7 +888,8 @@ public sealed class LlmCopyWriter(
             copy,
             new RepetitionContext(
                 recentTexts, cappedNotSelectedRules, personaName, request.StationName,
-                request.Track?.Title, request.Track?.Artist, request.Track?.Album, request.Track?.Year));
+                request.Track?.Title, request.Track?.Artist, request.Track?.Album, request.Track?.Year,
+                request.CrossingTrackTitle, request.CrossingTrackArtist));
         return result.Hits.Select(h => h.Phrase).ToList();
     }
 

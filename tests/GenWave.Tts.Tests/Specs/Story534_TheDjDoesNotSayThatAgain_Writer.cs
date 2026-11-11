@@ -280,6 +280,35 @@ public static class FeatureTheDjDoesNotSayThatAgainWriter
         }
     }
 
+    // F218.34 - the crossing track's title and artist are excluded from repeat runs too
+    // entry point: LlmCopyWriter.WriteAsync
+    public sealed class ScenarioTheWriterPassesTheCrossingTrackToTheCheck
+    {
+        // Given a sign-on whose crossing track is Duran Duran's "Do You Believe in Shame" and a recent line naming it
+        // When  the reply names the crossing track again inside otherwise fresh copy
+
+        readonly List<string> prompts = [];
+
+        public ScenarioTheWriterPassesTheCrossingTrackToTheCheck()
+        {
+            const string said = "That was Duran Duran's Do You Believe in Shame";
+            var store = new RecordingUtteranceStore { Seeded = { Arrange.Entry(1, said) } };
+            var writer = Arrange.Writer(prompts, ["Duran Duran's Do You Believe in Shame, and that is how the late shift begins."], store, new RecordingStationEventSink());
+            var request = QuirkSpecHarness.Request(null) with
+            {
+                Kind = SegmentKind.SignOn,
+                CrossingTrackTitle = "Do You Believe in Shame",
+                CrossingTrackArtist = "Duran Duran",
+            };
+
+            writer.WriteAsync(request, CancellationToken.None).GetAwaiter().GetResult();
+        }
+
+        [Fact]
+        public void ARepeatOfOnlyTheCrossingTrackNameMakesOneCall() =>
+            Assert.Single(prompts);
+    }
+
     sealed class FixedSelector(QuirkSelection selection) : IQuirkSelector
     {
         public Task<QuirkSelection> SelectAsync(

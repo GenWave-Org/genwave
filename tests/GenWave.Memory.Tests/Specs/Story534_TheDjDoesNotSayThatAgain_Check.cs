@@ -23,21 +23,21 @@ public static class FeatureTheDjDoesNotSayThatAgainCheck
     // HAPPY PATH
     // ---------------------------------------------------------------------
 
-    // AC2 — a four-word run is a hit
+    // AC2 — a five-word run is a hit
     // entry point: IRepetitionCheck (pure; reached via LlmCopyWriter.WriteAsync)
-    public sealed class ScenarioAFourWordRunIsAHit
+    public sealed class ScenarioAFiveWordRunIsAHit
     {
         // Given a recent utterance "welcome to the dance floor of the airwaves tonight"
-        // When  the candidate copy contains "the dance floor of the airwaves"
+        // When  the candidate copy contains "dance floor of the airwaves"
 
         [Fact]
         public void TheCheckReportsOneHitNamingThatPhrase()
         {
             var result = Check.Check(
-                "Okay, so, the dance floor of the airwaves is open.",
+                "Okay, so, dance floor of the airwaves is open.",
                 Recent("welcome to the dance floor of the airwaves tonight"));
 
-            Assert.Equal(["the dance floor of the airwaves"], result.Hits.Select(h => h.Phrase));
+            Assert.Equal(["dance floor of the airwaves"], result.Hits.Select(h => h.Phrase));
         }
     }
 
@@ -146,12 +146,12 @@ public static class FeatureTheDjDoesNotSayThatAgainCheck
         [Fact]
         public void AStopWordTitleDoesNotGrowFormsThatHideARepeat()
         {
-            // "its the one for" is the shortest run that goes red without the stop-word rule: only "its" is a form
+            // "and its the one for" is the shortest run that goes red without the stop-word rule: only "its" is a form
             // of the title word "it", leaving "one" as the lone fresh word. A longer text with a second fresh word
             // (e.g. "so its the one for you") would pass either way, so it can't pin the rule.
-            var context = new RepetitionContext(["its the one for"], [], null, null, "Beat It");
+            var context = new RepetitionContext(["and its the one for"], [], null, null, "Beat It");
 
-            Assert.True(Check.Check("its the one for", context).IsHit);
+            Assert.True(Check.Check("and its the one for", context).IsHit);
         }
 
         [Theory]

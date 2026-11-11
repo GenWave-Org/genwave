@@ -11,6 +11,8 @@ namespace GenWave.Core.Domain;
 /// <param name="TrackTitle">Current track title; same.</param>
 /// <param name="Artist">Current track artist; same.</param>
 /// <param name="Album">Current track album; same.</param>
+/// <param name="CrossingTrackTitle">Title of the track the break crosses from (the one before); same.</param>
+/// <param name="CrossingTrackArtist">Artist of the crossing track; same.</param>
 /// <param name="Year">Current track year; its digits, and its number words when paired, never make a repeat on their own.</param>
 public sealed record RepetitionContext(
     IReadOnlyList<string> RecentTexts,
@@ -20,4 +22,6 @@ public sealed record RepetitionContext(
     string? TrackTitle = null,
     string? Artist = null,
     string? Album = null,
-    int? Year = null);
+    int? Year = null,
+    string? CrossingTrackTitle = null,
+    string? CrossingTrackArtist = null);

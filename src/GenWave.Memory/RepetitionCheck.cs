@@ -4,7 +4,7 @@ using GenWave.Core.Domain;
 namespace GenWave.Memory;
 
 /// <summary>
-/// Default <see cref="IRepetitionCheck"/> (SPEC F218.11). Pure.
+/// Default <see cref="IRepetitionCheck"/> (SPEC F218.11, amended by F218.34). Pure.
 /// <list type="bullet">
 /// <item>Utterance hit: a maximal run of at least <see cref="MinRunWords"/> consecutive words shared with a
 /// recent text (lowercased, punctuation stripped), kept only if some four-word window of it holds enough fresh
@@ -22,7 +22,10 @@ namespace GenWave.Memory;
 public sealed class RepetitionCheck : IRepetitionCheck
 {
     /// <summary>Shortest shared run that counts as a repeat.</summary>
-    public const int MinRunWords = 4;
+    public const int MinRunWords = 5;
+
+    /// <summary>Words in a freshness window. A five-word run has two four-word windows; any one may qualify it.</summary>
+    const int FreshWindowWords = 4;
 
     /// <summary>Fresh words a window with no track fact needs for its run to count.</summary>
     public const int MinFreshWords = 1;
@@ -97,7 +100,9 @@ public sealed class RepetitionCheck : IRepetitionCheck
         return new ExcludedWords(
             StopWords,
             NameWords(context.PersonaName, context.StationName),
-            NameWords(context.TrackTitle, context.Artist, context.Album),
+            NameWords(
+                context.TrackTitle, context.Artist, context.Album,
+                context.CrossingTrackTitle, context.CrossingTrackArtist),
             YearWords.For(context.Year));
     }
 
@@ -129,11 +134,11 @@ public sealed class RepetitionCheck : IRepetitionCheck
     // The run survives if any four-word window has enough fresh words for what it holds.
     static bool HasFreshWindow(string[] candidate, int start, int length, ExcludedWords excluded, bool[] yearFacts)
     {
-        for (var w = start; w + MinRunWords <= start + length; w++)
+        for (var w = start; w + FreshWindowWords <= start + length; w++)
         {
             var fresh = 0;
             var nearTrackFacts = false;
-            for (var p = w; p < w + MinRunWords; p++)
+            for (var p = w; p < w + FreshWindowWords; p++)
             {
                 if (excluded.IsFresh(candidate[p], yearFacts[p]))
                     fresh++;
