@@ -30,6 +30,10 @@ internal static class PersonaCardQuirkRulesValidator
                 return $"Quirk rule \"{echoed}\" must also appear in quirks.";
             if (rule.MaxPerShift is < 1)
                 return $"Quirk rule \"{echoed}\": maxPerShift must be at least 1.";
+            if (rule.MaxPerHour is < 1)
+                return $"Quirk rule \"{echoed}\": maxPerHour must be at least 1.";
+            if (rule.MinBreaksApart is < 0)
+                return $"Quirk rule \"{echoed}\": minBreaksApart must be at least 0.";
             if (rule.PerBreakChance is { } chance && !(chance > 0.0 && chance <= 1.0))
                 return $"Quirk rule \"{echoed}\": perBreakChance must be above 0 and at most 1.";
         }

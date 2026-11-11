@@ -12,7 +12,11 @@ namespace GenWave.Core.Domain;
 /// <param name="Text">The quirk, verbatim as it appears in <see cref="PersonaCard.Quirks"/>.</param>
 /// <param name="MaxPerShift">Most times the quirk may fire in one shift; omitted when unlimited. Valid range: at least 1.</param>
 /// <param name="PerBreakChance">Chance the quirk fires on any one break; omitted when unconditioned. Valid range: above 0, at most 1.</param>
+/// <param name="MaxPerHour">Most times a quoted tagline of the quirk may air in a rolling 60 minutes (SPEC F218.31); omitted means the ledger default. Valid range: at least 1.</param>
+/// <param name="MinBreaksApart">Persona utterances that must pass before a tagline of the quirk may air again (SPEC F218.31); omitted means the ledger default, 0 disables the cooldown. Valid range: at least 0.</param>
 public sealed record QuirkRule(
     string Text,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? MaxPerShift = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] double? PerBreakChance = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] double? PerBreakChance = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? MaxPerHour = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? MinBreaksApart = null);

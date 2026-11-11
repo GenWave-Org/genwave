@@ -145,7 +145,8 @@ public sealed class RepetitionCheck : IRepetitionCheck
         return false;
     }
 
-    static bool ContainsKeyRun(string[] candidate, string[] key)
+    /// <summary>True when the candidate holds a contiguous, in-order run of min(<see cref="QuirkRunWords"/>, key words) of the key (the T691 rule); shared with <see cref="TaglineLedger"/>.</summary>
+    internal static bool ContainsKeyRun(string[] candidate, string[] key)
     {
         if (key.Length == 0)
             return false;

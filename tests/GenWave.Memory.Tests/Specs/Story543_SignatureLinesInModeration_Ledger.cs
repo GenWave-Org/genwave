@@ -1,13 +1,44 @@
 // STORY-543 — Signature lines in moderation (gh-#293 gh-#920 · SPEC F218.30–.38 · PLAN T709)
 //
-// BDD specification — xUnit. Every fact is pending at plan time (2026-11-10); the named task activates its
-// facts, watches them fail, then makes them pass.
+// BDD specification — xUnit. T709 activates every fact here.
 // entry point: TaglineLedger.Evaluate (pure; reached via LlmCopyWriter.WriteAsync, see the _Writer file)
+
+using GenWave.Core.Domain;
 
 namespace GenWave.Memory.Tests.Specs;
 
 public static class FeatureSignatureLinesInModerationLedger
 {
+    const long PersonaId = 7;
+    const string Years = "Cites years the way other people cite scores: 'nineteen fifty-nine, naturally'";
+    const string Segues = "Calls segues 'arguments' \u2014 'this next track disagrees with the last one, listen'";
+    const string Wrong = "Admits, rarely and grandly, when he is wrong";
+    const string YearsSpan = "nineteen fifty-nine, naturally";
+    const string YearsCopy = "Oh, nineteen fifty nine, naturally, what a year.";
+    const string PlainCopy = "Here is another record from the pile.";
+
+    static readonly DateTimeOffset Now = new(2026, 11, 10, 20, 0, 0, TimeSpan.Zero);
+    static readonly ShiftKey Shift = ShiftKey.Unscheduled(PersonaId, new DateOnly(2026, 11, 10));
+
+    static PersonaCard ProfessorB(params QuirkRule[] rules) =>
+        new(PersonaCard.CurrentSchemaVersion, "Professor B", "Every record is a footnote to another record.", "A pedant.",
+            [Years, Segues, Wrong], new VoiceSpec("kokoro", "af_heart", 1.0, "en"), 0.0, [], [])
+        {
+            QuirkRules = rules.Length == 0 ? null : rules,
+        };
+
+    static PersonaCard CardQuoting(string quirk, params QuirkRule[] rules) =>
+        ProfessorB() with { Quirks = [quirk], QuirkRules = rules.Length == 0 ? null : rules };
+
+    /// <summary>Utterances newest first, each the given number of minutes before <see cref="Now"/>.</summary>
+    static UtteranceEntry[] Utterances(params (int MinutesAgo, string Text)[] newestFirst) =>
+        newestFirst.Select((u, i) => new UtteranceEntry(
+            100 - i, PersonaId, null, UtteranceKind.Patter, "patter", Shift, u.Text, false,
+            Now.AddMinutes(-u.MinutesAgo), null)).ToArray();
+
+    static bool YearsAvailable(PersonaCard card, params UtteranceEntry[] recent) =>
+        new TaglineLedger().Evaluate(card, recent, [], Now).Single(t => t.Span == YearsSpan).Available;
+
     // ---------------------------------------------------------------------
     // HAPPY PATH
     // ---------------------------------------------------------------------
@@ -18,11 +49,13 @@ public static class FeatureSignatureLinesInModerationLedger
         // Given Professor B's card with quirks quoting 'nineteen fifty-nine, naturally' and 'this next track disagrees with the last one, listen' and tagline "Every record is a footnote to another record."
         // When  the ledger evaluates the card with no utterances
 
-        [Fact(Skip = "pending: T709 — see docs/PLAN.md")]
-        public void ItReports3Taglines() => Assert.Fail("pending: T709 — it reports 3 taglines");
+        readonly IReadOnlyList<TaglineStatus> statuses = new TaglineLedger().Evaluate(ProfessorB(), [], [], Now);
 
-        [Fact(Skip = "pending: T709 — see docs/PLAN.md")]
-        public void All3AreAvailable() => Assert.Fail("pending: T709 — all 3 are available");
+        [Fact]
+        public void ItReports3Taglines() => Assert.Equal(3, statuses.Count);
+
+        [Fact]
+        public void All3AreAvailable() => Assert.All(statuses, t => Assert.True(t.Available));
     }
 
     // AC2 — two uses in the hour spends it
@@ -31,8 +64,10 @@ public static class FeatureSignatureLinesInModerationLedger
         // Given two utterances in the last 60 minutes that use "nineteen fifty-nine, naturally", neither in the last 3
         // When  the ledger evaluates
 
-        [Fact(Skip = "pending: T709 — see docs/PLAN.md")]
-        public void ThatTaglineIsUnavailable() => Assert.Fail("pending: T709 — that tagline is unavailable");
+        [Fact]
+        public void ThatTaglineIsUnavailable() =>
+            Assert.False(YearsAvailable(ProfessorB(),
+                Utterances((2, PlainCopy), (5, PlainCopy), (8, PlainCopy), (20, YearsCopy), (40, YearsCopy))));
     }
 
     // AC3 — an hour later it is back
@@ -41,8 +76,10 @@ public static class FeatureSignatureLinesInModerationLedger
         // Given the same two uses, both older than 60 minutes
         // When  the ledger evaluates
 
-        [Fact(Skip = "pending: T709 — see docs/PLAN.md")]
-        public void ThatTaglineIsAvailable() => Assert.Fail("pending: T709 — that tagline is available");
+        [Fact]
+        public void ThatTaglineIsAvailable() =>
+            Assert.True(YearsAvailable(ProfessorB(),
+                Utterances((2, PlainCopy), (5, PlainCopy), (8, PlainCopy), (65, YearsCopy), (90, YearsCopy))));
     }
 
     // AC4 — never back to back
@@ -51,8 +88,9 @@ public static class FeatureSignatureLinesInModerationLedger
         // Given one use, in the persona's second-newest utterance
         // When  the ledger evaluates
 
-        [Fact(Skip = "pending: T709 — see docs/PLAN.md")]
-        public void ThatTaglineIsUnavailable() => Assert.Fail("pending: T709 — that tagline is unavailable");
+        [Fact]
+        public void ThatTaglineIsUnavailable() =>
+            Assert.False(YearsAvailable(ProfessorB(), Utterances((2, PlainCopy), (5, YearsCopy), (8, PlainCopy))));
     }
 
     // AC5 — the card can set its own quota
@@ -61,8 +99,11 @@ public static class FeatureSignatureLinesInModerationLedger
         // Given a QuirkRules entry for that quirk with maxPerHour 1 and minBreaksApart 0
         // When  one use sits in the last 60 minutes
 
-        [Fact(Skip = "pending: T709 — see docs/PLAN.md")]
-        public void ThatTaglineIsUnavailable() => Assert.Fail("pending: T709 — that tagline is unavailable");
+        [Fact]
+        public void ThatTaglineIsUnavailable() =>
+            Assert.False(YearsAvailable(
+                ProfessorB(new QuirkRule(Years, MaxPerHour: 1, MinBreaksApart: 0)),
+                Utterances((2, PlainCopy), (5, PlainCopy), (8, PlainCopy), (20, YearsCopy))));
     }
 
     // ---------------------------------------------------------------------
@@ -75,8 +116,11 @@ public static class FeatureSignatureLinesInModerationLedger
         // Given a quirk with maxPerShift 1 already spent this shift and its quoted span unused this hour
         // When  the ledger evaluates
 
-        [Fact(Skip = "pending: T709 — see docs/PLAN.md")]
-        public void ThatSpanIsUnavailable() => Assert.Fail("pending: T709 — that span is unavailable");
+        [Fact]
+        public void ThatSpanIsUnavailable() =>
+            Assert.False(new TaglineLedger()
+                .Evaluate(ProfessorB(new QuirkRule(Years, MaxPerShift: 1)), [], [Years], Now)
+                .Single(t => t.Span == YearsSpan).Available);
     }
 
     // AC12 — a one-word quote is not a tagline
@@ -85,7 +129,14 @@ public static class FeatureSignatureLinesInModerationLedger
         // Given a quirk quoting only 'folks'
         // When  the ledger evaluates
 
-        [Fact(Skip = "pending: T709 — see docs/PLAN.md")]
-        public void ItReportsNoTaglineForThatQuirk() => Assert.Fail("pending: T709 — it reports no tagline for that quirk");
+        [Fact]
+        public void ItReportsNoTaglineForThatQuirk()
+        {
+            const string Quirk = "Greets everyone with 'folks'";
+
+            Assert.DoesNotContain(
+                new TaglineLedger().Evaluate(CardQuoting(Quirk), [], [], Now),
+                t => t.QuirkText == Quirk);
+        }
     }
 }

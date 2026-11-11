@@ -27,13 +27,16 @@ static partial class RepetitionText
         return sb.ToString().Split(' ', StringSplitOptions.RemoveEmptyEntries);
     }
 
+    /// <summary>Every quoted span of <paramref name="text"/>, trimmed, as written; blank spans dropped.</summary>
+    public static IEnumerable<string> QuotedSpans(string text) =>
+        QuotedSpan().Matches(text)
+            .Select(m => (m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value).Trim())
+            .Where(s => s.Length > 0);
+
     /// <summary>The rule's longest quoted span, else its last four words; trimmed, as written (an unclosed quote mark stays in).</summary>
     public static string KeyPhrase(string ruleText)
     {
-        var quoted = QuotedSpan().Matches(ruleText)
-            .Select(m => (m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value).Trim())
-            .OrderByDescending(s => s.Length)
-            .FirstOrDefault();
+        var quoted = QuotedSpans(ruleText).OrderByDescending(s => s.Length).FirstOrDefault();
         if (!string.IsNullOrEmpty(quoted))
             return quoted;
 
