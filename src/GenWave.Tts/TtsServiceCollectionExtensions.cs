@@ -232,6 +232,15 @@ public static class TtsServiceCollectionExtensions
         services.AddHttpClient<OllamaHealthProbe>();
         services.AddSingleton<IDependencyProbe>(sp => sp.GetRequiredService<OllamaHealthProbe>());
 
+        // LLM context window (SPEC F218.21, STORY-539): the probe rides the same cadence; one
+        // LlmContextWindow instance serves both the probe (writer) and ILlmContextWindow (readers).
+        // IHttpClientFactory comes from the typed AddHttpClient<OllamaHealthProbe>() above.
+        services.AddSingleton<OllamaContextClient>();
+        services.AddSingleton<LlmContextWindow>();
+        services.AddSingleton<ILlmContextWindow>(sp => sp.GetRequiredService<LlmContextWindow>());
+        services.AddSingleton<LlmContextWindowProbe>();
+        services.AddSingleton<IDependencyProbe>(sp => sp.GetRequiredService<LlmContextWindowProbe>());
+
         services.AddHttpClient<KokoroHealthProbe>();
         services.AddSingleton<IDependencyProbe>(sp => sp.GetRequiredService<KokoroHealthProbe>());
 

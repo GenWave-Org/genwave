@@ -29,6 +29,7 @@ public sealed class StatusController(
     IOptionsMonitor<LlmOptions> llmMonitor,
     LlmCopyStatusHolder llmStatusHolder,
     LlmCallCauseCounters llmCauseCounters,
+    ILlmContextWindow llmContextWindow,
     DegradationController degradationController,
     VoiceHealthReader voiceHealthReader,
     IActivePersonaAccessor personaAccessor,
@@ -216,6 +217,9 @@ public sealed class StatusController(
                 dominantCause = dominantFailure?.Cause.ToString().ToLowerInvariant(),
                 dominantCauseCount = dominantFailure?.Count,
                 dominantCauseModel = dominantFailure?.Model,
+                // SPEC F218.21: the cached context-window verdict (health-cadence probe, never a live call here).
+                contextTokens = llmEnabled ? llmContextWindow.Tokens : null,
+                memoryOffReason = llmContextWindow.MemoryOffReason,
             },
             degradation = new
             {

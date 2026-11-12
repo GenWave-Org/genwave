@@ -38,6 +38,7 @@ using GenWave.Core.Domain;
 using GenWave.Host.Api;
 using GenWave.Host.Engine;
 using GenWave.Host.Options;
+using GenWave.Host.Tests.Fakes;
 using GenWave.Tts;
 
 namespace GenWave.Host.Tests.Specs;
@@ -163,7 +164,8 @@ public static class FeatureLlmStatus
         LlmOptions? llmOptions = null,
         LlmCopyStatusHolder? statusHolder = null,
         Persona? activePersona = null,
-        LlmCallCauseCounters? causeCounters = null)
+        LlmCallCauseCounters? causeCounters = null,
+        ILlmContextWindow? llmContextWindow = null)
     {
         var resolvedLlmOptions = llmOptions ?? new LlmOptions();
         var resolvedStatusHolder = statusHolder ?? new LlmCopyStatusHolder();
@@ -195,6 +197,7 @@ public static class FeatureLlmStatus
             llmOptionsMonitor,
             resolvedStatusHolder,
             causeCounters ?? new LlmCallCauseCounters(TimeProvider.System),
+            llmContextWindow ?? new FakeLlmContextWindow(),
             degradationController,
             voiceHealthReader,
             new FakeActivePersonaAccessor { Persona = activePersona },
@@ -222,6 +225,19 @@ public static class FeatureLlmStatus
 
     public sealed class ScenarioStatusAggregate
     {
+        [Fact]
+        public async Task AWindowUnder8kReportsItsMemoryOffReason()
+        {
+            // SPEC F218.21: the cached context-window verdict rides llm.memoryOffReason (T699).
+            var controller = BuildController(
+                llmOptions: new LlmOptions { Endpoint = "http://llm.test", Model = "m" },
+                llmContextWindow: new FakeLlmContextWindow(4096, "context window 4096 < 8192, memory off"));
+
+            var llm = AsJson(await controller.Get(CancellationToken.None)).GetProperty("llm");
+
+            Assert.Equal("context window 4096 < 8192, memory off", llm.GetProperty("memoryOffReason").GetString());
+        }
+
         [Fact]
         public async Task DisabledConfigReportsEnabledFalse()
         {

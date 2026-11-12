@@ -107,6 +107,9 @@ internal static class HttpClientSeams
         // PLAN T580 (SPEC F205.7, STORY-479) — the LLM model-list probe's own typed-client egress
         // point (GET {Llm:Endpoint}/v1/models), same shape as LlmCopyWriter immediately above.
         "GenWave.Tts.OpenAiModelLister",
+        // PLAN T699 (SPEC F218.21, STORY-539) — the context-window probe's IHttpClientFactory egress point
+        // (GET {Llm:Endpoint}/api/ps, POST /api/generate to load), (CreateClient per call).
+        "GenWave.Tts.OllamaContextClient",
         "GenWave.Tts.TtsServiceCollectionExtensions",
 
         // MediaLibrary enrichment (Ollama mood/explicit, MusicBrainz year lookup).

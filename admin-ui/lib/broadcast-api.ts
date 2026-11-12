@@ -79,6 +79,13 @@ export interface StatusResponse {
     dominantCause?: string | null;
     dominantCauseCount?: number | null;
     dominantCauseModel?: string | null;
+    /**
+     * SPEC F218.21, STORY-539 — the model's context window in tokens (null = unknown or LLM off) and,
+     * when it is below 8192 or unknown, the red tile text ("context window 4096 < 8192, memory off");
+     * null when memory is on. Optional on the wire for the same fixture-compat reason as above.
+     */
+    contextTokens?: number | null;
+    memoryOffReason?: string | null;
   };
   /**
    * SPEC F99.5, F100.3, STORY-256 AC4 — the primary voice engine's own cached health verdict.

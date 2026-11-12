@@ -43,6 +43,8 @@ function playableTracksCaption(playable: number): string {
  */
 function llmTileVariant(llm: StatusResponse["llm"]): "neutral" | "ok" | "warning" {
   if (!llm.enabled) return "neutral";
+  // SPEC F218.21: a window under 8192 (or unknown) turns DJ memory off — the tile is red and says why.
+  if (llm.memoryOffReason) return "warning";
   return llm.lastOutcome === "failed" ? "warning" : "ok";
 }
 
@@ -245,6 +247,9 @@ export function StatusTiles({ status, error, timeZone }: StatusTilesProps): Reac
               <p className="mt-1 text-[0.9rem] text-ink">{status.llm.model ?? "Model not set"}</p>
               {status.llm.activePersona !== null && (
                 <p className="mt-0.5 text-[0.8rem] text-mute">{status.llm.activePersona}</p>
+              )}
+              {status.llm.memoryOffReason && (
+                <p className="mt-1 text-[0.75rem] font-semibold text-danger">{status.llm.memoryOffReason}</p>
               )}
               {status.llm.lastOutcome === "failed" && (
                 <>

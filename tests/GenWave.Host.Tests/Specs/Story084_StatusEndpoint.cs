@@ -35,6 +35,7 @@ using GenWave.Core.Domain;
 using GenWave.Host.Api;
 using GenWave.Host.Engine;
 using GenWave.Host.Options;
+using GenWave.Host.Tests.Fakes;
 using GenWave.Tts;
 
 namespace GenWave.Host.Tests.Specs;
@@ -174,6 +175,7 @@ public static class FeatureStatusEndpoint
             llmOptions,
             statusHolder,
             new LlmCallCauseCounters(TimeProvider.System),
+            new FakeLlmContextWindow(),
             degradationController,
             voiceHealthReader,
             new FakeActivePersonaAccessor(),
