@@ -621,8 +621,8 @@ public static partial class CopyClaims
     // (RIGHT SINGLE QUOTATION MARK) — mark "it's", never only the ASCII one. SpeechText's own
     // curly->straight fold (SpeechText.cs, ApplyCopyHygiene->Normalize) runs AFTER this checker by
     // design (this class's own remarks: the checker sees POST-hygiene, PRE-Normalize text), and
-    // LlmCopyWriter already treats U+2019 as an apostrophe in three other places (SentenceBoundaryPattern,
-    // the "here's" probe, IsApostrophe), so a model emitting "It’s Saturday" in exactly this
+    // U+2019 is already treated as an apostrophe elsewhere (SentenceBoundaries' boundary pattern and
+    // apostrophe check, LlmCopyWriter's "here's" probe), so a model emitting "It’s Saturday" in exactly this
     // window is the expected case, not an edge one. The pattern below spells the curly form as
     // the \u2019 regex escape, not the raw glyph, to keep this source file itself ASCII — the next
     // edit here must keep BOTH forms, not silently narrow back to one.

@@ -18,6 +18,15 @@ public interface IUtteranceStore
     /// <summary>The persona's newest <paramref name="take"/> lines, newest first.</summary>
     Task<IReadOnlyList<UtteranceEntry>> RecentAsync(long personaId, int take, CancellationToken ct);
 
+    /// <summary>
+    /// The persona's lines written at or after <paramref name="since"/>, newest first, capped defensively
+    /// (<see cref="MaxSinceRows"/>). Fallback rows are included; callers filter. Feeds the tagline quota window (F218.31).
+    /// </summary>
+    Task<IReadOnlyList<UtteranceEntry>> SinceAsync(long personaId, DateTimeOffset since, CancellationToken ct);
+
+    /// <summary>Most rows <see cref="SinceAsync"/> returns.</summary>
+    const int MaxSinceRows = 200;
+
     /// <summary>Deletes rows past the retention window; returns how many went.</summary>
     Task<int> SweepAsync(CancellationToken ct);
 }

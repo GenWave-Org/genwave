@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **137 seams across 9 projects.**
+> **139 seams across 9 projects.**
 
 ## GenWave.Ads (2 seams)
 
@@ -184,12 +184,14 @@
 | `GenWave.Core.Abstractions.IVoicePackStore` | `GenWave.MediaLibrary.Station.VoicePackRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IYearLookup` | `GenWave.MediaLibrary.YearLookup.MusicBrainzYearLookup` | Singleton | — |
 
-## GenWave.Memory (2 seams)
+## GenWave.Memory (4 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
 | `GenWave.Core.Abstractions.IQuirkSelector` | `GenWave.Memory.QuirkSelector` | Singleton | — |
 | `GenWave.Core.Abstractions.IRepetitionCheck` | `GenWave.Memory.RepetitionCheck` | Singleton | — |
+| `GenWave.Core.Abstractions.ISentenceTrimmer` | `GenWave.Memory.SentenceTrimmer` | Singleton | — |
+| `GenWave.Core.Abstractions.ITaglineLedger` | `GenWave.Memory.TaglineLedger` | Singleton | — |
 
 ## GenWave.Orchestration (9 seams)
 

@@ -191,7 +191,15 @@ sealed class BoothLogWriter(
     static string Summarize(DegradationModeChanged d) =>
         $"LLM degradation: {d.Previous} → {d.New} ({d.Cause})";
 
-    static string Summarize(RepeatCaught r) => $"Repeat caught: \"{r.Phrase}\"";
+    static string Summarize(RepeatCaught r) =>
+        $"Repeat caught: \"{r.Phrase}\"" + r.Outcome switch
+        {
+            RepeatOutcome.Trimmed => " — trimmed",
+            RepeatOutcome.ReAsked => " — re-asked",
+            RepeatOutcome.Template => " — template",
+            RepeatOutcome.Dropped => " — dropped",
+            _ => "",
+        };
 
     static string Summarize(HandoffPieceDropped h) => $"Handoff {h.Kind} dropped ({h.Cause})";
 }

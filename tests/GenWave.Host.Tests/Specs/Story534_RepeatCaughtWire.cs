@@ -55,6 +55,9 @@ file sealed class SeededUtteranceStore(string recentLine) : IUtteranceStore
 
     public Task MarkAiredAsync(long id, CancellationToken ct) => Task.CompletedTask;
 
+    public Task<IReadOnlyList<UtteranceEntry>> SinceAsync(long personaId, DateTimeOffset since, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<UtteranceEntry>>([]);
+
     public Task<IReadOnlyList<UtteranceEntry>> RecentAsync(long personaId, int take, CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<UtteranceEntry>>(
         [

@@ -13,7 +13,7 @@ using Microsoft.Extensions.Logging;
 /// </summary>
 internal sealed class CrosstalkLineMemory(
     IRepetitionCheck? repetitionCheck, IUtteranceStore? utteranceStore, IStationEventSink events,
-    ILogger logger)
+    ILogger logger, ISentenceTrimmer? sentenceTrimmer = null)
 {
     /// <summary>How many of the speaker's newest non-template utterances a line is compared against (SPEC F218.11).</summary>
     const int Window = 10;
@@ -26,6 +26,16 @@ internal sealed class CrosstalkLineMemory(
 
     /// <summary>A line that repeats its own speaker's history: its index in the script and the phrases that hit.</summary>
     public sealed record LineHit(int LineIndex, long PersonaId, IReadOnlyList<string> Phrases);
+
+    /// <summary>
+    /// A script after the trim (SPEC F218.36): <paramref name="Lines"/> keeps every line that still has a sentence
+    /// (cut to it) and omits each line left empty; <paramref name="EmptiedLineIndexes"/> are the script indexes of
+    /// those omitted lines, so the outcome can be told per speaker, not per exchange.
+    /// </summary>
+    public sealed record TrimmedScript(IReadOnlyList<CrosstalkAiredLine> Lines, IReadOnlySet<int> EmptiedLineIndexes)
+    {
+        public int Emptied => EmptiedLineIndexes.Count;
+    }
 
     public async Task<IReadOnlyList<SpeakerHistory>> ReadHistoriesAsync(CrosstalkExchangeRequest request, CancellationToken ct)
     {
@@ -65,12 +75,74 @@ internal sealed class CrosstalkLineMemory(
         return hits;
     }
 
-    /// <summary>One <c>repeat-caught</c> row per speaker that had a hit, naming that speaker's phrases (SPEC F218.13).</summary>
-    public void PublishCaught(IReadOnlyList<LineHit> hits)
+    /// <summary>
+    /// SPEC F218.36: cuts the repeated sentences out of each hit line, inside the line, with no minimum word count —
+    /// any sentence left keeps the line. A line left empty is omitted (the caller re-asks, then drops it). Without a
+    /// trimmer, or when no sentence matched, the line counts as empty: exactly the pre-trim behaviour.
+    /// </summary>
+    public TrimmedScript Trim(CrosstalkAiredScript script, IReadOnlyList<LineHit> hits)
+    {
+        var hitsByLine = hits.ToDictionary(h => h.LineIndex);
+        var lines = new List<CrosstalkAiredLine>(script.Lines.Count);
+        var emptied = new HashSet<int>();
+        for (var i = 0; i < script.Lines.Count; i++)
+        {
+            var line = script.Lines[i];
+            if (!hitsByLine.TryGetValue(i, out var hit))
+            {
+                lines.Add(line);
+                continue;
+            }
+
+            var remainder = Remainder(line.Text, hit.Phrases);
+            if (remainder is null)
+                emptied.Add(i);
+            else
+                lines.Add(line with { Text = remainder });
+        }
+        return new TrimmedScript(lines, emptied);
+    }
+
+    string? Remainder(string text, IReadOnlyList<string> phrases)
+    {
+        var cut = RepeatTrim.Cut(sentenceTrimmer, text, phrases);
+        return cut is not null && cut.Any(char.IsLetterOrDigit) ? cut : null;
+    }
+
+    /// <summary>
+    /// First pass, one <c>repeat-caught</c> row per speaker (SPEC F218.13, F218.38). The row says what happened to the
+    /// exchange, not to the line: when any line emptied, the whole exchange is re-asked and this attempt is thrown
+    /// away, so every row is <see cref="RepeatOutcome.ReAsked"/>, even for a speaker whose lines kept a sentence.
+    /// Only when nothing emptied does the trimmed script air, and the rows are <see cref="RepeatOutcome.Trimmed"/>.
+    /// </summary>
+    public void PublishFirstPass(IReadOnlyList<LineHit> hits, TrimmedScript trimmed)
+    {
+        var outcome = trimmed.Emptied > 0 ? RepeatOutcome.ReAsked : RepeatOutcome.Trimmed;
+        foreach (var speaker in hits.GroupBy(h => h.PersonaId))
+            events.Publish(new RepeatCaught(speaker.Key, PhrasesOf(speaker), outcome));
+    }
+
+    /// <summary>
+    /// After the re-ask, ruled per line, and only once the survivor checks have run (SPEC F218.14, F218.38).
+    /// When the exchange airs, each speaker gets up to two rows: one <see cref="RepeatOutcome.Trimmed"/> carrying the
+    /// phrases of their lines that were cut and kept, and one <see cref="RepeatOutcome.Dropped"/> carrying the phrases
+    /// of their lines that left the exchange (no template airs). When the exchange is discarded nothing airs, so each
+    /// speaker gets a single <see cref="RepeatOutcome.Dropped"/> row and no Trimmed row is ever written.
+    /// </summary>
+    public void PublishAfterReAsk(IReadOnlyList<LineHit> hits, TrimmedScript trimmed, bool exchangeAirs)
     {
         foreach (var speaker in hits.GroupBy(h => h.PersonaId))
-            events.Publish(new RepeatCaught(speaker.Key, string.Join(", ", speaker.SelectMany(h => h.Phrases))));
+        {
+            var kept = exchangeAirs ? speaker.Where(h => !trimmed.EmptiedLineIndexes.Contains(h.LineIndex)).ToList() : [];
+            var dropped = exchangeAirs ? speaker.Where(h => trimmed.EmptiedLineIndexes.Contains(h.LineIndex)).ToList() : speaker.ToList();
+            if (kept.Count > 0)
+                events.Publish(new RepeatCaught(speaker.Key, PhrasesOf(kept), RepeatOutcome.Trimmed));
+            if (dropped.Count > 0)
+                events.Publish(new RepeatCaught(speaker.Key, PhrasesOf(dropped), RepeatOutcome.Dropped));
+        }
     }
+
+    static string PhrasesOf(IEnumerable<LineHit> hits) => string.Join(", ", hits.SelectMany(h => h.Phrases));
 
     /// <summary>Records every aired line under its speaker (SPEC F218.14, STORY-535 AC2). A fault costs the record, never the exchange.</summary>
     public async Task StoreAsync(CrosstalkExchangeRequest request, CrosstalkAiredScript script, CancellationToken ct)

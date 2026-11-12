@@ -152,6 +152,7 @@ file sealed class RecordingUtteranceStore : IUtteranceStore
 
     public Task<long> RecordAsync(NewUtterance utterance, CancellationToken ct) => throw new NotSupportedException();
     public Task<IReadOnlyList<UtteranceEntry>> RecentAsync(long personaId, int take, CancellationToken ct) => throw new NotSupportedException();
+    public Task<IReadOnlyList<UtteranceEntry>> SinceAsync(long personaId, DateTimeOffset since, CancellationToken ct) => throw new NotSupportedException();
     public Task<int> SweepAsync(CancellationToken ct) => throw new NotSupportedException();
 }
 

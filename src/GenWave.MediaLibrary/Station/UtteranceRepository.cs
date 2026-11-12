@@ -77,6 +77,24 @@ sealed class UtteranceRepository(Lazy<NpgsqlDataSource> dataSource, IOptionsMoni
         return rows.Select(r => r.ToEntry()).ToList();
     }
 
+    public async Task<IReadOnlyList<UtteranceEntry>> SinceAsync(long personaId, DateTimeOffset since, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var rows = await conn.QueryAsync<UtteranceRow>(new CommandDefinition(
+            """
+            select id::bigint as id, persona_id::bigint as persona_id, show_id::bigint as show_id,
+                   kind::text as kind, segment_kind, shift_key, text, fallback, written_at, aired_at
+            from station.utterance
+            where persona_id = @PersonaId and written_at >= @Since
+            order by written_at desc, id desc
+            limit @Cap
+            """,
+            new { PersonaId = personaId, Since = since, Cap = IUtteranceStore.MaxSinceRows },
+            cancellationToken: ct));
+
+        return rows.Select(r => r.ToEntry()).ToList();
+    }
+
     public async Task<int> SweepAsync(CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
