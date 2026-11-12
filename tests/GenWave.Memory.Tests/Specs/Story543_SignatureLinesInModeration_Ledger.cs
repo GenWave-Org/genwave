@@ -12,6 +12,7 @@ public static class FeatureSignatureLinesInModerationLedger
     const long PersonaId = 7;
     const string Years = "Cites years the way other people cite scores: 'nineteen fifty-nine, naturally'";
     const string Segues = "Calls segues 'arguments' \u2014 'this next track disagrees with the last one, listen'";
+    const string SeguesSpan = "this next track disagrees with the last one, listen";
     const string Wrong = "Admits, rarely and grandly, when he is wrong";
     const string YearsSpan = "nineteen fifty-nine, naturally";
     const string YearsCopy = "Oh, nineteen fifty nine, naturally, what a year.";
@@ -38,6 +39,11 @@ public static class FeatureSignatureLinesInModerationLedger
 
     static bool YearsAvailable(PersonaCard card, params UtteranceEntry[] recent) =>
         new TaglineLedger().Evaluate(card, recent, [], Now).Single(t => t.Span == YearsSpan).Available;
+
+    static bool SeguesAvailable(string said) =>
+        new TaglineLedger()
+            .Evaluate(ProfessorB(), Utterances((2, PlainCopy), (5, PlainCopy), (8, PlainCopy), (20, said), (40, said)), [], Now)
+            .Single(t => t.Span == SeguesSpan).Available;
 
     // ---------------------------------------------------------------------
     // HAPPY PATH
@@ -138,5 +144,37 @@ public static class FeatureSignatureLinesInModerationLedger
                 new TaglineLedger().Evaluate(CardQuoting(Quirk), [], [], Now),
                 t => t.QuirkText == Quirk);
         }
+    }
+
+    // AC13 (F218.39) — a long catchphrase is not used by its first words
+    public sealed class ScenarioALongCatchphraseIsNotUsedByItsFirstWords
+    {
+        // Given the 9-word tagline and two utterances in the last 60 minutes, neither in the last 3, each saying only "this next track"
+        // When  the ledger evaluates
+
+        [Fact]
+        public void ThatTaglineIsAvailable() => Assert.True(SeguesAvailable("Here is this next track, folks."));
+    }
+
+    // AC14 — five of its words are a use
+    public sealed class ScenarioFiveOfItsWordsAreAUse
+    {
+        // Given the same tagline and two utterances each saying "this next track disagrees with the last"
+        // When  the ledger evaluates
+
+        [Fact]
+        public void ThatTaglineIsUnavailable() => Assert.False(SeguesAvailable("Well, this next track disagrees with the last."));
+    }
+
+    // AC15 — a short catchphrase still needs only three
+    public sealed class ScenarioAShortCatchphraseStillNeedsOnlyThree
+    {
+        // Given 'nineteen fifty-nine, naturally' and two utterances each saying "fifty nine naturally"
+        // When  the ledger evaluates
+
+        [Fact]
+        public void ThatTaglineIsUnavailable() =>
+            Assert.False(YearsAvailable(ProfessorB(),
+                Utterances((2, PlainCopy), (5, PlainCopy), (8, PlainCopy), (20, "Fifty nine naturally."), (40, "Fifty nine naturally."))));
     }
 }

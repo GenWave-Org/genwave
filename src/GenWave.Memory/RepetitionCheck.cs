@@ -15,9 +15,9 @@ namespace GenWave.Memory;
 /// A longer run is one hit, named by the whole run.</item>
 /// <item>Quirk hit: the spent rule's key phrase (longest quoted span, else last four words). "At any length"
 /// means no minimum on the phrase itself: the candidate must hold a contiguous, in-order run of
-/// min(3, key-phrase words) of its words, so "banger, log it" hits "officially a banger, log it". Exclusions and
+/// min(n, max(3, ceil(n/2))) of its n words (<see cref="KeyRunWords"/>), so "banger, log it" hits "officially a banger, log it". Exclusions and
 /// stop words do not apply; the hit names the phrase as written in the rule.</item>
-/// <item>Taglines (F218.33): a phrase is used where the candidate holds a stretch of min(3, phrase words) or more
+/// <item>Taglines (F218.33): a phrase is used where the candidate holds a stretch of <see cref="KeyRunWords"/> or more
 /// contiguous phrase words (the key-run rule the <see cref="TaglineLedger"/> counts by), whole or partial. An allowed
 /// phrase's use is never a hit; an unavailable phrase's use is a quirk-style hit named as
 /// written. A run touching either use is cut at it: the words outside it still hit as their own run when they
@@ -39,8 +39,16 @@ public sealed class RepetitionCheck : IRepetitionCheck
     /// <summary>Fresh words a window holding a track fact needs; one is just a fact word plus filler.</summary>
     public const int MinFreshWordsNearTrackFacts = 2;
 
-    /// <summary>Words of a quirk key phrase the candidate must reproduce in order.</summary>
+    /// <summary>Floor of <see cref="KeyRunWords"/> for key phrases of three or more words (phrases up to six words need exactly this many).</summary>
     public const int QuirkRunWords = 3;
+
+    /// <summary>
+    /// Contiguous words a candidate must reproduce for a use of a phrase of <paramref name="phraseWords"/> words (F218.39):
+    /// min(n, max(3, ceil(n/2))), so a long catchphrase is not used by the everyday words it starts with.
+    /// The one rule for the ledger, the tagline cut and the spent-quirk hit.
+    /// </summary>
+    internal static int KeyRunWords(int phraseWords) =>
+        Math.Min(phraseWords, Math.Max(QuirkRunWords, (phraseWords + 1) / 2));
 
     // Articles, pronouns, prepositions, auxiliaries, and/or/but. Kept short on purpose.
     static readonly HashSet<string> StopWords = new(StringComparer.Ordinal)
@@ -97,14 +105,14 @@ public sealed class RepetitionCheck : IRepetitionCheck
     }
 
     // Where each phrase is used in the candidate, by the key-run rule: the maximal stretches of candidate words that
-    // match contiguous words of the phrase, at least min(QuirkRunWords, phrase words) long. A whole phrase is one such stretch.
+    // match contiguous words of the phrase, at least KeyRunWords(phrase words) long. A whole phrase is one such stretch.
     static List<Range> PhraseRanges(string[] candidate, IReadOnlyList<string>? phrases)
     {
         var ranges = new List<Range>();
         foreach (var phrase in phrases ?? [])
         {
             var key = RepetitionText.Tokens(phrase);
-            var size = Math.Min(QuirkRunWords, key.Length);
+            var size = KeyRunWords(key.Length);
             for (var c = 0; size > 0 && c < candidate.Length; c++)
             {
                 var longest = 0;
@@ -214,12 +222,12 @@ public sealed class RepetitionCheck : IRepetitionCheck
         return false;
     }
 
-    /// <summary>True when the candidate holds a contiguous, in-order run of min(<see cref="QuirkRunWords"/>, key words) of the key (the T691 rule); shared with <see cref="TaglineLedger"/>.</summary>
+    /// <summary>True when the candidate holds a contiguous, in-order run of <see cref="KeyRunWords"/> of the key (T691, F218.39); shared with <see cref="TaglineLedger"/>.</summary>
     internal static bool ContainsKeyRun(string[] candidate, string[] key)
     {
         if (key.Length == 0)
             return false;
-        var size = Math.Min(QuirkRunWords, key.Length);
+        var size = KeyRunWords(key.Length);
         for (var k = 0; k + size <= key.Length; k++)
             for (var c = 0; c + size <= candidate.Length; c++)
                 if (candidate.AsSpan(c, size).SequenceEqual(key.AsSpan(k, size)))

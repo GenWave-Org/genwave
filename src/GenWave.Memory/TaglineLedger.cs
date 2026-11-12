@@ -5,7 +5,7 @@ namespace GenWave.Memory;
 
 /// <summary>
 /// Default <see cref="ITaglineLedger"/> (SPEC F218.30–.31). Pure. A use is the T691 rule: a contiguous, in-order
-/// run of min(<see cref="RepetitionCheck.QuirkRunWords"/>, the tagline's word count) key words in an utterance.
+/// run of <c>RepetitionCheck.KeyRunWords</c> (F218.39: min(n, max(3, ceil(n/2)))) of the tagline's n words in an utterance.
 /// Unless a card's rule overrides it, a tagline is unavailable after <see cref="DefaultMaxPerHour"/> uses in the
 /// rolling <see cref="Window"/> or when one of the persona's newest <see cref="DefaultMinBreaksApart"/>
 /// utterances used it. A spent <c>maxPerShift</c> quirk keeps F218.7: its spans stay unavailable.

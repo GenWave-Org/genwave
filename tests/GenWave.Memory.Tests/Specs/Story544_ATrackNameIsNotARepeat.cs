@@ -181,7 +181,7 @@ public static class FeatureATrackNameIsNotARepeat
         public void TheCheckReportsOneHit() => Assert.Single(result.Hits);
     }
 
-    // F218.33 — a partial use (3+ contiguous tagline words) in quota is not a hit.
+    // F218.33 — a partial use (enough contiguous tagline words, F218.39) in quota is not a hit.
     public sealed class ScenarioAPartialAllowedTaglineIsNotAHit
     {
         // Given the tagline allowed and recent holding it
@@ -249,5 +249,20 @@ public static class FeatureATrackNameIsNotARepeat
 
         [Fact]
         public void OneHitIsTheTaglineAsWritten() => Assert.Contains(Tagline, result.Hits.Select(h => h.Phrase));
+    }
+
+    // STORY-543 AC16 (F218.39) — the check cuts only a real use of a long tagline.
+    public sealed class ScenarioTheCheckCutsOnlyARealUse
+    {
+        const string Long = "this next track disagrees with the last one, listen";
+
+        // Given the 9-word tagline unavailable
+        // When  the copy opens "This next track is a monster..." and there are no recent texts
+        readonly RepetitionResult result = Check.Check(
+            "This next track is a monster, folks, turn it up loud for the whole street to hear.",
+            new RepetitionContext([], [], UnavailablePhrases: [Long]));
+
+        [Fact]
+        public void ThereIsNoHit() => Assert.False(result.IsHit);
     }
 }
