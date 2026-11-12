@@ -4,6 +4,10 @@
 // Every fact is pending at plan time (2026-11-08); the named task activates its facts, watches them fail,
 // then makes them pass.
 
+using GenWave.Core.Domain;
+using GenWave.Memory.Tests.Fakes;
+using Microsoft.Extensions.Time.Testing;
+
 namespace GenWave.Memory.Tests.Specs;
 
 public static class FeatureTheRecallBudget
@@ -13,26 +17,53 @@ public static class FeatureTheRecallBudget
     // ---------------------------------------------------------------------
 
     // AC4 — The recall budget
+    // "When the prompt is built" is asserted on the MemoryPacket; the prompt block itself lands in T701.
     public sealed class ScenarioTheRecallBudget
     {
-        // entry point: IMemoryRecallSource.RecallAsync over the in-memory store
-        // Given 5 lore, 10 episodes and 10 life rows, none recalled recently
-        // When  the prompt is built
+        readonly InMemoryPersonaMemory store = new(new FakeTimeProvider());
+        readonly MemoryPacket packet;
 
-        [Fact(Skip = "pending: T700 — see docs/PLAN.md")]
-        public void ItCarries2Lore3EpisodesNewestFirstAnd3LifeRows() => Assert.Fail("pending: T700 — it carries 2 lore, 3 episodes (newest first) and 3 life rows");
+        public ScenarioTheRecallBudget()
+        {
+            for (var i = 1; i <= 5; i++) store.Add(MemoryKinds.Lore, $"lore {i}");
+            for (var i = 1; i <= 10; i++) store.Add(MemoryKinds.Episode, $"episode {i}", occurredAgo: TimeSpan.FromDays(11 - i));
+            for (var i = 1; i <= 10; i++) store.Add(MemoryKinds.Life, $"life {i}");
+            packet = new MemoryRecallSource(store).TakeAsync(1, MemoryBudget.Standard, CancellationToken.None).GetAwaiter().GetResult();
+        }
 
-        [Fact(Skip = "pending: T700 — see docs/PLAN.md")]
-        public void EachRecalledRowSAiredCountHasIncrementedBeforeRender() => Assert.Fail("pending: T700 — each recalled row's aired_count has incremented before render");
+        [Fact]
+        public void ItCarries2Lore() => Assert.Equal(2, packet.Lore.Count);
+
+        [Fact]
+        public void ItCarries3EpisodesNewestFirst() =>
+            Assert.Equal(["episode 10", "episode 9", "episode 8"], packet.Episodes.Select(e => e.Content));
+
+        [Fact]
+        public void ItCarries3LifeRows() => Assert.Equal(3, packet.Life.Count);
+
+        [Fact]
+        public void EachRecalledRowSAiredCountHasIncrementedBeforeRender() =>
+            Assert.All(packet.Lore.Concat(packet.Episodes).Concat(packet.Life),
+                m => Assert.Equal(1, store.Rows.Single(r => r.Id == m.Id).AiredCount));
     }
 
     // AC5 — Not twice in two days
     public sealed class ScenarioNotTwiceInTwoDays
     {
-        // Given an episode recalled 47 hours ago
-        // When  the prompt is built
+        readonly MemoryPacket packet;
 
-        [Fact(Skip = "pending: T700 — see docs/PLAN.md")]
-        public void ThatEpisodeIsNotRecalled() => Assert.Fail("pending: T700 — that episode is not recalled");
+        public ScenarioNotTwiceInTwoDays()
+        {
+            var store = new InMemoryPersonaMemory(new FakeTimeProvider());
+            store.Add(MemoryKinds.Episode, "the recent one", occurredAgo: TimeSpan.FromDays(1), airedAgo: TimeSpan.FromHours(47));
+            store.Add(MemoryKinds.Episode, "the older one", occurredAgo: TimeSpan.FromDays(2), airedAgo: TimeSpan.FromHours(49));
+            packet = new MemoryRecallSource(store).TakeAsync(1, MemoryBudget.Standard, CancellationToken.None).GetAwaiter().GetResult();
+        }
+
+        [Fact]
+        public void ThatEpisodeIsNotRecalled() => Assert.DoesNotContain("the recent one", packet.Episodes.Select(m => m.Content));
+
+        [Fact]
+        public void AnEpisodeAiredFortyNineHoursAgoIsRecalled() => Assert.Equal(["the older one"], packet.Episodes.Select(m => m.Content));
     }
 }

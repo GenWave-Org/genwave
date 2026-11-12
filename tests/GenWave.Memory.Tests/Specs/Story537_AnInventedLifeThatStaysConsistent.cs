@@ -4,6 +4,10 @@
 // Every fact is pending at plan time (2026-11-08); the named task activates its facts, watches them fail,
 // then makes them pass.
 
+using GenWave.Core.Domain;
+using GenWave.Memory.Tests.Fakes;
+using Microsoft.Extensions.Time.Testing;
+
 namespace GenWave.Memory.Tests.Specs;
 
 public static class FeatureAnInventedLifeThatStaysConsistent
@@ -51,23 +55,50 @@ public static class FeatureAnInventedLifeThatStaysConsistent
     public sealed class ScenarioForget
     {
         // Given a life row with forgotten_at set an hour ago
-        // When  the prompt is built
+        // When  the prompt is built (asserted on the MemoryPacket; the prompt block lands in T701)
 
-        [Fact(Skip = "pending: T700 — see docs/PLAN.md")]
-        public void TheRowIsNotInWhatYouRemember() => Assert.Fail("pending: T700 — the row is not in \"What you remember\"");
+        readonly MemoryPacket packet;
 
-        [Fact(Skip = "pending: T700 — see docs/PLAN.md")]
-        public void ItsClaimIsInTheNeverMentionList() => Assert.Fail("pending: T700 — its claim is in the \"never mention\" list");
+        public ScenarioForget()
+        {
+            var store = new InMemoryPersonaMemory(new FakeTimeProvider());
+            store.Add(MemoryKinds.Life, "has a beagle named Gus", source: "extracted", forgottenAgo: TimeSpan.FromHours(1));
+            store.Add(MemoryKinds.Life, "plays the banjo", source: "extracted");
+            packet = new MemoryRecallSource(store).TakeAsync(1, MemoryBudget.Standard, CancellationToken.None).GetAwaiter().GetResult();
+        }
+
+        [Fact]
+        public void TheRowIsNotInWhatYouRemember() => Assert.DoesNotContain("has a beagle named Gus", packet.Life.Select(m => m.Content));
+
+        [Fact]
+        public void AnUnforgottenLifeRowIsStillRemembered() => Assert.Equal(["plays the banjo"], packet.Life.Select(m => m.Content));
+
+        [Fact]
+        public void ItsClaimIsInTheNeverMentionList() => Assert.Equal(["has a beagle named Gus"], packet.NeverMention);
     }
 
     // AC6 — Forgotten fades
     public sealed class ScenarioForgottenFades
     {
         // Given a life row forgotten 8 days ago
-        // When  the prompt is built
+        // When  the prompt is built (asserted on the MemoryPacket; the prompt block lands in T701)
 
-        [Fact(Skip = "pending: T700 — see docs/PLAN.md")]
-        public void ItsClaimIsInNeitherBlock() => Assert.Fail("pending: T700 — its claim is in neither block");
+        readonly MemoryPacket packet;
+
+        public ScenarioForgottenFades()
+        {
+            var store = new InMemoryPersonaMemory(new FakeTimeProvider());
+            store.Add(MemoryKinds.Life, "has a beagle named Gus", source: "extracted", forgottenAgo: TimeSpan.FromDays(8));
+            store.Add(MemoryKinds.Life, "grew up in Red Deer", source: "extracted", forgottenAgo: TimeSpan.FromDays(6));
+            packet = new MemoryRecallSource(store).TakeAsync(1, MemoryBudget.Standard, CancellationToken.None).GetAwaiter().GetResult();
+        }
+
+        [Fact]
+        public void ItsClaimIsInNeitherBlock() =>
+            Assert.DoesNotContain("has a beagle named Gus", packet.Life.Select(m => m.Content).Concat(packet.NeverMention));
+
+        [Fact]
+        public void ARowForgottenSixDaysAgoIsStillInTheNeverMentionList() => Assert.Equal(["grew up in Red Deer"], packet.NeverMention);
     }
 
     // ---------------------------------------------------------------------

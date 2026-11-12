@@ -28,9 +28,9 @@ namespace GenWave.MediaLibrary.Station;
 /// standalone DB function would be one more place to keep in sync for no shared reuse.
 /// </summary>
 sealed class PersonaMemoryRepository(Lazy<NpgsqlDataSource> dataSource, IOptions<PersonaMemoryOptions> options)
-    : IPersonaMemory, IQuirkSpendLedger
+    : IPersonaMemory, IQuirkSpendLedger, IMemoryRecallStore
 {
-    const string QuirkKind = "quirk";
+    const string QuirkKind = MemoryKinds.Quirk;
 
     const string SelectColumns =
         """
@@ -176,6 +176,71 @@ sealed class PersonaMemoryRepository(Lazy<NpgsqlDataSource> dataSource, IOptions
     /// <summary>Writes one accrued <c>quirk</c> row; the F71.6 cap evicts the oldest spends, never the newest.</summary>
     public async Task RecordSpendAsync(long personaId, string content, CancellationToken ct) =>
         await RecordAsync(personaId, QuirkKind, content, PersonaMemorySource.Accrued, ct);
+
+    /// <summary>
+    /// Recall candidates for one block (F218.22). Eligibility: not forgotten, not an unapproved draft,
+    /// and lore only when authored or drafted-and-approved. The aired gate and every window run on
+    /// Postgres's <c>now()</c> (see this class's remarks). Episodes order by when they happened (falling
+    /// back to creation), newest first; lore and life order never-aired first, then least recently aired.
+    /// </summary>
+    public async Task<IReadOnlyList<RecalledMemory>> CandidatesAsync(long personaId, MemoryCandidateQuery query, CancellationToken ct)
+    {
+        var order = query.Order switch
+        {
+            MemoryRecallOrder.NewestFirst => "coalesce(occurred_at, created_at) desc, id desc",
+            MemoryRecallOrder.LeastRecentlyAired => "last_aired_at asc nulls first, id",
+            _ => throw new ArgumentOutOfRangeException(nameof(query), query.Order, "Unknown recall order."),
+        };
+
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var rows = await conn.QueryAsync<RecalledMemory>(new CommandDefinition(
+            $"""
+            select id::bigint as id, kind, content, occurred_at
+            from station.persona_memory
+            where persona_id = @PersonaId
+              and kind = @Kind
+              and forgotten_at is null
+              and (source <> 'drafted' or approved_at is not null)
+              and (kind <> 'lore' or source in ('authored', 'drafted'))
+              and (last_aired_at is null or last_aired_at <= now() - make_interval(secs => @NotAiredWithinSeconds))
+            order by {order}
+            limit @Take
+            """,
+            new { PersonaId = personaId, query.Kind, NotAiredWithinSeconds = query.NotAiredWithin.TotalSeconds, query.Take },
+            cancellationToken: ct));
+
+        return rows.ToList();
+    }
+
+    /// <summary>One <c>update … where id = any(@ids)</c>, on the database clock (see this class's remarks).</summary>
+    public async Task MarkAiredAsync(IReadOnlyList<long> ids, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        await conn.ExecuteAsync(new CommandDefinition(
+            "update station.persona_memory set aired_count = aired_count + 1, last_aired_at = now() where id = any(@ids)",
+            new { ids = ids.ToArray() },
+            cancellationToken: ct));
+    }
+
+    /// <summary>Claims of any row forgotten within the window (F218.19), newest forgotten first.</summary>
+    public async Task<IReadOnlyList<string>> RecentlyForgottenAsync(long personaId, TimeSpan within, int take, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var rows = await conn.QueryAsync<string>(new CommandDefinition(
+            """
+            select content
+            from station.persona_memory
+            where persona_id = @PersonaId
+              and forgotten_at is not null
+              and forgotten_at >= now() - make_interval(secs => @WithinSeconds)
+            order by forgotten_at desc, id desc
+            limit @Take
+            """,
+            new { PersonaId = personaId, WithinSeconds = within.TotalSeconds, Take = take },
+            cancellationToken: ct));
+
+        return rows.ToList();
+    }
 
     static string ToSourceText(PersonaMemorySource source) => source switch
     {

@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **140 seams across 9 projects.**
+> **142 seams across 9 projects.**
 
 ## GenWave.Ads (2 seams)
 
@@ -118,7 +118,7 @@
 | `GenWave.Core.Abstractions.IEnergyAnalyzer` | `GenWave.Loudness.FfmpegEnergyAnalyzer` | Singleton | — |
 | `GenWave.Core.Abstractions.ILoudnessAnalyzer` | `GenWave.Loudness.FfmpegLoudnessAnalyzer` | Singleton | — |
 
-## GenWave.MediaLibrary (61 seams)
+## GenWave.MediaLibrary (62 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -158,6 +158,7 @@
 | `GenWave.Core.Abstractions.IMediaPurge` | `GenWave.MediaLibrary.Catalog.MediaRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IMediaRating` | `GenWave.MediaLibrary.Catalog.MediaRatingRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IMediaRotationSink` | `GenWave.MediaLibrary.Garden.MediaRotationRepository` | Singleton | — |
+| `GenWave.Core.Abstractions.IMemoryRecallStore` | `GenWave.MediaLibrary.Station.PersonaMemoryRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IMoodTagger` | `GenWave.MediaLibrary.Mood.OllamaMoodTagger` | Singleton | — |
 | `GenWave.Core.Abstractions.IPersonaAvatarStore` | `GenWave.MediaLibrary.Station.PersonaAvatarRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IPersonaImportStore` | `GenWave.MediaLibrary.Station.PersonaImportRepository` | Singleton | — |
@@ -184,10 +185,11 @@
 | `GenWave.Core.Abstractions.IVoicePackStore` | `GenWave.MediaLibrary.Station.VoicePackRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IYearLookup` | `GenWave.MediaLibrary.YearLookup.MusicBrainzYearLookup` | Singleton | — |
 
-## GenWave.Memory (4 seams)
+## GenWave.Memory (5 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
+| `GenWave.Core.Abstractions.IMemoryRecallSource` | `GenWave.Memory.MemoryRecallSource` | Singleton | — |
 | `GenWave.Core.Abstractions.IQuirkSelector` | `GenWave.Memory.QuirkSelector` | Singleton | — |
 | `GenWave.Core.Abstractions.IRepetitionCheck` | `GenWave.Memory.RepetitionCheck` | Singleton | — |
 | `GenWave.Core.Abstractions.ISentenceTrimmer` | `GenWave.Memory.SentenceTrimmer` | Singleton | — |
