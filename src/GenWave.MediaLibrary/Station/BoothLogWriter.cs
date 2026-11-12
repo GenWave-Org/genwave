@@ -197,6 +197,7 @@ sealed class BoothLogWriter(
             RepeatOutcome.Trimmed => " — trimmed",
             RepeatOutcome.ReAsked => " — re-asked",
             RepeatOutcome.Template => " — template",
+            RepeatOutcome.Dropped => " — dropped",
             _ => "",
         };
 

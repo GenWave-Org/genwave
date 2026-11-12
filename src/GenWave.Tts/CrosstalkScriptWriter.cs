@@ -2,6 +2,7 @@ namespace GenWave.Tts;
 
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.Core.Events;
 using GenWave.Core.Logging;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -61,10 +62,11 @@ public sealed class CrosstalkScriptWriter(
     IQuirkSelector? quirkSelector = null,
     IRepetitionCheck? repetitionCheck = null, // T694: absent means no per-speaker check, as before
     IUtteranceStore? utteranceStore = null, // T694: absent means no stored lines
-    IStationEventSink? events = null) // T694: absent means no repeat-caught rows
+    IStationEventSink? events = null, // T694: absent means no repeat-caught rows
+    ISentenceTrimmer? sentenceTrimmer = null) // T715: absent means a repeated line always re-asks, then drops
 {
     readonly CrosstalkLineMemory memory = new(
-        repetitionCheck, utteranceStore, events ?? NoOpStationEventSink.Instance, logger);
+        repetitionCheck, utteranceStore, events ?? NoOpStationEventSink.Instance, logger, sentenceTrimmer);
 
     /// <summary>
     /// Headroom the whole-script generation cap carries OVER <see cref="CrosstalkOptions.DurationTargetSeconds"/>'s
@@ -169,11 +171,19 @@ public sealed class CrosstalkScriptWriter(
             if (result is CrosstalkWriteResult.Accepted first)
             {
                 var hits = memory.FindRepeats(first.Script, request.StationName, histories);
-                if (hits.Count > 0)
+                var trimmedFirst = hits.Count > 0 ? memory.Trim(first.Script, hits) : null;
+                if (trimmedFirst is not null)
+                    memory.PublishFirstPass(hits, trimmedFirst);
+
+                if (trimmedFirst is { Emptied: 0 })
+                {
+                    // SPEC F218.36: every repeated line kept a fresh sentence, so no second call is made.
+                    result = new CrosstalkWriteResult.Accepted(new CrosstalkAiredScript(trimmedFirst.Lines));
+                }
+                else if (trimmedFirst is not null)
                 {
                     // SPEC F218.12/F218.14: exactly ONE re-ask, never a third call. The caught call gets its
                     // own honest ring entry BEFORE the re-ask fires.
-                    memory.PublishCaught(hits);
                     recorder.Record(
                         personaName, systemPrompt, userPrompt, raw, startedAt, ElapsedMs(startedAt),
                         LlmCallOutcome.Ok, statusDetail: null, mode, LlmCallCause.Repeat, cfg.Model, LlmCallKind.Crosstalk);
@@ -254,12 +264,14 @@ public sealed class CrosstalkScriptWriter(
     }
 
     /// <summary>
-    /// SPEC F218.14: after the one re-ask, a line that still repeats its own speaker is dropped from the
-    /// exchange — never replaced by template text. The survivors must still be a two-voice exchange of at
-    /// least <see cref="CrosstalkScriptParser.MinLines"/> lines, else the whole exchange is discarded as
-    /// <see cref="LlmCallCause.Repeat"/>. Alternation is deliberately not re-checked: dropping one of A's lines from
-    /// H N H N leaves two N lines in a row (AC3 forces this), and the assembler handles a same-speaker pair
-    /// with the narrower F198.3 gap; a leading interjection still starts at 0 and its marker never reaches TTS.
+    /// SPEC F218.14, F218.36: after the one re-ask, a line that still repeats its own speaker is trimmed to its
+    /// fresh sentences, or dropped from the exchange when none is left — never replaced by template text. The
+    /// survivors must still be a two-voice exchange of at least <see cref="CrosstalkScriptParser.MinLines"/> lines,
+    /// else the whole exchange is discarded as <see cref="LlmCallCause.Repeat"/>. The repeat-caught rows are
+    /// published after those checks (Trimmed and Dropped per line when it airs, all Dropped when it is discarded).
+    /// Alternation is deliberately not re-checked: dropping one of A's lines from H N H N leaves two N lines in a
+    /// row (AC3 forces this), and the assembler handles a same-speaker pair with the narrower F198.3 gap; a
+    /// leading interjection still starts at 0 and its marker never reaches TTS.
     /// </summary>
     CrosstalkWriteResult DropStillRepeating(
         CrosstalkWriteResult.Accepted reasked, CrosstalkExchangeRequest request,
@@ -269,21 +281,27 @@ public sealed class CrosstalkScriptWriter(
         if (hits.Count == 0)
             return reasked;
 
-        memory.PublishCaught(hits);
-        var dropped = hits.Select(h => h.LineIndex).ToHashSet();
-        var survivors = reasked.Script.Lines.Where((_, i) => !dropped.Contains(i)).ToList();
+        // SPEC F218.36/F218.38: a line with a fresh sentence left is trimmed and kept; one left empty is dropped.
+        // The rows are published only after the survivor checks, so they are true about what airs.
+        var trimmed = memory.Trim(reasked.Script, hits);
+        var survivors = trimmed.Lines;
 
-        if (survivors.Count < CrosstalkScriptParser.MinLines)
-        {
-            return new CrosstalkWriteResult.Discarded(
-                $"{survivors.Count} lines were left after dropping repeated ones; at least {CrosstalkScriptParser.MinLines} are needed",
-                LlmCallCause.Repeat);
-        }
-
-        if (CrosstalkScriptParser.MissingSpeakerReason(survivors) is { } missing)
-            return new CrosstalkWriteResult.Discarded($"after dropping repeated lines, {missing}", LlmCallCause.Repeat);
+        var discard = SurvivorDiscardReason(survivors);
+        memory.PublishAfterReAsk(hits, trimmed, exchangeAirs: discard is null);
+        if (discard is not null)
+            return new CrosstalkWriteResult.Discarded(discard, LlmCallCause.Repeat);
 
         return new CrosstalkWriteResult.Accepted(new CrosstalkAiredScript(survivors));
+    }
+
+    static string? SurvivorDiscardReason(IReadOnlyList<CrosstalkAiredLine> survivors)
+    {
+        if (survivors.Count < CrosstalkScriptParser.MinLines)
+            return $"{survivors.Count} lines were left after dropping repeated ones; at least {CrosstalkScriptParser.MinLines} are needed";
+
+        return CrosstalkScriptParser.MissingSpeakerReason(survivors) is { } missing
+            ? $"after dropping repeated lines, {missing}"
+            : null;
     }
 
     /// <summary>

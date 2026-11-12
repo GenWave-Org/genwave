@@ -60,6 +60,7 @@ public static class FeatureRepeatCaughtBoothRow
         [InlineData(RepeatOutcome.Trimmed, "Repeat caught: \"golden hour groove\" — trimmed")]
         [InlineData(RepeatOutcome.ReAsked, "Repeat caught: \"golden hour groove\" — re-asked")]
         [InlineData(RepeatOutcome.Template, "Repeat caught: \"golden hour groove\" — template")]
+        [InlineData(RepeatOutcome.Dropped, "Repeat caught: \"golden hour groove\" — dropped")]
         public async Task TheSummaryEndsWithTheOutcome(RepeatOutcome outcome, string expected)
         {
             var row = await PublishAndCaptureAsync(new RepeatCaught(7, "golden hour groove", outcome));

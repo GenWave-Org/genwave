@@ -23,16 +23,24 @@ internal static class RepeatTrim
         ISentenceTrimmer? trimmer, string copy, IReadOnlyList<string> phrases,
         string? trackTitle, string? trackArtist, Func<string, bool> clears)
     {
-        if (trimmer is null || phrases.Count == 0)
-            return null;
-
-        var result = trimmer.Trim(copy, phrases.Select(p => new RepetitionHit(p)).ToList());
-        var text = result.Text.Trim();
-        if (result.DroppedCount == 0 || WordCount(text) < MinWords)
+        if (Cut(trimmer, copy, phrases) is not { } text || WordCount(text) < MinWords)
             return null;
         if (NamesTrack(copy, trackTitle, trackArtist) && !NamesTrack(text, trackTitle, trackArtist))
             return null;
         return clears(text) ? text : null;
+    }
+
+    /// <summary>
+    /// The bare cut every trim shares: <paramref name="copy"/> with the sentences matching <paramref name="phrases"/>
+    /// removed, trimmed; <see langword="null"/> with no trimmer, no phrases, or nothing dropped. No fitness rules.
+    /// </summary>
+    public static string? Cut(ISentenceTrimmer? trimmer, string copy, IReadOnlyList<string> phrases)
+    {
+        if (trimmer is null || phrases.Count == 0)
+            return null;
+
+        var result = trimmer.Trim(copy, phrases.Select(p => new RepetitionHit(p)).ToList());
+        return result.DroppedCount == 0 ? null : result.Text.Trim();
     }
 
     static int WordCount(string text) =>

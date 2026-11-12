@@ -36,6 +36,7 @@ public static class PendingPublicationSurfaceAllowlist
         "GenWave.Core.Events.RepeatCaught::TYPE class : GenWave.Core.Events.StationEvent [System.IEquatable<GenWave.Core.Events.RepeatCaught>,System.IEquatable<GenWave.Core.Events.StationEvent>]",
         // PLAN T714: RepeatOutcome, the F218.38 outcome the repeat-caught row ends with.
         "GenWave.Core.Events.RepeatOutcome::FIELD System.Int32 value__",
+        "GenWave.Core.Events.RepeatOutcome::FIELD static GenWave.Core.Events.RepeatOutcome Dropped const = 3",
         "GenWave.Core.Events.RepeatOutcome::FIELD static GenWave.Core.Events.RepeatOutcome ReAsked const = 1",
         "GenWave.Core.Events.RepeatOutcome::FIELD static GenWave.Core.Events.RepeatOutcome Template const = 2",
         "GenWave.Core.Events.RepeatOutcome::FIELD static GenWave.Core.Events.RepeatOutcome Trimmed const = 0",
