@@ -23,17 +23,17 @@ public static class FeatureTheDjDoesNotSayThatAgainWriter
     // entry point: LlmCopyWriter.WriteAsync (prompt posted to the LLM)
     public sealed class ScenarioRecentLinesReachThePrompt
     {
-        // Given a persona with 8 stored utterances and a non-zero memory budget
+        // Given a persona with 8 stored utterances
         // When  the prompt is built
 
         [Fact]
         public void ItContainsARecentLinesDoNotReuseTheirPhrasingBlock() =>
-            Assert.Contains("Recent lines, do not reuse their phrasing", Arrange.Prompt(Arrange.Eight(), MemoryBudget.Standard));
+            Assert.Contains("Recent lines, do not reuse their phrasing", Arrange.Prompt(Arrange.Eight()));
 
         [Fact]
         public void TheBlockListsThe6NewestUtterancesEachTrimmedTo160Characters()
         {
-            var block = Arrange.Block(Arrange.Prompt(Arrange.Eight(), MemoryBudget.Standard));
+            var block = Arrange.Block(Arrange.Prompt(Arrange.Eight()));
             var expected = Enumerable.Range(1, 6).Select(i => "- " + Arrange.Line(i)[..Math.Min(160, Arrange.Line(i).Length)]);
             Assert.Equal(expected, block);
         }
@@ -200,28 +200,28 @@ public static class FeatureTheDjDoesNotSayThatAgainWriter
             Assert.Equal(2, Arrange.Run(Arrange.Repeating, Arrange.Repeating).Events.Events.OfType<RepeatCaught>().Count());
     }
 
-    // AC8 — memory off, block off
-    public sealed class ScenarioMemoryOffBlockOff
+    // AC8 — memory off, block STILL on (rewritten by T716; supersedes the old "block off", see STORY-547 AC1)
+    public sealed class ScenarioMemoryOffBlockStillOn
     {
-        // Given a zero memory budget
+        // Given stored utterances and no memory budget (the writer takes none: F218.37)
         // When  the prompt is built
 
         [Fact]
-        public void NoRecentLinesBlockIsPresent() =>
-            Assert.DoesNotContain("Recent lines", Arrange.Prompt(Arrange.Eight(), MemoryBudget.Off));
+        public void TheRecentLinesBlockIsStillPresent() =>
+            Assert.Contains("Recent lines", Arrange.Prompt(Arrange.Eight()));
     }
 
     // AC8 — memory off, the post-check still runs
     // entry point: LlmCopyWriter.WriteAsync
     public sealed class ScenarioMemoryOffThePostCheckStillRuns
     {
-        // Given a zero memory budget
+        // Given the writer has no memory budget
         // When  WriteAsync runs
 
         [Fact]
         public void ThePostCheckStillRuns()
         {
-            var run = Arrange.Run(Arrange.Repeating, Arrange.Fresh, MemoryBudget.Off);
+            var run = Arrange.Run(Arrange.Repeating, Arrange.Fresh);
 
             Assert.Equal(2, run.UserPrompts.Count);
         }
@@ -234,7 +234,7 @@ public static class FeatureTheDjDoesNotSayThatAgainWriter
         public void TheRecentLinesBlockIsAtMost6TimesTheLineCapPlusOverhead()
         {
             var long6 = Enumerable.Range(1, 6).Select(i => Arrange.Entry(i, new string('x', 500))).ToList();
-            var block = Arrange.Block(Arrange.Prompt(long6, MemoryBudget.Standard));
+            var block = Arrange.Block(Arrange.Prompt(long6));
             Assert.Equal(6 * (2 + 160) + 5, string.Join('\n', block).Length);
         }
 
@@ -341,25 +341,25 @@ public static class FeatureTheDjDoesNotSayThatAgainWriter
         public const string CatchphraseCopy = "That one is officially a banger, log it, and now the next.";
 
         /// <summary>The WriteAsync call fed these replies in order, with one stored recent line that the first reply repeats.</summary>
-        public static Outcome Run(string first, string second, MemoryBudget? budget = null)
+        public static Outcome Run(string first, string second)
         {
             var prompts = new List<string>();
             var store = new RecordingUtteranceStore { Seeded = { Entry(1, Recent) } };
             var events = new RecordingStationEventSink();
             var counters = new LlmCallCauseCounters(TimeProvider.System);
             var status = new LlmCopyStatusHolder();
-            var writer = Writer(prompts, [first, second], store, events, budget, counters, statusHolder: status);
+            var writer = Writer(prompts, [first, second], store, events, counters, statusHolder: status);
             var copy = writer.WriteAsync(StampedRequest(), CancellationToken.None).GetAwaiter().GetResult();
             return new Outcome(copy, prompts, store, events, counters, status);
         }
 
         public static LlmCopyWriter Writer(
             List<string> prompts, string[] replies, RecordingUtteranceStore store, RecordingStationEventSink events,
-            MemoryBudget? budget = null, LlmCallCauseCounters? counters = null, IQuirkSelector? selector = null,
+            LlmCallCauseCounters? counters = null, IQuirkSelector? selector = null,
             PersonaCard? card = null, LlmCopyStatusHolder? statusHolder = null) =>
             QuirkSpecHarness.WriterFor(
                 card ?? QuirkSpecHarness.Card([], null), selector ?? new NoQuirkSelector(),
-                utteranceStore: store, memoryBudget: budget,
+                utteranceStore: store,
                 httpOverride: QuirkSpecHarness.ScriptedHttp(prompts, replies), repetitionCheck: new RepetitionCheck(),
                 events: events, recorder: QuirkSpecHarness.NewRecorder(counters), statusHolder: statusHolder);
 
@@ -384,7 +384,7 @@ public static class FeatureTheDjDoesNotSayThatAgainWriter
         /// <summary>Eight utterances, newest first (Line 1 is newest).</summary>
         public static List<UtteranceEntry> Eight() => Enumerable.Range(1, 8).Select(i => Entry(i, Line(i))).ToList();
 
-        public static string Prompt(List<UtteranceEntry> stored, MemoryBudget budget)
+        public static string Prompt(List<UtteranceEntry> stored)
         {
             var store = new RecordingUtteranceStore();
             store.Seeded.AddRange(stored);
@@ -392,7 +392,7 @@ public static class FeatureTheDjDoesNotSayThatAgainWriter
             QuirkSpecHarness.WriterFor(
                     QuirkSpecHarness.Card([], null), new NoQuirkSelector(),
                     onSystemPrompt: p => { prompt = p; return Task.CompletedTask; },
-                    utteranceStore: store, memoryBudget: budget)
+                    utteranceStore: store)
                 .WriteAsync(QuirkSpecHarness.Request(null), CancellationToken.None).GetAwaiter().GetResult();
             return prompt ?? throw new InvalidOperationException("No completion request was captured");
         }

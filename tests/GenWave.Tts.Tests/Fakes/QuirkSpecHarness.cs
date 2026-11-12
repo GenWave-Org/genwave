@@ -36,7 +36,7 @@ static class QuirkSpecHarness
 
     public static LlmCopyWriter WriterFor(
         PersonaCard card, IQuirkSelector selector, Func<string, Task>? onSystemPrompt = null, Action? onHttp = null,
-        IUtteranceStore? utteranceStore = null, MemoryBudget? memoryBudget = null,
+        IUtteranceStore? utteranceStore = null,
         IHttpClientFactory? httpOverride = null, IRepetitionCheck? repetitionCheck = null,
         IStationEventSink? events = null, LlmCallRecorder? recorder = null, LlmCopyStatusHolder? statusHolder = null,
         ITaglineLedger? taglineLedger = null, ISentenceTrimmer? sentenceTrimmer = null,
@@ -63,7 +63,7 @@ static class QuirkSpecHarness
             new TestOptionsMonitor<LlmOptions>(new LlmOptions { Endpoint = "http://fake-llm.local", Model = "m", TimeoutSeconds = 5, MaxCopyChars = 450 }),
             statusHolder ?? new LlmCopyStatusHolder(), new FakeActivePersonaAccessor { Card = card }, NullLogger<LlmCopyWriter>.Instance, TimeProvider.System,
             recorder ?? NewRecorder(),
-            new FakeDegradationModeReader(), utteranceStore: utteranceStore, quirkSelector: selector, memoryBudget: memoryBudget,
+            new FakeDegradationModeReader(), utteranceStore: utteranceStore, quirkSelector: selector,
             stationClock: stationClock, repetitionCheck: repetitionCheck, events: events, taglineLedger: taglineLedger,
             sentenceTrimmer: sentenceTrimmer);
     }

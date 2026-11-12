@@ -296,12 +296,18 @@ static class LlmPromptBuilder
     /// <summary>SPEC F218.10 - heading of the recent-lines block. Public so a spec pins it.</summary>
     public const string RecentLinesHeading = "Recent lines, do not reuse their phrasing:";
 
+    /// <summary>
+    /// SPEC F218.10 / F218.37 - how many of the persona's newest utterances the block lists. Independent of the
+    /// memory budget: about 400 tokens, so it fits a 4k window without the context probe.
+    /// </summary>
+    public const int RecentLinesInPrompt = 6;
+
     /// <summary>SPEC F218.10 - each recent line is cut to this many characters (no ellipsis).</summary>
     public const int RecentLineMaxChars = 160;
 
     /// <summary>
     /// SPEC F218.10 - the heading, then one "- " line per utterance in the order given (newest first),
-    /// each trimmed to <see cref="RecentLineMaxChars"/>. Callers cap the count (MemoryBudget.RecentLines).
+    /// each trimmed to <see cref="RecentLineMaxChars"/>. Callers cap the count at <see cref="RecentLinesInPrompt"/>.
     /// </summary>
     public static IReadOnlyList<string> BuildRecentLinesBlock(IReadOnlyList<string> recentLines)
     {

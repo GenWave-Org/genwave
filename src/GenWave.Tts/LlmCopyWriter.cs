@@ -134,7 +134,6 @@ public sealed class LlmCopyWriter(
     IShowFlavorLineSource? showFlavorLineSource = null,
     IUtteranceStore? utteranceStore = null,
     IQuirkSelector? quirkSelector = null,
-    MemoryBudget? memoryBudget = null, // T699 supplies this from the context probe; Off until then
     IRepetitionCheck? repetitionCheck = null, // T693: absent means no post-check at all
     IStationEventSink? events = null,
     ITaglineLedger? taglineLedger = null, // T713: absent means no taglines, exactly the pre-ledger behaviour
@@ -816,17 +815,18 @@ public sealed class LlmCopyWriter(
 
     /// <summary>
     /// The persona's newest utterances, newest first, in ONE store read per render: enough for the
-    /// recent-lines block (<see cref="MemoryBudget.RecentLines"/>, F218.10) and, when
+    /// recent-lines block (<see cref="LlmPromptBuilder.RecentLinesInPrompt"/>, F218.10/F218.37: on whenever the persona has utterances, memory budget or not) and, when
     /// <paramref name="needHistory"/>, for the repeat check's window (F218.11) even with memory
-    /// off. Empty when neither needs it, there is no store or persona, or the read faults (F12.4: costs
+    /// off. Empty when there is no store or persona, or the read faults (F12.4: costs
     /// the block and the recents half of the check, not the segment).
     /// </summary>
     async Task<IReadOnlyList<UtteranceEntry>> ReadRecentEntriesAsync(
         SegmentRequest request, bool needHistory, CancellationToken ct)
     {
-        var blockLines = (memoryBudget ?? MemoryBudget.Off).RecentLines;
-        var take = needHistory ? Math.Max(RepetitionWindow, blockLines) : blockLines;
-        if (take <= 0 || utteranceStore is null || request.PersonaId is not { } personaId)
+        var take = needHistory
+            ? Math.Max(RepetitionWindow, LlmPromptBuilder.RecentLinesInPrompt)
+            : LlmPromptBuilder.RecentLinesInPrompt;
+        if (utteranceStore is null || request.PersonaId is not { } personaId)
             return [];
 
         try
@@ -1050,10 +1050,8 @@ public sealed class LlmCopyWriter(
             var recentEntries = await ReadRecentEntriesAsync(request, checkRepeats || useTaglines, ct);
             var taglines = EvaluateTaglines(
                 card, quirkSelection, await ReadTaglineEntriesAsync(request, recentEntries, useTaglines, ct), onAir: spendQuirks);
-            var blockLineCount = (memoryBudget ?? MemoryBudget.Off).RecentLines;
-            IReadOnlyList<string> recentLines = blockLineCount > 0
-                ? recentEntries.Take(blockLineCount).Select(e => e.Text).ToList()
-                : [];
+            // F218.37: the block never waits for the memory budget; previews list it too.
+            IReadOnlyList<string> recentLines = recentEntries.Take(LlmPromptBuilder.RecentLinesInPrompt).Select(e => e.Text).ToList();
             // Read HERE — after WaitAsync above, i.e. already inside the single-flight critical
             // section — not by the caller before this method was ever invoked (SPEC F83.1, T65
             // review finding): Orchestrator.EnqueuePatterAsync starts a unit's BackAnnounce and
