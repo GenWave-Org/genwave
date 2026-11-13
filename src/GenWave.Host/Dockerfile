@@ -29,7 +29,7 @@ COPY src/ src/
 RUN dotnet publish src/GenWave.Host/GenWave.Host.csproj -c Release -o /app /p:UseAppHost=false \
     "/p:InformationalVersion=${GW_VERSION}"
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:11.0 AS runtime
 # ffmpeg (the Debian package bundles libswresample, so ebur128 peak=true works) is required by the
 # media library's enrichment stage (PRD §8).
 # aubio-tools supplies `aubio tempo`, the BPM estimator AubioBpmAnalyzer shells out to (SPEC F46.5);
