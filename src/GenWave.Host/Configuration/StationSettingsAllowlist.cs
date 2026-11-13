@@ -297,6 +297,9 @@ public static class StationSettingsAllowlist
             ChoiceSource = new SettingChoiceSource.Probe(LlmModelChoiceProbe.ProbeName),
         },
         new("Llm:TimeoutSeconds", SettingApplyMode.Live, SettingKind.Number, "seconds", SettingGroup.Voice, Min: 1, Max: 300),
+        // F218.21 — the context window for an endpoint with no Ollama /api/ps. Blank = unset (unknown).
+        // LlmContextWindow reads IOptionsMonitor<LlmOptions> on every health cycle, so a PUT lands on the next one.
+        new("Llm:ContextTokens", SettingApplyMode.Live, SettingKind.Number, "tokens", SettingGroup.Voice, Min: 1, Max: 10_000_000),
 
         // F44.2 allowlist completion (closes gitea-#197) — six more boot-frozen consumers migrate to a
         // live provider/IOptionsMonitor read at use time:

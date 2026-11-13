@@ -170,6 +170,7 @@ public static class FeatureSeededDefaults
     {
         "Llm:Endpoint",
         "Llm:Model",
+        "Llm:ContextTokens", // SPEC F218.21, PLAN T719: blank = unknown window; Ollama's /api/ps answers instead.
         "Station:PublicStreamUrl",
         "Station:PublicBaseUrl",
         "Tts:Corrections",

@@ -175,6 +175,10 @@ public sealed partial class SettingValidator
             // [Range(1, int.MaxValue)]; F53.1 adds the ceiling.
             ["Llm:TimeoutSeconds"] = v => IsIntInRange(v, Setting("Llm:TimeoutSeconds")),
 
+            // Context window in tokens (F218.21) — blank is the legal "unset" state (null on LlmOptions);
+            // anything else is an int in range.
+            ["Llm:ContextTokens"] = v => string.IsNullOrEmpty(v) || IsIntInRange(v, Setting("Llm:ContextTokens")),
+
             // F44.2 allowlist completion (closes gitea-#197) — six more live keys join the validator.
             // RenderBudgetSeconds/BlurbRetentionHours/MaxCopyChars floors mirror their options' own
             // [Range(1, int.MaxValue)] (boot-enforced via ValidateDataAnnotations); the remaining
@@ -964,6 +968,8 @@ public sealed partial class SettingValidator
             => $"Value '{value}' is not valid for '{key}'. Must be an absolute http/https URL, or empty to disable LLM-authored copy.",
         var k when k.Equals("Llm:TimeoutSeconds", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (seconds).",
+        var k when k.Equals("Llm:ContextTokens", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (tokens), or empty when unknown.",
         var k when k.Equals("Tts:RenderBudgetSeconds", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (seconds).",
         var k when k.Equals("Tts:BlurbRetentionHours", StringComparison.OrdinalIgnoreCase)

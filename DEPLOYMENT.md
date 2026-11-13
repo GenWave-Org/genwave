@@ -77,7 +77,7 @@ For Standard mode, set `Station__SpectatorMode: "true"` and point a browser at `
 
 Named volumes: `pgdata` (database), `tts` (rendered speech), `authored` (generated segments and jingle packs), `voices` (voice files), `piper_models`, `dp_keys` (keeps your admin login across restarts), `alloy_data`. Your music is bound read-only at `/media`.
 
-The language model is any OpenAI-compatible endpoint you set live as `Llm:Endpoint` and `Llm:Model`. Without one the station still talks, using template patter. `Llm:TimeoutSeconds` defaults to `10`; raise it for a slow model. `Llm:ReasoningEffort` defaults to `none`, which stops thinking-style models from spending the whole budget on reasoning and returning empty lines. Use `omit` for a backend that rejects the field.
+The language model is any OpenAI-compatible endpoint you set live as `Llm:Endpoint` and `Llm:Model`. Without one the station still talks, using template patter. `Llm:TimeoutSeconds` defaults to `10`; raise it for a slow model. On an endpoint that is not Ollama, set `Llm:ContextTokens` live to the model's context window (blank = unknown); the DJ's memory needs 8192 or more, and Ollama reports its own. `Llm:ReasoningEffort` defaults to `none`, which stops thinking-style models from spending the whole budget on reasoning and returning empty lines. Use `omit` for a backend that rejects the field.
 
 ---
 

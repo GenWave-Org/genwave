@@ -380,6 +380,12 @@
   <data name="Tts:BlurbRetentionHours.Help" xml:space="preserve">
     <value>How long a rendered TTS blurb stays cached before the garbage-collection sweep removes it.</value>
   </data>
+  <data name="Llm:ContextTokens.Label" xml:space="preserve">
+    <value>Language model context window</value>
+  </data>
+  <data name="Llm:ContextTokens.Help" xml:space="preserve">
+    <value>The model's context window in tokens, for an endpoint that is not Ollama. Leave blank when unknown; Ollama reports its own. Below 8192 the DJ's memory stays off.</value>
+  </data>
   <data name="Llm:MaxCopyChars.Label" xml:space="preserve">
     <value>Longest written DJ line</value>
   </data>

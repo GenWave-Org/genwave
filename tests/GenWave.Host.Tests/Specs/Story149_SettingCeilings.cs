@@ -80,6 +80,7 @@ public static class FeatureSettingCeilings
         ("Tts:BlurbRetentionHours",                     "1",           "1", "8760",  "8761"),
         ("Llm:MaxCopyChars",                            "1",           "1", "10000", "10001"),
         ("Llm:TimeoutSeconds",                          "1",           "1", "300",   "301"),
+        ("Llm:ContextTokens",                           "1",           "1", "10000000", "10000001"),
         // Exclusive floor (0 is illegal) — FloorValue is a tiny-but-legal stand-in, not 0 itself.
         ("GW_XFADE_MIN",                                TinyPositive,  "0", "30",    "99"),
         ("GW_XFADE_MAX",                                TinyPositive,  "0", "30",    "99"),
