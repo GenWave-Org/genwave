@@ -1,7 +1,7 @@
 # Multi-stage build for the GenWave control-plane API.
 # Build context is the repository root (see compose.yaml: context: .).
 
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:11.0 AS build
 WORKDIR /src
 
 # Tag-derived version (SPEC F65.1, STORY-175): build.sh computes this via `git describe` and
