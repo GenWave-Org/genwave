@@ -35,7 +35,7 @@
     "jest-environment-node": "^30.5.1",
     "postcss": "^8.5.32",
     "shadcn": "^4.23.0",
-    "tailwindcss": "^4.3.4",
+    "tailwindcss": "^4.3.5",
     "ts-jest": "^29.4.15",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.72.1"
