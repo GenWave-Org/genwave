@@ -12,6 +12,9 @@ public sealed record MemoryPacket(
     IReadOnlyList<RecalledMemory> Life,
     IReadOnlyList<string> NeverMention)
 {
+    /// <summary>Lore, then episodes, then life: every recalled row in prompt order.</summary>
+    public IReadOnlyList<RecalledMemory> Rows => [.. Lore, .. Episodes, .. Life];
+
     /// <summary>Nothing remembered, nothing to avoid.</summary>
     public static MemoryPacket Empty { get; } = new([], [], [], []);
 }

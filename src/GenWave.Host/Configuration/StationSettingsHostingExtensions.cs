@@ -107,7 +107,7 @@ static class StationSettingsHostingExtensions
         // the spend ledger comes from AddPersonaMemoryStore above.
         builder.Services.AddSingleton<IQuirkSelector, QuirkSelector>();
 
-        // Memory recall (SPEC F218.22, STORY-539, PLAN T700) — nothing consumes it until T701 wires the prompt.
+        // Memory recall (SPEC F218.22, STORY-539, PLAN T700) — LlmCopyWriter consumes it for the prompt.
         builder.Services.AddSingleton<IMemoryRecallSource, MemoryRecallSource>();
 
         // Repetition check (SPEC F218.11, STORY-534, PLAN T693) — pure; LlmCopyWriter resolves it

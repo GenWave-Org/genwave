@@ -137,7 +137,9 @@ public sealed class LlmCopyWriter(
     IRepetitionCheck? repetitionCheck = null, // T693: absent means no post-check at all
     IStationEventSink? events = null,
     ITaglineLedger? taglineLedger = null, // T713: absent means no taglines, exactly the pre-ledger behaviour
-    ISentenceTrimmer? sentenceTrimmer = null) // T714: absent means a repeat always re-asks, exactly the pre-trim behaviour
+    ISentenceTrimmer? sentenceTrimmer = null, // T714: absent means a repeat always re-asks, exactly the pre-trim behaviour
+    ILlmContextWindow? contextWindow = null, // T701: absent (or either seam absent) means no memory, exactly the pre-memory behaviour
+    IMemoryRecallSource? memoryRecall = null)
     : ISegmentCopyWriter, IPersonaPreviewWriter, IAnnouncementCopyWriter
 {
     readonly IStationEventSink events = events ?? NoOpStationEventSink.Instance;
@@ -814,6 +816,37 @@ public sealed class LlmCopyWriter(
     }
 
     /// <summary>
+    /// This break's memory (SPEC F218.22), or <see cref="MemoryPacket.Empty"/> when recall is not wanted, memory is
+    /// off, or there is no persona section to carry it (rows spent but never shown would be hidden for nothing). A recall fault costs this break its memory, never the segment (F12.4).
+    /// </summary>
+    async Task<MemoryPacket> RecallMemoryAsync(SegmentRequest request, bool onAir, bool hasPersonaSection, CancellationToken ct)
+    {
+        if (!onAir || !hasPersonaSection || memoryRecall is null || contextWindow is null || request.PersonaId is not { } personaId)
+            return MemoryPacket.Empty;
+
+        var budget = contextWindow.Budget;
+        if (!budget.MemoryOn)
+            return MemoryPacket.Empty;
+
+        try
+        {
+            return await memoryRecall.TakeAsync(personaId, budget, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Memory recall failed for {Kind}; this break airs without memory", request.Kind);
+            return MemoryPacket.Empty;
+        }
+    }
+
+    static string? CombineFacts(string? contextFacts, string? memoryFacts) =>
+        contextFacts is null || memoryFacts is null ? contextFacts : contextFacts + "\n" + memoryFacts;
+
+    /// <summary>
     /// The persona's newest utterances, newest first, in ONE store read per render: enough for the
     /// recent-lines block (<see cref="LlmPromptBuilder.RecentLinesInPrompt"/>, F218.10/F218.37: on whenever the persona has utterances, memory budget or not) and, when
     /// <paramref name="needHistory"/>, for the repeat check's window (F218.11) even with memory
@@ -966,7 +999,7 @@ public sealed class LlmCopyWriter(
         // of a provider's facts. Mutually exclusive with the ContextSegment branch below by
         // construction — announcementMessage is only ever non-null for an Announcement-kind request,
         // which is never a ContextSegment.
-        var factBlock = requiredCore
+        var contextFactBlock = requiredCore
             ?? (request.Kind == SegmentKind.ContextSegment
                 && request.ContextFacts is { } contextFacts && !string.IsNullOrWhiteSpace(contextFacts)
                     ? contextFacts
@@ -1050,6 +1083,13 @@ public sealed class LlmCopyWriter(
             var recentEntries = await ReadRecentEntriesAsync(request, checkRepeats || useTaglines, ct);
             var taglines = EvaluateTaglines(
                 card, quirkSelection, await ReadTaglineEntriesAsync(request, recentEntries, useTaglines, ct), onAir: spendQuirks);
+            // T701 (F218.22): recall spends rows (marks them aired), so on-air only, inside the critical section.
+            var memory = await RecallMemoryAsync(
+                request, spendQuirks && requiredCore is null, LlmPromptBuilder.HasPersonaSection(persona, card, quirkSelection), ct);
+            // F218.23: recalled text is part of the facts, so a number or weekday quoted from a memory passes the gate.
+            // Only where a fact check already runs (context/announcement lanes): a LeadIn has no fact block, and
+            // memory must not switch the digit/condition-word check on for ordinary patter.
+            var factBlock = CombineFacts(contextFactBlock, LlmPromptBuilder.MemoryFacts(memory));
             // F218.37: the block never waits for the memory budget; previews list it too.
             IReadOnlyList<string> recentLines = recentEntries.Take(LlmPromptBuilder.RecentLinesInPrompt).Select(e => e.Text).ToList();
             // Read HERE — after WaitAsync above, i.e. already inside the single-flight critical
@@ -1078,6 +1118,7 @@ public sealed class LlmCopyWriter(
                 stationLocalNow, previouslyVoicedTasteNotes)
             {
                 Taglines = taglines,
+                Memory = memory,
                 AnnouncementMessage = requiredCore,
                 PatterFact = patterFact?.Fact,
                 ShowFlavor = showFlavorFact,

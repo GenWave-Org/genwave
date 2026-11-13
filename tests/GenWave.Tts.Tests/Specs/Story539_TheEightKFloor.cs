@@ -25,7 +25,13 @@ public static class FeatureTheEightKFloor
         // When  the probe runs
         LlmContextWindow window = Arrange.Unrefreshed();
 
-        public async Task InitializeAsync() => window = await Arrange.Probed(Arrange.ResidentWindow(4096));
+        string prompt = "";
+
+        public async Task InitializeAsync()
+        {
+            window = await Arrange.Probed(Arrange.ResidentWindow(4096));
+            prompt = await Arrange.PromptAsync(window.Budget);
+        }
 
         public Task DisposeAsync() => Task.CompletedTask;
 
@@ -33,24 +39,36 @@ public static class FeatureTheEightKFloor
         public void TheLLMTileIsRedWithContextWindow40968192MemoryOff() =>
             Assert.Equal("context window 4096 < 8192, memory off", window.MemoryOffReason);
 
-        // The recent-lines block stays on (F218.37). Passes trivially until T701 adds memory blocks;
-        // T701 must rewire this fact to build the prompt under MemoryBudget.Off.
+        // The recent-lines block stays on (F218.37). The recall source WOULD return rows: only the 4096
+        // window keeps them out (positive control: Scenario8kIsGreenAndMemoryIsOn, identical setup at 8192).
         [Fact]
         public void TheNextPromptHasNoWhatYouRememberBlock() =>
-            Assert.DoesNotContain("What you remember", Arrange.Prompt());
+            Assert.DoesNotContain(LlmPromptBuilder.MemoryHeading, prompt);
     }
 
     // AC2 — 8k is green and memory is on
-    public sealed class Scenario8kIsGreenAndMemoryIsOn
+    public sealed class Scenario8kIsGreenAndMemoryIsOn : IAsyncLifetime
     {
         // Given a fake /api/ps reporting 8192
         // When  the probe runs
+        LlmContextWindow window = Arrange.Unrefreshed();
 
-        [Fact(Skip = "pending: T701 — see docs/PLAN.md")]
-        public void TheLLMTileIsGreen() => Assert.Fail("pending: T701 — the LLM tile is green");
+        string prompt = "";
 
-        [Fact(Skip = "pending: T701 — see docs/PLAN.md")]
-        public void TheNextPromptHasAWhatYouRememberBlock() => Assert.Fail("pending: T701 — the next prompt has a \"What you remember\" block");
+        public async Task InitializeAsync()
+        {
+            window = await Arrange.Probed(Arrange.ResidentWindow(8192));
+            prompt = await Arrange.PromptAsync(window.Budget);
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void TheLLMTileIsGreen() => Assert.Null(window.MemoryOffReason);
+
+        [Fact]
+        public void TheNextPromptHasAWhatYouRememberBlock() =>
+            Assert.Contains(LlmPromptBuilder.MemoryHeading, prompt);
     }
 
     // AC3 — A declared window stands in for non-Ollama endpoints
@@ -72,16 +90,145 @@ public static class FeatureTheEightKFloor
     }
 
     // AC6 — Memories are colour, and the gate knows them
-    public sealed class ScenarioMemoriesAreColourAndTheGateKnowsThem
+    public sealed class ScenarioMemoriesAreColourAndTheGateKnowsThem : IAsyncLifetime
     {
-        // Given a recalled episode "read the weather: high of 4 °C with sleet, Tuesday"
+        // Given a context (weather) break - the gate only checks a fact block there, so the fact is not vacuous
+        // (on a LeadIn there is no fact block and it would pass anyway) - and a recalled episode "read the weather: high of 4 °C with sleet, Tuesday"
         // When  the copy says "like Tuesday's sleet"
+        const string Copy = "Cloudy at 12 out there, like Tuesday's sleet at 4 degrees.";
+        const string Episode = "read the weather: high of 4 °C with sleet, Tuesday";
+        SegmentCopy aired = new("", false);
+        string prompt = "";
 
-        [Fact(Skip = "pending: T701 — see docs/PLAN.md")]
-        public void TheTruthGatePasses() => Assert.Fail("pending: T701 — the truth gate passes");
+        public async Task InitializeAsync()
+        {
+            var prompts = new List<string>();
+            var writer = QuirkSpecHarness.WriterFor(
+                QuirkSpecHarness.Card([], null), new NoQuirks(), httpOverride: QuirkSpecHarness.CapturingHttp(prompts, Copy),
+                contextWindow: new FixedWindow(MemoryBudget.Standard), memoryRecall: new FixedRecall(Episode));
+            aired = await writer.WriteAsync(Arrange.ContextRequest("Weather: 12 degrees and cloudy."), CancellationToken.None);
+            prompt = prompts[0];
+        }
 
-        [Fact(Skip = "pending: T701 — see docs/PLAN.md")]
-        public void ThePromptSaysTheDJMayReferToMemoriesNeverMust() => Assert.Fail("pending: T701 — the prompt says the DJ may refer to memories, never must");
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void TheTruthGatePasses() => Assert.Equal(Copy, aired.Text);
+
+        [Fact]
+        public void ThePromptSaysTheDJMayReferToMemoriesNeverMust() =>
+            Assert.Contains(LlmPromptBuilder.MemoryMayReferLine, prompt);
+    }
+
+    // F218.22 - rows are only spent when the prompt will carry them
+    // Given memory on (8192) and a counting recall source, each scenario starts from one condition.
+    static (LlmCopyWriter Writer, CountingRecall Recall) Arrange8k(PersonaCard card, bool throwing = false)
+    {
+        var recall = new CountingRecall(throwing);
+        var writer = QuirkSpecHarness.WriterFor(
+            card, new NoQuirks(),
+            contextWindow: new FixedWindow(MemoryBudget.Standard), memoryRecall: recall);
+        return (writer, recall);
+    }
+
+    public sealed class ScenarioASoullessQuirklessPersonaSpendsNothing : IAsyncLifetime
+    {
+        // Given a persona with no soul and no quirks
+        // When  a break is written
+        CountingRecall recall = new(false);
+
+        public async Task InitializeAsync()
+        {
+            PersonaCard card = QuirkSpecHarness.Card([], null) with { Soul = "" };
+            var (writer, taken) = Arrange8k(card);
+            recall = taken;
+            await writer.WriteAsync(QuirkSpecHarness.Request(null), CancellationToken.None);
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void RecallIsNeverTaken() => Assert.Equal(0, recall.Takes);
+    }
+
+    public sealed class ScenarioAPersonaWithASoulDoesSpend : IAsyncLifetime
+    {
+        // Given a persona with a soul
+        // When  a break is written
+        CountingRecall recall = new(false);
+
+        public async Task InitializeAsync()
+        {
+            var (writer, taken) = Arrange8k(QuirkSpecHarness.Card([], null));
+            recall = taken;
+            await writer.WriteAsync(QuirkSpecHarness.Request(null), CancellationToken.None);
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void RecallIsTakenOnce() => Assert.Equal(1, recall.Takes);
+    }
+
+    public sealed class ScenarioAPreviewNeverSpends : IAsyncLifetime
+    {
+        // Given a persona with a soul
+        // When  a preview is written
+        CountingRecall recall = new(false);
+
+        public async Task InitializeAsync()
+        {
+            var (writer, taken) = Arrange8k(QuirkSpecHarness.Card([], null));
+            recall = taken;
+            await writer.WritePreviewAsync(QuirkSpecHarness.Request(null), personaOverride: null, CancellationToken.None);
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void RecallIsNeverTaken() => Assert.Equal(0, recall.Takes);
+    }
+
+    public sealed class ScenarioAnAnnouncementNeverSpends : IAsyncLifetime
+    {
+        // Given a persona with a soul
+        // When  an announcement is written
+        CountingRecall recall = new(false);
+
+        public async Task InitializeAsync()
+        {
+            var (writer, taken) = Arrange8k(QuirkSpecHarness.Card([], null));
+            recall = taken;
+            await writer.WriteAnnouncementAsync(QuirkSpecHarness.Request(null), "The station is moving.", CancellationToken.None);
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void RecallIsNeverTaken() => Assert.Equal(0, recall.Takes);
+    }
+
+    public sealed class ScenarioARecallFaultStillAirsLlmCopy : IAsyncLifetime
+    {
+        // Given a recall source that throws
+        // When  a break is written
+        CountingRecall recall = new(true);
+        SegmentCopy copy = new("", false);
+
+        public async Task InitializeAsync()
+        {
+            var (writer, taken) = Arrange8k(QuirkSpecHarness.Card([], null), throwing: true);
+            recall = taken;
+            copy = await writer.WriteAsync(QuirkSpecHarness.Request(null), CancellationToken.None);
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void RecallWasAttemptedOnce() => Assert.Equal(1, recall.Takes);
+
+        [Fact]
+        public void TheLlmCopyAired() => Assert.Equal("Coming up next a classic from the vault.", copy.Text);
     }
 
     // ---------------------------------------------------------------------
@@ -95,7 +242,14 @@ public static class FeatureTheEightKFloor
         // When  the probe runs
         LlmContextWindow window = Arrange.Unrefreshed();
 
-        public async Task InitializeAsync() => window = await Arrange.Probed(psBody: null);
+        SegmentCopy copy = new("", false);
+
+        public async Task InitializeAsync()
+        {
+            window = await Arrange.Probed(psBody: null);
+            copy = await QuirkSpecHarness.WriterFor(QuirkSpecHarness.Card([], null), new NoQuirks())
+                .WriteAsync(QuirkSpecHarness.Request(null), CancellationToken.None);
+        }
 
         public Task DisposeAsync() => Task.CompletedTask;
 
@@ -104,13 +258,7 @@ public static class FeatureTheEightKFloor
             Assert.Equal("context window unknown, memory off", window.MemoryOffReason);
 
         [Fact]
-        public async Task PatterStillGenerates()
-        {
-            var copy = await QuirkSpecHarness.WriterFor(QuirkSpecHarness.Card([], null), new NoQuirks())
-                .WriteAsync(QuirkSpecHarness.Request(null), CancellationToken.None);
-
-            Assert.Equal("Coming up next a classic from the vault.", copy.Text);
-        }
+        public void PatterStillGenerates() => Assert.Equal("Coming up next a classic from the vault.", copy.Text);
     }
 
     // AC7b — The model is loaded at most once per endpoint and model (keep_alive must not be reset every cycle)
@@ -225,6 +373,32 @@ public static class FeatureTheEightKFloor
         }
     }
 
+    sealed class FixedWindow(MemoryBudget budget) : ILlmContextWindow
+    {
+        public int? Tokens => budget.MemoryOn ? MemoryBudget.MinContextTokens : null;
+        public MemoryBudget Budget => budget;
+        public string? MemoryOffReason => null;
+    }
+
+    sealed class FixedRecall(string episode) : IMemoryRecallSource
+    {
+        public Task<MemoryPacket> TakeAsync(long personaId, MemoryBudget budget, CancellationToken ct) =>
+            Task.FromResult(new MemoryPacket([], [new RecalledMemory(1, "episode", episode, null)], [], []));
+    }
+
+    sealed class CountingRecall(bool throws) : IMemoryRecallSource
+    {
+        public int Takes { get; private set; }
+
+        public Task<MemoryPacket> TakeAsync(long personaId, MemoryBudget budget, CancellationToken ct)
+        {
+            Takes++;
+            return throws
+                ? throw new InvalidOperationException("recall store down")
+                : Task.FromResult(new MemoryPacket([], [new RecalledMemory(1, "episode", "won the pub quiz", null)], [], []));
+        }
+    }
+
     sealed class NoQuirks : IQuirkSelector
     {
         public Task<QuirkSelection> SelectAsync(
@@ -256,14 +430,22 @@ public static class FeatureTheEightKFloor
                 new TestOptionsMonitor<LlmOptions>(new LlmOptions { Endpoint = Endpoint, Model = "m", ContextTokens = contextTokens }),
                 NullLogger<LlmContextWindow>.Instance);
 
-        /// <summary>The on-air system prompt for one break.</summary>
-        public static string Prompt()
+        public static SegmentRequest ContextRequest(string facts) =>
+            new(SegmentKind.ContextSegment, "af_heart", "GenWave", Track: null, DateTimeOffset.UtcNow, "test-station",
+                PersonaName: null, CounterpartName: null, ContextFacts: facts)
+            {
+                PersonaId = QuirkSpecHarness.PersonaId,
+            };
+
+        /// <summary>The on-air system prompt for one break; the recall source would return an episode whenever memory is on.</summary>
+        public static async Task<string> PromptAsync(MemoryBudget budget)
         {
             string? prompt = null;
-            QuirkSpecHarness.WriterFor(
+            await QuirkSpecHarness.WriterFor(
                     QuirkSpecHarness.Card([], null), new NoQuirks(),
-                    onSystemPrompt: p => { prompt = p; return Task.CompletedTask; })
-                .WriteAsync(QuirkSpecHarness.Request(null), CancellationToken.None).GetAwaiter().GetResult();
+                    onSystemPrompt: p => { prompt = p; return Task.CompletedTask; },
+                    contextWindow: new FixedWindow(budget), memoryRecall: new FixedRecall("won the pub quiz on a Tuesday"))
+                .WriteAsync(QuirkSpecHarness.Request(null), CancellationToken.None);
             return prompt ?? throw new InvalidOperationException("No completion request was captured");
         }
     }

@@ -29,4 +29,7 @@ internal sealed record BreakPromptInputs(
 
     /// <summary>Tagline statuses for an on-air break (F218.32); empty for a preview or the bench.</summary>
     public IReadOnlyList<TaglineStatus> Taglines { get; init; } = [];
+
+    /// <summary>What this on-air break remembers (F218.22); null or empty adds no block.</summary>
+    public MemoryPacket? Memory { get; init; }
 }

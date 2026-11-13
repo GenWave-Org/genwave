@@ -31,10 +31,11 @@ public sealed class MemoryRecallSource(IMemoryRecallStore store) : IMemoryRecall
         var neverMention = await store.RecentlyForgottenAsync(personaId, NeverMentionWindow, NeverMentionLimit, ct);
 
         // Mark before render (F71.5): the one atomic mark is awaited before the caller can dispatch.
-        var chosen = lore.Concat(episodes).Concat(life).Select(row => row.Id).ToList();
+        var packet = new MemoryPacket(lore, episodes, life, neverMention);
+        var chosen = packet.Rows.Select(row => row.Id).ToList();
         if (chosen.Count > 0)
             await store.MarkAiredAsync(chosen, ct);
 
-        return new MemoryPacket(lore, episodes, life, neverMention);
+        return packet;
     }
 }
