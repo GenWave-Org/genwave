@@ -346,6 +346,7 @@ public sealed class TtsSegmentSource(
             ShowId = request.ShowId,
             UtteranceId = copy.UtteranceId,
             Text = copy.Text,
+            FactRead = copy.FactRead,
         });
 
         // DjName (gh-#259) carries the SPEAKER's persona name for Now Playing attribution —

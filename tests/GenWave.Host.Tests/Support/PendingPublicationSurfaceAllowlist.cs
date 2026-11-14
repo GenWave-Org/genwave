@@ -4,7 +4,7 @@ namespace GenWave.Host.Tests.Support;
 /// SPEC F218.5 / PLAN T683 (the T524 precedent): <c>QuirkRule</c> and
 /// <c>PersonaCard.QuirkRules</c> (and, PLAN T684, the init-only <c>PersonaId</c>/<c>ShowId</c>/<c>ShiftKeyText</c>/
 /// <c>UtteranceId</c>/<c>Text</c> members on <c>SegmentRequest</c>/<c>SegmentCopy</c>/<c>SegmentGenerated</c>; and, PLAN T685,
-/// the new <c>TrackProvenAired</c> event published beside <c>TrackAired</c>; and, PLAN T693/T714, the new <c>RepeatCaught</c> event and its <c>RepeatOutcome</c>; and, PLAN T709, <c>QuirkRule.MaxPerHour</c>/<c>MinBreaksApart</c>) are an additive contract change that landed in
+/// the new <c>TrackProvenAired</c> event published beside <c>TrackAired</c>; and, PLAN T693/T714, the new <c>RepeatCaught</c> event and its <c>RepeatOutcome</c>; and, PLAN T709, <c>QuirkRule.MaxPerHour</c>/<c>MinBreaksApart</c>; and, PLAN T702, <c>CrosstalkParticipant</c>/<c>FactReadOnAir</c> and the init-only <c>Host</c>/<c>Neighbor</c>/<c>FactRead</c> members) are an additive contract change that landed in
 /// <c>src/GenWave.Abstractions</c> BEFORE the package that carries it is published. The committed
 /// baseline fixture stays byte-identical to the published surface (never hand-edited); the gap is
 /// tolerated only by passing these EXACT added lines — named line by line, no wildcard — to
@@ -50,5 +50,18 @@ public static class PendingPublicationSurfaceAllowlist
         "GenWave.Core.Events.TrackProvenAired::PROPERTY System.DateTimeOffset ProvenAt { public get; public init; }",
         "GenWave.Core.Events.TrackProvenAired::PROPERTY System.String MediaId { public get; public init; }",
         "GenWave.Core.Events.TrackProvenAired::TYPE class : GenWave.Core.Events.StationEvent [System.IEquatable<GenWave.Core.Events.StationEvent>,System.IEquatable<GenWave.Core.Events.TrackProvenAired>]",
+        // PLAN T702: the crosstalk's two participants and the fact read on air, additive init-only members the episode accrual reads.
+        "GenWave.Core.Domain.CrosstalkAiredScript::PROPERTY GenWave.Core.Domain.CrosstalkParticipant Host { public get; public init; }",
+        "GenWave.Core.Domain.CrosstalkAiredScript::PROPERTY GenWave.Core.Domain.CrosstalkParticipant Neighbor { public get; public init; }",
+        "GenWave.Core.Domain.CrosstalkParticipant::CTOR (System.Int64 PersonaId, System.String Name)",
+        "GenWave.Core.Domain.CrosstalkParticipant::PROPERTY System.Int64 PersonaId { public get; public init; }",
+        "GenWave.Core.Domain.CrosstalkParticipant::PROPERTY System.String Name { public get; public init; }",
+        "GenWave.Core.Domain.CrosstalkParticipant::TYPE class : none [System.IEquatable<GenWave.Core.Domain.CrosstalkParticipant>]",
+        "GenWave.Core.Domain.FactReadOnAir::CTOR (System.String Key, System.String Text)",
+        "GenWave.Core.Domain.FactReadOnAir::PROPERTY System.String Key { public get; public init; }",
+        "GenWave.Core.Domain.FactReadOnAir::PROPERTY System.String Text { public get; public init; }",
+        "GenWave.Core.Domain.FactReadOnAir::TYPE class : none [System.IEquatable<GenWave.Core.Domain.FactReadOnAir>]",
+        "GenWave.Core.Domain.SegmentCopy::PROPERTY GenWave.Core.Domain.FactReadOnAir FactRead { public get; public init; }",
+        "GenWave.Core.Events.SegmentGenerated::PROPERTY GenWave.Core.Domain.FactReadOnAir FactRead { public get; public init; }",
     ];
 }

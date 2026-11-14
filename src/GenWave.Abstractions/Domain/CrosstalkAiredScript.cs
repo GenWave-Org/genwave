@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace GenWave.Core.Domain;
 
 /// <summary>
@@ -18,4 +20,20 @@ namespace GenWave.Core.Domain;
 /// stamp — "what did they say" is answerable from the booth log alone, never just the ear (F127.11).
 /// </para>
 /// </summary>
-public sealed record CrosstalkAiredScript(IReadOnlyList<CrosstalkAiredLine> Lines);
+public sealed record CrosstalkAiredScript(IReadOnlyList<CrosstalkAiredLine> Lines)
+{
+    /// <summary>
+    /// SPEC F218.15 — the persona who spoke the <see cref="CrosstalkSpeaker.Host"/> lines, stamped when the
+    /// exchange is stocked so the memory consumer can write an episode on each side from
+    /// <c>TrackAired.CrosstalkScript</c> alone. An init-only body property, never a positional parameter, so
+    /// the published constructor and <c>Deconstruct</c> arity stay unchanged (the
+    /// <see cref="SegmentRequest.CrosstalkAiredThisBreak"/> precedent). <see langword="null"/> when unknown.
+    /// Never on the booth log's wire shape (<c>{"lines":[...]}</c>): it rides in memory from stock to air.
+    /// </summary>
+    [JsonIgnore]
+    public CrosstalkParticipant? Host { get; init; }
+
+    /// <summary>SPEC F218.15 — the persona who spoke the <see cref="CrosstalkSpeaker.Neighbor"/> lines; see <see cref="Host"/>.</summary>
+    [JsonIgnore]
+    public CrosstalkParticipant? Neighbor { get; init; }
+}

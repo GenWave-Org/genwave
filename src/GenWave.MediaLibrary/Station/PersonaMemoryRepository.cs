@@ -28,8 +28,11 @@ namespace GenWave.MediaLibrary.Station;
 /// standalone DB function would be one more place to keep in sync for no shared reuse.
 /// </summary>
 sealed class PersonaMemoryRepository(Lazy<NpgsqlDataSource> dataSource, IOptions<PersonaMemoryOptions> options)
-    : IPersonaMemory, IQuirkSpendLedger, IMemoryRecallStore
+    : IPersonaMemory, IQuirkSpendLedger, IMemoryRecallStore, IEpisodeStore
 {
+    /// <summary>Accrued episodes older than this many days are evicted on the next episode write (SPEC F218.16).</summary>
+    internal const int EpisodeWindowDays = 28;
+
     const string QuirkKind = MemoryKinds.Quirk;
 
     const string SelectColumns =
@@ -42,8 +45,8 @@ sealed class PersonaMemoryRepository(Lazy<NpgsqlDataSource> dataSource, IOptions
     /// <summary>
     /// Single insert; when <paramref name="source"/> is <see cref="PersonaMemorySource.Accrued"/>, a
     /// second statement in the SAME transaction deletes every accrued row for this (persona, kind)
-    /// beyond <see cref="PersonaMemoryOptions.CapPerKind"/> newest (F71.6): ordering
-    /// <c>created_at desc, id desc</c> then skipping the newest <c>CapPerKind</c> rows selects exactly
+    /// beyond <see cref="PersonaMemoryOptions.CapPerKind"/> newest (F71.6, see <see cref="EvictAsync"/>): ordering
+    /// <c>coalesce(occurred_at, created_at) desc, id desc</c> then skipping the newest <c>CapPerKind</c> rows selects exactly
     /// the oldest excess for deletion — the <c>id desc</c> tiebreak keeps eviction order deterministic
     /// even when two accrued rows land inside the same transaction-frozen <c>now()</c>. An
     /// <see cref="PersonaMemorySource.Authored"/> insert skips this second statement entirely: never
@@ -51,40 +54,106 @@ sealed class PersonaMemoryRepository(Lazy<NpgsqlDataSource> dataSource, IOptions
     /// </summary>
     public async Task<long> RecordAsync(long personaId, string kind, string content, PersonaMemorySource source, CancellationToken ct)
     {
-        var sourceText = ToSourceText(source);
-
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
 
-        var id = await conn.QuerySingleAsync<long>(new CommandDefinition(
-            """
-            insert into station.persona_memory (persona_id, kind, content, source)
-            values (@PersonaId, @Kind, @Content, @Source)
-            returning id::bigint
-            """,
-            new { PersonaId = personaId, Kind = kind, Content = content, Source = sourceText },
-            transaction: tx,
-            cancellationToken: ct));
-
+        var id = await InsertAsync(conn, tx, new(personaId, kind, content, source, null, null), ct);
         if (source == PersonaMemorySource.Accrued)
-        {
-            await conn.ExecuteAsync(new CommandDefinition(
-                """
-                delete from station.persona_memory
-                where id in (
-                    select id from station.persona_memory
-                    where persona_id = @PersonaId and kind = @Kind and source = 'accrued'
-                    order by created_at desc, id desc
-                    offset @CapPerKind
-                )
-                """,
-                new { PersonaId = personaId, Kind = kind, options.Value.CapPerKind },
-                transaction: tx,
-                cancellationToken: ct));
-        }
+            await EvictAsync(conn, tx, personaId, kind, ct);
 
         await tx.CommitAsync(ct);
         return id;
+    }
+
+    /// <summary>One accrued episode (SPEC F218.15), written and evicted in one transaction (F218.16).</summary>
+    public async Task AppendAsync(NewEpisode episode, CancellationToken ct) =>
+        await WriteEpisodesAsync(null, [episode], ct);
+
+    /// <summary>
+    /// A shared <c>memory_event</c> plus one accrued episode per entry, each pointing at it, in one
+    /// transaction (SPEC F218.15). Each affected persona is evicted before the commit (F218.16).
+    /// </summary>
+    public async Task AppendSharedAsync(NewMemoryEvent happening, IReadOnlyList<NewEpisode> episodes, CancellationToken ct) =>
+        await WriteEpisodesAsync(happening, episodes, ct);
+
+    async Task WriteEpisodesAsync(NewMemoryEvent? happening, IReadOnlyList<NewEpisode> episodes, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+
+        long? eventId = happening is null
+            ? null
+            : await conn.QuerySingleAsync<long>(new CommandDefinition(
+                """
+                insert into station.memory_event (occurred_at, kind, summary)
+                values (@OccurredAt, @Kind, @Summary)
+                returning id::bigint
+                """,
+                happening,
+                transaction: tx,
+                cancellationToken: ct));
+
+        foreach (var episode in episodes)
+            await InsertAsync(
+                conn, tx,
+                new(episode.PersonaId, MemoryKinds.Episode, episode.Content, PersonaMemorySource.Accrued, episode.OccurredAt, eventId),
+                ct);
+
+        foreach (var personaId in episodes.Select(e => e.PersonaId).Distinct())
+            await EvictAsync(conn, tx, personaId, MemoryKinds.Episode, ct);
+
+        await tx.CommitAsync(ct);
+    }
+
+    sealed record NewRow(
+        long PersonaId, string Kind, string Content, PersonaMemorySource Source, DateTimeOffset? OccurredAt, long? EventId);
+
+    static async Task<long> InsertAsync(NpgsqlConnection conn, NpgsqlTransaction tx, NewRow row, CancellationToken ct) =>
+        await conn.QuerySingleAsync<long>(new CommandDefinition(
+            """
+            insert into station.persona_memory (persona_id, kind, content, source, occurred_at, event_id)
+            values (@PersonaId, @Kind, @Content, @Source, @OccurredAt, @EventId)
+            returning id::bigint
+            """,
+            new { row.PersonaId, row.Kind, row.Content, Source = ToSourceText(row.Source), row.OccurredAt, row.EventId },
+            transaction: tx,
+            cancellationToken: ct));
+
+    /// <summary>
+    /// F71.6 / F218.16 retention for one (persona, kind) of accrued rows, inside the caller's transaction:
+    /// every accrued row beyond <see cref="PersonaMemoryOptions.CapPerKind"/> newest goes, newest meaning
+    /// <c>coalesce(occurred_at, created_at) desc, id desc</c> (the <c>id desc</c> tiebreak keeps eviction
+    /// deterministic inside one transaction-frozen <c>now()</c>); and for episodes, every accrued row whose
+    /// happening is older than <see cref="EpisodeWindowDays"/> days on the database clock goes too.
+    /// </summary>
+    async Task EvictAsync(NpgsqlConnection conn, NpgsqlTransaction tx, long personaId, string kind, CancellationToken ct)
+    {
+        await conn.ExecuteAsync(new CommandDefinition(
+            """
+            delete from station.persona_memory
+            where id in (
+                select id from station.persona_memory
+                where persona_id = @PersonaId and kind = @Kind and source = 'accrued'
+                order by coalesce(occurred_at, created_at) desc, id desc
+                offset @CapPerKind
+            )
+            """,
+            new { PersonaId = personaId, Kind = kind, options.Value.CapPerKind },
+            transaction: tx,
+            cancellationToken: ct));
+
+        if (kind != MemoryKinds.Episode)
+            return;
+
+        await conn.ExecuteAsync(new CommandDefinition(
+            """
+            delete from station.persona_memory
+            where persona_id = @PersonaId and kind = @Kind and source = 'accrued'
+              and coalesce(occurred_at, created_at) < now() - make_interval(days => @WindowDays)
+            """,
+            new { PersonaId = personaId, Kind = kind, WindowDays = EpisodeWindowDays },
+            transaction: tx,
+            cancellationToken: ct));
     }
 
     /// <summary>

@@ -60,6 +60,7 @@ public static class PersonaServiceCollectionExtensions
                 sp.GetRequiredService<IOptions<PersonaMemoryOptions>>()));
         services.AddSingleton<IQuirkSpendLedger>(sp => sp.GetRequiredService<PersonaMemoryRepository>());
         services.AddSingleton<IMemoryRecallStore>(sp => sp.GetRequiredService<PersonaMemoryRepository>());
+        services.AddSingleton<IEpisodeStore>(sp => sp.GetRequiredService<PersonaMemoryRepository>());
         return services.AddSingleton<IPersonaMemory>(sp => sp.GetRequiredService<PersonaMemoryRepository>());
     }
 

@@ -123,10 +123,7 @@ public static partial class CopyClaims
 
         foreach (var token in DistinctNonExemptTokens(DigitRunRx().Matches(copy), nameSpans))
         {
-            var supported = factDigitTokens.Any(fact =>
-                string.Equals(fact, token, StringComparison.Ordinal) ||
-                fact.StartsWith(token + ".", StringComparison.Ordinal));
-            if (!supported)
+            if (!IsDigitTokenSupported(token, factDigitTokens))
                 violations.Add(new ClaimViolation(ClaimClass.DigitRun, token));
         }
 
@@ -148,6 +145,16 @@ public static partial class CopyClaims
 
         return new ClaimCheckResult(violations);
     }
+
+    /// <summary>
+    /// The ONE "does the fact support this digit-run claim" rule, shared by <see cref="CheckFacts"/> and
+    /// <see cref="UsesFact"/>: whole-token equality, or the claim is the integer part of a decimal the fact
+    /// carries (fact "4.5" supports copy "4").
+    /// </summary>
+    static bool IsDigitTokenSupported(string token, IReadOnlyList<string> factDigitTokens) =>
+        factDigitTokens.Any(fact =>
+            string.Equals(fact, token, StringComparison.Ordinal) ||
+            fact.StartsWith(token + ".", StringComparison.Ordinal));
 
     /// <summary>
     /// SPEC F138.3 — every weekday/daypart claim in <paramref name="copy"/> must match the clock this

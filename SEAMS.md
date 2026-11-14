@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **142 seams across 9 projects.**
+> **143 seams across 9 projects.**
 
 ## GenWave.Ads (2 seams)
 
@@ -118,7 +118,7 @@
 | `GenWave.Core.Abstractions.IEnergyAnalyzer` | `GenWave.Loudness.FfmpegEnergyAnalyzer` | Singleton | — |
 | `GenWave.Core.Abstractions.ILoudnessAnalyzer` | `GenWave.Loudness.FfmpegLoudnessAnalyzer` | Singleton | — |
 
-## GenWave.MediaLibrary (62 seams)
+## GenWave.MediaLibrary (63 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -141,6 +141,7 @@
 | `GenWave.Core.Abstractions.IBoothLogEventConsumer` | `GenWave.MediaLibrary.Station.BoothLogWriter` | Singleton | — |
 | `GenWave.Core.Abstractions.IBoothLogReader` | `GenWave.MediaLibrary.Station.BoothLogRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IDeadFileReporter` | `GenWave.MediaLibrary.Garden.DeadFileReporter` | Singleton | — |
+| `GenWave.Core.Abstractions.IEpisodeStore` | `GenWave.MediaLibrary.Station.PersonaMemoryRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IExplicitClassifier` | `GenWave.MediaLibrary.ExplicitClassification.OllamaExplicitClassifier` | Singleton | — |
 | `GenWave.Core.Abstractions.IFileActionExecutor` | `GenWave.MediaLibrary.Garden.FileActions.FileActionExecutor` | Singleton | — |
 | `GenWave.Core.Abstractions.IFileActionPlanner` | `GenWave.MediaLibrary.Garden.FileActions.FileActionPlanner` | Singleton | — |

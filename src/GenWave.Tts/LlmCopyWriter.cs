@@ -285,6 +285,39 @@ public sealed class LlmCopyWriter(
             : templated;
 
     /// <summary>
+    /// The ONE definition of the fact block the truth gate checks a render against: the owner's announcement
+    /// message when there is one, else a ContextSegment's non-blank <see cref="SegmentRequest.ContextFacts"/>.
+    /// </summary>
+    static string? ContextFactBlockOf(SegmentRequest request, string? announcementMessage) =>
+        announcementMessage
+        ?? (request.Kind == SegmentKind.ContextSegment
+            && request.ContextFacts is { } contextFacts && !string.IsNullOrWhiteSpace(contextFacts)
+                ? contextFacts
+                : null);
+
+    /// <summary>The <see cref="FactReadOnAir.Key"/> of a ContextSegment's facts: the block is one fact with no single provider key.</summary>
+    const string ContextSegmentFactKey = "context";
+
+    /// <summary>
+    /// SPEC F218.15 — the fact the ACCEPTED <paramref name="copy"/> used, by the truth gate's own claim rules
+    /// (<see cref="CopyClaims.UsesFact"/>): the patter fact on a patter lane, or a ContextSegment's
+    /// <see cref="SegmentRequest.ContextFacts"/> block. <see langword="null"/> when none was offered or the copy
+    /// claimed nothing from it.
+    /// </summary>
+    static FactReadOnAir? FactReadBy(string copy, SegmentRequest request, ContextPatterFact? patterFact)
+    {
+        bool Used(string fact) =>
+            CopyClaims.UsesFact(copy, fact, request.StationName, request.Track?.Title, request.Track?.Artist);
+
+        if (patterFact is { } offered)
+            return Used(offered.Fact) ? new FactReadOnAir(offered.Key, offered.Fact) : null;
+
+        return request.Kind == SegmentKind.ContextSegment && ContextFactBlockOf(request, announcementMessage: null) is { } facts && Used(facts)
+            ? new FactReadOnAir(ContextSegmentFactKey, facts)
+            : null;
+    }
+
+    /// <summary>
     /// SPEC F218.1 (STORY-532, PLAN T684) — stores <paramref name="copy"/> in the utterance log BEFORE
     /// render, raw text as handed to the renderer, and returns it stamped with the new row id. A request
     /// the planner left unstamped (no persona, no shift key) is not recorded. A store fault is logged
@@ -418,7 +451,11 @@ public sealed class LlmCopyWriter(
             statusHolder.Record(LlmAttemptOutcome.Ok, attemptedAt);
             // Only genuinely LLM-authored copy is fresh-per-airing (F34.6) — every fallback path
             // above returns the template writer's own SegmentCopy (FreshPerAiring: false) unchanged.
-            return await RecordAsync(request, new SegmentCopy(cleaned, FreshPerAiring: true), fallbackCopy: false, ct);
+            // SPEC F218.15: the patter fact the accepted copy actually used rides out with the copy, so the
+            // render event can name it for the memory consumer. A fact the copy never claimed is not "read".
+            var factRead = FactReadBy(cleaned, request, patterFact);
+            return await RecordAsync(
+                request, new SegmentCopy(cleaned, FreshPerAiring: true) { FactRead = factRead }, fallbackCopy: false, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -999,11 +1036,7 @@ public sealed class LlmCopyWriter(
         // of a provider's facts. Mutually exclusive with the ContextSegment branch below by
         // construction — announcementMessage is only ever non-null for an Announcement-kind request,
         // which is never a ContextSegment.
-        var contextFactBlock = requiredCore
-            ?? (request.Kind == SegmentKind.ContextSegment
-                && request.ContextFacts is { } contextFacts && !string.IsNullOrWhiteSpace(contextFacts)
-                    ? contextFacts
-                    : null);
+        var contextFactBlock = ContextFactBlockOf(request, requiredCore);
         // Captured up front, once, for LlmCallRing (SPEC F73.1, T41) — startedAt mirrors
         // LlmCopyStatusHolder's own attemptedAt semantics (includes any single-flight queueing wait
         // below), and mode is read fresh right here rather than threaded in as a parameter: a
