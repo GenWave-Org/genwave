@@ -7,6 +7,13 @@ updates:
     schedule:
       interval: weekly
     labels: [dependencies]
+    # Stay on .NET 10 LTS: framework-aligned packages follow the TFM (net10.0), so no major
+    # bumps (11.x on a net10 shared framework = version conflicts). Next hop = .NET 12 LTS.
+    ignore:
+      - dependency-name: "Microsoft.Extensions.*"
+        update-types: [version-update:semver-major]
+      - dependency-name: "Microsoft.AspNetCore.*"
+        update-types: [version-update:semver-major]
   - package-ecosystem: npm
     directory: /admin-ui
     schedule:
@@ -33,6 +40,12 @@ updates:
     schedule:
       interval: weekly
     labels: [dependencies]
+    # Stay on .NET 10 LTS (see the nuget entry): no sdk/aspnet major bumps.
+    ignore:
+      - dependency-name: dotnet/sdk
+        update-types: [version-update:semver-major]
+      - dependency-name: dotnet/aspnet
+        update-types: [version-update:semver-major]
   - package-ecosystem: docker
     directory: /icecast
     schedule:
