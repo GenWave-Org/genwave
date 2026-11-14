@@ -7,13 +7,14 @@ updates:
     schedule:
       interval: weekly
     labels: [dependencies]
-    # Stay on .NET 10 LTS: framework-aligned packages follow the TFM (net10.0), so no major
-    # bumps (11.x on a net10 shared framework = version conflicts). Next hop = .NET 12 LTS.
+    # Stay on .NET 10 LTS: skip .NET 11 (STS, same Nov 2028 end of support as 10). Only 11 is
+    # skipped, so the .NET 12 LTS PRs (Nov 2027) arrive on their own as the cue to move.
+    # Framework-aligned packages follow the TFM, so they move with it, never ahead of it.
     ignore:
       - dependency-name: "Microsoft.Extensions.*"
-        update-types: [version-update:semver-major]
+        versions: ["11.*"]
       - dependency-name: "Microsoft.AspNetCore.*"
-        update-types: [version-update:semver-major]
+        versions: ["11.*"]
   - package-ecosystem: npm
     directory: /admin-ui
     schedule:
@@ -40,12 +41,12 @@ updates:
     schedule:
       interval: weekly
     labels: [dependencies]
-    # Stay on .NET 10 LTS (see the nuget entry): no sdk/aspnet major bumps.
+    # Stay on .NET 10 LTS (see the nuget entry): skip the 11 images only (Bundler range syntax).
     ignore:
       - dependency-name: dotnet/sdk
-        update-types: [version-update:semver-major]
+        versions: ["~> 11.0"]
       - dependency-name: dotnet/aspnet
-        update-types: [version-update:semver-major]
+        versions: ["~> 11.0"]
   - package-ecosystem: docker
     directory: /icecast
     schedule:
