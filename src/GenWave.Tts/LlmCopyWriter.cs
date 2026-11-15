@@ -295,13 +295,12 @@ public sealed class LlmCopyWriter(
                 ? contextFacts
                 : null);
 
-    /// <summary>The <see cref="FactReadOnAir.Key"/> of a ContextSegment's facts: the block is one fact with no single provider key.</summary>
-    const string ContextSegmentFactKey = "context";
-
     /// <summary>
     /// SPEC F218.15 — the fact the ACCEPTED <paramref name="copy"/> used, by the truth gate's own claim rules
     /// (<see cref="CopyClaims.UsesFact"/>): the patter fact on a patter lane, or a ContextSegment's
-    /// <see cref="SegmentRequest.ContextFacts"/> block. <see langword="null"/> when none was offered or the copy
+    /// <see cref="SegmentRequest.ContextFacts"/> block, keyed by <see cref="SegmentRequest.ContextProviderKey"/>
+    /// (one block is one provider's own join, so the single key is always true; "context" only when a request
+    /// carries no key). <see langword="null"/> when none was offered or the copy
     /// claimed nothing from it.
     /// </summary>
     static FactReadOnAir? FactReadBy(string copy, SegmentRequest request, ContextPatterFact? patterFact)
@@ -312,8 +311,8 @@ public sealed class LlmCopyWriter(
         if (patterFact is { } offered)
             return Used(offered.Fact) ? new FactReadOnAir(offered.Key, offered.Fact) : null;
 
-        return request.Kind == SegmentKind.ContextSegment && ContextFactBlockOf(request, announcementMessage: null) is { } facts && Used(facts)
-            ? new FactReadOnAir(ContextSegmentFactKey, facts)
+        return ContextFactBlockOf(request, announcementMessage: null) is { } facts && Used(facts)
+            ? new FactReadOnAir(request.ContextProviderKey ?? "context", facts)
             : null;
     }
 

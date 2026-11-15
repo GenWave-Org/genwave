@@ -91,11 +91,13 @@ public static class FeatureRequestShoutOut
         // persona Soul/Backstory fields already are.
         // ShiftKeyText (SPEC F218.1, PLAN T684): the planner-built "personaId|day|minute|date" shift key —
         // numbers, a DayOfWeek name and a station date, assembled by ShiftKey; never listener text.
+        // ContextProviderKey (PLAN T702a): the context provider's own key ("weather"), set by the planner from the
+        // deferral discriminator; never listener text.
         static readonly string[] SegmentRequestStringMembers =
         [
             "Voice", "StationName", "StationId", "PersonaName", "CounterpartName", "ContextFacts",
             "CrossingTrackTitle", "CrossingTrackArtist", "ShowName", "ShowFlavor", "CounterpartShowName",
-            "ShiftKeyText",
+            "ShiftKeyText", "ContextProviderKey",
         ];
         static readonly string[] MediaItemStringMembers = ["MediaId", "Locator", "Title", "Artist", "Album", "Genre", "DjName"];
 

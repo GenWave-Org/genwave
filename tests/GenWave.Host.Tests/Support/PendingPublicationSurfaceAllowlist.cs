@@ -4,7 +4,7 @@ namespace GenWave.Host.Tests.Support;
 /// SPEC F218.5 / PLAN T683 (the T524 precedent): <c>QuirkRule</c> and
 /// <c>PersonaCard.QuirkRules</c> (and, PLAN T684, the init-only <c>PersonaId</c>/<c>ShowId</c>/<c>ShiftKeyText</c>/
 /// <c>UtteranceId</c>/<c>Text</c> members on <c>SegmentRequest</c>/<c>SegmentCopy</c>/<c>SegmentGenerated</c>; and, PLAN T685,
-/// the new <c>TrackProvenAired</c> event published beside <c>TrackAired</c>; and, PLAN T693/T714, the new <c>RepeatCaught</c> event and its <c>RepeatOutcome</c>; and, PLAN T709, <c>QuirkRule.MaxPerHour</c>/<c>MinBreaksApart</c>; and, PLAN T702, <c>CrosstalkParticipant</c>/<c>FactReadOnAir</c> and the init-only <c>Host</c>/<c>Neighbor</c>/<c>FactRead</c> members) are an additive contract change that landed in
+/// the new <c>TrackProvenAired</c> event published beside <c>TrackAired</c>; and, PLAN T693/T714, the new <c>RepeatCaught</c> event and its <c>RepeatOutcome</c>; and, PLAN T709, <c>QuirkRule.MaxPerHour</c>/<c>MinBreaksApart</c>; and, PLAN T702, <c>CrosstalkParticipant</c>/<c>FactReadOnAir</c> and the init-only <c>Host</c>/<c>Neighbor</c>/<c>FactRead</c> members; and, PLAN T702a, <c>SegmentRequest.ContextProviderKey</c>) are an additive contract change that landed in
 /// <c>src/GenWave.Abstractions</c> BEFORE the package that carries it is published. The committed
 /// baseline fixture stays byte-identical to the published surface (never hand-edited); the gap is
 /// tolerated only by passing these EXACT added lines — named line by line, no wildcard — to
@@ -28,6 +28,8 @@ public static class PendingPublicationSurfaceAllowlist
         "GenWave.Core.Domain.SegmentRequest::PROPERTY System.Nullable<System.Int64> PersonaId { public get; public init; }",
         "GenWave.Core.Domain.SegmentRequest::PROPERTY System.Nullable<System.Int64> ShowId { public get; public init; }",
         "GenWave.Core.Domain.SegmentRequest::PROPERTY System.String ShiftKeyText { public get; public init; }",
+        // PLAN T702a: the context provider's key on a ContextSegment request.
+        "GenWave.Core.Domain.SegmentRequest::PROPERTY System.String ContextProviderKey { public get; public init; }",
         // PLAN T693: RepeatCaught, a new additive event (the repeat check's booth-log signal).
         "GenWave.Core.Events.RepeatCaught::CTOR (System.Int64 PersonaId, System.String Phrase, System.Nullable<GenWave.Core.Events.RepeatOutcome> Outcome = null)",
         "GenWave.Core.Events.RepeatCaught::PROPERTY System.Nullable<GenWave.Core.Events.RepeatOutcome> Outcome { public get; public init; }",

@@ -48,10 +48,6 @@ public sealed class InMemoryEpisodeStore(FakeTimeProvider clock) : IEpisodeStore
         return Task.CompletedTask;
     }
 
-    /// <summary>Plants an episode without eviction, the way a direct SQL insert plants one a test needs already aged.</summary>
-    public void Seed(long personaId, string content, TimeSpan age) =>
-        rows.Add(new Row(rows.Count + 1, personaId, content, clock.GetUtcNow() - age, null));
-
     void Insert(NewEpisode episode, long? eventId) =>
         rows.Add(new Row(rows.Count + 1, episode.PersonaId, episode.Content, episode.OccurredAt, eventId));
 

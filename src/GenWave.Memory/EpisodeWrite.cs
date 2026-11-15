@@ -8,4 +8,4 @@ namespace GenWave.Memory;
 /// </summary>
 /// <param name="Happening">The shared <c>memory_event</c>, or <see langword="null"/> for a solo episode.</param>
 /// <param name="Episodes">The episodes to write, one per persona that remembers it.</param>
-public sealed record EpisodeWrite(NewMemoryEvent? Happening, IReadOnlyList<NewEpisode> Episodes);
+internal sealed record EpisodeWrite(NewMemoryEvent? Happening, IReadOnlyList<NewEpisode> Episodes);

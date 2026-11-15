@@ -179,4 +179,12 @@ public sealed record SegmentRequest(
     /// <see langword="null"/> means "do not record". Same init-only discipline as <see cref="PersonaId"/>.
     /// </summary>
     public string? ShiftKeyText { get; init; }
+
+    /// <summary>
+    /// SPEC F218.15 (PLAN T702a) — for a <see cref="SegmentKind.ContextSegment"/>, the originating context
+    /// provider's key ("weather", "history"): one <see cref="ContextFacts"/> block is always one provider's
+    /// own join, so a single key names it truthfully. <see langword="null"/> for every other kind. The copy
+    /// writer reads it so the memory episode says "read the weather: ...". Same init-only discipline as <see cref="PersonaId"/>.
+    /// </summary>
+    public string? ContextProviderKey { get; init; }
 }

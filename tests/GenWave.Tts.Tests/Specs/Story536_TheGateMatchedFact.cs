@@ -119,6 +119,9 @@ public static class FeatureTheGateMatchedFact
         public void AcceptedCopyThatUsedTheFactsNamesThem() => Assert.Equal(ContextFacts, accepted?.Text);
 
         [Fact]
+        public void TheFactIsKeyedByTheProviderNotAGenericContext() => Assert.Equal("weather", accepted?.Key);
+
+        [Fact]
         public void ATemplateFallbackNamesNoFact() => Assert.Null(fallback);
     }
 
@@ -236,7 +239,7 @@ public static class FeatureTheGateMatchedFact
 
     static SegmentRequest ContextRequest() =>
         new(SegmentKind.ContextSegment, "af_heart", "GenWave", Track: null, StationLocalNow, "test-station",
-            PersonaName: null, CounterpartName: null, ContextFacts: ContextFacts);
+            PersonaName: null, CounterpartName: null, ContextFacts: ContextFacts) { ContextProviderKey = "weather" };
 
     /// <summary>One real LlmCopyWriter render; a null <paramref name="reply"/> is an endpoint fault (the template fallback airs).</summary>
     static async Task<SegmentCopy> Write(SegmentRequest request, string? reply, ContextPatterFact? patterFact)

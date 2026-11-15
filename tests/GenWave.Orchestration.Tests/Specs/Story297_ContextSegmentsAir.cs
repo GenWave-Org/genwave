@@ -128,6 +128,7 @@ public static class FeatureContextSegmentsAirAtBoundaries
             // instead. This project's own seam is the SegmentRequest the Orchestrator hands down.
             var request = Assert.Single(tts.Requests, r => r.Kind == SegmentKind.ContextSegment);
             Assert.Equal(Facts, request.ContextFacts);
+            Assert.Equal("weather", request.ContextProviderKey);
         }
     }
 

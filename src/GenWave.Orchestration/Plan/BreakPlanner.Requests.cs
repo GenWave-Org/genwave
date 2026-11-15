@@ -92,6 +92,7 @@ public sealed partial class BreakPlanner
             ContextFacts: content.SegmentFacts)
         {
             Speaker = speaker,
+            ContextProviderKey = providerKey,
         }, contextPersonaId);
 
         return (contextReq, providerKey);
