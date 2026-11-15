@@ -64,6 +64,8 @@ public sealed partial class BreakPlanner
     // Verbatim copy of Orchestrator.BuildContextSegmentRequestAsync (SPEC F107.3/F107.6/F107.7),
     // split into a guard (ValidateContextContent, below) and this assembly step purely to stay
     // under the ~30-line method budget — every log line stays byte-identical to the original.
+    // ContextProviderKey is the deferral's own Discriminator (null when absent): "(unknown)" is a log
+    // label only, so a keyless segment is never remembered as "read the (unknown)" (PLAN T702c).
     // Speaker (PLAN T527, SPEC F188.4/F189.4): resolved off the SAME PersonaId the voice/name tuple
     // just named, and — per round-2 review finding F1 — the request's stamped Voice is this method's
     // own already-resolved contextVoice term; the snapshot aligns to it, never the reverse, so the
@@ -92,7 +94,7 @@ public sealed partial class BreakPlanner
             ContextFacts: content.SegmentFacts)
         {
             Speaker = speaker,
-            ContextProviderKey = providerKey,
+            ContextProviderKey = deferral.Discriminator,
         }, contextPersonaId);
 
         return (contextReq, providerKey);
