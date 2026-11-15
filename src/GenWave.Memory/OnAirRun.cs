@@ -1,19 +1,21 @@
 namespace GenWave.Memory;
 
-/// <summary>The show currently on the air, as the accrual consumer has watched it so far (SPEC F218.15).</summary>
-sealed class ShowRun(long showId, long? personaId, string showName, DateTimeOffset startedAt, bool partial)
+/// <summary>The show (or, with no show attached, the DJ's shift) currently on the air, as the accrual consumer has watched it so far (SPEC F218.15).</summary>
+sealed class OnAirRun(RunKey key, long? personaId, string? showName, DateTimeOffset startedAt, bool partial)
 {
     /// <summary>
-    /// True when the consumer first saw this show already under way (a restart mid-show): its count and first
+    /// True when the consumer first saw this run already under way (a restart mid-show or mid-shift): its count and first
     /// track are incomplete, so no episode is written for it rather than a "hosted" memory that is half true.
     /// </summary>
     public bool Partial { get; } = partial;
 
-    public long ShowId { get; } = showId;
+    /// <summary>What makes this run one run: see <see cref="RunKey"/>.</summary>
+    public RunKey Key { get; } = key;
 
     public long? PersonaId { get; } = personaId;
 
-    public string ShowName { get; } = showName;
+    /// <summary>The named show's name; null for a shift (a DJ-only slot with no show attached).</summary>
+    public string? ShowName { get; } = showName;
 
     /// <summary>The show's scheduled start, station-local.</summary>
     public DateTimeOffset StartedAt { get; } = startedAt;

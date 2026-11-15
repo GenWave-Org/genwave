@@ -8,13 +8,14 @@ namespace GenWave.Memory;
 
 /// <summary>
 /// SPEC F218.15 (STORY-536) — turns what the station does into the episodes a persona remembers. Three
-/// things accrue and nothing else: a show the persona hosted (written when the show ends), a crosstalk (one
+/// things accrue and nothing else: a show or shift the persona hosted (written when it ends), a crosstalk (one
 /// shared <c>memory_event</c> plus an episode per participant naming the other), and a context fact the
 /// persona read on air (the copy the truth gate accepted used it).
 /// <para>
-/// <b>Where each signal comes from.</b> The show boundary is read off <see cref="IOnAirSnapshotSource"/> on each
-/// <see cref="TrackAired"/>: a changed (or vanished) show id ends the run the consumer was watching. The
-/// boundary is therefore noticed on the first track after it, which is the first track of the next show. The
+/// <b>Where each signal comes from.</b> The boundary is read off <see cref="IOnAirSnapshotSource"/> on each
+/// <see cref="TrackAired"/>: a changed (or vanished) <see cref="RunKey"/> ends the run the consumer was watching
+/// (a named show by its id, otherwise the slot's shift). The boundary is therefore noticed on the first track
+/// after it, which is the first track of the next run. The
 /// crosstalk's two personas ride <see cref="TrackAired.CrosstalkScript"/> (stamped at stock time). The fact rides
 /// <see cref="SegmentGenerated.FactRead"/> and is written when the segment with that id airs, never at render.
 /// </para>
@@ -39,7 +40,7 @@ public sealed class EpisodeAccrualSink(
     readonly object gate = new();
     readonly Dictionary<string, PendingFact> pendingFacts = new(StringComparer.Ordinal);
     readonly Queue<string> pendingFactOrder = new();
-    ShowRun? current;
+    OnAirRun? current;
     bool observedATrack;
     long droppedWrites;
 
@@ -105,7 +106,7 @@ public sealed class EpisodeAccrualSink(
         // non-null snapshot whose Show is null.
         if (onAir.Current is { } snapshot)
         {
-            FollowShow(snapshot);
+            FollowRun(snapshot);
             observedATrack = true;
         }
 
@@ -125,18 +126,26 @@ public sealed class EpisodeAccrualSink(
             new NewEpisode(neighbor.PersonaId, EpisodeWording.TalkedWith(host), at),
         ]);
 
-    /// <summary>Ends the watched show when the on-air show id differs, then starts watching the new one.</summary>
-    void FollowShow(OnAirSnapshot snapshot)
+    /// <summary>
+    /// Ends the watched run when the on-air run differs, then starts watching the new one. A run is the named show
+    /// (by id) or, with no show attached, the slot's shift; an unscheduled gap is no run.
+    /// </summary>
+    void FollowRun(OnAirSnapshot snapshot)
     {
-        var show = snapshot.Show;
-        if (current is { } run && run.ShowId == show?.Id)
+        var next = snapshot switch
+        {
+            { Show: { } show } => (RunKey?)RunKey.ForShow(show.Id),
+            { Segment: { } segment } => RunKey.ForShift(segment),
+            _ => null,
+        };
+        if (current?.Key == next)
             return;
 
         if (current is { PersonaId: { } hostId, TrackCount: > 0, Partial: false } ended)
-            Enqueue(new(null, [new NewEpisode(hostId, EpisodeWording.HostedShow(ended), ended.StartedAt)]));
+            Enqueue(new(null, [new NewEpisode(hostId, EpisodeWording.HostedRun(ended), ended.StartedAt)]));
 
-        current = snapshot is { Segment: { } segment, Show: { } startedShow }
-            ? new ShowRun(startedShow.Id, snapshot.PersonaId, startedShow.Name, ScheduledStart(segment), partial: !observedATrack)
+        current = next is { } key && snapshot.Segment is { } started
+            ? new OnAirRun(key, snapshot.PersonaId, snapshot.Show?.Name, ScheduledStart(started), partial: !observedATrack)
             : null;
     }
 

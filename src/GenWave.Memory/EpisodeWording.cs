@@ -6,15 +6,17 @@ namespace GenWave.Memory;
 /// <summary>The words an accrued episode is remembered in (SPEC F218.15); pure, so the rules are pinned by one fake event stream.</summary>
 static class EpisodeWording
 {
-    /// <summary>The show a persona hosted: which show, which day and time, how many tracks, the first and the last.</summary>
-    public static string HostedShow(ShowRun run)
+    /// <summary>The show (or, with no show attached, the shift) a persona hosted: which show, which day and time, how many tracks, the first and the last.</summary>
+    public static string HostedRun(OnAirRun run)
     {
-        var when = run.StartedAt.ToString("dddd HH:mm", CultureInfo.InvariantCulture);
+        var day = run.StartedAt.ToString("dddd", CultureInfo.InvariantCulture);
+        var time = run.StartedAt.ToString("HH:mm", CultureInfo.InvariantCulture);
+        var what = run.ShowName is { } name ? $"hosted {name} on {day} {time}" : $"hosted a shift on {day} at {time}";
         var tracks = run.TrackCount == 1 ? "1 track" : $"{run.TrackCount} tracks";
         var ends = run.FirstTrack is { } first && run.LastTrack is { } last
             ? $", opening with {first} and closing with {last}"
             : string.Empty;
-        return $"hosted {run.ShowName} on {when}: {tracks}{ends}";
+        return $"{what}: {tracks}{ends}";
     }
 
     /// <summary>A fact the persona read on air, labelled by the provider that produced it.</summary>

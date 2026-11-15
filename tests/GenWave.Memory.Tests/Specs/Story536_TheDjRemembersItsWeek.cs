@@ -59,6 +59,103 @@ public static class FeatureTheDjRemembersItsWeek
         public void OccurredAtIsTheShowSStart() => Assert.Equal(TuesdaySixAm, persona7Rows.Single().OccurredAt);
     }
 
+    // AC1b — A DJ-only slot is a shift
+    public sealed class ScenarioADjOnlySlotBecomesAShiftEpisode : IAsyncLifetime
+    {
+        // Given persona 7 hosts the Saturday 16:30 slot, no show attached, with 38 tracks
+        // When  the next slot begins
+        IReadOnlyList<InMemoryEpisodeStore.Row> persona7Rows = [];
+
+        public async Task InitializeAsync()
+        {
+            var harness = new AccrualHarness();
+            harness.Time.SetUtcNow(new DateTimeOffset(2026, 11, 14, 23, 0, 0, TimeSpan.Zero));   // 17:00 station-local
+            harness.OnAir.Current = FakeOnAir.Gap();
+            harness.MusicAired("Before The Slot", "Someone");
+            harness.OnAir.Current = FakeOnAir.Shift(DayOfWeek.Saturday, 990, personaId: 7);
+            for (var i = 1; i <= 38; i++)
+                harness.MusicAired($"Song {i}", $"Artist {i}");
+
+            harness.OnAir.Current = FakeOnAir.Shift(DayOfWeek.Saturday, 1110, personaId: 9);
+            harness.MusicAired("Next Slot Opener", "Someone");
+            await harness.FlushAsync();
+            persona7Rows = harness.Store.Rows.Where(r => r.PersonaId == 7).ToList();
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void Persona7GainsExactlyOneEpisode() => Assert.Single(persona7Rows);
+
+        [Fact]
+        public void ItsContentIsTheShiftWording() =>
+            Assert.Equal(
+                "hosted a shift on Saturday at 16:30: 38 tracks, opening with \"Song 1\" by Artist 1 and closing with \"Song 38\" by Artist 38",
+                persona7Rows.Single().Content);
+
+        [Fact]
+        public void OccurredAtIsTheSlotSStart() =>
+            Assert.Equal(new DateTimeOffset(2026, 11, 14, 16, 30, 0, TimeSpan.FromHours(-6)), persona7Rows.Single().OccurredAt);
+    }
+
+    // AC1c — Adjacent DJ-only slots hand over at the boundary
+    public sealed class ScenarioAdjacentDjOnlySlotsEachGetTheirOutgoingDjAShift : IAsyncLifetime
+    {
+        // Given persona 7's slot is followed at once by persona 9's
+        // When  the boundary passes
+        IReadOnlyList<InMemoryEpisodeStore.Row> rows = [];
+
+        public async Task InitializeAsync()
+        {
+            var harness = new AccrualHarness();
+            harness.Time.SetUtcNow(new DateTimeOffset(2026, 11, 14, 23, 0, 0, TimeSpan.Zero));   // 17:00 station-local
+            harness.OnAir.Current = FakeOnAir.Gap();
+            harness.MusicAired("Before", "Someone");
+            harness.OnAir.Current = FakeOnAir.Shift(DayOfWeek.Saturday, 990, personaId: 7, minutes: 30);
+            harness.MusicAired("Seven", "A");
+            harness.OnAir.Current = FakeOnAir.Shift(DayOfWeek.Saturday, 1020, personaId: 9, minutes: 30);
+            harness.MusicAired("Nine", "B");
+            await harness.FlushAsync();
+            rows = harness.Store.Rows.ToList();
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void TheOutgoingDjGainsTheirShiftAndTheIncomingDjNothingYet() =>
+            Assert.Equal(
+                [(7L, "hosted a shift on Saturday at 16:30: 1 track, opening with \"Seven\" by A and closing with \"Seven\" by A")],
+                rows.Select(r => (r.PersonaId, r.Content)));
+    }
+
+    // AC6c — A restart mid-slot is not a shift
+    public sealed class ScenarioARestartMidSlotWritesNoShiftEpisodeForThatSlot : IAsyncLifetime
+    {
+        // Given the consumer starts while persona 7's slot is already on air
+        // When  the next slot begins and then ends in turn
+        IReadOnlyList<InMemoryEpisodeStore.Row> rows = [];
+
+        public async Task InitializeAsync()
+        {
+            var harness = new AccrualHarness();
+            harness.Time.SetUtcNow(new DateTimeOffset(2026, 11, 14, 23, 0, 0, TimeSpan.Zero));   // 17:00 station-local
+            harness.OnAir.Current = FakeOnAir.Shift(DayOfWeek.Saturday, 990, personaId: 7, minutes: 30);
+            harness.MusicAired("Joined Late", "A");
+            harness.OnAir.Current = FakeOnAir.Shift(DayOfWeek.Saturday, 1020, personaId: 9, minutes: 30);
+            harness.MusicAired("Nine", "B");
+            harness.OnAir.Current = FakeOnAir.Shift(DayOfWeek.Saturday, 1050, personaId: 11, minutes: 30);
+            harness.MusicAired("Eleven", "C");
+            await harness.FlushAsync();
+            rows = harness.Store.Rows.ToList();
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void NoEpisodeForTheSlotJoinedMidWayButTheNextFullSlotWritesOne() =>
+            Assert.Equal([9L], rows.Select(r => r.PersonaId));
+    }
+
     // AC2 — A handoff is remembered on both sides
     public sealed class ScenarioAHandoffIsRememberedOnBothSides : IAsyncLifetime
     {

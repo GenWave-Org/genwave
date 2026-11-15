@@ -19,6 +19,15 @@ public sealed class FakeOnAir : IOnAirSnapshotSource
             null,
             new ShowSummary(showId, name, null, null));
 
+    /// <summary>A DJ-only slot (no show attached): persona <paramref name="personaId"/> on <paramref name="day"/> from <paramref name="startMinute"/> for <paramref name="minutes"/>.</summary>
+    public static OnAirSnapshot Shift(DayOfWeek day, int startMinute, long personaId, int minutes = 120) =>
+        new(
+            new ScheduleSegment(null, day, startMinute, startMinute + minutes, personaId, null, null, null),
+            personaId,
+            SegmentEnvelope.StationDefault,
+            null,
+            null);
+
     /// <summary>An unscheduled gap: the schedule resolved, and nothing (no show) is on.</summary>
     public static OnAirSnapshot Gap() => new(null, null, SegmentEnvelope.StationDefault, null, null);
 }
