@@ -7,6 +7,14 @@ updates:
     schedule:
       interval: weekly
     labels: [dependencies]
+    # Stay on .NET 10 LTS: skip .NET 11 (STS, same Nov 2028 end of support as 10). Only 11 is
+    # skipped, so the .NET 12 LTS PRs (Nov 2027) arrive on their own as the cue to move.
+    # Framework-aligned packages follow the TFM, so they move with it, never ahead of it.
+    ignore:
+      - dependency-name: "Microsoft.Extensions.*"
+        versions: ["11.*"]
+      - dependency-name: "Microsoft.AspNetCore.*"
+        versions: ["11.*"]
   - package-ecosystem: npm
     directory: /admin-ui
     schedule:
@@ -33,6 +41,12 @@ updates:
     schedule:
       interval: weekly
     labels: [dependencies]
+    # Stay on .NET 10 LTS (see the nuget entry): skip the 11 images only (Bundler range syntax).
+    ignore:
+      - dependency-name: dotnet/sdk
+        versions: ["~> 11.0"]
+      - dependency-name: dotnet/aspnet
+        versions: ["~> 11.0"]
   - package-ecosystem: docker
     directory: /icecast
     schedule:
