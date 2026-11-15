@@ -7,6 +7,8 @@ using GenWave.Host.Announcements;
 using GenWave.Host.Artwork;
 using GenWave.Host.Engine;
 using GenWave.Host.Options;
+using GenWave.Memory;
+using GenWave.Orchestration;
 
 namespace GenWave.Host.Playout;
 
@@ -95,6 +97,12 @@ static class PlayoutServiceCollectionExtensions
             // that holds for a lazily-resolved DI singleton regardless). MediaRotationEventSink and
             // AiringTokenRing are both registered by THIS same call, so no such ordering question
             // exists for either.
+            // DJ memory accrual (SPEC F218.15, STORY-536; PLAN T703): the sink queues episode writes, the hosted
+            // drain writes them. The on-air snapshot is the SAME CachingScheduleResolver singleton the schedule
+            // reads (it subscribes to store events in its ctor, so never construct a second).
+            .AddSingleton<EpisodeAccrualSink>()
+            .AddSingleton<IOnAirSnapshotSource>(sp => sp.GetRequiredService<CachingScheduleResolver>())
+            .AddHostedService<EpisodeAccrualDrainService>()
             .AddSingleton<IStationEventSink>(sp => new CompositeStationEventSink(
                 [
                     sp.GetRequiredService<PlayHistoryEventSink>(),
@@ -105,6 +113,7 @@ static class PlayoutServiceCollectionExtensions
                     sp.GetRequiredService<MediaRotationEventSink>(),
                     sp.GetRequiredService<AiringTokenRing>(),
                     sp.GetRequiredService<UtteranceAirEventSink>(),
+                    sp.GetRequiredService<EpisodeAccrualSink>(),
                 ],
                 sp.GetRequiredService<ILogger<CompositeStationEventSink>>()))
             // Persona-id -> worn-face token, memoized on a ≤30s TTL (SPEC F129.5, STORY-336, PLAN

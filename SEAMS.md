@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **143 seams across 9 projects.**
+> **144 seams across 9 projects.**
 
 ## GenWave.Ads (2 seams)
 
@@ -196,13 +196,14 @@
 | `GenWave.Core.Abstractions.ISentenceTrimmer` | `GenWave.Memory.SentenceTrimmer` | Singleton | — |
 | `GenWave.Core.Abstractions.ITaglineLedger` | `GenWave.Memory.TaglineLedger` | Singleton | — |
 
-## GenWave.Orchestration (9 seams)
+## GenWave.Orchestration (10 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
 | `GenWave.Core.Abstractions.IActivePersonaAccessor` | `GenWave.Orchestration.OnAirPersonaAccessor` | Singleton | — |
 | `GenWave.Core.Abstractions.IEnvelopeProvider` | `GenWave.Orchestration.ScheduleEnvelopeProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.INextItemProvider` | `GenWave.Orchestration.Orchestrator` | Singleton | — |
+| `GenWave.Core.Abstractions.IOnAirSnapshotSource` | `GenWave.Orchestration.CachingScheduleResolver` | Singleton | — |
 | `GenWave.Core.Abstractions.IPatterDurationEstimator` | `GenWave.Orchestration.RollingPatterDurationEstimator` | Singleton | — |
 | `GenWave.Core.Abstractions.IShowFlavorLineSource` | `GenWave.Orchestration.ShowFlavorLineGate` | Singleton | — |
 | `GenWave.Orchestration.IBreakPlanObserver` | `GenWave.Orchestration.NoOpBreakPlanObserver` | Singleton | — |
