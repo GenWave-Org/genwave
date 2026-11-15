@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **147 seams across 9 projects.**
+> **148 seams across 9 projects.**
 
 ## GenWave.Ads (2 seams)
 
@@ -118,7 +118,7 @@
 | `GenWave.Core.Abstractions.IEnergyAnalyzer` | `GenWave.Loudness.FfmpegEnergyAnalyzer` | Singleton | — |
 | `GenWave.Core.Abstractions.ILoudnessAnalyzer` | `GenWave.Loudness.FfmpegLoudnessAnalyzer` | Singleton | — |
 
-## GenWave.MediaLibrary (64 seams)
+## GenWave.MediaLibrary (65 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -165,6 +165,7 @@
 | `GenWave.Core.Abstractions.IPersonaAvatarStore` | `GenWave.MediaLibrary.Station.PersonaAvatarRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IPersonaImportStore` | `GenWave.MediaLibrary.Station.PersonaImportRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IPersonaMemory` | `GenWave.MediaLibrary.Station.PersonaMemoryRepository` | Singleton | — |
+| `GenWave.Core.Abstractions.IPersonaMemoryAdmin` | `GenWave.MediaLibrary.Station.PersonaMemoryRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IPersonaStore` | `GenWave.MediaLibrary.Station.PersonaRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IPersonaTasteAccrualStore` | `GenWave.MediaLibrary.Station.PersonaTasteAccrualRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IPersonaTasteReader` | `GenWave.MediaLibrary.Station.PersonaTasteRepository` | Singleton | — |

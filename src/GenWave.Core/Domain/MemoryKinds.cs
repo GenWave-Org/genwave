@@ -14,4 +14,7 @@ public static class MemoryKinds
 
     /// <summary>A spent once-a-shift quirk (the quirk ledger's rows).</summary>
     public const string Quirk = "quirk";
+
+    /// <summary>The kinds the operator sees and shapes; the quirk ledger's rows are not memory they edit.</summary>
+    public static readonly IReadOnlyList<string> OperatorShaped = [Lore, Episode, Life];
 }

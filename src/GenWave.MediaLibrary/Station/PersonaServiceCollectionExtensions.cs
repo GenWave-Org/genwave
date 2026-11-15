@@ -62,6 +62,7 @@ public static class PersonaServiceCollectionExtensions
         services.AddSingleton<IMemoryRecallStore>(sp => sp.GetRequiredService<PersonaMemoryRepository>());
         services.AddSingleton<IEpisodeStore>(sp => sp.GetRequiredService<PersonaMemoryRepository>());
         services.AddSingleton<ILifeStore>(sp => sp.GetRequiredService<PersonaMemoryRepository>());
+        services.AddSingleton<IPersonaMemoryAdmin>(sp => sp.GetRequiredService<PersonaMemoryRepository>());
         return services.AddSingleton<IPersonaMemory>(sp => sp.GetRequiredService<PersonaMemoryRepository>());
     }
 

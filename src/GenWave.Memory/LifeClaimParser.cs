@@ -1,4 +1,5 @@
 using System.Text.Json;
+using GenWave.Core.Domain;
 
 namespace GenWave.Memory;
 
@@ -10,7 +11,7 @@ namespace GenWave.Memory;
 public static class LifeClaimParser
 {
     /// <summary>Longest claim kept; a longer one is prose, not a fact.</summary>
-    public const int MaxClaimChars = 200;
+    public const int MaxClaimChars = MemoryText.MaxChars;
 
     /// <summary>Most claims taken from one reply.</summary>
     public const int MaxClaims = 5;
