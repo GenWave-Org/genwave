@@ -76,6 +76,8 @@ sealed class PersonaMemoryRepository(Lazy<NpgsqlDataSource> dataSource, IOptions
     public async Task AppendSharedAsync(NewMemoryEvent happening, IReadOnlyList<NewEpisode> episodes, CancellationToken ct) =>
         await WriteEpisodesAsync(happening, episodes, ct);
 
+    // Npgsql writes timestamptz only from offset 0; callers pass station-local offsets, so both inserts
+    // (the memory_event here, every row in InsertAsync) normalise OccurredAt to UTC at this seam.
     async Task WriteEpisodesAsync(NewMemoryEvent? happening, IReadOnlyList<NewEpisode> episodes, CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
@@ -89,7 +91,7 @@ sealed class PersonaMemoryRepository(Lazy<NpgsqlDataSource> dataSource, IOptions
                 values (@OccurredAt, @Kind, @Summary)
                 returning id::bigint
                 """,
-                happening,
+                new { OccurredAt = happening.OccurredAt.ToUniversalTime(), happening.Kind, happening.Summary },
                 transaction: tx,
                 cancellationToken: ct));
 
@@ -108,6 +110,7 @@ sealed class PersonaMemoryRepository(Lazy<NpgsqlDataSource> dataSource, IOptions
     sealed record NewRow(
         long PersonaId, string Kind, string Content, PersonaMemorySource Source, DateTimeOffset? OccurredAt, long? EventId);
 
+    // OccurredAt goes to UTC: Npgsql rejects a non-zero offset for timestamptz (see WriteEpisodesAsync).
     static async Task<long> InsertAsync(NpgsqlConnection conn, NpgsqlTransaction tx, NewRow row, CancellationToken ct) =>
         await conn.QuerySingleAsync<long>(new CommandDefinition(
             """
@@ -115,7 +118,7 @@ sealed class PersonaMemoryRepository(Lazy<NpgsqlDataSource> dataSource, IOptions
             values (@PersonaId, @Kind, @Content, @Source, @OccurredAt, @EventId)
             returning id::bigint
             """,
-            new { row.PersonaId, row.Kind, row.Content, Source = ToSourceText(row.Source), row.OccurredAt, row.EventId },
+            new { row.PersonaId, row.Kind, row.Content, Source = ToSourceText(row.Source), OccurredAt = row.OccurredAt?.ToUniversalTime(), row.EventId },
             transaction: tx,
             cancellationToken: ct));
 

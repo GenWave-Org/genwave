@@ -126,6 +126,50 @@ public static class FeatureEpisodeRetentionSql
         public void TheRowIsSourceAccrued() => Assert.Equal(["accrued"], rows.Select(r => r.Source));
     }
 
+    // A station-local (-06:00) happening is stored as the same instant (Npgsql accepts only offset 0)
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioAStationLocalHappeningKeepsItsInstant(DatabaseFixture db) : IAsyncLifetime
+    {
+        static readonly DateTimeOffset LocalShiftStart = new(2026, 11, 15, 6, 0, 0, TimeSpan.FromHours(-6));
+
+        DateTime soloEpisodeAt;
+        DateTime sharedEventAt;
+        DateTime sharedEpisodeAt;
+
+        public async Task InitializeAsync()
+        {
+            await db.ResetStationAsync();
+            await ResetMemoryEventsAsync(db);
+            var solo = await CreatePersonaAsync(db, "Shift DJ");
+            var duo = await CreatePersonaAsync(db, "Duo DJ");
+
+            await Repo(db).AppendAsync(new NewEpisode(solo, "hosted a shift", LocalShiftStart), CancellationToken.None);
+            await Repo(db).AppendSharedAsync(
+                new NewMemoryEvent("crosstalk", "talked on air", LocalShiftStart),
+                [new NewEpisode(duo, "talked on air", LocalShiftStart)],
+                CancellationToken.None);
+
+            await using var conn = await db.StationDataSource.OpenConnectionAsync();
+            soloEpisodeAt = await conn.QuerySingleAsync<DateTime>(
+                "select occurred_at from station.persona_memory where persona_id = @solo", new { solo });
+            sharedEpisodeAt = await conn.QuerySingleAsync<DateTime>(
+                "select occurred_at from station.persona_memory where persona_id = @duo", new { duo });
+            sharedEventAt = await conn.QuerySingleAsync<DateTime>("select occurred_at from station.memory_event");
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void ASoloEpisodeReadsBackTheSameInstant() => Assert.Equal(LocalShiftStart.UtcDateTime, soloEpisodeAt);
+
+        [Fact]
+        public void ASharedEventReadsBackTheSameInstant() => Assert.Equal(LocalShiftStart.UtcDateTime, sharedEventAt);
+
+        [Fact]
+        public void ASharedEpisodeReadsBackTheSameInstant() => Assert.Equal(LocalShiftStart.UtcDateTime, sharedEpisodeAt);
+    }
+
     // AC5 — 50 recent episodes plus one 29 days old, then a new one
     [Collection(DatabaseCollection.Name)]
     [Trait("Category", "Integration")]
