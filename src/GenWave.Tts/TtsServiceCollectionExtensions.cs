@@ -295,6 +295,9 @@ public static class TtsServiceCollectionExtensions
             // F35.6/T7) — so the persona preview endpoint reuses the exact same prompt-building/
             // hygiene instance the feeder does, never a second parallel writer.
             .AddSingleton<LlmCopyWriter>()
+            // The life extractor's own completion seam (SPEC F218.17, PLAN T704): same endpoint/key/timeout, called
+            // only from the background LifeExtractionService, never from the render path.
+            .AddSingleton<ILifeClaimLlm, LifeClaimLlm>()
             .AddSingleton<IPersonaPreviewWriter>(sp => sp.GetRequiredService<LlmCopyWriter>())
             // IAnnouncementCopyWriter (SPEC F144.3, STORY-358, PLAN T342): the SAME "register
             // concretely once, expose under every seam it implements" idiom IPersonaPreviewWriter

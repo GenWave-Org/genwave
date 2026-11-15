@@ -27,8 +27,8 @@ namespace GenWave.MediaLibrary.Station;
 /// the <c>RecordAsync</c> transaction"); the eviction has no callers beyond this one write path, so a
 /// standalone DB function would be one more place to keep in sync for no shared reuse.
 /// </summary>
-sealed class PersonaMemoryRepository(Lazy<NpgsqlDataSource> dataSource, IOptions<PersonaMemoryOptions> options)
-    : IPersonaMemory, IQuirkSpendLedger, IMemoryRecallStore, IEpisodeStore
+sealed partial class PersonaMemoryRepository(Lazy<NpgsqlDataSource> dataSource, IOptions<PersonaMemoryOptions> options)
+    : IPersonaMemory, IQuirkSpendLedger, IMemoryRecallStore, IEpisodeStore, ILifeStore
 {
     /// <summary>Accrued episodes older than this many days are evicted on the next episode write (SPEC F218.16).</summary>
     internal const int EpisodeWindowDays = 28;

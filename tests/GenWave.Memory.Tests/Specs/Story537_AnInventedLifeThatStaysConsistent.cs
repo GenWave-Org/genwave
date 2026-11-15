@@ -6,6 +6,7 @@
 
 using GenWave.Core.Domain;
 using GenWave.Memory.Tests.Fakes;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 
 namespace GenWave.Memory.Tests.Specs;
@@ -24,8 +25,90 @@ public static class FeatureAnInventedLifeThatStaysConsistent
         // Given a fake LLM returning [{"claim":"has a beagle named Gus","about":"self","category":"home"}]
         // When  the extractor runs
 
-        [Fact(Skip = "pending: T704 — see docs/PLAN.md")]
-        public void ThePersonaGainsAPersonaMemoryRowKindLifeSourceExtractedContentHasABeagleNamedGus() => Assert.Fail("pending: T704 — the persona gains a persona_memory row kind life, source extracted, content \"has a beagle named Gus\"");
+        readonly LifeHarness harness = new("""[{"claim":"has a beagle named Gus","about":"self","category":"home"}]""");
+
+        public ScenarioAClaimIsExtractedAndStored() =>
+            harness.RunAsync("My beagle Gus howled through the whole intro").GetAwaiter().GetResult();
+
+        [Fact]
+        public void ThePersonaGainsAPersonaMemoryRowKindLifeSourceExtractedContentHasABeagleNamedGus()
+        {
+            var row = Assert.Single(harness.Store.Rows);
+            Assert.Equal((LifeHarness.Sal, MemoryKinds.Life, "extracted", "has a beagle named Gus"), (row.PersonaId, row.Kind, row.Source, row.Content));
+        }
+
+        [Theory]
+        [InlineData("```json\n[{\"claim\":\"has a beagle named Gus\",\"about\":\"self\"}]\n```")]
+        public async Task AFencedReplyIsStillRead(string fenced)
+        {
+            var other = new LifeHarness(fenced);
+
+            await other.RunAsync("Gus howled");
+
+            Assert.Single(other.Store.Rows);
+        }
+
+        [Fact]
+        public void TheModelWasShownTheCopy() => Assert.Contains("beagle Gus howled", Assert.Single(harness.Llm.UserPrompts));
+    }
+
+    // AC2 (the real queue) — the model is slow, the caller is not
+    public sealed class ScenarioTheModelIsSlow
+    {
+        [Fact]
+        public async Task EnqueueReturnsWhileTheModelIsStillWorkingAndTheClaimLandsOnceItFinishes()
+        {
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var store = new InMemoryLifeStore();
+            var service = new LifeExtractionService(
+                new FakeLifeClaimLlm("""[{"claim":"has a beagle named Gus","about":"self","category":"home"}]""", _ => release.Task),
+                store, new FakePersonaRoster((LifeHarness.Sal, "Sal")), new FakeLlmBatchGate(), new FakeTimeProvider(),
+                new CapturingLogger<LifeExtractionService>());
+            var drain = service.RunAsync(ex => throw ex, CancellationToken.None);
+
+            service.Enqueue(new AcceptedCopy(LifeHarness.Sal, "Sal", "Gus howled"));
+            Assert.Empty(store.Rows);
+
+            release.SetResult();
+            service.Complete();
+            await drain;
+            Assert.Single(store.Rows);
+        }
+    }
+
+    // AC2 (the real queue) — a full queue sheds the newest copy, loudly enough to find
+    public sealed class ScenarioTheQueueIsFull
+    {
+        [Fact]
+        public void ACopyPastTheCapacityIsLoggedAndNotThrown()
+        {
+            var log = new CapturingLogger<LifeExtractionService>();
+            var service = new LifeExtractionService(
+                new FakeLifeClaimLlm("[]"), new InMemoryLifeStore(), new FakePersonaRoster((LifeHarness.Sal, "Sal")),
+                new FakeLlmBatchGate(), new FakeTimeProvider(), log);
+            for (var n = 0; n < LifeExtractionService.QueueCapacity; n++)
+                service.Enqueue(new AcceptedCopy(LifeHarness.Sal, "Sal", $"copy {n}"));
+            Assert.Empty(log.Entries);
+
+            service.Enqueue(new AcceptedCopy(LifeHarness.Sal, "Sal", "one too many"));
+
+            Assert.Equal(1, service.DroppedCopies);
+            Assert.Contains(log.Entries, e => e.Level == LogLevel.Information && e.Message.Contains("dropped a copy from Sal", StringComparison.Ordinal));
+        }
+
+        [Fact]
+        public void AStalledModelDoesNotFloodTheLog()
+        {
+            var log = new CapturingLogger<LifeExtractionService>();
+            var service = new LifeExtractionService(
+                new FakeLifeClaimLlm("[]"), new InMemoryLifeStore(), new FakePersonaRoster((LifeHarness.Sal, "Sal")),
+                new FakeLlmBatchGate(), new FakeTimeProvider(), log);
+            for (var n = 0; n < LifeExtractionService.QueueCapacity + 9; n++)
+                service.Enqueue(new AcceptedCopy(LifeHarness.Sal, "Sal", $"copy {n}"));
+
+            Assert.Equal(9, service.DroppedCopies);
+            Assert.Single(log.Entries);
+        }
     }
 
     // AC3 — No duplicates
@@ -34,8 +117,38 @@ public static class FeatureAnInventedLifeThatStaysConsistent
         // Given an existing life row "has a beagle named Gus"
         // When  the same claim is extracted again
 
-        [Fact(Skip = "pending: T704 — see docs/PLAN.md")]
-        public void TheRowCountIsUnchanged() => Assert.Fail("pending: T704 — the row count is unchanged");
+        [Fact]
+        public async Task TheRowCountIsUnchanged()
+        {
+            var harness = new LifeHarness("""[{"claim":"has a beagle named Gus","about":"self","category":"home"}]""");
+            harness.Store.Seed(LifeHarness.Sal, "has a beagle named Gus");
+
+            await harness.RunAsync("Gus howled again");
+
+            Assert.Single(harness.Store.Rows);
+        }
+
+        [Fact]
+        public async Task ADifferentCaseOrPunctuationIsTheSameClaim()
+        {
+            var harness = new LifeHarness("""[{"claim":"Has a  beagle named Gus!","about":"self","category":"home"}]""");
+            harness.Store.Seed(LifeHarness.Sal, "has a beagle named Gus");
+
+            await harness.RunAsync("Gus howled again");
+
+            Assert.Single(harness.Store.Rows);
+        }
+
+        [Fact]
+        public async Task TheSameClaimForAnotherPersonaIsStored()
+        {
+            var harness = new LifeHarness("""[{"claim":"has a beagle named Gus","about":"self","category":"home"}]""");
+            harness.Store.Seed(LifeHarness.Flip, "has a beagle named Gus");
+
+            await harness.RunAsync("Gus howled again");
+
+            Assert.Equal(2, harness.Store.Rows.Count);
+        }
     }
 
     // AC4 — An outing is shared
@@ -44,11 +157,46 @@ public static class FeatureAnInventedLifeThatStaysConsistent
         // Given persona Sal's copy yields {"claim":"grabbed tacos with Flip after the show","about":"Captain Flip","category":"people"}
         // When  the extractor stores it
 
-        [Fact(Skip = "pending: T704 — see docs/PLAN.md")]
-        public void OneMemoryEventOfKindOutingExists() => Assert.Fail("pending: T704 — one memory_event of kind outing exists");
+        readonly LifeHarness harness = new("""[{"claim":"grabbed tacos with Flip after the show","about":"Captain Flip","category":"people"}]""");
 
-        [Fact(Skip = "pending: T704 — see docs/PLAN.md")]
-        public void SalAndFlipEachGainALifeRowPointingAtItPhrasedFromTheirOwnSide() => Assert.Fail("pending: T704 — sal and Flip each gain a life row pointing at it, phrased from their own side");
+        public ScenarioAnOutingIsShared() =>
+            harness.RunAsync("Tacos with Flip last night, folks").GetAwaiter().GetResult();
+
+        [Fact]
+        public void OneMemoryEventOfKindOutingExists() => Assert.Equal(
+            [(MemoryEventKinds.Outing, "Sal and Captain Flip: grabbed tacos with Flip after the show")],
+            harness.Store.Happenings.Select(h => (h.Kind, h.Summary)));
+
+        [Fact]
+        public void SalAndFlipEachGainALifeRowPointingAtItPhrasedFromTheirOwnSide()
+        {
+            var eventId = Assert.Single(harness.Store.Happenings).Id;
+            Assert.Equal(
+                [(LifeHarness.Sal, "grabbed tacos with Flip after the show", (long?)eventId),
+                 (LifeHarness.Flip, "grabbed tacos with Sal after the show", eventId)],
+                harness.Store.Rows.Select(r => (r.PersonaId, r.Content, r.EventId)));
+        }
+
+        [Fact]
+        public async Task AClaimThatNamesNoOneInItsTextGetsTheSpeakerAppendedForTheOtherSide()
+        {
+            var other = new LifeHarness("""[{"claim":"went bowling after the show","about":"Flip","category":"people"}]""");
+
+            await other.RunAsync("Bowling last night");
+
+            Assert.Equal(["went bowling after the show", "went bowling after the show, with Sal"], other.Store.Rows.Select(r => r.Content));
+        }
+
+        [Fact]
+        public async Task ANameThatIsNotOnTheRosterIsAClaimAboutTheSpeakerAlone()
+        {
+            var other = new LifeHarness("""[{"claim":"visits her sister Karen on Sundays","about":"Karen","category":"people"}]""");
+
+            await other.RunAsync("Sunday with Karen");
+
+            Assert.Empty(other.Store.Happenings);
+            Assert.Equal([(LifeHarness.Sal, "visits her sister Karen on Sundays")], other.Store.Rows.Select(r => (r.PersonaId, r.Content)));
+        }
     }
 
     // AC5 — Forget
@@ -111,11 +259,52 @@ public static class FeatureAnInventedLifeThatStaysConsistent
         // Given the fake LLM returns prose, not JSON
         // When  the extractor runs
 
-        [Fact(Skip = "pending: T704 — see docs/PLAN.md")]
-        public void NoRowIsWritten() => Assert.Fail("pending: T704 — no row is written");
+        readonly LifeHarness harness = new("Sure! Gus the beagle sounds lovely.");
 
-        [Fact(Skip = "pending: T704 — see docs/PLAN.md")]
-        public void ADebugLogLineRecordsIt() => Assert.Fail("pending: T704 — a Debug log line records it");
+        public ScenarioGarbageIsNothing() =>
+            harness.RunAsync("My beagle Gus howled through the whole intro").GetAwaiter().GetResult();
+
+        [Fact]
+        public void NoRowIsWritten() => Assert.Empty(harness.Store.Rows);
+
+        [Fact]
+        public void ADebugLogLineRecordsIt() => Assert.Contains(
+            harness.Log.Entries, e => e.Level == LogLevel.Debug && e.Message.Contains("not a JSON array", StringComparison.Ordinal));
+
+        [Theory]
+        [InlineData("[]")]
+        [InlineData("""{"claim":"has a beagle","about":"self"}""")]
+        [InlineData("""[{"about":"self"},42,"x",{"claim":""}]""")]
+        public async Task AnEmptyOrMisshapenReplyStoresNothing(string reply)
+        {
+            var other = new LifeHarness(reply);
+
+            await other.RunAsync("anything");
+
+            Assert.Empty(other.Store.Rows);
+        }
+    }
+
+    // Review addition (T704 round 1, F85.3) — The gate says not now
+    public sealed class ScenarioTheBatchGateDeclines
+    {
+        // Given the offline-batch gate declines
+        // When  the extractor runs
+
+        readonly LifeHarness harness = new("""[{"claim":"has a beagle named Gus","about":"self"}]""", gateAllows: false);
+
+        public ScenarioTheBatchGateDeclines() =>
+            harness.RunAsync("My beagle Gus howled through the whole intro").GetAwaiter().GetResult();
+
+        [Fact]
+        public void TheModelIsNotCalled() => Assert.Empty(harness.Llm.UserPrompts);
+
+        [Fact]
+        public void NoRowIsWritten() => Assert.Empty(harness.Store.Rows);
+
+        [Fact]
+        public void OneDebugLineRecordsTheSkip() =>
+            Assert.Single(harness.Log.Entries, e => e.Level == LogLevel.Debug && e.Message.Contains("skipped", StringComparison.Ordinal));
     }
 
     // AC8 — The cap
@@ -124,7 +313,20 @@ public static class FeatureAnInventedLifeThatStaysConsistent
         // Given 100 life rows, the oldest never aired
         // When  a new claim is stored
 
-        [Fact(Skip = "pending: T704 — see docs/PLAN.md")]
-        public void TheOldestNeverAiredRowIsEvicted() => Assert.Fail("pending: T704 — the oldest never-aired row is evicted");
+        [Fact]
+        public async Task TheOldestNeverAiredRowIsEvicted()
+        {
+            var harness = new LifeHarness("""[{"claim":"plays the banjo","about":"self","category":"habit"}]""");
+            for (var n = 1; n <= LifeMemoryRules.Cap; n++)
+                harness.Store.Seed(LifeHarness.Sal, $"claim {n}", aired: n == 1);
+
+            await harness.RunAsync("Banjo night");
+
+            var contents = harness.Store.Rows.Select(r => r.Content).ToList();
+            Assert.Equal(LifeMemoryRules.Cap, contents.Count);
+            Assert.DoesNotContain("claim 2", contents);
+            Assert.Contains("claim 1", contents);
+            Assert.Contains("plays the banjo", contents);
+        }
     }
 }

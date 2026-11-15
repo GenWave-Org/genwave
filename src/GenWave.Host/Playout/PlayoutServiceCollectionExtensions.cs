@@ -103,6 +103,11 @@ static class PlayoutServiceCollectionExtensions
             .AddSingleton<EpisodeAccrualSink>()
             .AddSingleton<IOnAirSnapshotSource>(sp => sp.GetRequiredService<CachingScheduleResolver>())
             .AddHostedService<EpisodeAccrualDrainService>()
+            // DJ life extraction (SPEC F218.17, STORY-537; PLAN T704): LlmCopyWriter enqueues each accepted copy, the
+            // hosted drain runs the model call off the air path, one copy at a time.
+            .AddSingleton<LifeExtractionService>()
+            .AddSingleton<ILifeExtractor>(sp => sp.GetRequiredService<LifeExtractionService>())
+            .AddHostedService<LifeExtractionDrainService>()
             .AddSingleton<IStationEventSink>(sp => new CompositeStationEventSink(
                 [
                     sp.GetRequiredService<PlayHistoryEventSink>(),

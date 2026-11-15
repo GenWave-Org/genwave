@@ -139,7 +139,8 @@ public sealed class LlmCopyWriter(
     ITaglineLedger? taglineLedger = null, // T713: absent means no taglines, exactly the pre-ledger behaviour
     ISentenceTrimmer? sentenceTrimmer = null, // T714: absent means a repeat always re-asks, exactly the pre-trim behaviour
     ILlmContextWindow? contextWindow = null, // T701: absent (or either seam absent) means no memory, exactly the pre-memory behaviour
-    IMemoryRecallSource? memoryRecall = null)
+    IMemoryRecallSource? memoryRecall = null,
+    ILifeExtractor? lifeExtractor = null) // T704: absent means no life extraction, exactly the pre-extractor behaviour
     : ISegmentCopyWriter, IPersonaPreviewWriter, IAnnouncementCopyWriter
 {
     readonly IStationEventSink events = events ?? NoOpStationEventSink.Instance;
@@ -453,6 +454,10 @@ public sealed class LlmCopyWriter(
             // SPEC F218.15: the patter fact the accepted copy actually used rides out with the copy, so the
             // render event can name it for the memory consumer. A fact the copy never claimed is not "read".
             var factRead = FactReadBy(cleaned, request, patterFact);
+            // SPEC F218.17: hand the accepted copy to the background life extractor. A bounded queue write, never
+            // awaited, so the render is not held for it; a fallback copy returned above never reaches here.
+            if (persona is not null)
+                lifeExtractor?.Enqueue(new AcceptedCopy(persona.Id, persona.Name, cleaned));
             return await RecordAsync(
                 request, new SegmentCopy(cleaned, FreshPerAiring: true) { FactRead = factRead }, fallbackCopy: false, ct);
         }

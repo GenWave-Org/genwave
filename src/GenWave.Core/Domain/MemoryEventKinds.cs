@@ -5,4 +5,7 @@ public static class MemoryEventKinds
 {
     /// <summary>A crosstalk two personas had on air.</summary>
     public const string Crosstalk = "crosstalk";
+
+    /// <summary>Something two personas did together off air, extracted from a copy (SPEC F218.18).</summary>
+    public const string Outing = "outing";
 }

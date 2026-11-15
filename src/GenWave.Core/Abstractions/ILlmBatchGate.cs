@@ -2,10 +2,11 @@ namespace GenWave.Core.Abstractions;
 
 /// <summary>
 /// The offline-batch gate every low-priority LLM consumer checks ONCE per batch, never per item
-/// (SPEC F85.3) — two consumers today, both sub-passes of the SAME
+/// (SPEC F85.3) — three consumers today. Two are sub-passes of the SAME
 /// <c>GenWave.MediaLibrary.Enrich.EnrichmentService</c> backfill loop, each evaluating this gate
 /// independently: the mood-tagger enrichment pass (mood-tag backfill, STORY-216, T72) and the
-/// explicit-classification sweep (STORY-251, T113, SPEC F95.3).
+/// explicit-classification sweep (STORY-251, T113, SPEC F95.3). The third is the life extractor
+/// (<c>GenWave.Memory.LifeExtractionService</c>, STORY-537, SPEC F218.17), which checks once per queued copy.
 ///
 /// Kept narrow and living here — NOT in <c>GenWave.Tts</c>, where the actual F69 degradation state
 /// machine (<c>DegradationController</c>) and <c>Llm:*</c> configuration live — because

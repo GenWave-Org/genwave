@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **144 seams across 9 projects.**
+> **147 seams across 9 projects.**
 
 ## GenWave.Ads (2 seams)
 
@@ -118,7 +118,7 @@
 | `GenWave.Core.Abstractions.IEnergyAnalyzer` | `GenWave.Loudness.FfmpegEnergyAnalyzer` | Singleton | — |
 | `GenWave.Core.Abstractions.ILoudnessAnalyzer` | `GenWave.Loudness.FfmpegLoudnessAnalyzer` | Singleton | — |
 
-## GenWave.MediaLibrary (63 seams)
+## GenWave.MediaLibrary (64 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -153,6 +153,7 @@
 | `GenWave.Core.Abstractions.IIconPackStore` | `GenWave.MediaLibrary.Station.IconPackRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IJinglePackStore` | `GenWave.MediaLibrary.Station.JinglePackRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.ILibraryRepository` | `GenWave.MediaLibrary.Catalog.LibraryRepository` | Singleton | — |
+| `GenWave.Core.Abstractions.ILifeStore` | `GenWave.MediaLibrary.Station.PersonaMemoryRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IMediaCatalog` | `GenWave.MediaLibrary.Catalog.MediaRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IMediaExplicitOverride` | `GenWave.MediaLibrary.Catalog.MediaRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IMediaLibraryMembership` | `GenWave.MediaLibrary.Catalog.MediaLibraryMembershipRepository` | Singleton | — |
@@ -186,10 +187,11 @@
 | `GenWave.Core.Abstractions.IVoicePackStore` | `GenWave.MediaLibrary.Station.VoicePackRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IYearLookup` | `GenWave.MediaLibrary.YearLookup.MusicBrainzYearLookup` | Singleton | — |
 
-## GenWave.Memory (5 seams)
+## GenWave.Memory (6 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
+| `GenWave.Core.Abstractions.ILifeExtractor` | `GenWave.Memory.LifeExtractionService` | Singleton | — |
 | `GenWave.Core.Abstractions.IMemoryRecallSource` | `GenWave.Memory.MemoryRecallSource` | Singleton | — |
 | `GenWave.Core.Abstractions.IQuirkSelector` | `GenWave.Memory.QuirkSelector` | Singleton | — |
 | `GenWave.Core.Abstractions.IRepetitionCheck` | `GenWave.Memory.RepetitionCheck` | Singleton | — |
@@ -211,12 +213,13 @@
 | `GenWave.Orchestration.IRandomSource` | `GenWave.Orchestration.SystemRandomSource` | Singleton | — |
 | `GenWave.Orchestration.IRequestFulfillmentSource` | `GenWave.Orchestration.RequestFulfillmentProvider` | Singleton | also registered: `GenWave.Orchestration.NoOpRequestFulfillmentSource` (GenWave.Orchestration) |
 
-## GenWave.Tts (19 seams)
+## GenWave.Tts (20 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
 | `GenWave.Core.Abstractions.IAnnouncementCopyWriter` | `GenWave.Tts.LlmCopyWriter` | Singleton | — |
 | `GenWave.Core.Abstractions.ICopyBoundsProvider` | `GenWave.Tts.OptionsMonitorCopyBoundsProvider` | Singleton | — |
+| `GenWave.Core.Abstractions.ILifeClaimLlm` | `GenWave.Tts.LifeClaimLlm` | Singleton | — |
 | `GenWave.Core.Abstractions.ILlmModelLister` | `GenWave.Tts.OpenAiModelLister` | Singleton | — |
 | `GenWave.Core.Abstractions.IPersonaPreviewWriter` | `GenWave.Tts.LlmCopyWriter` | Singleton | — |
 | `GenWave.Core.Abstractions.ISegmentCopyWriter` | `GenWave.Tts.DegradationGatedCopyWriter` | Singleton | wraps: `GenWave.Tts.LlmCopyWriter` (GenWave.Tts), `GenWave.Tts.TemplateCopyWriter` (GenWave.Tts) |
