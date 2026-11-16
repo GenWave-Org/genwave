@@ -191,8 +191,9 @@ sealed class BoothLogWriter(
     static string Summarize(DegradationModeChanged d) =>
         $"LLM degradation: {d.Previous} → {d.New} ({d.Cause})";
 
+    // One row per caught attempt: phrase part, then the motif words, then " — <outcome>" (the repeat views match that tail).
     static string Summarize(RepeatCaught r) =>
-        $"Repeat caught: \"{r.Phrase}\"" + r.Outcome switch
+        "Repeat caught:" + RepeatParts(r) + r.Outcome switch
         {
             RepeatOutcome.Trimmed => " — trimmed",
             RepeatOutcome.ReAsked => " — re-asked",
@@ -200,6 +201,15 @@ sealed class BoothLogWriter(
             RepeatOutcome.Dropped => " — dropped",
             _ => "",
         };
+
+    static string RepeatParts(RepeatCaught r)
+    {
+        var phrase = string.IsNullOrEmpty(r.Phrase) ? "" : $" \"{r.Phrase}\"";
+        var motif = r.MotifWords is { Count: > 0 } words
+            ? " motif " + string.Join(", ", words.Select(w => $"\"{w}\""))
+            : "";
+        return phrase + motif;
+    }
 
     static string Summarize(HandoffPieceDropped h) => $"Handoff {h.Kind} dropped ({h.Cause})";
 }

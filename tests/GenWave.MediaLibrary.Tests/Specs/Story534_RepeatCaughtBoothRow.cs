@@ -68,4 +68,33 @@ public static class FeatureRepeatCaughtBoothRow
             Assert.Equal(expected, row.Summary);
         }
     }
+
+    // T724 — a motif word reads as such
+    public sealed class ScenarioAMotifWordSaysMotif
+    {
+        [Fact]
+        public async Task TheSummaryNamesTheMotifAndTheOutcome()
+        {
+            var row = await PublishAndCaptureAsync(new RepeatCaught(7, "", RepeatOutcome.Trimmed, ["ballroom"]));
+
+            Assert.Equal("Repeat caught: motif \"ballroom\" — trimmed", row.Summary);
+        }
+
+        [Fact]
+        public async Task EachMotifWordIsQuotedSeparately()
+        {
+            var row = await PublishAndCaptureAsync(new RepeatCaught(7, "", RepeatOutcome.ReAsked, ["ballroom", "velvet"]));
+
+            Assert.Equal("Repeat caught: motif \"ballroom\", \"velvet\" — re-asked", row.Summary);
+        }
+
+        [Fact]
+        public async Task APhraseAndMotifWordShareOneSummaryEndingInTheOutcome()
+        {
+            var row = await PublishAndCaptureAsync(
+                new RepeatCaught(7, "golden hour groove", RepeatOutcome.Trimmed, ["ballroom"]));
+
+            Assert.Equal("Repeat caught: \"golden hour groove\" motif \"ballroom\" — trimmed", row.Summary);
+        }
+    }
 }

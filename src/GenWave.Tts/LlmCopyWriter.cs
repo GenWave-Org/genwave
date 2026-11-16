@@ -148,6 +148,9 @@ public sealed class LlmCopyWriter(
     /// <summary>How many of the persona's newest non-template utterances the repetition check compares against (SPEC F218.11).</summary>
     const int RepetitionWindow = 10;
 
+    /// <summary>Newest utterances read for the repeat check, wide enough to see a shift's motif words (T724). The cap counts the shift's lines within these newest, not the whole shift.</summary>
+    const int ShiftLineWindow = 60;
+
     /// <summary>Name of the <see cref="IHttpClientFactory"/> client this writer resolves (registered in Program.cs).</summary>
     public const string HttpClientName = "Llm";
 
@@ -897,9 +900,7 @@ public sealed class LlmCopyWriter(
     async Task<IReadOnlyList<UtteranceEntry>> ReadRecentEntriesAsync(
         SegmentRequest request, bool needHistory, CancellationToken ct)
     {
-        var take = needHistory
-            ? Math.Max(RepetitionWindow, LlmPromptBuilder.RecentLinesInPrompt)
-            : LlmPromptBuilder.RecentLinesInPrompt;
+        var take = needHistory ? Math.Max(ShiftLineWindow, LlmPromptBuilder.RecentLinesInPrompt) : LlmPromptBuilder.RecentLinesInPrompt;
         if (utteranceStore is null || request.PersonaId is not { } personaId)
             return [];
 
@@ -917,6 +918,10 @@ public sealed class LlmCopyWriter(
             return [];
         }
     }
+
+    /// <summary>The ledger's "newest reads" are the repeat check's classic window, not the wider shift read (T724).</summary>
+    static IReadOnlyList<UtteranceEntry> NewestForLedger(IReadOnlyList<UtteranceEntry> entries) =>
+        entries.Take(Math.Max(RepetitionWindow, LlmPromptBuilder.RecentLinesInPrompt)).ToList();
 
     /// <summary>
     /// What the tagline ledger counts (F218.31): every line the persona wrote inside <see cref="ITaglineLedger.RollingWindow"/>
@@ -946,12 +951,13 @@ public sealed class LlmCopyWriter(
     }
 
     /// <summary>
-    /// SPEC F218.11 — phrases in <paramref name="copy"/> that repeat the persona's last
-    /// <see cref="RepetitionWindow"/> real (non-template) utterances or a spent <c>maxPerShift</c> quirk.
+    /// SPEC F218.11 — hits in <paramref name="copy"/> that repeat the persona's last
+    /// <see cref="RepetitionWindow"/> real (non-template) utterances or a spent <c>maxPerShift</c> quirk, plus
+    /// motif words (T724) counted over the shift's lines in <paramref name="recent"/>.
     /// Spent = a capped rule on the card the selector did NOT hand this break: the selected ones were
     /// only just spent for THIS render, so counting them would stop the catchphrase airing even once.
     /// </summary>
-    IReadOnlyList<string> FindRepeats(
+    IReadOnlyList<RepetitionHit> FindRepeats(
         string copy, SegmentRequest request, string? personaName, IReadOnlyList<UtteranceEntry> recent,
         PersonaCard? card, QuirkSelection? quirkSelection, IReadOnlyList<TaglineStatus> taglines)
     {
@@ -959,6 +965,10 @@ public sealed class LlmCopyWriter(
             return [];
 
         var recentTexts = recent.Where(e => !e.Fallback).Take(RepetitionWindow).Select(e => e.Text).ToList();
+        // T724: the motif cap reads the persona's real lines of THIS shift out of the same read (no unparsable key, no shift lines).
+        var shiftTexts = ShiftKey.TryParse(request.ShiftKeyText, out var shiftKey)
+            ? recent.Where(e => !e.Fallback && e.ShiftKey == shiftKey).Select(e => e.Text).ToList()
+            : [];
         var result = repetitionCheck.Check(
             copy,
             new RepetitionContext(
@@ -966,8 +976,9 @@ public sealed class LlmCopyWriter(
                 request.Track?.Title, request.Track?.Artist, request.Track?.Album, request.Track?.Year,
                 request.CrossingTrackTitle, request.CrossingTrackArtist,
                 AllowedPhrases: taglines.Where(t => t.Available).Select(t => t.Span).ToList(),
-                UnavailablePhrases: taglines.Where(t => !t.Available).Select(t => t.Span).ToList()));
-        return result.Hits.Select(h => h.Phrase).ToList();
+                UnavailablePhrases: taglines.Where(t => !t.Available).Select(t => t.Span).ToList(),
+                ShiftTexts: shiftTexts));
+        return result.Hits;
     }
 
     /// <summary>
@@ -993,10 +1004,12 @@ public sealed class LlmCopyWriter(
             : [];
 
     /// <summary>One <c>repeat-caught</c> booth row per caught attempt (SPEC F218.13); needs a persona to name.</summary>
-    void PublishRepeatCaught(SegmentRequest request, IReadOnlyList<string> phrases, RepeatOutcome outcome)
+    void PublishRepeatCaught(SegmentRequest request, CopyGateVerdict verdict, RepeatOutcome outcome)
     {
-        if (request.PersonaId is { } personaId && phrases.Count > 0)
-            events.Publish(new RepeatCaught(personaId, string.Join(", ", phrases), outcome));
+        if (request.PersonaId is not { } personaId || verdict.RepeatedPhrases.Count == 0)
+            return;
+        // T724: phrase and motif hits of one attempt share ONE event, so the views count one catch.
+        events.Publish(new RepeatCaught(personaId, string.Join(", ", verdict.PhraseHits), outcome, verdict.MotifWords));
     }
 
     /// <summary>
@@ -1119,7 +1132,7 @@ public sealed class LlmCopyWriter(
             var useTaglines = spendQuirks && taglineLedger is not null;
             var recentEntries = await ReadRecentEntriesAsync(request, checkRepeats || useTaglines, ct);
             var taglines = EvaluateTaglines(
-                card, quirkSelection, await ReadTaglineEntriesAsync(request, recentEntries, useTaglines, ct), onAir: spendQuirks);
+                card, quirkSelection, await ReadTaglineEntriesAsync(request, NewestForLedger(recentEntries), useTaglines, ct), onAir: spendQuirks);
             // T701 (F218.22): recall spends rows (marks them aired), so on-air only, inside the critical section.
             var memory = await RecallMemoryAsync(
                 request, spendQuirks && requiredCore is null, LlmPromptBuilder.HasPersonaSection(persona, card, quirkSelection), ct);
@@ -1302,7 +1315,7 @@ public sealed class LlmCopyWriter(
                 if (TrimmedRepeat(firstCandidate, gateResult, request, check) is { } trimmed)
                 {
                     // F218.35: air what is left; no second call. The call itself was fine, so it records as it would uncaught.
-                    PublishRepeatCaught(request, gateResult.RepeatedPhrases, RepeatOutcome.Trimmed);
+                    PublishRepeatCaught(request, gateResult, RepeatOutcome.Trimmed);
                     var (trimOutcome, trimCause) = ClassifyCleanup(cleanup);
                     recorder.Record(
                         personaName, systemPrompt, userPrompt, firstRawText, startedAt, ElapsedMs(startedAt),
@@ -1310,7 +1323,7 @@ public sealed class LlmCopyWriter(
                     return new LlmCopyCleanupResult.Fits(trimmed);
                 }
 
-                PublishRepeatCaught(request, gateResult.RepeatedPhrases, RepeatOutcome.ReAsked);
+                PublishRepeatCaught(request, gateResult, RepeatOutcome.ReAsked);
 
                 // The rejected first call gets its own honest ring entry (SPEC F138.4: each call in
                 // the ladder is its own call with its own entry) BEFORE the re-ask fires — never
@@ -1378,12 +1391,12 @@ public sealed class LlmCopyWriter(
                 // real (unusable) text that must never reach TextOf.
                 if (reaskTrimmed is not null && reaskRejection is not null)
                 {
-                    PublishRepeatCaught(request, reaskRejection.RepeatedPhrases, RepeatOutcome.Trimmed);
+                    PublishRepeatCaught(request, reaskRejection, RepeatOutcome.Trimmed);
                     return new LlmCopyCleanupResult.Fits(reaskTrimmed);
                 }
 
                 if (reaskRejection is not null)
-                    PublishRepeatCaught(request, reaskRejection.RepeatedPhrases, RepeatOutcome.Template);
+                    PublishRepeatCaught(request, reaskRejection, RepeatOutcome.Template);
 
                 return reaskRejection switch
                 {

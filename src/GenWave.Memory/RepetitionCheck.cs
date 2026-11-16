@@ -23,12 +23,19 @@ namespace GenWave.Memory;
 /// written. A run touching either use is cut at it: the words outside it still hit as their own run when they
 /// number <see cref="MinRunWords"/> or more (and pass the freshness test), else the run is absorbed into the tagline's use.
 /// A run reaching past an allowed use by a word or two therefore gives no hit.</item>
+/// <item>Motif hit (T724): one content word already in <see cref="MotifLineCap"/> of the shift's lines; the hit's phrase is the word.</item>
 /// </list>
 /// </summary>
 public sealed class RepetitionCheck : IRepetitionCheck
 {
     /// <summary>Shortest shared run that counts as a repeat.</summary>
     public const int MinRunWords = 5;
+
+    /// <summary>Shift lines already holding a content word before a further line using it is a motif hit (T724).</summary>
+    public const int MotifLineCap = 3;
+
+    /// <summary>Shortest word, in letters, the motif cap applies to.</summary>
+    public const int MotifMinLetters = 5;
 
     /// <summary>Words in a freshness window. A five-word run has two four-word windows; any one may qualify it.</summary>
     const int FreshWindowWords = 4;
@@ -101,7 +108,28 @@ public sealed class RepetitionCheck : IRepetitionCheck
                 hits.Add(new RepetitionHit(phrase));
         }
 
+        foreach (var word in MotifWords(candidate, context.ShiftTexts, excluded))
+            hits.Add(new RepetitionHit(word, RepetitionHitKind.Motif));
+
         return hits.Count == 0 ? RepetitionResult.None : new RepetitionResult(hits);
+    }
+
+    // T724: a content word (MotifMinLetters+ letters, fresh: not a stop, persona, station or track word) that is already
+    // in MotifLineCap of the shift's lines is a hit. Whole tokens only ("ballrooms" is not "ballroom"); a word counts once per line.
+    static IEnumerable<string> MotifWords(string[] candidate, IReadOnlyList<string>? shiftTexts, ExcludedWords excluded)
+    {
+        if (shiftTexts is not { Count: > 0 })
+            return [];
+
+        var linesWithWord = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var line in shiftTexts)
+            foreach (var word in RepetitionText.Tokens(line).Distinct(StringComparer.Ordinal))
+                linesWithWord[word] = linesWithWord.GetValueOrDefault(word) + 1;
+
+        return candidate
+            .Distinct(StringComparer.Ordinal)
+            .Where(word => word.Length >= MotifMinLetters && word.All(char.IsLetter) && excluded.IsFresh(word, false)
+                && linesWithWord.GetValueOrDefault(word) >= MotifLineCap);
     }
 
     // Where each phrase is used in the candidate, by the key-run rule: the maximal stretches of candidate words that
