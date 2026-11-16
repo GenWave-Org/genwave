@@ -147,6 +147,19 @@ describe("Feature: I can see and shape a DJ's memory", () => {
       expect(within(region).getByText("Has a cat called Biscuit.")).toBeInTheDocument();
     });
 
+    it("a row's status says how often it was offered to the model, not aired (T721)", async () => {
+      const never = memoryRow({ id: 40, kind: "lore", text: "Never offered line." });
+      const once = memoryRow({ id: 41, kind: "lore", text: "Once line.", airedCount: 1 });
+      const many = memoryRow({ id: 42, kind: "lore", text: "Many line.", airedCount: 3, lastAiredAt: "2026-11-10T10:00:00Z" });
+      makeFetchMock({ "GET /api/personas/1/memory": { status: 200, body: [never, once, many] } });
+      const region = await openMemory();
+
+      expect(within(within(region).getByTestId("memory-row-40")).getByText("Not offered yet")).toBeInTheDocument();
+      expect(within(within(region).getByTestId("memory-row-41")).getByText("Offered once")).toBeInTheDocument();
+      expect(within(within(region).getByTestId("memory-row-42")).getByText(/^Offered 3 times, last /)).toBeInTheDocument();
+      expect(within(region).queryByText(/aired/i)).not.toBeInTheDocument();
+    });
+
     it("Lately explains itself and shows episode text starting with a capital", async () => {
       const hosted = memoryRow({ id: 21, kind: "episode", source: "accrued", text: "hosted a shift on Sunday" });
       makeFetchMock({ "GET /api/personas/1/memory": { status: 200, body: [hosted, LORE_AUTHORED] } });

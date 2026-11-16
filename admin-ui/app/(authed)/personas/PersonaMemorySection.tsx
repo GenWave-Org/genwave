@@ -78,9 +78,10 @@ function errorText(err: unknown): string {
   return err instanceof MemoryApiError ? err.message : "Something went wrong. Try again.";
 }
 
-function airedText(row: PersonaMemoryRow): string {
-  if (row.airedCount === 0) return "Not aired yet";
-  const times = row.airedCount === 1 ? "Aired once" : `Aired ${row.airedCount} times`;
+// `airedCount`/`lastAiredAt` are the wire names: the count is how often the row was offered to the model, not how often it aired.
+function offeredText(row: PersonaMemoryRow): string {
+  if (row.airedCount === 0) return "Not offered yet";
+  const times = row.airedCount === 1 ? "Offered once" : `Offered ${row.airedCount} times`;
   return row.lastAiredAt === null ? times : `${times}, last ${formatUpSince(row.lastAiredAt)}`;
 }
 
@@ -133,7 +134,7 @@ function MemoryRowItem({ row, busy, onChange, onDelete }: MemoryRowItemProps): R
         <Chip>{SOURCE_LABELS[row.source]}</Chip>
         {row.pending && <Chip className="border-accent-2 text-ink">Waiting for your OK</Chip>}
         {row.forgotten && <Chip>Forgotten</Chip>}
-        <span>{airedText(row)}</span>
+        <span>{offeredText(row)}</span>
       </div>
 
       <div className="flex flex-wrap gap-2">
