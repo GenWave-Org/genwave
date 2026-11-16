@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { cookies } from "next/headers";
 import { apiGet } from "@/lib/api";
 import { PersonasClient } from "./PersonasClient";
+import { lifeExtractionOffFrom } from "./life-extraction-setting";
 import type { PersonaDto } from "./types";
 
 // Personas, the format-clock schedule, and on-air status are all live/mutable (an operator edits
@@ -53,10 +54,11 @@ export default async function PersonasPage(): Promise<ReactNode> {
   // Promise.allSettled, not Promise.all: the schedule/status reads are both optional degrades
   // (see their own remarks below) — a network reject on either must never take the personas read
   // down with it and 500 the whole page.
-  const [personasResult, scheduleResult, statusResult] = await Promise.allSettled([
+  const [personasResult, scheduleResult, statusResult, settingsResult] = await Promise.allSettled([
     apiGet("/api/personas", { cookies: cookieHeader }),
     apiGet("/api/schedule", { cookies: cookieHeader }),
     apiGet("/api/status", { cookies: cookieHeader }),
+    apiGet("/api/settings", { cookies: cookieHeader }),
   ]);
 
   if (personasResult.status === "rejected" || !personasResult.value.ok) {
@@ -86,6 +88,17 @@ export default async function PersonasPage(): Promise<ReactNode> {
       ? ((await statusResult.value.json()) as StatusRow).llm?.activePersona ?? null
       : null;
 
+  // The Life tab's "switched off" empty text degrades to "not off" when settings can't be read
+  // (a reject, a non-2xx, or a malformed body) — never claim it is off without proof.
+  let lifeExtractionOff = false;
+  if (settingsResult.status === "fulfilled" && settingsResult.value.ok) {
+    try {
+      lifeExtractionOff = lifeExtractionOffFrom((await settingsResult.value.json()) as unknown);
+    } catch {
+      lifeExtractionOff = false;
+    }
+  }
+
   return (
     <main>
       <h1 className="font-display text-[1.35rem] font-semibold text-ink">Personas</h1>
@@ -94,6 +107,7 @@ export default async function PersonasPage(): Promise<ReactNode> {
           initialPersonas={personas}
           scheduledPersonaIds={scheduledPersonaIds}
           onAirPersonaName={onAirPersonaName}
+          lifeExtractionOff={lifeExtractionOff}
         />
       </div>
     </main>

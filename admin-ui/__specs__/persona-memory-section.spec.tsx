@@ -92,10 +92,10 @@ function callsTo(mockFetch: jest.MockedFunction<typeof fetch>, method: string, u
   return mockFetch.mock.calls.filter(([input, init]) => String(input) === url && (init?.method ?? "GET") === method);
 }
 
-async function openMemory(): Promise<HTMLElement> {
+async function openMemory(lifeExtractionOff = false): Promise<HTMLElement> {
   render(
     <ConfirmDialogProvider>
-      <PersonasClient initialPersonas={[REX]} />
+      <PersonasClient initialPersonas={[REX]} lifeExtractionOff={lifeExtractionOff} />
       <Toaster />
     </ConfirmDialogProvider>
   );
@@ -235,6 +235,35 @@ describe("Feature: I can see and shape a DJ's memory", () => {
       makeFetchMock({ "GET /api/personas/1/memory": { status: 200, body: [] } });
       const region = await openMemory();
       expect(within(region).getByText("No lore yet. Add a line, or ask for suggestions.")).toBeInTheDocument();
+    });
+  });
+
+  describe("T720 — empty states", () => {
+    const SWITCHED_OFF = "Picking up life details is switched off.";
+    const NORMAL_EMPTY = "Nothing here yet. This fills up as the DJ talks on air.";
+
+    it("Life empty with life extraction off says it is switched off", async () => {
+      makeFetchMock({ "GET /api/personas/1/memory": { status: 200, body: [] } });
+      const region = await openMemory(true);
+      await openTab(region, "Life");
+      expect(within(region).getByText(SWITCHED_OFF)).toBeInTheDocument();
+    });
+
+    it("Life empty with life extraction on shows the normal empty text", async () => {
+      makeFetchMock({ "GET /api/personas/1/memory": { status: 200, body: [] } });
+      const region = await openMemory(false);
+      await openTab(region, "Life");
+      expect(within(region).queryByText(SWITCHED_OFF)).not.toBeInTheDocument();
+      expect(within(region).getByText(NORMAL_EMPTY)).toBeInTheDocument();
+    });
+
+    it("Lately empty says it fills as the DJ hosts shifts and hands over", async () => {
+      makeFetchMock({ "GET /api/personas/1/memory": { status: 200, body: [] } });
+      const region = await openMemory();
+      await openTab(region, "Lately");
+      expect(
+        within(region).getByText("Nothing here yet. This fills up as the DJ hosts shifts and hands over to other DJs.")
+      ).toBeInTheDocument();
     });
   });
 

@@ -26,6 +26,8 @@ import { cn } from "@/lib/utils";
 interface PersonaMemorySectionProps {
   personaId: number;
   personaName: string;
+  /** True only when `Memory:LifeExtraction:Enabled` is known to be false (derived by the page). */
+  lifeExtractionOff?: boolean;
 }
 
 interface MemoryKindView {
@@ -48,7 +50,7 @@ const KIND_VIEWS: readonly MemoryKindView[] = [
     kind: "episode",
     label: "Lately",
     blurb: "What this DJ did on the station lately. They can refer back to it.",
-    empty: "Nothing here yet. This fills up as the DJ talks on air.",
+    empty: "Nothing here yet. This fills up as the DJ hosts shifts and hands over to other DJs.",
   },
   {
     kind: "life",
@@ -57,6 +59,8 @@ const KIND_VIEWS: readonly MemoryKindView[] = [
     empty: "Nothing here yet. This fills up as the DJ talks on air.",
   },
 ];
+
+const LIFE_SWITCHED_OFF_TEXT = "Picking up life details is switched off.";
 
 const SOURCE_LABELS: Record<MemorySource, string> = {
   authored: "You wrote this",
@@ -207,7 +211,11 @@ function AddLoreForm({ busy, onAdd }: { busy: boolean; onAdd: (text: string) => 
  * mount lists every kind; each button sends its request and swaps the row from the response, with
  * every button disabled while any request is in flight.
  */
-export function PersonaMemorySection({ personaId, personaName }: PersonaMemorySectionProps): ReactNode {
+export function PersonaMemorySection({
+  personaId,
+  personaName,
+  lifeExtractionOff = false,
+}: PersonaMemorySectionProps): ReactNode {
   const confirm = useConfirm();
   const [status, setStatus] = useState<LoadStatus>({ kind: "loading" });
   const [activeKind, setActiveKind] = useState<MemoryKind>("lore");
@@ -292,6 +300,7 @@ export function PersonaMemorySection({ personaId, personaName }: PersonaMemorySe
   const loadedRows = status.kind === "loaded" ? status.rows : [];
   const viewRows = loadedRows.filter((row) => row.kind === view.kind);
   const visibleRows = showForgotten ? viewRows : viewRows.filter((row) => !row.forgotten);
+  const emptyText = view.kind === "life" && lifeExtractionOff ? LIFE_SWITCHED_OFF_TEXT : view.empty;
   const forgottenCount = viewRows.filter((row) => row.forgotten).length;
 
   return (
@@ -349,7 +358,7 @@ export function PersonaMemorySection({ personaId, personaName }: PersonaMemorySe
           {view.kind === "lore" && <AddLoreForm busy={busy} onAdd={handleAdd} />}
 
           {visibleRows.length === 0 ? (
-            <EmptyState title="Nothing to show" reason={view.empty} />
+            <EmptyState title="Nothing to show" reason={emptyText} />
           ) : (
             <ul className="flex flex-col">
               {visibleRows.map((row) => (

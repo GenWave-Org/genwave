@@ -40,6 +40,9 @@ export interface PersonasClientProps {
    * this and gets the browser's local zone — the same StatusTiles/BoothLogFeed/LlmCallsFeed
    * idiom, not a bespoke one. */
   timeZone?: string;
+  /** True only when `Memory:LifeExtraction:Enabled` is known to be false (page-derived); drives the
+   * Life tab's empty text. Defaults false: unknown is never claimed as off. */
+  lifeExtractionOff?: boolean;
 }
 
 /** Shape of a `PersonaRequest` body accepted by POST/PATCH /api/personas (SPEC F35.4). `soul`
@@ -219,6 +222,7 @@ export function PersonasClient({
   scheduledPersonaIds = [],
   onAirPersonaName = null,
   timeZone,
+  lifeExtractionOff = false,
 }: PersonasClientProps): ReactNode {
   const [personas, setPersonas] = useState<PersonaDto[]>(initialPersonas);
 
@@ -504,7 +508,11 @@ export function PersonasClient({
           <tr className="border-b border-line last:border-b-0">
             <td colSpan={4} className="py-3">
               <div className="rounded-[6px] border border-line bg-surface-2 p-3">
-                <PersonaMemorySection personaId={persona.id} personaName={persona.name} />
+                <PersonaMemorySection
+                  personaId={persona.id}
+                  personaName={persona.name}
+                  lifeExtractionOff={lifeExtractionOff}
+                />
               </div>
             </td>
           </tr>
