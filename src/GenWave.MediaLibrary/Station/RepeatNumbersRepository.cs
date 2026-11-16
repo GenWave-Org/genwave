@@ -33,7 +33,8 @@ sealed class RepeatNumbersRepository(Lazy<NpgsqlDataSource> dataSource, ILogger<
 
             var overused = await conn.QueryAsync<OveruseRow>(new CommandDefinition(
                 """
-                select persona_id::bigint as persona_id, persona_name, shift_key, phrase, max_per_shift, occurrences
+                select persona_id::bigint as persona_id, persona_name, shift_key, phrase, max_per_shift, occurrences,
+                       last_written_at
                 from station.v_catchphrase_per_shift
                 where occurrences > max_per_shift and last_written_at >= now() - interval '7 days'
                 order by last_written_at desc, persona_name, phrase
@@ -45,7 +46,8 @@ sealed class RepeatNumbersRepository(Lazy<NpgsqlDataSource> dataSource, ILogger<
             return new RepeatNumbers(
                 djs.Select(r => new DjRepeatNumbers(r.PersonaId, r.PersonaName, r.Catches, r.Trims, r.Fallbacks)).ToList(),
                 overused.Select(r => new CatchphraseOveruse(
-                    r.PersonaId, r.PersonaName, r.ShiftKey, r.Phrase, r.MaxPerShift, r.Occurrences)).ToList());
+                    r.PersonaId, r.PersonaName, r.ShiftKey, r.Phrase, r.MaxPerShift, r.Occurrences,
+                    new DateTimeOffset(DateTime.SpecifyKind(r.LastWrittenAt, DateTimeKind.Utc)))).ToList());
         }
         // ArgumentException: no station connection string is configured, so the lazy data source cannot be built.
         catch (Exception ex) when (ex is NpgsqlException or ArgumentException)
@@ -57,5 +59,6 @@ sealed class RepeatNumbersRepository(Lazy<NpgsqlDataSource> dataSource, ILogger<
 
     sealed record DjRow(long PersonaId, string PersonaName, int Catches, int Trims, int Fallbacks);
 
-    sealed record OveruseRow(long PersonaId, string PersonaName, string ShiftKey, string Phrase, int MaxPerShift, int Occurrences);
+    // timestamptz arrives as a UTC DateTime: Dapper cannot match a positional DateTimeOffset parameter.
+    sealed record OveruseRow(long PersonaId, string PersonaName, string ShiftKey, string Phrase, int MaxPerShift, int Occurrences, DateTime LastWrittenAt);
 }

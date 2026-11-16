@@ -121,7 +121,8 @@ public static class FeatureTheWeekAfterInNumbers
         {
             var numbers = new RepeatNumbers(
                 [new DjRepeatNumbers(7, "Flip", Catches: 3, Trims: 2, Fallbacks: 1)],
-                [new CatchphraseOveruse(7, "Flip", "shift-a", "banger, log it", MaxPerShift: 1, Occurrences: 2)]);
+                [new CatchphraseOveruse(7, "Flip", "shift-a", "banger, log it", MaxPerShift: 1, Occurrences: 2,
+                    LastSaidAt: new DateTimeOffset(2026, 11, 9, 3, 0, 0, TimeSpan.Zero))]);
             await using var factory = new RepeatsStatusWebFactory(new FakeRepeatNumbersReader(numbers));
             var client = factory.CreateClient();
             var login = await client.PostAsJsonAsync("/api/auth/login", new { password = RepeatsStatusWebFactory.Password });
@@ -140,6 +141,7 @@ public static class FeatureTheWeekAfterInNumbers
             Assert.Equal("banger, log it", overused.GetProperty("phrase").GetString());
             Assert.Equal(2, overused.GetProperty("occurrences").GetInt32());
             Assert.Equal(1, overused.GetProperty("maxPerShift").GetInt32());
+            Assert.Equal(new DateTimeOffset(2026, 11, 9, 3, 0, 0, TimeSpan.Zero), overused.GetProperty("lastSaidAt").GetDateTimeOffset());
         }
 
         [Fact]

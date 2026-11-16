@@ -336,7 +336,7 @@ export function StatusTiles({ status, error, timeZone }: StatusTilesProps): Reac
             <TileUnavailable />
           )}
           {status !== null && status.repeats !== undefined && status.repeats !== null && (
-            <RepeatsTileBody repeats={status.repeats} />
+            <RepeatsTileBody repeats={status.repeats} timeZone={timeZone} />
           )}
         </Tile>
 
@@ -452,7 +452,7 @@ function PluginsTileBody({ plugins }: { plugins: readonly PluginStatusEntry[] })
 
 /** SPEC F218.29, STORY-542 — the Repeats panel's body: one sentence per DJ with activity, then one per
  * over-used phrase; a plain "No repeats caught" when the week was quiet. */
-function RepeatsTileBody({ repeats }: { repeats: RepeatsStatus }): ReactNode {
+function RepeatsTileBody({ repeats, timeZone }: { repeats: RepeatsStatus; timeZone?: string }): ReactNode {
   if (isQuietWeek(repeats)) return <p className="mt-1 text-[0.8rem] text-mute">{NO_REPEATS_LINE}</p>;
 
   return (
@@ -464,7 +464,7 @@ function RepeatsTileBody({ repeats }: { repeats: RepeatsStatus }): ReactNode {
       ))}
       {repeats.overused.map((over, index) => (
         <p key={`${over.personaId}-${over.phrase}-${index}`} className="text-[0.75rem] text-mute">
-          {overuseLine(over)}
+          {overuseLine(over, { timeZone })}
         </p>
       ))}
     </div>

@@ -155,6 +155,8 @@ export interface CatchphraseOveruseStatus {
   phrase: string;
   maxPerShift: number;
   occurrences: number;
+  /** ISO-8601 UTC: when the shift's most recent line was written. Absent from an older api. */
+  lastSaidAt?: string;
 }
 
 export interface RepeatsStatus {

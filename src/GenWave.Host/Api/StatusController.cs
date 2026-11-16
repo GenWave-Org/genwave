@@ -52,7 +52,7 @@ public sealed class StatusController(
     /// plugins: [{ name, version, contracts, state, reason? }],
     /// version: { app, build, schema: { expected, applied } },
     /// repeats: { djs: [{ personaId, name, catches, trims, fallbacks }],
-    ///            overused: [{ personaId, name, phrase, maxPerShift, occurrences }] } | null }</c>.
+    ///            overused: [{ personaId, name, phrase, maxPerShift, occurrences, lastSaidAt (ISO-8601 UTC) }] } | null }</c>.
     ///
     /// <c>Station:SafeScope:LibraryIds</c> is read via <see cref="IOptionsMonitor{TOptions}.CurrentValue"/>
     /// on every call — not a boot-time snapshot — so a live <c>PUT /api/settings</c> edit
@@ -273,6 +273,7 @@ public sealed class StatusController(
                     phrase = o.Phrase,
                     maxPerShift = o.MaxPerShift,
                     occurrences = o.Occurrences,
+                    lastSaidAt = o.LastSaidAt,
                 }),
             },
         });

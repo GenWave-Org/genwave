@@ -20,6 +20,7 @@ public static class FeatureTheWeekAfterInNumbersRepository
     public sealed class ScenarioTheRepositoryReadsTheViews(DatabaseFixture db) : IAsyncLifetime
     {
         GenWave.Core.Domain.RepeatNumbers? numbers;
+        DateTime writtenAt;
 
         public async Task InitializeAsync()
         {
@@ -32,12 +33,14 @@ public static class FeatureTheWeekAfterInNumbersRepository
                 returning id
                 """);
             await conn.QuerySingleAsync<int>("insert into station.persona (name) values ('Tony') returning id");
+            // A fixed instant, written as UTC, so a UTC/local shift in the read cannot hide.
+            writtenAt = DateTime.SpecifyKind(DateTime.UtcNow.AddHours(-3), DateTimeKind.Utc);
             await conn.ExecuteAsync(
                 """
-                insert into station.utterance (persona_id, kind, segment_kind, shift_key, text, fallback)
-                values (@flip, 'patter', 'LeadIn', 'a', 'Banger, log it. Banger, log it.', false),
-                       (@flip, 'patter', 'LeadIn', 'b', 'Banger, log it.', true)
-                """, new { flip });
+                insert into station.utterance (persona_id, kind, segment_kind, shift_key, text, fallback, written_at)
+                values (@flip, 'patter', 'LeadIn', 'a', 'Banger, log it. Banger, log it.', false, @writtenAt),
+                       (@flip, 'patter', 'LeadIn', 'b', 'Banger, log it.', true, @writtenAt)
+                """, new { flip, writtenAt });
             await conn.ExecuteAsync(
                 """
                 insert into station.booth_log (kind, summary, persona_id)
@@ -63,6 +66,8 @@ public static class FeatureTheWeekAfterInNumbersRepository
             Assert.Equal("a", over.ShiftKey);
             Assert.Equal("banger, log it", over.Phrase);
             Assert.Equal((1, 2), (over.MaxPerShift, over.Occurrences));
+            Assert.Equal(new DateTimeOffset(writtenAt), over.LastSaidAt, TimeSpan.FromSeconds(1));
+            Assert.Equal(TimeSpan.Zero, over.LastSaidAt.Offset);
         }
     }
 }

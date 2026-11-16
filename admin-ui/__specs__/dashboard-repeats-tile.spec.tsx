@@ -34,7 +34,7 @@ describe("Feature: The Repeats panel on the Status page", () => {
   describe("Scenario: the views have rows", () => {
     const repeats: RepeatsStatus = {
       djs: [flip],
-      overused: [{ personaId: 7, name: "Flip", phrase: "banger, log it", maxPerShift: 1, occurrences: 2 }],
+      overused: [{ personaId: 7, name: "Flip", phrase: "banger, log it", maxPerShift: 1, occurrences: 2, lastSaidAt: "2026-11-09T03:00:00Z" }],
     };
 
     it("shows each DJ's numbers in plain words", () => {
@@ -48,10 +48,10 @@ describe("Feature: The Repeats panel on the Status page", () => {
     });
 
     it("names a phrase said more than its limit in one shift", () => {
-      render(<StatusTiles status={makeStatus(repeats)} error={false} />);
+      render(<StatusTiles status={makeStatus(repeats)} error={false} timeZone="America/Edmonton" />);
 
       expect(
-        within(repeatsTile()).getByText('Flip said "banger, log it" twice in one shift (the limit is 1).')
+        within(repeatsTile()).getByText('Flip said "banger, log it" twice in one shift on Sun Nov 8 (the limit is 1).')
       ).toBeInTheDocument();
     });
   });
@@ -95,8 +95,18 @@ describe("Feature: The Repeats panel on the Status page", () => {
 
     it("counts above two use a number", () => {
       expect(
-        overuseLine({ personaId: 1, name: "Sal", phrase: "oh boy", maxPerShift: 1, occurrences: 4 })
-      ).toBe('Sal said "oh boy" 4 times in one shift (the limit is 1).');
+        overuseLine(
+          { personaId: 1, name: "Sal", phrase: "oh boy", maxPerShift: 1, occurrences: 4, lastSaidAt: "2026-11-09T03:00:00Z" },
+          { timeZone: "America/Edmonton" }
+        )
+      ).toBe('Sal said "oh boy" 4 times in one shift on Sun Nov 8 (the limit is 1).');
+    });
+
+    it("leaves the day out when the api sent none or an invalid one", () => {
+      const base = { personaId: 1, name: "Flip", phrase: "banger, log it", maxPerShift: 1, occurrences: 2 };
+      const expected = 'Flip said "banger, log it" twice in one shift (the limit is 1).';
+      expect(overuseLine(base)).toBe(expected);
+      expect(overuseLine({ ...base, lastSaidAt: "not a date" })).toBe(expected);
     });
   });
 });

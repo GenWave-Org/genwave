@@ -1,3 +1,4 @@
+import { formatWeekdayMonthDay, type ClockFormatOptions } from "@/lib/format-clock";
 import type { CatchphraseOveruseStatus, DjRepeatStatus, RepeatsStatus } from "@/lib/broadcast-api";
 
 /** SPEC F218.29, STORY-542 — the Repeats panel's wording, in plain words (no radio jargon, gh-#707). */
@@ -29,9 +30,15 @@ function timesSaid(count: number): string {
   return count === 2 ? "twice" : `${count} times`;
 }
 
-/** e.g. `Flip said "banger, log it" twice in one shift (the limit is 1).` */
-export function overuseLine(over: CatchphraseOveruseStatus): string {
-  return `${over.name} said "${over.phrase}" ${timesSaid(over.occurrences)} in one shift (the limit is ${over.maxPerShift}).`;
+/** e.g. `Flip said "banger, log it" twice in one shift on Sun Nov 8 (the limit is 1).` */
+export function overuseLine(over: CatchphraseOveruseStatus, clock: ClockFormatOptions = {}): string {
+  const said = `${over.name} said "${over.phrase}" ${timesSaid(over.occurrences)} in one shift`;
+  const limit = `(the limit is ${over.maxPerShift}).`;
+  // An older api sends no day: fall back to the sentence without one rather than naming "unknown".
+  if (over.lastSaidAt === undefined || Number.isNaN(Date.parse(over.lastSaidAt))) {
+    return `${said} ${limit}`;
+  }
+  return `${said} on ${formatWeekdayMonthDay(over.lastSaidAt, clock)} ${limit}`;
 }
 
 /** True when there is nothing worth showing: no DJ had a repeat caught or swapped, no phrase went over. */
