@@ -130,6 +130,36 @@ export interface StatusResponse {
    * already follow.
    */
   plugins?: PluginStatusEntry[];
+  /**
+   * SPEC F218.29, STORY-542, PLAN T708 — the Repeats panel's numbers for the last 7 days. `null` when the
+   * api could not read the station database; absent on an api that predates it (the same "one deploy of
+   * backward tolerance" convention as `rotation`/`gardener`/`plugins` above).
+   */
+  repeats?: RepeatsStatus | null;
+}
+
+/** SPEC F218.29 — one DJ's repeat numbers: `catches` is every repeat caught, `trims` the ones fixed by
+ * cutting a sentence, `fallbacks` the lines that aired as a stock line instead. */
+export interface DjRepeatStatus {
+  personaId: number;
+  name: string;
+  catches: number;
+  trims: number;
+  fallbacks: number;
+}
+
+/** SPEC F218.29 — a signature phrase said more often in one shift than the DJ's card allows. */
+export interface CatchphraseOveruseStatus {
+  personaId: number;
+  name: string;
+  phrase: string;
+  maxPerShift: number;
+  occurrences: number;
+}
+
+export interface RepeatsStatus {
+  djs: DjRepeatStatus[];
+  overused: CatchphraseOveruseStatus[];
 }
 
 /** SPEC F156.7 — one `plugins[]` entry. `name`/`version` are the plugin manifest's own raw text,

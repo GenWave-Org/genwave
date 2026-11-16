@@ -1,6 +1,7 @@
 using GenWave.Core.Abstractions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Npgsql;
 
@@ -13,7 +14,8 @@ public static class UtteranceServiceCollectionExtensions
     /// Registers <see cref="IUtteranceStore"/> (SPEC F218, STORY-532) the same lazy way
     /// <see cref="PersonaServiceCollectionExtensions.AddPersonaStore"/> registers <see cref="IPersonaStore"/>, and binds/validates
     /// <see cref="UtteranceOptions"/> (<c>Memory:UtteranceRetentionDays</c>) from
-    /// <paramref name="configuration"/>.
+    /// <paramref name="configuration"/>. Also registers <see cref="IRepeatNumbersReader"/> (SPEC F218.29,
+    /// STORY-542), the read side over the same utterance and booth data.
     /// </summary>
     public static IServiceCollection AddUtteranceStore(
         this IServiceCollection services, string connectionString, IConfiguration configuration)
@@ -23,6 +25,11 @@ public static class UtteranceServiceCollectionExtensions
             .Bind(configuration.GetSection(UtteranceOptions.Section))
             .ValidateDataAnnotations()
             .ValidateOnStart();
+
+        services.AddSingleton<IRepeatNumbersReader>(sp =>
+            new RepeatNumbersRepository(
+                new Lazy<NpgsqlDataSource>(() => new NpgsqlDataSourceBuilder(connectionString).Build()),
+                sp.GetRequiredService<ILogger<RepeatNumbersRepository>>()));
 
         return services.AddSingleton<IUtteranceStore>(sp =>
             new UtteranceRepository(

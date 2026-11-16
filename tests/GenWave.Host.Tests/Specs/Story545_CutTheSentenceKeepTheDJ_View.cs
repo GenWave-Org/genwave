@@ -1,8 +1,8 @@
 // STORY-545 — Cut the sentence, keep the DJ (gh-#293 gh-#920 · SPEC F218.30–.38 · PLAN T708)
 //
-// BDD specification — xUnit. Every fact is pending at plan time (2026-11-10); the named task activates its
-// facts, watches them fail, then makes them pass.
-// entry point: station.v_repeat_catches_7d over real Postgres (Integration)
+// BDD specification — xUnit. AC8 over real Postgres (Category=Integration): station.v_repeat_catches_7d.
+
+using GenWave.Host.Tests.Support;
 
 namespace GenWave.Host.Tests.Specs;
 
@@ -13,12 +13,37 @@ public static class FeatureCutTheSentenceKeepTheDJView
     // ---------------------------------------------------------------------
 
     // AC8 — trims are counted apart from fallbacks
-    public sealed class ScenarioTrimsAreCountedApartFromFallbacks
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioTrimsAreCountedApartFromFallbacks : IAsyncLifetime
     {
-        // Given 2 repeat-caught rows ending "trimmed" and 1 ending "template" for one DJ in 7 days
-        // When  the repeat view is queried
+        RepeatViewsDatabase? database;
+        (int Catches, int Trims, int Fallbacks) numbers;
 
-        [Fact(Skip = "pending: T708 — see docs/PLAN.md")]
-        public void ItReportsTrims2AndFallbacks1() => Assert.Fail("pending: T708 — it reports trims 2 and fallbacks 1");
+        // Given 2 repeat-caught rows ending "trimmed" and 1 ending "template" for one DJ in 7 days
+        // (the template outcome also aired its fallback line, as production does)
+        // When  the repeat view is queried
+        public async Task InitializeAsync()
+        {
+            database = await RepeatViewsDatabase.StartAsync();
+            var flip = await database.AddPersonaAsync("Flip");
+            await database.AddRepeatCaughtAsync(flip, "banger, log it", "trimmed");
+            await database.AddRepeatCaughtAsync(flip, "that was a stone cold classic", "trimmed", TimeSpan.FromDays(3));
+            await database.AddRepeatCaughtAsync(flip, "welcome back to the shift", "template");
+            await database.AddUtteranceAsync(flip, "flip|1|600|2026-11-09", "Here is a stock line.", fallback: true);
+            numbers = await database.RepeatCatchesAsync(flip);
+        }
+
+        public async Task DisposeAsync()
+        {
+            if (database is not null) await database.DisposeAsync();
+        }
+
+        [Fact]
+        public void ItReportsTrims2AndFallbacks1()
+        {
+            Assert.Equal(2, numbers.Trims);
+            Assert.Equal(1, numbers.Fallbacks);
+            Assert.Equal(3, numbers.Catches);
+        }
     }
 }

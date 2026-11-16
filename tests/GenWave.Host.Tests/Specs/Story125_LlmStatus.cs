@@ -205,7 +205,8 @@ public static class FeatureLlmStatus
             new PluginStatusAccessor(),
             AppVersion.From("0.0.0-test"),
             new SchemaVersionStatus(),
-            new EngineSettingsStatus())
+            new EngineSettingsStatus(),
+            new FakeRepeatNumbersReader())
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
         };

@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **149 seams across 9 projects.**
+> **150 seams across 9 projects.**
 
 ## GenWave.Ads (2 seams)
 
@@ -119,7 +119,7 @@
 | `GenWave.Core.Abstractions.IEnergyAnalyzer` | `GenWave.Loudness.FfmpegEnergyAnalyzer` | Singleton | — |
 | `GenWave.Core.Abstractions.ILoudnessAnalyzer` | `GenWave.Loudness.FfmpegLoudnessAnalyzer` | Singleton | — |
 
-## GenWave.MediaLibrary (65 seams)
+## GenWave.MediaLibrary (66 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -172,6 +172,7 @@
 | `GenWave.Core.Abstractions.IPersonaTasteReader` | `GenWave.MediaLibrary.Station.PersonaTasteRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IPersonaTasteStore` | `GenWave.MediaLibrary.Station.PersonaTasteRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IQuirkSpendLedger` | `GenWave.MediaLibrary.Station.PersonaMemoryRepository` | Singleton | — |
+| `GenWave.Core.Abstractions.IRepeatNumbersReader` | `GenWave.MediaLibrary.Station.RepeatNumbersRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IRequestCatalogProbe` | `GenWave.MediaLibrary.Catalog.RequestCatalogProbeRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IRequestStore` | `GenWave.MediaLibrary.Station.RequestRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IRotFindingStore` | `GenWave.MediaLibrary.Garden.RotFindingRepository` | Singleton | — |
