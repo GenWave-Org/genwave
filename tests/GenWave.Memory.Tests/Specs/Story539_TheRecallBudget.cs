@@ -66,4 +66,28 @@ public static class FeatureTheRecallBudget
         [Fact]
         public void AnEpisodeAiredFortyNineHoursAgoIsRecalled() => Assert.Equal(["the older one"], packet.Episodes.Select(m => m.Content));
     }
+
+    // T725 - lore comes back about once a shift; episodes and life keep 48 h
+    public sealed class ScenarioLoreIsHeardAboutOnceAShift
+    {
+        readonly MemoryPacket packet;
+
+        public ScenarioLoreIsHeardAboutOnceAShift()
+        {
+            var store = new InMemoryPersonaMemory(new FakeTimeProvider());
+            store.Add(MemoryKinds.Lore, "lore 5h", airedAgo: TimeSpan.FromHours(5));
+            store.Add(MemoryKinds.Lore, "lore 7h", airedAgo: TimeSpan.FromHours(7));
+            store.Add(MemoryKinds.Life, "life 47h", airedAgo: TimeSpan.FromHours(47));
+            packet = new MemoryRecallSource(store).TakeAsync(1, MemoryBudget.Standard, CancellationToken.None).GetAwaiter().GetResult();
+        }
+
+        [Fact]
+        public void LoreAiredFiveHoursAgoIsSkipped() => Assert.DoesNotContain("lore 5h", packet.Lore.Select(m => m.Content));
+
+        [Fact]
+        public void LoreAiredSevenHoursAgoIsRecalled() => Assert.Contains("lore 7h", packet.Lore.Select(m => m.Content));
+
+        [Fact]
+        public void ALifeRowAiredFortySevenHoursAgoIsStillSkipped() => Assert.Empty(packet.Life);
+    }
 }

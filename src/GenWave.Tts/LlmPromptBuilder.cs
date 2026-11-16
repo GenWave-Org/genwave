@@ -313,6 +313,9 @@ static class LlmPromptBuilder
     /// <summary>SPEC F218.23 - memories are colour: the DJ may refer to them, never must.</summary>
     public const string MemoryMayReferLine = "You may refer to these if it fits, but you never have to.";
 
+    /// <summary>SPEC F218.22 - nudge under the lore lines only; lore is the one kind recalled about once a shift.</summary>
+    public const string MemoryLoreNudgeLine = "Work one of these into this break if it fits naturally.";
+
     /// <summary>SPEC F218.19 - heading of the never-mention list.</summary>
     public const string NeverMentionHeading = "Never mention:";
 
@@ -320,8 +323,8 @@ static class LlmPromptBuilder
     public const int MemoryRowMaxChars = 240;
 
     /// <summary>
-    /// SPEC F218.22/F218.19/F218.23 - the memory block (lore, then episodes newest first, then life, then the
-    /// may-refer line) and the never-mention block; each is absent when it has nothing to list.
+    /// SPEC F218.22/F218.19/F218.23 - the memory block (lore, then the lore nudge when lore is present, then episodes newest
+    /// first, then life, then the may-refer line) and the never-mention block; each is absent when it has nothing to list.
     /// Row text is flattened to one line so a stored newline cannot start a fake prompt section.
     /// </summary>
     public static IReadOnlyList<string> BuildMemoryBlocks(MemoryPacket memory)
@@ -331,7 +334,10 @@ static class LlmPromptBuilder
         if (rows.Count > 0)
         {
             block.Add(MemoryHeading);
-            block.AddRange(rows.Select(r => "- " + MemoryLine(r.Content)));
+            block.AddRange(memory.Lore.Select(r => "- " + MemoryLine(r.Content)));
+            if (memory.Lore.Count > 0)
+                block.Add(MemoryLoreNudgeLine);
+            block.AddRange(memory.Episodes.Concat(memory.Life).Select(r => "- " + MemoryLine(r.Content)));
             block.Add(MemoryMayReferLine);
         }
 
