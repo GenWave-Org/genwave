@@ -392,6 +392,12 @@
   <data name="Llm:MaxCopyChars.Help" xml:space="preserve">
     <value>The maximum length, in characters, of LLM-authored patter copy — longer completions are truncated.</value>
   </data>
+  <data name="Memory:LifeExtraction:Enabled.Label" xml:space="preserve">
+    <value>DJs remember the life they invent</value>
+  </data>
+  <data name="Memory:LifeExtraction:Enabled.Help" xml:space="preserve">
+    <value>After each written DJ line, a second model call looks for new personal details the DJ mentioned (a pet, a home, a habit) and remembers them for next time. Turn this off to stop those extra model calls; what is already remembered stays.</value>
+  </data>
   <data name="Admin:PlayHistoryCapacity.Label" xml:space="preserve">
     <value>Play history capacity</value>
   </data>

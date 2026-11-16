@@ -7,8 +7,11 @@ public sealed class FakeLifeClaimLlm(string? reply, Func<CancellationToken, Task
 {
     public List<string> UserPrompts { get; } = [];
 
+    public List<string> SystemPrompts { get; } = [];
+
     public async Task<string?> CompleteAsync(string systemPrompt, string userPrompt, CancellationToken ct)
     {
+        SystemPrompts.Add(systemPrompt);
         UserPrompts.Add(userPrompt);
         if (beforeReply is not null)
             await beforeReply(ct);

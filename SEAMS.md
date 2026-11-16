@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **148 seams across 9 projects.**
+> **149 seams across 9 projects.**
 
 ## GenWave.Ads (2 seams)
 
@@ -66,7 +66,7 @@
 |---|---|---|---|
 | `GenWave.Core.Abstractions.IAppVersion` | `GenWave.Core.AppVersion` | Singleton | — |
 
-## GenWave.Host (37 seams)
+## GenWave.Host (38 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -79,6 +79,7 @@
 | `GenWave.Core.Abstractions.IContextSettingsProvider` | `GenWave.Host.Options.ConfigurationContextSettingsProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.ICrosstalkScopeProvider` | `GenWave.Host.Options.OptionsMonitorCrosstalkScopeProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.IFileActionPlanTokens` | `GenWave.Host.Api.DataProtectionFileActionPlanTokens` | Singleton | — |
+| `GenWave.Core.Abstractions.ILifeExtractionSwitch` | `GenWave.Host.Options.OptionsMonitorLifeExtractionSwitch` | Singleton | — |
 | `GenWave.Core.Abstractions.ILiquidsoapControl` | `GenWave.Host.Engine.MediaExistencePushGuard` | Singleton | — |
 | `GenWave.Core.Abstractions.IListenerStatsSource` | `GenWave.Host.Stats.IcecastListenerStatsSource` | Singleton | — |
 | `GenWave.Core.Abstractions.ILlmBatchGate` | `GenWave.Host.Enrichment.LlmBatchGate` | Singleton | — |

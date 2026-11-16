@@ -14,6 +14,48 @@ sealed partial class PersonaMemoryRepository
     public async Task AddOutingAsync(NewMemoryEvent outing, IReadOnlyList<NewLifeClaim> claims, CancellationToken ct) =>
         await WriteLifeAsync(outing, claims, ct);
 
+    public async Task<IReadOnlyList<string>> RecentLifeAsync(long personaId, int limit, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var rows = await conn.QueryAsync<string>(new CommandDefinition(
+            """
+            select content from station.persona_memory
+            where persona_id = @personaId and kind = 'life' and forgotten_at is null
+            order by created_at desc, id desc
+            limit @limit
+            """,
+            new { personaId, limit },
+            cancellationToken: ct));
+        return rows.ToList();
+    }
+
+    public async Task<IReadOnlyList<string>> ForgottenLifeAsync(long personaId, int limit, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var rows = await conn.QueryAsync<string>(new CommandDefinition(
+            """
+            select content from station.persona_memory
+            where persona_id = @personaId and kind = 'life' and forgotten_at is not null
+            order by created_at desc, id desc
+            limit @limit
+            """,
+            new { personaId, limit },
+            cancellationToken: ct));
+        return rows.ToList();
+    }
+
+    public async Task<int> CountExtractedSinceAsync(long personaId, DateTimeOffset since, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        return await conn.QuerySingleAsync<int>(new CommandDefinition(
+            """
+            select count(*)::int from station.persona_memory
+            where persona_id = @personaId and kind = 'life' and source = 'extracted' and created_at >= @since
+            """,
+            new { personaId, since = since.ToUniversalTime() },
+            cancellationToken: ct));
+    }
+
     /// <summary>
     /// One transaction: drop the claims the persona already has (compared on <see cref="LifeMemoryRules.Normalise"/>
     /// in code, so there is one definition of "same claim", forgotten rows included), write the shared event when

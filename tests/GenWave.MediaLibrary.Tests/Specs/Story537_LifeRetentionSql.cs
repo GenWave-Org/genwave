@@ -272,4 +272,59 @@ public static class FeatureLifeRetentionSql
         [Fact]
         public void ReExtractingTheForgottenClaimWritesNothing() => Assert.False(relearned);
     }
+
+    // T704a — what the extractor already knows, and how many rows a window has gained
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioTheExtractorReadsWhatIsKnown(DatabaseFixture db) : IAsyncLifetime
+    {
+        long sal;
+        long flip;
+
+        public async Task InitializeAsync()
+        {
+            await ResetAsync(db);
+            sal = await CreatePersonaAsync(db, "Sal");
+            flip = await CreatePersonaAsync(db, "Flip");
+            await PlantAsync(db, sal, "oldest detail", minutesAgo: 300);
+            await PlantAsync(db, sal, "forgotten detail", minutesAgo: 200);
+            await using (var conn = await db.StationDataSource.OpenConnectionAsync())
+                await conn.ExecuteAsync("update station.persona_memory set forgotten_at = now() where content = 'forgotten detail'");
+            await PlantAsync(db, sal, "authored detail", minutesAgo: 100, source: "authored");
+            await PlantAsync(db, sal, "newest detail", minutesAgo: 10);
+            await PlantAsync(db, flip, "flip detail", minutesAgo: 10);
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public async Task RecentLifeIsNewestFirstWithoutForgottenRowsOrOtherPersonas() =>
+            Assert.Equal(
+                ["newest detail", "authored detail", "oldest detail"],
+                await Repo(db).RecentLifeAsync(sal, 30, CancellationToken.None));
+
+        [Fact]
+        public async Task ForgottenLifeIsOnlyTheForgottenRowsOfThatPersona() =>
+            Assert.Equal(["forgotten detail"], await Repo(db).ForgottenLifeAsync(sal, 30, CancellationToken.None));
+
+        [Fact]
+        public async Task ForgottenLifeIsEmptyForAPersonaWithNone() =>
+            Assert.Empty(await Repo(db).ForgottenLifeAsync(flip, 30, CancellationToken.None));
+
+        [Fact]
+        public async Task RecentLifeStopsAtTheLimit() =>
+            Assert.Equal(["newest detail", "authored detail"], await Repo(db).RecentLifeAsync(sal, 2, CancellationToken.None));
+
+        [Fact]
+        public async Task TheWindowCountIsExtractedRowsSinceTheCutoffAndNotAuthoredOnes() =>
+            Assert.Equal(1, await Repo(db).CountExtractedSinceAsync(sal, DateTimeOffset.UtcNow.AddMinutes(-60), CancellationToken.None));
+
+        [Fact]
+        public async Task TheWindowCountIncludesForgottenRows() =>
+            Assert.Equal(2, await Repo(db).CountExtractedSinceAsync(sal, DateTimeOffset.UtcNow.AddMinutes(-250), CancellationToken.None));
+
+        [Fact]
+        public async Task TheWindowCountIsPerPersona() =>
+            Assert.Equal(1, await Repo(db).CountExtractedSinceAsync(flip, DateTimeOffset.UtcNow.AddMinutes(-120), CancellationToken.None));
+    }
 }

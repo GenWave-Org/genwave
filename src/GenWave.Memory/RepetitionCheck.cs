@@ -51,7 +51,7 @@ public sealed class RepetitionCheck : IRepetitionCheck
         Math.Min(phraseWords, Math.Max(QuirkRunWords, (phraseWords + 1) / 2));
 
     // Articles, pronouns, prepositions, auxiliaries, and/or/but. Kept short on purpose.
-    static readonly HashSet<string> StopWords = new(StringComparer.Ordinal)
+    internal static readonly HashSet<string> StopWords = new(StringComparer.Ordinal)
     {
         "a", "an", "the", "i", "you", "he", "she", "it", "we", "they", "me", "my", "your", "our", "us", "this", "that",
         "of", "in", "on", "at", "to", "for", "with", "from", "by", "up", "as", "into",

@@ -105,6 +105,10 @@ static class PlayoutServiceCollectionExtensions
             .AddHostedService<EpisodeAccrualDrainService>()
             // DJ life extraction (SPEC F218.17, STORY-537; PLAN T704): LlmCopyWriter enqueues each accepted copy, the
             // hosted drain runs the model call off the air path, one copy at a time.
+            // The live off-switch (PLAN T704a): bound to the host IConfiguration (the settings overlay is a provider
+            // on it), read per copy through IOptionsMonitor, so a PUT /api/settings edit applies to the next copy.
+            .AddOptions<MemoryLifeExtractionOptions>().BindConfiguration(MemoryLifeExtractionOptions.Section).Services
+            .AddSingleton<ILifeExtractionSwitch, OptionsMonitorLifeExtractionSwitch>()
             .AddSingleton<LifeExtractionService>()
             .AddSingleton<ILifeExtractor>(sp => sp.GetRequiredService<LifeExtractionService>())
             .AddHostedService<LifeExtractionDrainService>()

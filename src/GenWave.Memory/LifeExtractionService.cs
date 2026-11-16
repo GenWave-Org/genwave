@@ -16,12 +16,19 @@ namespace GenWave.Memory;
 /// it becomes an <see cref="MemoryEventKinds.Outing"/> event and one row each side (<see cref="OutingPhrasing"/>).
 /// An <c>about</c> that names nobody on the roster is a claim about the speaker alone.
 /// </para>
+/// <para>
+/// The per-window cap (<see cref="LifeMemoryRules.MaxNewPerWindow"/> per <see cref="LifeMemoryRules.NewWindow"/>)
+/// holds for both DJs of an outing: rows added earlier in the same pass count too. When the other DJ has no room
+/// left, only the speaker's own row is stored (with <see cref="ILifeStore.AddAsync"/>, no outing event), so a DJ
+/// never gains rows past the cap by being named.
+/// </para>
 /// </summary>
 public sealed class LifeExtractionService(
     ILifeClaimLlm llm,
     ILifeStore store,
     IPersonaStore personas,
     ILlmBatchGate gate,
+    ILifeExtractionSwitch enabled,
     TimeProvider time,
     ILogger<LifeExtractionService> logger) : ILifeExtractor
 {
@@ -41,6 +48,9 @@ public sealed class LifeExtractionService(
 
     public void Enqueue(AcceptedCopy copy)
     {
+        if (!enabled.IsEnabled)
+            return;
+
         if (queue.Writer.TryWrite(copy))
             return;
 
@@ -75,14 +85,30 @@ public sealed class LifeExtractionService(
 
     async Task ExtractAsync(AcceptedCopy copy, CancellationToken ct)
     {
-        var decision = gate.Evaluate();
-        if (!decision.Allowed)
+        var persona = LogSanitize.Strip(copy.PersonaName);
+        if (!enabled.IsEnabled)
         {
-            logger.LogDebug("Life extraction skipped for {Persona}: {Reason}", LogSanitize.Strip(copy.PersonaName), LogSanitize.Strip(decision.Reason));
+            logger.LogDebug("Life extraction skipped for {Persona}: switched off", persona);
             return;
         }
 
-        var reply = await llm.CompleteAsync(LifeExtractionPrompt.System, LifeExtractionPrompt.User(copy.Text), ct);
+        var decision = gate.Evaluate();
+        if (!decision.Allowed)
+        {
+            logger.LogDebug("Life extraction skipped for {Persona}: {Reason}", persona, LogSanitize.Strip(decision.Reason));
+            return;
+        }
+
+        var remaining = new Dictionary<long, int>();
+        var room = await RoomAsync(copy.PersonaId, remaining, ct);
+        if (room <= 0)
+        {
+            logger.LogDebug("Life extraction skipped for {Persona}: {Max} new rows already stored this window", persona, LifeMemoryRules.MaxNewPerWindow);
+            return;
+        }
+
+        var known = await store.RecentLifeAsync(copy.PersonaId, LifeMemoryRules.KnownShown, ct);
+        var reply = await llm.CompleteAsync(LifeExtractionPrompt.System, LifeExtractionPrompt.User(copy.Text, known), ct);
         if (reply is null)
             return;
 
@@ -91,24 +117,70 @@ public sealed class LifeExtractionService(
         {
             logger.LogDebug(
                 "Life extraction for {Persona} found no claims ({Shape}); nothing stored",
-                LogSanitize.Strip(copy.PersonaName), claims is null ? "reply was not a JSON array" : "empty array");
+                persona, claims is null ? "reply was not a JSON array" : "empty array");
             return;
         }
 
+        var forgotten = await store.ForgottenLifeAsync(copy.PersonaId, LifeMemoryRules.ForgottenChecked, ct);
         var roster = await personas.GetAllAsync(ct);
-        foreach (var claim in claims)
-            await StoreAsync(copy, claim, roster, ct);
+        var accepted = Accept(claims, new LifeKnownClaims(known.Concat(forgotten), roster.Select(p => p.Name)), room, persona);
+        foreach (var claim in accepted)
+            await StoreAsync(copy, claim, roster, remaining, ct);
     }
 
-    Task StoreAsync(AcceptedCopy copy, ExtractedClaim claim, IReadOnlyList<Persona> roster, CancellationToken ct)
+    // Rows a persona may still gain this window; read once per pass, then counted down as the pass stores rows.
+    async Task<int> RoomAsync(long personaId, Dictionary<long, int> remaining, CancellationToken ct)
+    {
+        if (!remaining.TryGetValue(personaId, out var room))
+        {
+            room = LifeMemoryRules.MaxNewPerWindow
+                - await store.CountExtractedSinceAsync(personaId, time.GetUtcNow() - LifeMemoryRules.NewWindow, ct);
+            remaining[personaId] = room;
+        }
+
+        return room;
+    }
+
+    // The model is not trusted: refuse vague, music and repeated claims, then keep only what the window has room for.
+    List<ExtractedClaim> Accept(IReadOnlyList<ExtractedClaim> claims, LifeKnownClaims seen, int room, string persona)
+    {
+        var accepted = new List<ExtractedClaim>();
+        var rejected = 0;
+        foreach (var claim in claims)
+        {
+            if (accepted.Count == room)
+                break;
+            if (LifeClaimRules.Reject(claim.Claim, seen) is not null)
+            {
+                rejected++;
+                continue;
+            }
+
+            seen.Add(claim.Claim);
+            accepted.Add(claim);
+        }
+
+        if (rejected > 0)
+            logger.LogDebug("Life extraction for {Persona} refused {Rejected} claim(s) as vague, music or already known", persona, rejected);
+        return accepted;
+    }
+
+    async Task StoreAsync(
+        AcceptedCopy copy, ExtractedClaim claim, IReadOnlyList<Persona> roster, Dictionary<long, int> remaining, CancellationToken ct)
     {
         var own = new NewLifeClaim(copy.PersonaId, claim.Claim);
-        if (PersonaNameMatch.Other(claim.About, copy.PersonaId, roster) is not { } other)
-            return store.AddAsync(own, ct);
+        remaining[copy.PersonaId]--;
+        if (PersonaNameMatch.Other(claim.About, copy.PersonaId, roster) is not { } other
+            || await RoomAsync(other.Id, remaining, ct) <= 0)
+        {
+            await store.AddAsync(own, ct);
+            return;
+        }
 
+        remaining[other.Id]--;
         var outing = new NewMemoryEvent(
             MemoryEventKinds.Outing, OutingPhrasing.Summary(copy.PersonaName, other.Name, claim.Claim), time.GetUtcNow());
-        return store.AddOutingAsync(
+        await store.AddOutingAsync(
             outing,
             [own, new NewLifeClaim(other.Id, OutingPhrasing.ForOther(claim.Claim, other.Name, copy.PersonaName))],
             ct);

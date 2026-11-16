@@ -5,16 +5,31 @@ namespace GenWave.Memory.Tests.Fakes;
 
 /// <summary>
 /// The life extractor wired to fakes: a roster of Sal (1) and Captain Flip (2), an in-memory life store and a
-/// canned model reply. <see cref="RunAsync"/> queues one accepted copy and drains it as the Host's loop would.
+/// canned model reply, all on one <see cref="Time"/>. <see cref="RunAsync"/> queues one accepted copy and drains it
+/// as the Host's loop would.
 /// </summary>
-public sealed class LifeHarness(string? reply, bool gateAllows = true)
+public sealed class LifeHarness
 {
     public const long Sal = 1;
     public const long Flip = 2;
 
-    public InMemoryLifeStore Store { get; } = new();
+    readonly bool gateAllows;
 
-    public FakeLifeClaimLlm Llm { get; } = new(reply);
+    public LifeHarness(string? reply, bool gateAllows = true, bool extractionOn = true)
+    {
+        this.gateAllows = gateAllows;
+        Llm = new FakeLifeClaimLlm(reply);
+        Switch = new FakeLifeExtractionSwitch(extractionOn);
+        Store = new InMemoryLifeStore(Time);
+    }
+
+    public FakeTimeProvider Time { get; } = new();
+
+    public InMemoryLifeStore Store { get; }
+
+    public FakeLifeClaimLlm Llm { get; }
+
+    public FakeLifeExtractionSwitch Switch { get; }
 
     public CapturingLogger<LifeExtractionService> Log { get; } = new();
 
@@ -22,7 +37,7 @@ public sealed class LifeHarness(string? reply, bool gateAllows = true)
     {
         var service = new LifeExtractionService(
             Llm, Store, new FakePersonaRoster((Sal, "Sal"), (Flip, "Captain Flip")), new FakeLlmBatchGate(gateAllows),
-            new FakeTimeProvider(), Log);
+            Switch, Time, Log);
         service.Enqueue(new AcceptedCopy(personaId, personaName, copy));
         service.Complete();
         await service.RunAsync(ex => throw ex, CancellationToken.None);

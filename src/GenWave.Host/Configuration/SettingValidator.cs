@@ -250,6 +250,9 @@ public sealed partial class SettingValidator
             // T357) — plain bool kill switch, same shape as Station:Requests:Enabled above.
             ["Station:Thumbs:Enabled"] = IsBool,
 
+            // DJ life extraction's live switch (SPEC F218.17, STORY-537, PLAN T704a) — plain bool.
+            ["Memory:LifeExtraction:Enabled"] = IsBool,
+
             // Persona Catalog origin (SPEC F90.1, STORY-234, PLAN T99) — empty is the F90.1 kill
             // switch (catalog endpoints 404, admin UI hides the shelf), mirroring Llm:Endpoint/
             // Tts:Fallback:Endpoint's own "empty legal, else absolute http/https" shape.
@@ -1018,7 +1021,8 @@ public sealed partial class SettingValidator
             => $"Value '{value}' is not valid for '{key}'. Must be a boolean (true/false).",
         var k when k.Equals("Station:Requests:WindowMinutes", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (minutes).",
-        var k when k.Equals("Station:Thumbs:Enabled", StringComparison.OrdinalIgnoreCase)
+        var k when k.Equals("Station:Thumbs:Enabled", StringComparison.OrdinalIgnoreCase) ||
+                   k.Equals("Memory:LifeExtraction:Enabled", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be a boolean (true/false).",
         var k when k.Equals("Community:CatalogIndexUrl", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an absolute http/https URL, or empty to disable the Persona Catalog entirely.",
