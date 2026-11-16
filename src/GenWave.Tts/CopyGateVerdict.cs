@@ -1,5 +1,3 @@
-using GenWave.Core.Domain;
-
 namespace GenWave.Tts;
 
 /// <summary>
@@ -8,21 +6,10 @@ namespace GenWave.Tts;
 /// never both populated.
 /// </summary>
 /// <param name="Violations">Truth-gate violations; empty when the truth gate passed.</param>
-/// <param name="Hits">Repeat hits; empty unless the truth gate passed and the copy repeats.</param>
-internal sealed record CopyGateVerdict(IReadOnlyList<ClaimViolation> Violations, IReadOnlyList<RepetitionHit> Hits)
+/// <param name="RepeatedPhrases">Repeated phrases; empty unless the truth gate passed and the copy repeats.</param>
+internal sealed record CopyGateVerdict(IReadOnlyList<ClaimViolation> Violations, IReadOnlyList<string> RepeatedPhrases)
 {
-    /// <summary>Every hit's phrase (motif hits are their bare word).</summary>
-    public IReadOnlyList<string> RepeatedPhrases { get; } = Hits.Select(h => h.Phrase).ToList();
-
-    /// <summary>The words of the motif hits (T724), for the booth row.</summary>
-    public IReadOnlyList<string> MotifWords { get; } =
-        Hits.Where(h => h.Kind == RepetitionHitKind.Motif).Select(h => h.Phrase).ToList();
-
-    /// <summary>The phrases of every other hit.</summary>
-    public IReadOnlyList<string> PhraseHits { get; } =
-        Hits.Where(h => h.Kind != RepetitionHitKind.Motif).Select(h => h.Phrase).ToList();
-
-    public bool Passed => Violations.Count == 0 && Hits.Count == 0;
+    public bool Passed => Violations.Count == 0 && RepeatedPhrases.Count == 0;
 
     public bool FailedTruth => Violations.Count > 0;
 

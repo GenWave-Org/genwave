@@ -5,7 +5,5 @@ namespace GenWave.Core.Domain;
 /// For a repeat of a recent utterance, the normalised text of the shared run (lowercased, punctuation
 /// stripped). For a spent quirk, the rule's key phrase as written and trimmed (its longest quoted span,
 /// else its last four words; an unclosed quote mark stays in the phrase, matching ignores it).
-/// For a <see cref="RepetitionHitKind.Motif"/>, the single lowercased word.
 /// </param>
-/// <param name="Kind">Which rule found it; defaults to <see cref="RepetitionHitKind.Phrase"/>, so only the motif rule passes it.</param>
-public sealed record RepetitionHit(string Phrase, RepetitionHitKind Kind = RepetitionHitKind.Phrase);
+public sealed record RepetitionHit(string Phrase);

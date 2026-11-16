@@ -31,9 +31,7 @@ public static class PendingPublicationSurfaceAllowlist
         // PLAN T702a: the context provider's key on a ContextSegment request.
         "GenWave.Core.Domain.SegmentRequest::PROPERTY System.String ContextProviderKey { public get; public init; }",
         // PLAN T693: RepeatCaught, a new additive event (the repeat check's booth-log signal).
-        "GenWave.Core.Events.RepeatCaught::CTOR (System.Int64 PersonaId, System.String Phrase, System.Nullable<GenWave.Core.Events.RepeatOutcome> Outcome = null, System.Collections.Generic.IReadOnlyList<System.String> MotifWords = null)",
-        // PLAN T724: RepeatCaught.MotifWords carries the motif words caught in the same attempt.
-        "GenWave.Core.Events.RepeatCaught::PROPERTY System.Collections.Generic.IReadOnlyList<System.String> MotifWords { public get; public init; }",
+        "GenWave.Core.Events.RepeatCaught::CTOR (System.Int64 PersonaId, System.String Phrase, System.Nullable<GenWave.Core.Events.RepeatOutcome> Outcome = null)",
         "GenWave.Core.Events.RepeatCaught::PROPERTY System.Nullable<GenWave.Core.Events.RepeatOutcome> Outcome { public get; public init; }",
         "GenWave.Core.Events.RepeatCaught::PROPERTY System.Int64 PersonaId { public get; public init; }",
         "GenWave.Core.Events.RepeatCaught::PROPERTY System.String Phrase { public get; public init; }",
