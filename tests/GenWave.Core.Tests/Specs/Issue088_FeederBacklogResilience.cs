@@ -86,6 +86,24 @@ public static class FeatureFeederBacklogResilience
         }
     }
 
+    public sealed class ScenarioAHandoffPairRidesTheAiredEvent
+    {
+        [Fact]
+        public async Task TrackAiredCarriesTheHandoffTheItemWasPushedWith()
+        {
+            var pair = new HandoffParticipants(new CrosstalkParticipant(7, "Dusty"), new CrosstalkParticipant(9, "Flip"), DateTimeOffset.UnixEpoch);
+            var signOff = Item("tts:off") with { SegmentKind = SegmentKind.SignOff, Handoff = pair };
+            var ls = new FakeLiquidsoapControl(["safe", "tts:off"], Real("tts:off"));
+            var sink = new RecordingSink();
+            var feeder = new PlayoutFeeder(ls, new FakeNextItemProvider(signOff, Item("m2")), Rotation(2), events: sink);
+
+            await feeder.TickAsync(CancellationToken.None);
+            await feeder.TickAsync(CancellationToken.None);
+
+            Assert.Same(pair, Assert.Single(sink.Aired, t => t.MediaId == "tts:off").Handoff);
+        }
+    }
+
     public sealed class ScenarioBackloggedQueueSelfDrains
     {
         [Fact]

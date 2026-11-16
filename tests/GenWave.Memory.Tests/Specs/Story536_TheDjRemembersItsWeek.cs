@@ -196,6 +196,97 @@ public static class FeatureTheDjRemembersItsWeek
                 episodes);
     }
 
+    // AC2 (handoff half, PLAN T726) — A SignOff/SignOn handoff is remembered on both sides, once
+    public sealed class ScenarioASignOffAndSignOnHandoffIsRememberedOnce : IAsyncLifetime
+    {
+        // Given a sign-off then a sign-on between personas 7 and 9, both carrying the pair
+        // When  they air
+        IReadOnlyList<InMemoryEpisodeStore.Happening> happenings = [];
+        IReadOnlyList<(long PersonaId, string Content, long? EventId)> episodes = [];
+
+        public async Task InitializeAsync()
+        {
+            var harness = new AccrualHarness();
+            harness.Sink.Publish(HandoffAired(harness, "tts:off", SegmentKind.SignOff, 7, 9));
+            harness.Time.Advance(TimeSpan.FromMinutes(12)); // a SignOn held behind a long crossing track
+            harness.Sink.Publish(HandoffAired(harness, "tts:on", SegmentKind.SignOn, 7, 9));
+            await harness.FlushAsync();
+
+            happenings = harness.Store.Happenings;
+            episodes = harness.Store.Rows.OrderBy(r => r.PersonaId).Select(r => (r.PersonaId, r.Content, r.EventId)).ToList();
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void OneMemoryEventRowOfKindHandoffExists() =>
+            Assert.Equal(["handoff"], happenings.Select(h => h.Kind));
+
+        [Fact]
+        public void TheOutgoingPersonaHandedOverAndTheIncomingOneTookOver() =>
+            Assert.Equal(
+                [(7L, "handed over to Flip", (long?)happenings.Single().Id), (9L, "took over from Dusty", (long?)happenings.Single().Id)],
+                episodes);
+    }
+
+    public sealed class ScenarioAHandoffWithOnlyOneHalfStillAccrues
+    {
+        [Theory]
+        [InlineData(SegmentKind.SignOff)]
+        [InlineData(SegmentKind.SignOn)]
+        public async Task TheLoneHalfWritesOneEventAndTwoEpisodes(SegmentKind kind)
+        {
+            var harness = new AccrualHarness();
+            harness.Sink.Publish(HandoffAired(harness, "tts:1", kind, 7, 9));
+            await harness.FlushAsync();
+
+            Assert.Single(harness.Store.Happenings);
+            Assert.Equal([7L, 9L], harness.Store.Rows.Select(r => r.PersonaId).Order());
+        }
+    }
+
+    public sealed class ScenarioTheSamePairAtALaterBoundaryIsANewHandoff
+    {
+        [Fact]
+        public async Task TheNextDaySHandoffWritesAgain()
+        {
+            var harness = new AccrualHarness();
+            harness.Sink.Publish(HandoffAired(harness, "tts:1", SegmentKind.SignOff, 7, 9));
+            harness.Time.Advance(TimeSpan.FromHours(4));
+            harness.Sink.Publish(HandoffAired(harness, "tts:2", SegmentKind.SignOff, 7, 9, harness.Time.GetUtcNow().AddMinutes(1)));
+            await harness.FlushAsync();
+
+            Assert.Equal(2, harness.Store.Happenings.Count);
+        }
+    }
+
+    public sealed class ScenarioASamePersonaOrUnknownCounterpartWritesNothing
+    {
+        [Fact]
+        public async Task NoEventAndNoEpisodes()
+        {
+            var harness = new AccrualHarness();
+            harness.Sink.Publish(HandoffAired(harness, "tts:1", SegmentKind.SignOn, 7, 7));
+            harness.Sink.Publish(new TrackAired(
+                "tts:2", "Station", "Dusty", 0, harness.Time.GetUtcNow(), 8_000, SegmentKind: SegmentKind.SignOn));
+            await harness.FlushAsync();
+
+            Assert.Empty(harness.Store.Happenings);
+            Assert.Empty(harness.Store.Rows);
+        }
+    }
+
+    static readonly DateTimeOffset DefaultBoundary = new(2030, 1, 7, 9, 30, 0, TimeSpan.Zero);
+
+    static TrackAired HandoffAired(
+        AccrualHarness harness, string id, SegmentKind kind, long outgoing, long incoming, DateTimeOffset? boundaryAt = null) =>
+        new(id, "Station", "Persona", 0, harness.Time.GetUtcNow(), 8_000, SegmentKind: kind)
+        {
+            Handoff = new HandoffParticipants(
+                new CrosstalkParticipant(outgoing, "Dusty"), new CrosstalkParticipant(incoming, "Flip"),
+                boundaryAt ?? DefaultBoundary),
+        };
+
     // AC3 — A fact read on air is remembered
     public sealed class ScenarioAFactReadOnAirIsRemembered : IAsyncLifetime
     {

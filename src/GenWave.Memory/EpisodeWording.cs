@@ -29,6 +29,16 @@ static class EpisodeWording
     public static string CrosstalkSummary(CrosstalkParticipant host, CrosstalkParticipant neighbor) =>
         $"{host.Name} and {neighbor.Name} talked on air";
 
+    /// <summary>The outgoing side of a handoff, naming who took over.</summary>
+    public static string HandedOverTo(CrosstalkParticipant incoming) => $"handed over to {incoming.Name}";
+
+    /// <summary>The incoming side of a handoff, naming who handed over.</summary>
+    public static string TookOverFrom(CrosstalkParticipant outgoing) => $"took over from {outgoing.Name}";
+
+    /// <summary>The shared happening both handoff episodes point at.</summary>
+    public static string HandoffSummary(HandoffParticipants handoff) =>
+        $"{handoff.Outgoing.Name} handed over to {handoff.Incoming.Name}";
+
     /// <summary>A track as it is remembered: title, and artist when known.</summary>
     public static string? Track(string? title, string? artist) => (title, artist) switch
     {

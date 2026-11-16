@@ -361,7 +361,10 @@ public sealed class TtsSegmentSource(
         return new MediaItem(
             $"tts:{hash}", path, request.StationName, loudness,
             Artist: request.PersonaName ?? request.StationName, Cue: cuePoints, DurationMs: durationMs,
-            DjName: request.PersonaName, SegmentKind: request.Kind);
+            DjName: request.PersonaName, SegmentKind: request.Kind)
+        {
+            Handoff = request.Handoff,
+        };
     }
 
     /// <summary>

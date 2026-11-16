@@ -64,6 +64,14 @@ public sealed record TrackAired(
     public CrosstalkAiredScript? CrosstalkScript { get; init; }
 
     /// <summary>
+    /// SPEC F218.15(b) — the SAME <see cref="HandoffParticipants"/> the aired item's <c>MediaItem.Handoff</c>
+    /// carried, forwarded the way <see cref="CrosstalkScript"/> is. Non-null only for a SignOff/SignOn between two
+    /// distinct known personas. A defaulted body property, same binary-compatibility discipline as
+    /// <see cref="CrosstalkScript"/>.
+    /// </summary>
+    public HandoffParticipants? Handoff { get; init; }
+
+    /// <summary>
     /// SPEC F152.4 (STORY-372, PLAN T361) — the SAME <see cref="RotationCandidate.RotationRelax"/> the
     /// feeder's pushed-item metadata carries off <c>MediaItem.RotationRelax</c>, forwarded the same way
     /// <see cref="CrosstalkScript"/> is above. <see langword="null"/> for every engine-initiated advance

@@ -8,7 +8,7 @@ namespace GenWave.Memory;
 
 /// <summary>
 /// SPEC F218.15 (STORY-536) — turns what the station does into the episodes a persona remembers. Three
-/// things accrue and nothing else: a show or shift the persona hosted (written when it ends), a crosstalk (one
+/// things accrue and nothing else: a show or shift the persona hosted (written when it ends), a crosstalk or handoff (one
 /// shared <c>memory_event</c> plus an episode per participant naming the other), and a context fact the
 /// persona read on air (the copy the truth gate accepted used it).
 /// <para>
@@ -34,12 +34,17 @@ public sealed class EpisodeAccrualSink(
     /// <summary>Most rendered-but-not-yet-aired facts held; the oldest is forgotten past this (a segment that never airs).</summary>
     public const int PendingFactCapacity = 64;
 
+    /// <summary>Most recent handoffs remembered for the once-per-handoff dedupe; the oldest is forgotten past this.</summary>
+    public const int RecentHandoffCapacity = 16;
+
     readonly Channel<EpisodeWrite> queue = Channel.CreateBounded<EpisodeWrite>(
         new BoundedChannelOptions(QueueCapacity) { SingleReader = true, FullMode = BoundedChannelFullMode.Wait });
 
     readonly object gate = new();
     readonly Dictionary<string, PendingFact> pendingFacts = new(StringComparer.Ordinal);
     readonly Queue<string> pendingFactOrder = new();
+    readonly HashSet<HandoffKey> recentHandoffs = [];
+    readonly Queue<HandoffKey> recentHandoffOrder = new();
     OnAirRun? current;
     bool observedATrack;
     long droppedWrites;
@@ -117,7 +122,49 @@ public sealed class EpisodeAccrualSink(
             current?.CountTrack(EpisodeWording.Track(aired.Title, aired.Artist));
         else if (aired.SegmentKind == SegmentKind.Crosstalk && aired.CrosstalkScript is { Host: { } host, Neighbor: { } neighbor })
             Enqueue(Crosstalk(host, neighbor, aired.StartedAt));
+        else if (aired.SegmentKind is SegmentKind.SignOff or SegmentKind.SignOn && aired.Handoff is { } handoff)
+            AccrueHandoff(handoff, aired.StartedAt);
     }
+
+    /// <summary>
+    /// One event per handoff: a boundary can air a SignOff (just before it) and a SignOn (just after, possibly held
+    /// behind a queued tail), each carrying the same pair. The first of the pair to air writes; the same pair
+    /// airing again for the same (outgoing id, incoming id, boundary) is the other half of that handoff, not a new
+    /// one - no clock window, so a SignOn held behind a long crossing track still dedupes. Either half alone still
+    /// accrues, and the pair recurring at a later boundary is a new handoff. Known limit: the keys live in memory,
+    /// so an api restart between the two halves lets the second half write a second event (no schema change).
+    /// A schedule edit that moves the boundary after the SignOff aired gives the SignOn a new key, so a second
+    /// event is written - intended: the handoff really did happen at a different boundary.
+    /// </summary>
+    void AccrueHandoff(HandoffParticipants handoff, DateTimeOffset at)
+    {
+        if (handoff.Outgoing.PersonaId == handoff.Incoming.PersonaId)
+            return;
+
+        if (!RememberHandoff(new HandoffKey(handoff.Outgoing.PersonaId, handoff.Incoming.PersonaId, handoff.BoundaryAt)))
+            return;
+
+        Enqueue(new(
+            new NewMemoryEvent(MemoryEventKinds.Handoff, EpisodeWording.HandoffSummary(handoff), at),
+            [
+                new NewEpisode(handoff.Outgoing.PersonaId, EpisodeWording.HandedOverTo(handoff.Incoming), at),
+                new NewEpisode(handoff.Incoming.PersonaId, EpisodeWording.TookOverFrom(handoff.Outgoing), at),
+            ]));
+    }
+
+    // False when this handoff was already written. Bounded: the oldest key falls out past the capacity.
+    bool RememberHandoff(HandoffKey key)
+    {
+        if (!recentHandoffs.Add(key))
+            return false;
+
+        recentHandoffOrder.Enqueue(key);
+        if (recentHandoffOrder.Count > RecentHandoffCapacity)
+            recentHandoffs.Remove(recentHandoffOrder.Dequeue());
+        return true;
+    }
+
+    readonly record struct HandoffKey(long OutgoingId, long IncomingId, DateTimeOffset BoundaryAt);
 
     static EpisodeWrite Crosstalk(CrosstalkParticipant host, CrosstalkParticipant neighbor, DateTimeOffset at) => new(
         new NewMemoryEvent(MemoryEventKinds.Crosstalk, EpisodeWording.CrosstalkSummary(host, neighbor), at),

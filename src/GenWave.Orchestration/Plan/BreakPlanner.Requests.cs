@@ -46,7 +46,26 @@ public sealed partial class BreakPlanner
             CounterpartShowName: handoff.CounterpartShowName)
         {
             Speaker = handoff.Speaker is { } s ? s with { Voice = handoff.Voice } : null,
+            Handoff = HandoffBetween(kind, handoff),
         }, handoff.PersonaId);
+
+    // SPEC F218.15(b): both sides known and distinct, else no handoff to remember (a same-persona show
+    // transition has no counterpart; a music-only half never resolved one).
+    static HandoffParticipants? HandoffBetween(SegmentKind kind, HandoffContext handoff)
+    {
+        if (handoff is not { PersonaId: { } self, PersonaName: { } selfName, CounterpartPersonaId: { } other, CounterpartName: { } otherName, BoundaryAt: { } boundaryAt }
+            || self == other)
+            return null;
+
+        var me = new CrosstalkParticipant(self, selfName);
+        var them = new CrosstalkParticipant(other, otherName);
+        return kind switch
+        {
+            SegmentKind.SignOff => new HandoffParticipants(me, them, boundaryAt),
+            SegmentKind.SignOn => new HandoffParticipants(them, me, boundaryAt),
+            _ => null,
+        };
+    }
 
     // Verbatim copy of Orchestrator.BuildTimeDateRequest (SPEC F110.3/F141.2): LocalNow carries the
     // deferral's own armed Due, never a drain-time StationLocalNow() read. Speaker (PLAN T527, SPEC

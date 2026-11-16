@@ -33,21 +33,21 @@ public static class FeatureHandoffCeremonyProducer
         FakeBoundaryBiasProvider BoundaryBias,
         CapturingLogger<HandoffCeremonyProducer> Logger);
 
-    static readonly StationIdentity Identity = new("s1", "GenWave", "default");
+    internal static readonly StationIdentity Identity = new("s1", "GenWave", "default");
 
-    static readonly DayOfWeek Monday = new DateTimeOffset(2026, 3, 2, 0, 0, 0, TimeSpan.Zero).DayOfWeek;
+    internal static readonly DayOfWeek Monday = new DateTimeOffset(2026, 3, 2, 0, 0, 0, TimeSpan.Zero).DayOfWeek;
 
     // 5 minutes before the noon boundary — inside a 10-minute F74.3 lookahead window from the very
     // first unit planned (the same instant FeatureDjsHandOffAudibly's own JustBeforeNoon names).
-    static readonly DateTimeOffset JustBeforeNoon = new(2026, 3, 2, 11, 55, 0, TimeSpan.Zero);
+    internal static readonly DateTimeOffset JustBeforeNoon = new(2026, 3, 2, 11, 55, 0, TimeSpan.Zero);
 
-    static Persona MakePersona(long id, string name, string voice)
+    internal static Persona MakePersona(long id, string name, string voice)
     {
         var now = DateTime.UnixEpoch;
         return new Persona(id, name, "", "", voice, now, now);
     }
 
-    static Harness Build(FakePersonaStore personaStore, ScheduleWeekSnapshot snapshot, DateTimeOffset now, TimeSpan lookahead)
+    internal static Harness Build(FakePersonaStore personaStore, ScheduleWeekSnapshot snapshot, DateTimeOffset now, TimeSpan lookahead)
     {
         var time = new FakeTimeProvider(now);
         var scheduleStore = new FakeScheduleStore(snapshot);

@@ -92,6 +92,14 @@ using GenWave.Core.Domain;
 /// stamped for the utterance log (each speaker's line is recorded under that speaker).
 /// <see langword="null"/> means the piece is not recorded.
 /// </param>
+/// <param name="CounterpartPersonaId">
+/// SPEC F218.15(b) (PLAN T726): id of the OTHER persona (<see cref="CounterpartName"/>'s), so the aired piece can
+/// carry both sides of the handoff for the memory consumer. <see langword="null"/> when there is no other persona.
+/// </param>
+/// <param name="BoundaryAt">
+/// SPEC F218.15(b) (PLAN T726): the show boundary both halves of the handoff were armed from; identifies the handoff
+/// for the memory consumer's once-per-handoff dedupe. <see langword="null"/> when no boundary is known.
+/// </param>
 public sealed record HandoffContext(
     string Voice,
     string? PersonaName,
@@ -102,4 +110,6 @@ public sealed record HandoffContext(
     string? ShowFlavor = null,
     string? CounterpartShowName = null,
     SpeakerSnapshot? Speaker = null,
-    long? PersonaId = null);
+    long? PersonaId = null,
+    long? CounterpartPersonaId = null,
+    DateTimeOffset? BoundaryAt = null);
