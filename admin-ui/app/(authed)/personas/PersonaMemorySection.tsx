@@ -47,7 +47,7 @@ const KIND_VIEWS: readonly MemoryKindView[] = [
   {
     kind: "episode",
     label: "Lately",
-    blurb: "What this DJ has said on air recently, so they do not repeat themselves.",
+    blurb: "What this DJ did on the station lately. They can refer back to it.",
     empty: "Nothing here yet. This fills up as the DJ talks on air.",
   },
   {
@@ -78,6 +78,12 @@ function airedText(row: PersonaMemoryRow): string {
   if (row.airedCount === 0) return "Not aired yet";
   const times = row.airedCount === 1 ? "Aired once" : `Aired ${row.airedCount} times`;
   return row.lastAiredAt === null ? times : `${times}, last ${formatUpSince(row.lastAiredAt)}`;
+}
+
+/** Episodes are stored as a lowercase predicate ("hosted a shift"); capitalise it for display only. */
+function displayText(row: PersonaMemoryRow): string {
+  if (row.kind !== "episode") return row.text;
+  return row.text.charAt(0).toUpperCase() + row.text.slice(1);
 }
 
 interface MemoryRowItemProps {
@@ -116,7 +122,7 @@ function MemoryRowItem({ row, busy, onChange, onDelete }: MemoryRowItemProps): R
           </span>
         </div>
       ) : (
-        <p className="text-[0.85rem] text-ink">{row.text}</p>
+        <p className="text-[0.85rem] text-ink">{displayText(row)}</p>
       )}
 
       <div className="flex flex-wrap items-center gap-2 text-[0.72rem] text-mute">

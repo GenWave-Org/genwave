@@ -147,6 +147,21 @@ describe("Feature: I can see and shape a DJ's memory", () => {
       expect(within(region).getByText("Has a cat called Biscuit.")).toBeInTheDocument();
     });
 
+    it("Lately explains itself and shows episode text starting with a capital", async () => {
+      const hosted = memoryRow({ id: 21, kind: "episode", source: "accrued", text: "hosted a shift on Sunday" });
+      makeFetchMock({ "GET /api/personas/1/memory": { status: 200, body: [hosted, LORE_AUTHORED] } });
+      const region = await openMemory();
+
+      await openTab(region, "Lately");
+      expect(
+        within(region).getByText("What this DJ did on the station lately. They can refer back to it.")
+      ).toBeInTheDocument();
+      expect(within(within(region).getByTestId("memory-row-21")).getByText("Hosted a shift on Sunday")).toBeInTheDocument();
+
+      await click(within(within(region).getByTestId("memory-row-21")).getByRole("button", { name: "Edit" }));
+      expect(within(region).getByRole("textbox", { name: "Memory text" })).toHaveValue("hosted a shift on Sunday");
+    });
+
     it("each open section's Add label points at its own textbox", async () => {
       makeFetchMock({ "GET /api/personas/2/memory": { status: 200, body: [] } });
       render(
