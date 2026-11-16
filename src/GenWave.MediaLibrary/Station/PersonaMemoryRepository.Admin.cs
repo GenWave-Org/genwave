@@ -42,6 +42,25 @@ sealed partial class PersonaMemoryRepository : IPersonaMemoryAdmin
             cancellationToken: ct));
     }
 
+    public async Task<IReadOnlyList<PersonaMemoryAdminRow>> AddDraftedLoreAsync(
+        long personaId, IReadOnlyList<string> texts, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+        var stored = new List<PersonaMemoryAdminRow>(texts.Count);
+        foreach (var text in texts)
+            stored.Add(await conn.QuerySingleAsync<PersonaMemoryAdminRow>(new CommandDefinition(
+                $"""
+                insert into station.persona_memory (persona_id, kind, content, source)
+                values (@personaId, 'lore', @text, 'drafted')
+                returning {AdminColumns}
+                """,
+                new { personaId, text },
+                tx, cancellationToken: ct)));
+        await tx.CommitAsync(ct);
+        return stored;
+    }
+
     public async Task<PersonaMemoryUpdateResult> UpdateAsync(
         long personaId, long rowId, PersonaMemoryChange change, CancellationToken ct)
     {

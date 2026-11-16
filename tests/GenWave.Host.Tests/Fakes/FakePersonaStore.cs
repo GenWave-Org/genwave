@@ -20,6 +20,11 @@ sealed class FakePersonaStore : IPersonaStore
     /// existing — the only capability Story333's own T295 Facts need from this double.</summary>
     public void Seed(Persona persona) => byId[persona.Id] = persona;
 
+    readonly Dictionary<long, PersonaCard> cardById = new();
+
+    /// <summary>Arranges the reconciled card <see cref="GetCardByIdAsync"/> reports for a persona id.</summary>
+    public void SeedCard(long id, PersonaCard card) => cardById[id] = card;
+
     public Task<Persona?> GetByIdAsync(long id, CancellationToken ct) =>
         Task.FromResult(byId.TryGetValue(id, out var persona) ? persona : null);
 
@@ -35,8 +40,9 @@ sealed class FakePersonaStore : IPersonaStore
     public Task<PersonaWriteResult> DeleteAsync(long id, CancellationToken ct) =>
         throw new NotSupportedException("Not exercised by Story333's T295 write-path Facts.");
 
+    /// <summary>A persona carries a card only when <see cref="SeedCard"/> arranged one (else the legacy-row case, null); Story538's lore suggestion reads it.</summary>
     public Task<PersonaCard?> GetCardByIdAsync(long id, CancellationToken ct) =>
-        throw new NotSupportedException("Not exercised by Story333's T295 write-path Facts.");
+        Task.FromResult(cardById.TryGetValue(id, out var card) ? card : null);
 
     public Task<long?> GetIdBySlugAsync(string slug, CancellationToken ct) =>
         throw new NotSupportedException("Not exercised by Story333's T295 write-path Facts.");

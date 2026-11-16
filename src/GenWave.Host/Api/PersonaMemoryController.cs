@@ -2,12 +2,14 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.Memory;
 
 namespace GenWave.Host.Api;
 
 /// <summary>
-/// The operator's view of one DJ's memory (SPEC F218.19, F218.20, F218.24; STORY-540; PLAN T706):
-/// <c>GET/POST /api/personas/{id}/memory</c>, <c>PATCH/DELETE /api/personas/{id}/memory/{rowId}</c>.
+/// The operator's view of one DJ's memory (SPEC F218.19, F218.20, F218.24; STORY-538, STORY-540; PLAN T705, T706):
+/// <c>GET/POST /api/personas/{id}/memory</c>, <c>POST /api/personas/{id}/memory/suggest</c>,
+/// <c>PATCH/DELETE /api/personas/{id}/memory/{rowId}</c>.
 /// A sibling of <see cref="PersonaAvatarController"/>, with the same <see cref="AuthorizationPolicies.Settings"/>
 /// pairing: memory is part of the persona's own editable identity. It carries <see cref="AdminSurfaceAttribute"/>,
 /// never a spectator marker, so no public surface reaches it (F218.26). Every action resolves the persona first
@@ -21,6 +23,7 @@ namespace GenWave.Host.Api;
 public sealed class PersonaMemoryController(
     IPersonaStore personaStore,
     IPersonaMemoryAdmin memory,
+    LoreDrafter loreDrafter,
     ILogger<PersonaMemoryController> logger) : ControllerBase
 {
     [HttpGet]
@@ -49,6 +52,51 @@ public sealed class PersonaMemoryController(
         logger.LogInformation("Persona memory lore added personaId={PersonaId} rowId={RowId}", id, row.Id);
         // There is no single-row GET, so the location is the list the new row appears in.
         return Created($"/api/personas/{id}/memory", PersonaMemoryRowDto.From(row));
+    }
+
+    /// <summary>
+    /// <c>POST /api/personas/{id}/memory/suggest</c> (SPEC F218.20): drafts up to five lore rows from the persona's soul
+    /// and backstory, stored <c>source=drafted</c> and pending until approved. A model that is not set up is 409, a model
+    /// fault or an unusable reply is 502; nothing is stored in either case, and no prompt or reply text is logged.
+    /// </summary>
+    [HttpPost("suggest")]
+    public async Task<IActionResult> Suggest(long id, CancellationToken ct)
+    {
+        if (await personaStore.GetByIdAsync(id, ct) is not { } persona)
+            return NotFound(UnknownPersonaProblem(id));
+
+        var soul = (await personaStore.GetCardByIdAsync(id, ct))?.Soul ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(soul) && string.IsNullOrWhiteSpace(persona.Backstory))
+            return BadRequest(Problem400("Give this DJ a soul or a backstory first."));
+
+        var existing = (await memory.ListForAdminAsync(id, MemoryKinds.Lore, ct)).Select(r => r.Content).ToList();
+        LoreDraft draft;
+        try
+        {
+            draft = await loreDrafter.DraftAsync(soul, persona.Backstory, existing, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogWarning("Lore suggestion failed personaId={PersonaId} error={ErrorType}", id, ex.GetType().Name);
+            return Problem502("The language model did not answer.");
+        }
+
+        switch (draft.Status)
+        {
+            case LoreDraftStatus.NotConfigured:
+                return Conflict(new ProblemDetails
+                {
+                    Status = StatusCodes.Status409Conflict,
+                    Title = "Language model not set up.",
+                    Detail = "No language model is set up.",
+                });
+            case LoreDraftStatus.NoUsableLines:
+                return Problem502("The language model gave no usable lore.");
+        }
+
+        var rows = await memory.AddDraftedLoreAsync(id, draft.Lines, ct);
+        logger.LogInformation("Persona lore drafted personaId={PersonaId} count={Count}", id, rows.Count);
+        return Created($"/api/personas/{id}/memory", rows.Select(PersonaMemoryRowDto.From).ToList());
     }
 
     [HttpPatch("{rowId:long}")]
@@ -104,6 +152,13 @@ public sealed class PersonaMemoryController(
         Title = "Validation error.",
         Detail = detail,
     };
+
+    ObjectResult Problem502(string detail) => StatusCode(StatusCodes.Status502BadGateway, new ProblemDetails
+    {
+        Status = StatusCodes.Status502BadGateway,
+        Title = "Language model unavailable.",
+        Detail = detail,
+    });
 
     static ProblemDetails UnknownPersonaProblem(long id) => new()
     {

@@ -253,7 +253,7 @@ public static class FeatureICanSeeAndShapeADjsMemory
                 .Where(e => e.RoutePattern.RawText?.StartsWith("api/personas/{id:long}/memory", StringComparison.OrdinalIgnoreCase) == true)
                 .ToList();
 
-            Assert.Equal(4, endpoints.Count);
+            Assert.Equal(5, endpoints.Count);
             foreach (var endpoint in endpoints)
             {
                 var policies = endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>().Select(a => a.Policy).ToList();

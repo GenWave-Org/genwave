@@ -11,12 +11,13 @@ namespace GenWave.Host.Tests.Fakes;
 sealed class FakePersonaMemoryAdmin : IPersonaMemoryAdmin
 {
     readonly List<(long PersonaId, PersonaMemoryAdminRow Row)> rows = [];
+    static readonly DateTime SeedEpoch = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
     long nextId = 1;
 
     public long Seed(long personaId, string kind, string source, string content, int airedCount = 0, DateTime? approvedAt = null)
     {
         var id = nextId++;
-        rows.Add((personaId, new PersonaMemoryAdminRow(id, kind, source, content, airedCount, null, DateTime.UtcNow, approvedAt, null)));
+        rows.Add((personaId, new PersonaMemoryAdminRow(id, kind, source, content, airedCount, null, SeedEpoch.AddSeconds(id), approvedAt, null)));
         return id;
     }
 
@@ -28,12 +29,22 @@ sealed class FakePersonaMemoryAdmin : IPersonaMemoryAdmin
         IReadOnlyList<PersonaMemoryAdminRow> result = rows
             .Where(r => r.PersonaId == personaId && (kind is null || r.Row.Kind == kind))
             .Select(r => r.Row)
+            .OrderByDescending(row => row.CreatedAt)
+            .ThenByDescending(row => row.Id)
             .ToList();
         return Task.FromResult(result);
     }
 
     public Task<PersonaMemoryAdminRow> AddAuthoredLoreAsync(long personaId, string text, CancellationToken ct) =>
         Task.FromResult(Find(personaId, Seed(personaId, MemoryKinds.Lore, "authored", text)) ?? throw new InvalidOperationException());
+
+    public Task<IReadOnlyList<PersonaMemoryAdminRow>> AddDraftedLoreAsync(long personaId, IReadOnlyList<string> texts, CancellationToken ct)
+    {
+        IReadOnlyList<PersonaMemoryAdminRow> stored = texts
+            .Select(text => Find(personaId, Seed(personaId, MemoryKinds.Lore, MemorySources.Drafted, text)) ?? throw new InvalidOperationException())
+            .ToList();
+        return Task.FromResult(stored);
+    }
 
     public Task<PersonaMemoryUpdateResult> UpdateAsync(long personaId, long rowId, PersonaMemoryChange change, CancellationToken ct)
     {

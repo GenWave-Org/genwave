@@ -20,6 +20,12 @@ public interface IPersonaMemoryAdmin
     Task<PersonaMemoryAdminRow> AddAuthoredLoreAsync(long personaId, string text, CancellationToken ct);
 
     /// <summary>
+    /// Adds each text as one lore row, <c>source=drafted</c>, <c>approved_at</c> null (pending, never recalled until approved),
+    /// in one transaction: all of it or none. Returns the stored rows in the order given.
+    /// </summary>
+    Task<IReadOnlyList<PersonaMemoryAdminRow>> AddDraftedLoreAsync(long personaId, IReadOnlyList<string> texts, CancellationToken ct);
+
+    /// <summary>
     /// Applies <paramref name="change"/> to one row in one transaction (a row lock, then one UPDATE): all of it or none. Approving a row whose
     /// source is not <see cref="MemorySources.Drafted"/> changes nothing and reports
     /// <see cref="PersonaMemoryUpdateStatus.NotDrafted"/>; approving stamps <c>approved_at</c> when not set yet.

@@ -159,4 +159,34 @@ public static class FeatureMemoryAdminSql
             Assert.DoesNotContain(await repo.ListForAdminAsync(sal, null, CancellationToken.None), r => r.Id == drafted);
         }
     }
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioTheListIsNewestFirst(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task RowsComeBackNewestFirstWhateverTheInsertOrder()
+        {
+            await db.ResetStationAsync();
+            var sal = await CreatePersonaAsync(db, "Sal");
+            await using (var conn = await db.StationDataSource.OpenConnectionAsync())
+            {
+                foreach (var (content, createdAt) in new[]
+                {
+                    ("middle", new DateTime(2026, 1, 2, 0, 0, 0, DateTimeKind.Utc)),
+                    ("newest", new DateTime(2026, 1, 3, 0, 0, 0, DateTimeKind.Utc)),
+                    ("oldest", new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)),
+                })
+                {
+                    await conn.ExecuteAsync(
+                        "insert into station.persona_memory (persona_id, kind, content, source, created_at) values (@sal, 'lore', @content, 'authored', @createdAt)",
+                        new { sal, content, createdAt });
+                }
+            }
+
+            var listed = await Repo(db).ListForAdminAsync(sal, "lore", CancellationToken.None);
+
+            Assert.Equal(new[] { "newest", "middle", "oldest" }, listed.Select(r => r.Content).ToArray());
+        }
+    }
 }

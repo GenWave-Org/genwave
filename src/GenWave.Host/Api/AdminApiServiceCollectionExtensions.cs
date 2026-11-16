@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
 using GenWave.Host.Auth;
 using GenWave.Host.Options;
+using GenWave.Memory;
 
 namespace GenWave.Host.Api;
 
@@ -85,6 +86,9 @@ static class AdminApiServiceCollectionExtensions
         // Named rate-limiter policies (Login, Spectator, and the F87.3 Requests cooldown+daily-cap
         // limiter) — see RateLimiterPolicies for the single registration point (SPEC F61.5).
         services.AddGenWaveRateLimiting(configuration);
+
+        // Operator-triggered lore suggestion (SPEC F218.20): one synchronous completion over the ILifeClaimLlm seam, no gate.
+        services.AddSingleton<LoreDrafter>();
 
         return services;
     }
