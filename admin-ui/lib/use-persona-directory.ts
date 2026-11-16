@@ -68,10 +68,18 @@ export function usePersonaDirectory(): PersonaDirectoryState {
   return state;
 }
 
+export const PERSONA_NAME_FALLBACK = "this persona";
+
 /** Fallback copy for a personaId whose name hasn't resolved yet (directory still loading, or the
  * fetch failed) — the control this feeds is still rendered (SPEC F84.6 gates only on `personaId`
  * presence, never on whether the directory happens to have loaded), so this never blocks
  * rendering, it just degrades the label. */
 export function personaNameOrFallback(state: PersonaDirectoryState, personaId: number): string {
-  return state.kind === "loaded" ? (state.names.get(personaId) ?? "this persona") : "this persona";
+  return personaNameOrNull(state, personaId) ?? PERSONA_NAME_FALLBACK;
+}
+
+/** The resolved name, or `null` when the directory is still loading, failed, or lacks the id — for
+ * copy that reads better with no name than with a stand-in. */
+export function personaNameOrNull(state: PersonaDirectoryState, personaId: number): string | null {
+  return state.kind === "loaded" ? (state.names.get(personaId) ?? null) : null;
 }

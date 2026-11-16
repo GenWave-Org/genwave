@@ -4,6 +4,8 @@ import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
+import { REPEAT_CAUGHT_KIND, repeatCaughtSummary } from "@/lib/booth-log-copy";
+import { PERSONA_NAME_FALLBACK } from "@/lib/use-persona-directory";
 import { formatUpSince } from "@/lib/format-clock";
 import type { BoothLogEntry } from "@/lib/booth-log-api";
 import { cn } from "@/lib/utils";
@@ -20,10 +22,18 @@ interface BoothLogFeedProps {
   onLoadMore: () => void;
   /** Test-only injection point for the timestamp formatter; production omits this and gets the browser's local zone. */
   timeZone?: string;
-  /** Resolves a stamped `personaId` to a display name (SPEC F84.6-F84.7) — owned by
-   * `BoothLogView`'s `usePersonaDirectory`, threaded down as a plain function so this component
-   * stays presentational and never touches the directory's own loading/error state. */
-  personaName: (personaId: number) => string;
+  /** Resolves a stamped `personaId` to a display name, or `null` when not known (yet) (SPEC F84.6-F84.7)
+   * — owned by `BoothLogView`'s `usePersonaDirectory`, threaded down as a plain function so this
+   * component stays presentational. The taste thumb applies its own "this persona" stand-in. */
+  knownPersonaName: (personaId: number) => string | null;
+}
+
+/** The summary as shown: a repeat-caught row is reworded in plain words and names its DJ; every
+ * other row shows its stored text as-is. Display only. */
+function displaySummary(entry: BoothLogEntry, knownPersonaName: BoothLogFeedProps["knownPersonaName"]): string {
+  if (entry.kind !== REPEAT_CAUGHT_KIND) return entry.summary;
+  const djName = typeof entry.personaId === "number" ? knownPersonaName(entry.personaId) : null;
+  return repeatCaughtSummary(entry.summary, djName);
 }
 
 /** True only for a persona-stamped track-start row (SPEC F84.6) — every other row (a different
@@ -42,6 +52,7 @@ const KIND_LABELS: Record<string, string> = {
   "track-started": "Track started",
   "patter-aired": "Patter aired",
   "mode-changed": "Mode changed",
+  [REPEAT_CAUGHT_KIND]: "Repeat caught",
 };
 
 /** 3px-radius bordered chip per design-aesthetic's source-tag convention (SourceChip,
@@ -54,6 +65,7 @@ function BoothLogKindBadge({ kind }: { kind: string }): ReactNode {
     "track-started": "border-line text-mute",
     "patter-aired": "border-accent text-accent",
     "mode-changed": "border-accent-2 text-accent-2",
+    [REPEAT_CAUGHT_KIND]: "border-accent-2 text-accent-2",
   };
   return (
     <span
@@ -97,7 +109,7 @@ export function BoothLogFeed({
   loadMoreError,
   onLoadMore,
   timeZone,
-  personaName,
+  knownPersonaName,
 }: BoothLogFeedProps): ReactNode {
   const loading = entries === null && !error;
   const neverLoaded = entries === null && error;
@@ -168,13 +180,13 @@ export function BoothLogFeed({
                     <BoothLogKindBadge kind={entry.kind} />
                   </td>
                   <td className="py-2 pr-3 text-ink">
-                    {entry.summary}
+                    {displaySummary(entry, knownPersonaName)}
                     <PickChips pick={entry.pick} className="mt-1.5" />
                   </td>
                   <td className="py-2">
                     {isThumbable(entry) && (
                       <div className="flex flex-wrap items-center gap-3">
-                        <PersonaTasteThumbs boothLogRowId={entry.id} personaName={personaName(entry.personaId)} />
+                        <PersonaTasteThumbs boothLogRowId={entry.id} personaName={knownPersonaName(entry.personaId) ?? PERSONA_NAME_FALLBACK} />
                         <StationThumbs boothLogRowId={entry.id} />
                       </div>
                     )}

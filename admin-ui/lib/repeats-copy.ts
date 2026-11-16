@@ -3,6 +3,11 @@ import type { CatchphraseOveruseStatus, DjRepeatStatus, RepeatsStatus } from "@/
 
 /** SPEC F218.29, STORY-542 — the Repeats panel's wording, in plain words (no radio jargon, gh-#707). */
 
+/** Shared with the booth log (lib/booth-log-copy.ts). The tile uses CUT_SHORT_WORDS; its stock-line sentence
+ * pluralises, so it spells its own words, and STOCK_LINE_SWAP_WORDS copies its singular form for the feed. */
+export const CUT_SHORT_WORDS = "cut short";
+export const STOCK_LINE_SWAP_WORDS = "swapped for a stock line";
+
 export const NO_REPEATS_LINE = "No repeats caught this week.";
 
 function plural(count: number, singular: string, pluralForm: string): string {
@@ -21,7 +26,7 @@ export function djRepeatLine(dj: DjRepeatStatus): string {
   if (dj.catches === 0) {
     return `${swapped} this week.`;
   }
-  const trimmed = dj.trims > 0 ? `, ${dj.trims} cut short` : "";
+  const trimmed = dj.trims > 0 ? `, ${dj.trims} ${CUT_SHORT_WORDS}` : "";
   const caught = `Caught ${dj.catches} ${plural(dj.catches, "repeat", "repeats")} this week${trimmed}.`;
   return swapped === "" ? caught : `${caught} ${swapped}.`;
 }
