@@ -1,3 +1,5 @@
+using GenWave.Core.Domain;
+
 namespace GenWave.Core.Events;
 
 /// <summary>
@@ -24,4 +26,7 @@ public sealed record SegmentGenerated(
     /// just before the segment airs, so it is the text about to be spoken, not yet heard.
     /// </summary>
     public string? Text { get; init; }
+
+    /// <summary>SPEC F218.15 — the context fact this copy used (the truth gate's match), when one did; the memory consumer writes an episode for it.</summary>
+    public FactReadOnAir? FactRead { get; init; }
 }

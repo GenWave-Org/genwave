@@ -164,6 +164,17 @@ describe("Feature: Booth log", () => {
       expect(rowTexts[rowTexts.length - 1]).toContain("LLM degradation");
     });
 
+    it("labels a repeat-caught row plainly and rewords its outcome, never breaking without a DJ name", async () => {
+      const entries = [makeEntry({ kind: "repeat-caught", summary: 'Repeat caught: "banger, log it" — trimmed' })];
+      installFetchMock({ head: ok(page(entries)), pages: {} });
+
+      render(<BoothLogView timeZone="UTC" />);
+      await flush();
+
+      expect(screen.getByText("Repeat caught")).toBeInTheDocument();
+      expect(screen.getByText('Repeat caught: "banger, log it" — cut short')).toBeInTheDocument();
+    });
+
     it("renders an unrecognized kind as its own raw text rather than dropping the row", async () => {
       const entries = [makeEntry({ kind: "future-event", summary: "Something new happened" })];
       installFetchMock({ head: ok(page(entries)), pages: {} });

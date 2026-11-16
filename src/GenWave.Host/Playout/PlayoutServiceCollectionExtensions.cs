@@ -7,6 +7,8 @@ using GenWave.Host.Announcements;
 using GenWave.Host.Artwork;
 using GenWave.Host.Engine;
 using GenWave.Host.Options;
+using GenWave.Memory;
+using GenWave.Orchestration;
 
 namespace GenWave.Host.Playout;
 
@@ -95,6 +97,21 @@ static class PlayoutServiceCollectionExtensions
             // that holds for a lazily-resolved DI singleton regardless). MediaRotationEventSink and
             // AiringTokenRing are both registered by THIS same call, so no such ordering question
             // exists for either.
+            // DJ memory accrual (SPEC F218.15, STORY-536; PLAN T703): the sink queues episode writes, the hosted
+            // drain writes them. The on-air snapshot is the SAME CachingScheduleResolver singleton the schedule
+            // reads (it subscribes to store events in its ctor, so never construct a second).
+            .AddSingleton<EpisodeAccrualSink>()
+            .AddSingleton<IOnAirSnapshotSource>(sp => sp.GetRequiredService<CachingScheduleResolver>())
+            .AddHostedService<EpisodeAccrualDrainService>()
+            // DJ life extraction (SPEC F218.17, STORY-537; PLAN T704): LlmCopyWriter enqueues each accepted copy, the
+            // hosted drain runs the model call off the air path, one copy at a time.
+            // The live off-switch (PLAN T704a): bound to the host IConfiguration (the settings overlay is a provider
+            // on it), read per copy through IOptionsMonitor, so a PUT /api/settings edit applies to the next copy.
+            .AddOptions<MemoryLifeExtractionOptions>().BindConfiguration(MemoryLifeExtractionOptions.Section).Services
+            .AddSingleton<ILifeExtractionSwitch, OptionsMonitorLifeExtractionSwitch>()
+            .AddSingleton<LifeExtractionService>()
+            .AddSingleton<ILifeExtractor>(sp => sp.GetRequiredService<LifeExtractionService>())
+            .AddHostedService<LifeExtractionDrainService>()
             .AddSingleton<IStationEventSink>(sp => new CompositeStationEventSink(
                 [
                     sp.GetRequiredService<PlayHistoryEventSink>(),
@@ -105,6 +122,7 @@ static class PlayoutServiceCollectionExtensions
                     sp.GetRequiredService<MediaRotationEventSink>(),
                     sp.GetRequiredService<AiringTokenRing>(),
                     sp.GetRequiredService<UtteranceAirEventSink>(),
+                    sp.GetRequiredService<EpisodeAccrualSink>(),
                 ],
                 sp.GetRequiredService<ILogger<CompositeStationEventSink>>()))
             // Persona-id -> worn-face token, memoized on a ≤30s TTL (SPEC F129.5, STORY-336, PLAN

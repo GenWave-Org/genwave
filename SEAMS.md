@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **139 seams across 9 projects.**
+> **150 seams across 9 projects.**
 
 ## GenWave.Ads (2 seams)
 
@@ -66,7 +66,7 @@
 |---|---|---|---|
 | `GenWave.Core.Abstractions.IAppVersion` | `GenWave.Core.AppVersion` | Singleton | — |
 
-## GenWave.Host (37 seams)
+## GenWave.Host (38 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -79,6 +79,7 @@
 | `GenWave.Core.Abstractions.IContextSettingsProvider` | `GenWave.Host.Options.ConfigurationContextSettingsProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.ICrosstalkScopeProvider` | `GenWave.Host.Options.OptionsMonitorCrosstalkScopeProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.IFileActionPlanTokens` | `GenWave.Host.Api.DataProtectionFileActionPlanTokens` | Singleton | — |
+| `GenWave.Core.Abstractions.ILifeExtractionSwitch` | `GenWave.Host.Options.OptionsMonitorLifeExtractionSwitch` | Singleton | — |
 | `GenWave.Core.Abstractions.ILiquidsoapControl` | `GenWave.Host.Engine.MediaExistencePushGuard` | Singleton | — |
 | `GenWave.Core.Abstractions.IListenerStatsSource` | `GenWave.Host.Stats.IcecastListenerStatsSource` | Singleton | — |
 | `GenWave.Core.Abstractions.ILlmBatchGate` | `GenWave.Host.Enrichment.LlmBatchGate` | Singleton | — |
@@ -118,7 +119,7 @@
 | `GenWave.Core.Abstractions.IEnergyAnalyzer` | `GenWave.Loudness.FfmpegEnergyAnalyzer` | Singleton | — |
 | `GenWave.Core.Abstractions.ILoudnessAnalyzer` | `GenWave.Loudness.FfmpegLoudnessAnalyzer` | Singleton | — |
 
-## GenWave.MediaLibrary (61 seams)
+## GenWave.MediaLibrary (66 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -141,6 +142,7 @@
 | `GenWave.Core.Abstractions.IBoothLogEventConsumer` | `GenWave.MediaLibrary.Station.BoothLogWriter` | Singleton | — |
 | `GenWave.Core.Abstractions.IBoothLogReader` | `GenWave.MediaLibrary.Station.BoothLogRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IDeadFileReporter` | `GenWave.MediaLibrary.Garden.DeadFileReporter` | Singleton | — |
+| `GenWave.Core.Abstractions.IEpisodeStore` | `GenWave.MediaLibrary.Station.PersonaMemoryRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IExplicitClassifier` | `GenWave.MediaLibrary.ExplicitClassification.OllamaExplicitClassifier` | Singleton | — |
 | `GenWave.Core.Abstractions.IFileActionExecutor` | `GenWave.MediaLibrary.Garden.FileActions.FileActionExecutor` | Singleton | — |
 | `GenWave.Core.Abstractions.IFileActionPlanner` | `GenWave.MediaLibrary.Garden.FileActions.FileActionPlanner` | Singleton | — |
@@ -152,21 +154,25 @@
 | `GenWave.Core.Abstractions.IIconPackStore` | `GenWave.MediaLibrary.Station.IconPackRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IJinglePackStore` | `GenWave.MediaLibrary.Station.JinglePackRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.ILibraryRepository` | `GenWave.MediaLibrary.Catalog.LibraryRepository` | Singleton | — |
+| `GenWave.Core.Abstractions.ILifeStore` | `GenWave.MediaLibrary.Station.PersonaMemoryRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IMediaCatalog` | `GenWave.MediaLibrary.Catalog.MediaRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IMediaExplicitOverride` | `GenWave.MediaLibrary.Catalog.MediaRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IMediaLibraryMembership` | `GenWave.MediaLibrary.Catalog.MediaLibraryMembershipRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IMediaPurge` | `GenWave.MediaLibrary.Catalog.MediaRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IMediaRating` | `GenWave.MediaLibrary.Catalog.MediaRatingRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IMediaRotationSink` | `GenWave.MediaLibrary.Garden.MediaRotationRepository` | Singleton | — |
+| `GenWave.Core.Abstractions.IMemoryRecallStore` | `GenWave.MediaLibrary.Station.PersonaMemoryRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IMoodTagger` | `GenWave.MediaLibrary.Mood.OllamaMoodTagger` | Singleton | — |
 | `GenWave.Core.Abstractions.IPersonaAvatarStore` | `GenWave.MediaLibrary.Station.PersonaAvatarRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IPersonaImportStore` | `GenWave.MediaLibrary.Station.PersonaImportRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IPersonaMemory` | `GenWave.MediaLibrary.Station.PersonaMemoryRepository` | Singleton | — |
+| `GenWave.Core.Abstractions.IPersonaMemoryAdmin` | `GenWave.MediaLibrary.Station.PersonaMemoryRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IPersonaStore` | `GenWave.MediaLibrary.Station.PersonaRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IPersonaTasteAccrualStore` | `GenWave.MediaLibrary.Station.PersonaTasteAccrualRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IPersonaTasteReader` | `GenWave.MediaLibrary.Station.PersonaTasteRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IPersonaTasteStore` | `GenWave.MediaLibrary.Station.PersonaTasteRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IQuirkSpendLedger` | `GenWave.MediaLibrary.Station.PersonaMemoryRepository` | Singleton | — |
+| `GenWave.Core.Abstractions.IRepeatNumbersReader` | `GenWave.MediaLibrary.Station.RepeatNumbersRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IRequestCatalogProbe` | `GenWave.MediaLibrary.Catalog.RequestCatalogProbeRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IRequestStore` | `GenWave.MediaLibrary.Station.RequestRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IRotFindingStore` | `GenWave.MediaLibrary.Garden.RotFindingRepository` | Singleton | — |
@@ -184,22 +190,25 @@
 | `GenWave.Core.Abstractions.IVoicePackStore` | `GenWave.MediaLibrary.Station.VoicePackRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IYearLookup` | `GenWave.MediaLibrary.YearLookup.MusicBrainzYearLookup` | Singleton | — |
 
-## GenWave.Memory (4 seams)
+## GenWave.Memory (6 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
+| `GenWave.Core.Abstractions.ILifeExtractor` | `GenWave.Memory.LifeExtractionService` | Singleton | — |
+| `GenWave.Core.Abstractions.IMemoryRecallSource` | `GenWave.Memory.MemoryRecallSource` | Singleton | — |
 | `GenWave.Core.Abstractions.IQuirkSelector` | `GenWave.Memory.QuirkSelector` | Singleton | — |
 | `GenWave.Core.Abstractions.IRepetitionCheck` | `GenWave.Memory.RepetitionCheck` | Singleton | — |
 | `GenWave.Core.Abstractions.ISentenceTrimmer` | `GenWave.Memory.SentenceTrimmer` | Singleton | — |
 | `GenWave.Core.Abstractions.ITaglineLedger` | `GenWave.Memory.TaglineLedger` | Singleton | — |
 
-## GenWave.Orchestration (9 seams)
+## GenWave.Orchestration (10 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
 | `GenWave.Core.Abstractions.IActivePersonaAccessor` | `GenWave.Orchestration.OnAirPersonaAccessor` | Singleton | — |
 | `GenWave.Core.Abstractions.IEnvelopeProvider` | `GenWave.Orchestration.ScheduleEnvelopeProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.INextItemProvider` | `GenWave.Orchestration.Orchestrator` | Singleton | — |
+| `GenWave.Core.Abstractions.IOnAirSnapshotSource` | `GenWave.Orchestration.CachingScheduleResolver` | Singleton | — |
 | `GenWave.Core.Abstractions.IPatterDurationEstimator` | `GenWave.Orchestration.RollingPatterDurationEstimator` | Singleton | — |
 | `GenWave.Core.Abstractions.IShowFlavorLineSource` | `GenWave.Orchestration.ShowFlavorLineGate` | Singleton | — |
 | `GenWave.Orchestration.IBreakPlanObserver` | `GenWave.Orchestration.NoOpBreakPlanObserver` | Singleton | — |
@@ -207,12 +216,13 @@
 | `GenWave.Orchestration.IRandomSource` | `GenWave.Orchestration.SystemRandomSource` | Singleton | — |
 | `GenWave.Orchestration.IRequestFulfillmentSource` | `GenWave.Orchestration.RequestFulfillmentProvider` | Singleton | also registered: `GenWave.Orchestration.NoOpRequestFulfillmentSource` (GenWave.Orchestration) |
 
-## GenWave.Tts (18 seams)
+## GenWave.Tts (20 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
 | `GenWave.Core.Abstractions.IAnnouncementCopyWriter` | `GenWave.Tts.LlmCopyWriter` | Singleton | — |
 | `GenWave.Core.Abstractions.ICopyBoundsProvider` | `GenWave.Tts.OptionsMonitorCopyBoundsProvider` | Singleton | — |
+| `GenWave.Core.Abstractions.ILifeClaimLlm` | `GenWave.Tts.LifeClaimLlm` | Singleton | — |
 | `GenWave.Core.Abstractions.ILlmModelLister` | `GenWave.Tts.OpenAiModelLister` | Singleton | — |
 | `GenWave.Core.Abstractions.IPersonaPreviewWriter` | `GenWave.Tts.LlmCopyWriter` | Singleton | — |
 | `GenWave.Core.Abstractions.ISegmentCopyWriter` | `GenWave.Tts.DegradationGatedCopyWriter` | Singleton | wraps: `GenWave.Tts.LlmCopyWriter` (GenWave.Tts), `GenWave.Tts.TemplateCopyWriter` (GenWave.Tts) |
@@ -224,8 +234,9 @@
 | `GenWave.Tts.ICastSegmentAuthor` | `GenWave.Tts.CastSegmentAuthor` | Singleton | — |
 | `GenWave.Tts.IDegradationModeReader` | `GenWave.Tts.DegradationController` | Singleton | — |
 | `GenWave.Tts.IDependencyHealth` | `GenWave.Tts.DependencyHealthStore` | Singleton | — |
-| `GenWave.Tts.IDependencyProbe` | `GenWave.Tts.PiperHealthProbe` | Singleton | also registered: `GenWave.Tts.OllamaHealthProbe` (GenWave.Tts), `GenWave.Tts.KokoroHealthProbe` (GenWave.Tts) |
+| `GenWave.Tts.IDependencyProbe` | `GenWave.Tts.PiperHealthProbe` | Singleton | also registered: `GenWave.Tts.OllamaHealthProbe` (GenWave.Tts), `GenWave.Tts.LlmContextWindowProbe` (GenWave.Tts), `GenWave.Tts.KokoroHealthProbe` (GenWave.Tts) |
 | `GenWave.Tts.IFallbackProfileRenderer` | `GenWave.Tts.KokoroFallbackRenderer` | Singleton | also registered: `GenWave.Tts.PiperTtsSynthesizer` (GenWave.Tts) |
+| `GenWave.Tts.ILlmContextWindow` | `GenWave.Tts.LlmContextWindow` | Singleton | — |
 | `GenWave.Tts.ISafeSegmentAuthor` | `GenWave.Tts.SafeSegmentAuthor` | Singleton | — |
 | `GenWave.Tts.ISpeechNormalizationPreview` | `GenWave.Tts.NormalizingTtsSynthesizer` | Singleton | — |
 | `GenWave.Tts.IVoiceListingCache` | `GenWave.Tts.CachedVoiceLister` | Singleton | — |

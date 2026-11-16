@@ -29,6 +29,7 @@ public sealed class StatusController(
     IOptionsMonitor<LlmOptions> llmMonitor,
     LlmCopyStatusHolder llmStatusHolder,
     LlmCallCauseCounters llmCauseCounters,
+    ILlmContextWindow llmContextWindow,
     DegradationController degradationController,
     VoiceHealthReader voiceHealthReader,
     IActivePersonaAccessor personaAccessor,
@@ -36,7 +37,8 @@ public sealed class StatusController(
     PluginStatusAccessor pluginStatus,
     IAppVersion appVersion,
     SchemaVersionStatus schemaVersionStatus,
-    EngineSettingsStatus engineSettingsStatus) : ControllerBase
+    EngineSettingsStatus engineSettingsStatus,
+    IRepeatNumbersReader repeatNumbersReader) : ControllerBase
 {
     /// <summary>
     /// GET /api/status — cookie-auth (covered by the deny-by-default fallback policy when
@@ -48,7 +50,9 @@ public sealed class StatusController(
     /// degradation: { mode, pinned, since, cause },
     /// voice: { engine, degraded, reason, checkedAt },
     /// plugins: [{ name, version, contracts, state, reason? }],
-    /// version: { app, build, schema: { expected, applied } } }</c>.
+    /// version: { app, build, schema: { expected, applied } },
+    /// repeats: { djs: [{ personaId, name, catches, trims, fallbacks }],
+    ///            overused: [{ personaId, name, phrase, maxPerShift, occurrences, lastSaidAt (ISO-8601 UTC) }] } | null }</c>.
     ///
     /// <c>Station:SafeScope:LibraryIds</c> is read via <see cref="IOptionsMonitor{TOptions}.CurrentValue"/>
     /// on every call — not a boot-time snapshot — so a live <c>PUT /api/settings</c> edit
@@ -168,6 +172,7 @@ public sealed class StatusController(
         var dominantFailure = llmCauseCounters.DominantFailure(LlmCallKind.Copy);
         var degradation = degradationController.Evaluate();
         var voice = voiceHealthReader.Evaluate();
+        var repeats = await repeatNumbersReader.ReadAsync(ct);
 
         return Ok(new
         {
@@ -216,6 +221,9 @@ public sealed class StatusController(
                 dominantCause = dominantFailure?.Cause.ToString().ToLowerInvariant(),
                 dominantCauseCount = dominantFailure?.Count,
                 dominantCauseModel = dominantFailure?.Model,
+                // SPEC F218.21: the cached context-window verdict (health-cadence probe, never a live call here).
+                contextTokens = llmEnabled ? llmContextWindow.Tokens : null,
+                memoryOffReason = llmContextWindow.MemoryOffReason,
             },
             degradation = new
             {
@@ -246,6 +254,27 @@ public sealed class StatusController(
             {
                 settings = engineSettingsStatus.Settings,
                 differs = engineSettingsStatus.Differs,
+            },
+            // SPEC F218.29, STORY-542: the Repeats panel. Null when the station database could not be read.
+            repeats = repeats is null ? null : new
+            {
+                djs = repeats.Djs.Select(d => new
+                {
+                    personaId = d.PersonaId,
+                    name = d.PersonaName,
+                    catches = d.Catches,
+                    trims = d.Trims,
+                    fallbacks = d.Fallbacks,
+                }),
+                overused = repeats.Overused.Select(o => new
+                {
+                    personaId = o.PersonaId,
+                    name = o.PersonaName,
+                    phrase = o.Phrase,
+                    maxPerShift = o.MaxPerShift,
+                    occurrences = o.Occurrences,
+                    lastSaidAt = o.LastSaidAt,
+                }),
             },
         });
     }

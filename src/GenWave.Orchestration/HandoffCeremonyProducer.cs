@@ -410,7 +410,9 @@ public sealed class HandoffCeremonyProducer(
                     ShowName: onAir.Show?.Name,
                     CounterpartShowName: onAir.NextSegment?.Show?.Name,
                     Speaker: await ForPersonaOrNullAsync(outgoingId, ct),
-                    PersonaId: outgoingId));
+                    PersonaId: outgoingId,
+                    CounterpartPersonaId: incomingId,
+                    BoundaryAt: boundaryAt.Value));
         }
 
         if (incoming is null || boundaryAt.Value <= now)
@@ -460,7 +462,9 @@ public sealed class HandoffCeremonyProducer(
                     ShowName: onAir.NextSegment?.Show?.Name,
                     ShowFlavor: onAir.NextSegment?.Show?.Flavor,
                     Speaker: speaker,
-                    PersonaId: incomingId),
+                    PersonaId: incomingId,
+                    CounterpartPersonaId: outgoingId,
+                    BoundaryAt: boundaryAt.Value),
                 notBefore: heldNotBefore);
         }
     }

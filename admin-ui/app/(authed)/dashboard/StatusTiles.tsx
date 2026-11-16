@@ -5,13 +5,14 @@ import Link from "next/link";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDateStamp, formatUpSince } from "@/lib/format-clock";
 import { cn } from "@/lib/utils";
-import type { PluginStatusEntry, StatusResponse } from "@/lib/broadcast-api";
+import type { PluginStatusEntry, RepeatsStatus, StatusResponse } from "@/lib/broadcast-api";
 import {
   GARDENER_KIND_ORDER,
   GARDENER_OPEN_COUNT_KEY,
   gardenerCountPhrase,
   type GardenerOpenCounts,
 } from "@/lib/gardener-api";
+import { NO_REPEATS_LINE, djRepeatLine, isQuietWeek, overuseLine } from "@/lib/repeats-copy";
 
 /** SPEC F31.4–F31.5 — non-empty SafeScope with zero playable tracks: the drain would go silent. */
 function isSafeScopeDepleted(status: StatusResponse): boolean {
@@ -43,6 +44,8 @@ function playableTracksCaption(playable: number): string {
  */
 function llmTileVariant(llm: StatusResponse["llm"]): "neutral" | "ok" | "warning" {
   if (!llm.enabled) return "neutral";
+  // SPEC F218.21: a window under 8192 (or unknown) turns DJ memory off — the tile is red and says why.
+  if (llm.memoryOffReason) return "warning";
   return llm.lastOutcome === "failed" ? "warning" : "ok";
 }
 
@@ -246,6 +249,9 @@ export function StatusTiles({ status, error, timeZone }: StatusTilesProps): Reac
               {status.llm.activePersona !== null && (
                 <p className="mt-0.5 text-[0.8rem] text-mute">{status.llm.activePersona}</p>
               )}
+              {status.llm.memoryOffReason && (
+                <p className="mt-1 text-[0.75rem] font-semibold text-danger">{status.llm.memoryOffReason}</p>
+              )}
               {status.llm.lastOutcome === "failed" && (
                 <>
                   <p className="mt-1 text-[0.75rem] font-semibold text-danger">
@@ -318,6 +324,19 @@ export function StatusTiles({ status, error, timeZone }: StatusTilesProps): Reac
               <TileHeadline value={status.gardener.total} caption={gardenerHeadlineCaption(status.gardener.total)} />
               <p className="mt-1 text-[0.8rem] text-mute">{gardenerBreakdownLine(status.gardener.open)}</p>
             </>
+          )}
+        </Tile>
+
+        {/* SPEC F218.29, STORY-542 AC3, PLAN T708 — the Repeats panel: per DJ, what the repeat check caught this
+            week and which signature phrases went over their per-shift limit. `repeats` is null when the api
+            could not read the station database, and absent on an older api: both read as unavailable. */}
+        <Tile label="Repeats">
+          {loading && <TileSkeleton />}
+          {(neverLoaded || (status !== null && (status.repeats === undefined || status.repeats === null))) && (
+            <TileUnavailable />
+          )}
+          {status !== null && status.repeats !== undefined && status.repeats !== null && (
+            <RepeatsTileBody repeats={status.repeats} timeZone={timeZone} />
           )}
         </Tile>
 
@@ -428,6 +447,27 @@ function PluginsTileBody({ plugins }: { plugins: readonly PluginStatusEntry[] })
         ))}
       </div>
     </>
+  );
+}
+
+/** SPEC F218.29, STORY-542 — the Repeats panel's body: one sentence per DJ with activity, then one per
+ * over-used phrase; a plain "No repeats caught" when the week was quiet. */
+function RepeatsTileBody({ repeats, timeZone }: { repeats: RepeatsStatus; timeZone?: string }): ReactNode {
+  if (isQuietWeek(repeats)) return <p className="mt-1 text-[0.8rem] text-mute">{NO_REPEATS_LINE}</p>;
+
+  return (
+    <div className="space-y-1.5">
+      {repeats.djs.map((dj) => (
+        <p key={dj.personaId} className="text-[0.8rem] text-ink">
+          <span className="font-semibold">{dj.name}</span> <span className="text-mute">{djRepeatLine(dj)}</span>
+        </p>
+      ))}
+      {repeats.overused.map((over, index) => (
+        <p key={`${over.personaId}-${over.phrase}-${index}`} className="text-[0.75rem] text-mute">
+          {overuseLine(over, { timeZone })}
+        </p>
+      ))}
+    </div>
   );
 }
 

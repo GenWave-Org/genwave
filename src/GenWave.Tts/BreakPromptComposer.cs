@@ -11,7 +11,8 @@ internal static class BreakPromptComposer
     {
         var system = LlmPromptBuilder.BuildSystemPrompt(
             LlmPromptBuilder.BuildPersonaSection(
-                inputs.Persona, inputs.Card, inputs.MentionOwnName, inputs.Quirks, inputs.RecentLines, inputs.Taglines),
+                inputs.Persona, inputs.Card, inputs.MentionOwnName, inputs.Quirks, inputs.RecentLines, inputs.Taglines,
+                inputs.Memory),
             inputs.MaxCopyChars,
             inputs.StationLocalNow);
 

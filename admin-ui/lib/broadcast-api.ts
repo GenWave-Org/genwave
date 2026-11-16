@@ -79,6 +79,13 @@ export interface StatusResponse {
     dominantCause?: string | null;
     dominantCauseCount?: number | null;
     dominantCauseModel?: string | null;
+    /**
+     * SPEC F218.21, STORY-539 — the model's context window in tokens (null = unknown or LLM off) and,
+     * when it is below 8192 or unknown, the red tile text ("context window 4096 < 8192, memory off");
+     * null when memory is on. Optional on the wire for the same fixture-compat reason as above.
+     */
+    contextTokens?: number | null;
+    memoryOffReason?: string | null;
   };
   /**
    * SPEC F99.5, F100.3, STORY-256 AC4 — the primary voice engine's own cached health verdict.
@@ -123,6 +130,38 @@ export interface StatusResponse {
    * already follow.
    */
   plugins?: PluginStatusEntry[];
+  /**
+   * SPEC F218.29, STORY-542, PLAN T708 — the Repeats panel's numbers for the last 7 days. `null` when the
+   * api could not read the station database; absent on an api that predates it (the same "one deploy of
+   * backward tolerance" convention as `rotation`/`gardener`/`plugins` above).
+   */
+  repeats?: RepeatsStatus | null;
+}
+
+/** SPEC F218.29 — one DJ's repeat numbers: `catches` is every repeat caught, `trims` the ones fixed by
+ * cutting a sentence, `fallbacks` the lines that aired as a stock line instead. */
+export interface DjRepeatStatus {
+  personaId: number;
+  name: string;
+  catches: number;
+  trims: number;
+  fallbacks: number;
+}
+
+/** SPEC F218.29 — a signature phrase said more often in one shift than the DJ's card allows. */
+export interface CatchphraseOveruseStatus {
+  personaId: number;
+  name: string;
+  phrase: string;
+  maxPerShift: number;
+  occurrences: number;
+  /** ISO-8601 UTC: when the shift's most recent line was written. Absent from an older api. */
+  lastSaidAt?: string;
+}
+
+export interface RepeatsStatus {
+  djs: DjRepeatStatus[];
+  overused: CatchphraseOveruseStatus[];
 }
 
 /** SPEC F156.7 — one `plugins[]` entry. `name`/`version` are the plugin manifest's own raw text,

@@ -346,6 +346,7 @@ public sealed class TtsSegmentSource(
             ShowId = request.ShowId,
             UtteranceId = copy.UtteranceId,
             Text = copy.Text,
+            FactRead = copy.FactRead,
         });
 
         // DjName (gh-#259) carries the SPEAKER's persona name for Now Playing attribution —
@@ -360,7 +361,10 @@ public sealed class TtsSegmentSource(
         return new MediaItem(
             $"tts:{hash}", path, request.StationName, loudness,
             Artist: request.PersonaName ?? request.StationName, Cue: cuePoints, DurationMs: durationMs,
-            DjName: request.PersonaName, SegmentKind: request.Kind);
+            DjName: request.PersonaName, SegmentKind: request.Kind)
+        {
+            Handoff = request.Handoff,
+        };
     }
 
     /// <summary>

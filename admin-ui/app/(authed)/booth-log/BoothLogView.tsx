@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { personaNameOrFallback, usePersonaDirectory } from "@/lib/use-persona-directory";
+import { personaNameOrNull, usePersonaDirectory } from "@/lib/use-persona-directory";
 import { BoothLogFeed } from "./BoothLogFeed";
 import { useBoothLogFeed } from "./useBoothLogFeed";
 
@@ -34,7 +34,7 @@ export function BoothLogView({ timeZone }: BoothLogViewProps = {}): ReactNode {
       loadMoreError={feed.loadMoreError}
       onLoadMore={feed.loadMore}
       timeZone={timeZone}
-      personaName={(personaId) => personaNameOrFallback(personaDirectory, personaId)}
+      knownPersonaName={(personaId) => personaNameOrNull(personaDirectory, personaId)}
     />
   );
 }

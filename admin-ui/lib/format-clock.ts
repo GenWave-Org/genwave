@@ -52,6 +52,25 @@ export function formatUpSince(iso: string, options: ClockFormatOptions = {}): st
 }
 
 /**
+ * Formats an ISO timestamp as `Sun Nov 8` (short weekday, short month, day; no year, no comma) in the
+ * given zone or the browser's local zone by default. Built from parts so the shape is locale-stable.
+ */
+export function formatWeekdayMonthDay(iso: string, options: ClockFormatOptions = {}): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return "unknown";
+  }
+  const parts = new Intl.DateTimeFormat(options.locale, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    timeZone: options.timeZone,
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes): string => parts.find((p) => p.type === type)?.value ?? "";
+  return `${part("weekday")} ${part("month")} ${part("day")}`;
+}
+
+/**
  * Formats an ISO timestamp as a bare calendar date, `Mon D, YYYY` — no time-of-day, no internal
  * separator of its own — in the given zone or the browser's local zone by default. Distinct from
  * `formatUpSince` (which renders `HH:MM · Mon D`, no year, for the "API up since" tile): a caller

@@ -74,4 +74,12 @@ public sealed class LlmOptions
     /// </summary>
     [Range(1, int.MaxValue)]
     public int CallRingCapacity { get; set; } = 50;
+
+    /// <summary>
+    /// The model's context window in tokens, declared by the operator for an endpoint that has no
+    /// Ollama <c>/api/ps</c> (SPEC F218.21). Unset (null) = unknown. Consulted only when Ollama gives
+    /// no answer. A live station setting (<c>Llm:ContextTokens</c>, blank = unset); <c>LlmContextWindow</c> re-reads it each health cycle.
+    /// </summary>
+    [Range(1, int.MaxValue)]
+    public int? ContextTokens { get; set; }
 }

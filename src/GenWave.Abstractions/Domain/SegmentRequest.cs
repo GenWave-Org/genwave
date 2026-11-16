@@ -123,6 +123,14 @@ public sealed record SegmentRequest(
     public bool CrosstalkAiredThisBreak { get; init; }
 
     /// <summary>
+    /// SPEC F218.15(b) — for a <see cref="SegmentKind.SignOff"/>/<see cref="SegmentKind.SignOn"/> between two
+    /// distinct, known personas, who handed over to whom; <see langword="null"/> for every other request.
+    /// Copied onto <see cref="MediaItem.Handoff"/> by the renderer. A defaulted body property, not a
+    /// constructor parameter — the <see cref="CrosstalkAiredThisBreak"/> published-arity precedent.
+    /// </summary>
+    public HandoffParticipants? Handoff { get; init; }
+
+    /// <summary>
     /// SPEC F141.2/F141.3 (STORY-355, PLAN T326) — for a <see cref="SegmentKind.TimeDate"/> request,
     /// how honestly this drain can speak the hour it was armed for; see
     /// <see cref="TimeAnnouncementFreshness"/>'s own remarks for the full contract.
@@ -179,4 +187,12 @@ public sealed record SegmentRequest(
     /// <see langword="null"/> means "do not record". Same init-only discipline as <see cref="PersonaId"/>.
     /// </summary>
     public string? ShiftKeyText { get; init; }
+
+    /// <summary>
+    /// SPEC F218.15 (PLAN T702a) — for a <see cref="SegmentKind.ContextSegment"/>, the originating context
+    /// provider's key ("weather", "history"): one <see cref="ContextFacts"/> block is always one provider's
+    /// own join, so a single key names it truthfully. <see langword="null"/> for every other kind. The copy
+    /// writer reads it so the memory episode says "read the weather: ...". Same init-only discipline as <see cref="PersonaId"/>.
+    /// </summary>
+    public string? ContextProviderKey { get; init; }
 }

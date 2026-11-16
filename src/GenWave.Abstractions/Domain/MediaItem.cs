@@ -89,6 +89,14 @@ public sealed record MediaItem(string MediaId, string Locator, string Title, Lou
     public CrosstalkAiredScript? CrosstalkScript { get; init; }
 
     /// <summary>
+    /// SPEC F218.15(b) — the two personas of a <see cref="SegmentKind.SignOff"/>/<see cref="SegmentKind.SignOn"/>
+    /// handoff, copied from <see cref="SegmentRequest.Handoff"/>; rides through <c>PlayoutFeeder</c> into
+    /// <c>TrackAired.Handoff</c> the way <see cref="CrosstalkScript"/> does. <see langword="null"/> otherwise.
+    /// A defaulted body property for the same published-arity reason as <see cref="CrosstalkScript"/>.
+    /// </summary>
+    public HandoffParticipants? Handoff { get; init; }
+
+    /// <summary>
     /// SPEC F152.4 (STORY-372, PLAN T361) — the SAME <see cref="Core.Domain.RotationCandidate.RotationRelax"/>
     /// the rotation relax ladder stamped on the winning candidate, carried straight from
     /// <c>Orchestrator.GetNextAsync</c>'s own <c>RotationCandidate -&gt; MediaItem</c> narrowing (rides the

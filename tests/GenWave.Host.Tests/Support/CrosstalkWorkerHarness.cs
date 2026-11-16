@@ -168,6 +168,9 @@ internal static class CrosstalkWorkerHarness
     /// <param name="utteranceStore">SPEC F218.14 (PLAN T694): the store the script writer records aired lines into; null builds the writer without one.</param>
     /// <param name="card">Replaces the default quirk-less card for every cast persona.</param>
     /// <param name="postedPrompts">When supplied, receives each posted system prompt in arrival order.</param>
+    /// <param name="stockingSynthesizer">SPEC F218.15 (PLAN T702): replaces the forever-blocking synthesizer with one that
+    /// renders, and the never-called analyzers with fixed fakes, so the tick runs through to <c>planner.Stock</c>.</param>
+    /// <param name="capturePlanner">Receives the real <see cref="CrosstalkPlanner"/> so a fact can vend what the worker stocked.</param>
     /// <param name="causeCounters">The SPEC F139.2 sibling of <paramref name="callRing"/> — same
     /// "supply your own to observe it, otherwise get a fresh unobserved one" shape.</param>
     public static async Task<(
@@ -177,7 +180,8 @@ internal static class CrosstalkWorkerHarness
             DateTimeOffset now, string showSlug, string showName, string? replyContent = null,
             string llmEndpoint = "http://fake-llm.local", LlmCallRing? callRing = null,
             LlmCallCauseCounters? causeCounters = null, IQuirkSelector? quirkSelector = null,
-            PersonaCard? card = null, List<string>? postedPrompts = null, IUtteranceStore? utteranceStore = null)
+            PersonaCard? card = null, List<string>? postedPrompts = null, IUtteranceStore? utteranceStore = null,
+            ITtsSynthesizer? stockingSynthesizer = null, Action<CrosstalkPlanner>? capturePlanner = null)
     {
         var timeProvider = new FakeTimeProvider(now);
         var gate = new OnAirRenderGate();
@@ -201,6 +205,7 @@ internal static class CrosstalkWorkerHarness
         personaStore.Cards[20] = card ?? MakeCard("Next DJ");
         var planner = new CrosstalkPlanner(
             personaStore, new FakeCrosstalkScopeProvider([showSlug]), NullLogger<CrosstalkPlanner>.Instance);
+        capturePlanner?.Invoke(planner);
 
         var wireResponse = JsonSerializer.Serialize(new
         {
@@ -249,12 +254,12 @@ internal static class CrosstalkWorkerHarness
         var cacheRoot = Directory.CreateDirectory(Path.Combine(SharedTempRoot, Guid.NewGuid().ToString("N"))).FullName;
         var ttsOptions = new FakeOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, RenderBudgetSeconds = 30 });
         var assembler = new CrosstalkAssembler(
-            synthesizer,
+            stockingSynthesizer ?? synthesizer,
             new PronunciationRuleProvider(
                 new FakeOptionsMonitor<TtsPronunciationsOptions>(new TtsPronunciationsOptions()),
                 NullLogger<PronunciationRuleProvider>.Instance),
-            new NeverCalledLoudnessAnalyzer(),
-            new NeverCalledCueAnalyzer(),
+            stockingSynthesizer is null ? new NeverCalledLoudnessAnalyzer() : new FakeLoudnessAnalyzer(),
+            stockingSynthesizer is null ? new NeverCalledCueAnalyzer() : new FakeCueAnalyzer(),
             new NeverCalledAudioMixer(),
             ttsOptions,
             new FakeOptionsMonitor<CrosstalkOptions>(new CrosstalkOptions()),

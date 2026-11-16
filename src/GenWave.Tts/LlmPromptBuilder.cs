@@ -251,6 +251,14 @@ static class LlmPromptBuilder
     public const double SelfNameMentionProbability = 0.15;
 
     /// <summary>
+    /// SPEC F35.2 - whether <see cref="BuildPersonaSection"/> will yield a section (a soul line or quirks).
+    /// One predicate for the section and for riders that spend something (memory recall), so a spent
+    /// row never goes undelivered.
+    /// </summary>
+    public static bool HasPersonaSection(Persona? persona, PersonaCard? card, QuirkSelection? selection = null) =>
+        !string.IsNullOrEmpty(BuildSoul(persona, card)) || (selection?.Lines.Count ?? card?.Quirks.Count ?? 0) > 0;
+
+    /// <summary>
     /// Composes the persona section (SPEC F35.2, F35.3, F71.3): a soul line/block (see
     /// <see cref="BuildSoul"/>) plus, when the card carries any, a line of 2-3 SAMPLED quirks (see
     /// <see cref="SampleQuirks"/>) — never the full set (F71.3). A persona that yields neither
@@ -261,11 +269,13 @@ static class LlmPromptBuilder
     /// there is an actual persona section for it to ride on. <paramref name="recentLines"/> (F218.10)
     /// rides the same way: only on an existing persona section, so a persona with no soul and no
     /// quirks gets no block and the neutral scaffold stays neutral. <paramref name="taglines"/>
-    /// (F218.32) is passed through to <see cref="BuildQuirksBlock"/>.
+    /// (F218.32) is passed through to <see cref="BuildQuirksBlock"/>. <paramref name="memory"/> (F218.22)
+    /// is the same kind of rider: its blocks appear only when <see cref="HasPersonaSection"/> is true.
     /// </summary>
     public static string? BuildPersonaSection(
         Persona? persona, PersonaCard? card, bool mentionOwnName = false, QuirkSelection? selection = null,
-        IReadOnlyList<string>? recentLines = null, IReadOnlyList<TaglineStatus>? taglines = null)
+        IReadOnlyList<string>? recentLines = null, IReadOnlyList<TaglineStatus>? taglines = null,
+        MemoryPacket? memory = null)
     {
         var lines = new List<string>();
 
@@ -284,6 +294,10 @@ static class LlmPromptBuilder
         if (recentLines is { Count: > 0 } && lines.Count > 0)
             lines.AddRange(BuildRecentLinesBlock(recentLines));
 
+        // T701 (F218.22/F218.19): memory blocks ride the persona section too; an empty packet adds nothing.
+        if (memory is not null && lines.Count > 0)
+            lines.AddRange(BuildMemoryBlocks(memory));
+
         // gh-#150: the name line is a rider on an actual persona section, never a section by
         // itself — a persona with no soul and no quirks stays on the neutral scaffold (the
         // "neutral otherwise" half of F35.2 above) even on a rolled-true break.
@@ -291,6 +305,64 @@ static class LlmPromptBuilder
             lines.Add(BuildSelfNameMentionLine(name));
 
         return lines.Count == 0 ? null : string.Join('\n', lines);
+    }
+
+    /// <summary>SPEC F218.22 - heading of the memory block.</summary>
+    public const string MemoryHeading = "What you remember:";
+
+    /// <summary>SPEC F218.23 - memories are colour: the DJ may refer to them, never must.</summary>
+    public const string MemoryMayReferLine = "You may refer to these if it fits, but you never have to.";
+
+    /// <summary>SPEC F218.22 - nudge under the lore lines only; lore is the one kind recalled about once a shift.</summary>
+    public const string MemoryLoreNudgeLine = "Work one of these into this break if it fits naturally.";
+
+    /// <summary>SPEC F218.19 - heading of the never-mention list.</summary>
+    public const string NeverMentionHeading = "Never mention:";
+
+    /// <summary>Each memory row and never-mention entry is cut to this many characters (no ellipsis).</summary>
+    public const int MemoryRowMaxChars = 240;
+
+    /// <summary>
+    /// SPEC F218.22/F218.19/F218.23 - the memory block (lore, then the lore nudge when lore is present, then episodes newest
+    /// first, then life, then the may-refer line) and the never-mention block; each is absent when it has nothing to list.
+    /// Row text is flattened to one line so a stored newline cannot start a fake prompt section.
+    /// </summary>
+    public static IReadOnlyList<string> BuildMemoryBlocks(MemoryPacket memory)
+    {
+        var block = new List<string>();
+        var rows = memory.Rows;
+        if (rows.Count > 0)
+        {
+            block.Add(MemoryHeading);
+            block.AddRange(memory.Lore.Select(r => "- " + MemoryLine(r.Content)));
+            if (memory.Lore.Count > 0)
+                block.Add(MemoryLoreNudgeLine);
+            block.AddRange(memory.Episodes.Concat(memory.Life).Select(r => "- " + MemoryLine(r.Content)));
+            block.Add(MemoryMayReferLine);
+        }
+
+        if (memory.NeverMention.Count > 0)
+        {
+            block.Add(NeverMentionHeading);
+            block.AddRange(memory.NeverMention.Select(t => "- " + MemoryLine(t)));
+        }
+
+        return block;
+    }
+
+    static string MemoryLine(string text)
+    {
+        var flat = string.Join(' ', text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)).Trim();
+        return TrimTo(flat, MemoryRowMaxChars);
+    }
+
+    static string TrimTo(string text, int maxChars) => text.Length <= maxChars ? text : text[..maxChars];
+
+    /// <summary>SPEC F218.23 - the recalled rows' text, one per line, for the truth gate's fact block; empty when none.</summary>
+    public static string? MemoryFacts(MemoryPacket memory)
+    {
+        var rows = memory.Rows.Select(r => MemoryLine(r.Content)).ToList();
+        return rows.Count == 0 ? null : string.Join('\n', rows);
     }
 
     /// <summary>SPEC F218.10 - heading of the recent-lines block. Public so a spec pins it.</summary>
@@ -312,7 +384,7 @@ static class LlmPromptBuilder
     public static IReadOnlyList<string> BuildRecentLinesBlock(IReadOnlyList<string> recentLines)
     {
         var block = new List<string> { RecentLinesHeading };
-        block.AddRange(recentLines.Select(t => "- " + (t.Length <= RecentLineMaxChars ? t : t[..RecentLineMaxChars])));
+        block.AddRange(recentLines.Select(t => "- " + TrimTo(t, RecentLineMaxChars)));
         return block;
     }
 

@@ -285,7 +285,8 @@ public sealed class CrosstalkStockWorker(
 
             var exchange = new StockedCrosstalkExchange(
                 attempt.ShowSlug, cast.Cast, assembled.Result.Path, assembled.Result.Loudness,
-                assembled.Result.Cue, assembled.Result.DurationMs, Script: assembled.Script);
+                assembled.Result.Cue, assembled.Result.DurationMs,
+                Script: NameTheCast(assembled.Script, cast));
 
             if (planner.Stock(exchange))
             {
@@ -512,6 +513,16 @@ public sealed class CrosstalkStockWorker(
         DateTimeOffset now, NowPlayingSnapshot? nowPlaying, TimeSpan renderBudget, bool refillInFlight) =>
         CrosstalkBreakWindow.IsOpen(
             now, EstimatedOnAirEndsAt(nowPlaying), OnAirStartedAt(nowPlaying), renderBudget, refillInFlight);
+
+    /// <summary>
+    /// SPEC F218.15: the script with who spoke each side stamped on, here where the cast is known, so the accrual
+    /// consumer can write an episode for each persona from the aired script alone.
+    /// </summary>
+    internal static CrosstalkAiredScript NameTheCast(CrosstalkAiredScript script, CrosstalkCastResult cast) => script with
+    {
+        Host = new CrosstalkParticipant(cast.Cast.HostPersonaId, cast.HostCard.Name),
+        Neighbor = new CrosstalkParticipant(cast.Cast.NeighborPersonaId, cast.NeighborCard.Name),
+    };
 
     /// <summary>The current on-air item's estimated end — <see cref="CrosstalkBreakWindow"/>'s own
     /// input — derived from <c>NowPlayingSnapshot</c>'s already-published

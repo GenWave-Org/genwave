@@ -175,6 +175,10 @@ public sealed partial class SettingValidator
             // [Range(1, int.MaxValue)]; F53.1 adds the ceiling.
             ["Llm:TimeoutSeconds"] = v => IsIntInRange(v, Setting("Llm:TimeoutSeconds")),
 
+            // Context window in tokens (F218.21) — blank is the legal "unset" state (null on LlmOptions);
+            // anything else is an int in range.
+            ["Llm:ContextTokens"] = v => string.IsNullOrEmpty(v) || IsIntInRange(v, Setting("Llm:ContextTokens")),
+
             // F44.2 allowlist completion (closes gitea-#197) — six more live keys join the validator.
             // RenderBudgetSeconds/BlurbRetentionHours/MaxCopyChars floors mirror their options' own
             // [Range(1, int.MaxValue)] (boot-enforced via ValidateDataAnnotations); the remaining
@@ -245,6 +249,9 @@ public sealed partial class SettingValidator
             // The station-level rotation signal's Live switch (SPEC F150.2, F155.1, STORY-380, PLAN
             // T357) — plain bool kill switch, same shape as Station:Requests:Enabled above.
             ["Station:Thumbs:Enabled"] = IsBool,
+
+            // DJ life extraction's live switch (SPEC F218.17, STORY-537, PLAN T704a) — plain bool.
+            ["Memory:LifeExtraction:Enabled"] = IsBool,
 
             // Persona Catalog origin (SPEC F90.1, STORY-234, PLAN T99) — empty is the F90.1 kill
             // switch (catalog endpoints 404, admin UI hides the shelf), mirroring Llm:Endpoint/
@@ -964,6 +971,8 @@ public sealed partial class SettingValidator
             => $"Value '{value}' is not valid for '{key}'. Must be an absolute http/https URL, or empty to disable LLM-authored copy.",
         var k when k.Equals("Llm:TimeoutSeconds", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (seconds).",
+        var k when k.Equals("Llm:ContextTokens", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (tokens), or empty when unknown.",
         var k when k.Equals("Tts:RenderBudgetSeconds", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (seconds).",
         var k when k.Equals("Tts:BlurbRetentionHours", StringComparison.OrdinalIgnoreCase)
@@ -1012,7 +1021,8 @@ public sealed partial class SettingValidator
             => $"Value '{value}' is not valid for '{key}'. Must be a boolean (true/false).",
         var k when k.Equals("Station:Requests:WindowMinutes", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (minutes).",
-        var k when k.Equals("Station:Thumbs:Enabled", StringComparison.OrdinalIgnoreCase)
+        var k when k.Equals("Station:Thumbs:Enabled", StringComparison.OrdinalIgnoreCase) ||
+                   k.Equals("Memory:LifeExtraction:Enabled", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be a boolean (true/false).",
         var k when k.Equals("Community:CatalogIndexUrl", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an absolute http/https URL, or empty to disable the Persona Catalog entirely.",

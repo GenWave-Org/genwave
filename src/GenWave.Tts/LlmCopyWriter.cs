@@ -137,7 +137,10 @@ public sealed class LlmCopyWriter(
     IRepetitionCheck? repetitionCheck = null, // T693: absent means no post-check at all
     IStationEventSink? events = null,
     ITaglineLedger? taglineLedger = null, // T713: absent means no taglines, exactly the pre-ledger behaviour
-    ISentenceTrimmer? sentenceTrimmer = null) // T714: absent means a repeat always re-asks, exactly the pre-trim behaviour
+    ISentenceTrimmer? sentenceTrimmer = null, // T714: absent means a repeat always re-asks, exactly the pre-trim behaviour
+    ILlmContextWindow? contextWindow = null, // T701: absent (or either seam absent) means no memory, exactly the pre-memory behaviour
+    IMemoryRecallSource? memoryRecall = null,
+    ILifeExtractor? lifeExtractor = null) // T704: absent means no life extraction, exactly the pre-extractor behaviour
     : ISegmentCopyWriter, IPersonaPreviewWriter, IAnnouncementCopyWriter
 {
     readonly IStationEventSink events = events ?? NoOpStationEventSink.Instance;
@@ -283,6 +286,38 @@ public sealed class LlmCopyWriter(
             : templated;
 
     /// <summary>
+    /// The ONE definition of the fact block the truth gate checks a render against: the owner's announcement
+    /// message when there is one, else a ContextSegment's non-blank <see cref="SegmentRequest.ContextFacts"/>.
+    /// </summary>
+    static string? ContextFactBlockOf(SegmentRequest request, string? announcementMessage) =>
+        announcementMessage
+        ?? (request.Kind == SegmentKind.ContextSegment
+            && request.ContextFacts is { } contextFacts && !string.IsNullOrWhiteSpace(contextFacts)
+                ? contextFacts
+                : null);
+
+    /// <summary>
+    /// SPEC F218.15 — the fact the ACCEPTED <paramref name="copy"/> used, by the truth gate's own claim rules
+    /// (<see cref="CopyClaims.UsesFact"/>): the patter fact on a patter lane, or a ContextSegment's
+    /// <see cref="SegmentRequest.ContextFacts"/> block, keyed by <see cref="SegmentRequest.ContextProviderKey"/>
+    /// (one block is one provider's own join, so the single key is always true; "context" only when a request
+    /// carries no key). <see langword="null"/> when none was offered or the copy
+    /// claimed nothing from it.
+    /// </summary>
+    static FactReadOnAir? FactReadBy(string copy, SegmentRequest request, ContextPatterFact? patterFact)
+    {
+        bool Used(string fact) =>
+            CopyClaims.UsesFact(copy, fact, request.StationName, request.Track?.Title, request.Track?.Artist);
+
+        if (patterFact is { } offered)
+            return Used(offered.Fact) ? new FactReadOnAir(offered.Key, offered.Fact) : null;
+
+        return ContextFactBlockOf(request, announcementMessage: null) is { } facts && Used(facts)
+            ? new FactReadOnAir(request.ContextProviderKey ?? "context", facts)
+            : null;
+    }
+
+    /// <summary>
     /// SPEC F218.1 (STORY-532, PLAN T684) — stores <paramref name="copy"/> in the utterance log BEFORE
     /// render, raw text as handed to the renderer, and returns it stamped with the new row id. A request
     /// the planner left unstamped (no persona, no shift key) is not recorded. A store fault is logged
@@ -416,7 +451,15 @@ public sealed class LlmCopyWriter(
             statusHolder.Record(LlmAttemptOutcome.Ok, attemptedAt);
             // Only genuinely LLM-authored copy is fresh-per-airing (F34.6) — every fallback path
             // above returns the template writer's own SegmentCopy (FreshPerAiring: false) unchanged.
-            return await RecordAsync(request, new SegmentCopy(cleaned, FreshPerAiring: true), fallbackCopy: false, ct);
+            // SPEC F218.15: the patter fact the accepted copy actually used rides out with the copy, so the
+            // render event can name it for the memory consumer. A fact the copy never claimed is not "read".
+            var factRead = FactReadBy(cleaned, request, patterFact);
+            // SPEC F218.17: hand the accepted copy to the background life extractor. A bounded queue write, never
+            // awaited, so the render is not held for it; a fallback copy returned above never reaches here.
+            if (persona is not null)
+                lifeExtractor?.Enqueue(new AcceptedCopy(persona.Id, persona.Name, cleaned));
+            return await RecordAsync(
+                request, new SegmentCopy(cleaned, FreshPerAiring: true) { FactRead = factRead }, fallbackCopy: false, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -814,6 +857,37 @@ public sealed class LlmCopyWriter(
     }
 
     /// <summary>
+    /// This break's memory (SPEC F218.22), or <see cref="MemoryPacket.Empty"/> when recall is not wanted, memory is
+    /// off, or there is no persona section to carry it (rows spent but never shown would be hidden for nothing). A recall fault costs this break its memory, never the segment (F12.4).
+    /// </summary>
+    async Task<MemoryPacket> RecallMemoryAsync(SegmentRequest request, bool onAir, bool hasPersonaSection, CancellationToken ct)
+    {
+        if (!onAir || !hasPersonaSection || memoryRecall is null || contextWindow is null || request.PersonaId is not { } personaId)
+            return MemoryPacket.Empty;
+
+        var budget = contextWindow.Budget;
+        if (!budget.MemoryOn)
+            return MemoryPacket.Empty;
+
+        try
+        {
+            return await memoryRecall.TakeAsync(personaId, budget, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Memory recall failed for {Kind}; this break airs without memory", request.Kind);
+            return MemoryPacket.Empty;
+        }
+    }
+
+    static string? CombineFacts(string? contextFacts, string? memoryFacts) =>
+        contextFacts is null || memoryFacts is null ? contextFacts : contextFacts + "\n" + memoryFacts;
+
+    /// <summary>
     /// The persona's newest utterances, newest first, in ONE store read per render: enough for the
     /// recent-lines block (<see cref="LlmPromptBuilder.RecentLinesInPrompt"/>, F218.10/F218.37: on whenever the persona has utterances, memory budget or not) and, when
     /// <paramref name="needHistory"/>, for the repeat check's window (F218.11) even with memory
@@ -966,11 +1040,7 @@ public sealed class LlmCopyWriter(
         // of a provider's facts. Mutually exclusive with the ContextSegment branch below by
         // construction — announcementMessage is only ever non-null for an Announcement-kind request,
         // which is never a ContextSegment.
-        var factBlock = requiredCore
-            ?? (request.Kind == SegmentKind.ContextSegment
-                && request.ContextFacts is { } contextFacts && !string.IsNullOrWhiteSpace(contextFacts)
-                    ? contextFacts
-                    : null);
+        var contextFactBlock = ContextFactBlockOf(request, requiredCore);
         // Captured up front, once, for LlmCallRing (SPEC F73.1, T41) — startedAt mirrors
         // LlmCopyStatusHolder's own attemptedAt semantics (includes any single-flight queueing wait
         // below), and mode is read fresh right here rather than threaded in as a parameter: a
@@ -1050,6 +1120,13 @@ public sealed class LlmCopyWriter(
             var recentEntries = await ReadRecentEntriesAsync(request, checkRepeats || useTaglines, ct);
             var taglines = EvaluateTaglines(
                 card, quirkSelection, await ReadTaglineEntriesAsync(request, recentEntries, useTaglines, ct), onAir: spendQuirks);
+            // T701 (F218.22): recall spends rows (marks them aired), so on-air only, inside the critical section.
+            var memory = await RecallMemoryAsync(
+                request, spendQuirks && requiredCore is null, LlmPromptBuilder.HasPersonaSection(persona, card, quirkSelection), ct);
+            // F218.23: recalled text is part of the facts, so a number or weekday quoted from a memory passes the gate.
+            // Only where a fact check already runs (context/announcement lanes): a LeadIn has no fact block, and
+            // memory must not switch the digit/condition-word check on for ordinary patter.
+            var factBlock = CombineFacts(contextFactBlock, LlmPromptBuilder.MemoryFacts(memory));
             // F218.37: the block never waits for the memory budget; previews list it too.
             IReadOnlyList<string> recentLines = recentEntries.Take(LlmPromptBuilder.RecentLinesInPrompt).Select(e => e.Text).ToList();
             // Read HERE — after WaitAsync above, i.e. already inside the single-flight critical
@@ -1078,6 +1155,7 @@ public sealed class LlmCopyWriter(
                 stationLocalNow, previouslyVoicedTasteNotes)
             {
                 Taglines = taglines,
+                Memory = memory,
                 AnnouncementMessage = requiredCore,
                 PatterFact = patterFact?.Fact,
                 ShowFlavor = showFlavorFact,
@@ -1110,7 +1188,7 @@ public sealed class LlmCopyWriter(
             // its own outcome instead of only discoverable by re-reading Response after the fact.
             // gh-#620: a reasoning-only reply is recognised BEFORE hygiene ever sees the (empty) text,
             // so the fallback WARN can name the real cause; see CleanupOf's own remarks.
-            var cleanup = CleanupOf(reply, cfg.MaxCopyChars);
+            var cleanup = CleanupOf(reply, cfg.MaxCopyChars, personaName);
             LogIfTrimmed(request, personaName, cleanup);
 
             // SPEC F138.2/F138.3/F138.4 (STORY-350, STORY-351, PLAN T331/T332) — the truth-gate
@@ -1257,7 +1335,7 @@ public sealed class LlmCopyWriter(
                 var reaskReply = await PostChatCompletionAsync(
                     http, requestUri, cfg, systemPrompt, userPrompt, DeriveMaxTokens(cfg.MaxCopyChars), timeoutCts.Token);
                 var reaskText = reaskReply.Content;
-                var reaskCleanup = CleanupOf(reaskReply, cfg.MaxCopyChars);
+                var reaskCleanup = CleanupOf(reaskReply, cfg.MaxCopyChars, personaName);
                 LogIfTrimmed(request, personaName, reaskCleanup);
 
                 // The tri-state (no candidate to even check / checked-and-failed / checked-and-passed)
@@ -1471,10 +1549,10 @@ public sealed class LlmCopyWriter(
     /// sent the 2026-08-24 bench morning at the endpoint and max_tokens for a failure only
     /// <c>Llm:ReasoningEffort</c> fixes. Every other reply runs the unchanged hygiene pass.
     /// </summary>
-    internal static LlmCopyCleanupResult CleanupOf(CompletionReply reply, int maxCopyChars) =>
+    internal static LlmCopyCleanupResult CleanupOf(CompletionReply reply, int maxCopyChars, string? personaName) =>
         reply.IsReasoningOnly
             ? new LlmCopyCleanupResult.ReasoningOnly(reply.ReasoningChars, reply.FinishReason)
-            : CleanCopy(reply.Content, maxCopyChars);
+            : CleanCopy(SpeakerLabel.Strip(reply.Content, personaName), maxCopyChars);
 
     long ElapsedMs(DateTimeOffset startedAt) => (long)(timeProvider.GetUtcNow() - startedAt).TotalMilliseconds;
 

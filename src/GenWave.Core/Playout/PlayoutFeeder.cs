@@ -131,7 +131,7 @@ public sealed class PlayoutFeeder(
     sealed record PushedItemMeta(
         string? Title, string? Artist, double GainDb, int? DurationMs, PersonaPickDiagnostics? PersonaPick,
         string? ArtworkUrl, string? DjName, SegmentKind? SegmentKind, CrosstalkAiredScript? CrosstalkScript,
-        int? RotationRelax, double? Nudge);
+        int? RotationRelax, double? Nudge, HandoffParticipants? Handoff);
 
     // Media ids whose pushedMeta entry is feeder-authoritative — set at PushAsync time from the
     // exact MediaItem we queued, so TickAsync must never overwrite it with an engine-output guess.
@@ -326,7 +326,7 @@ public sealed class PlayoutFeeder(
                         : null;
                     pushedMeta[mediaId] = new PushedItemMeta(
                         title, artist, gainDb, DurationMs: null, PersonaPick: null, ArtworkUrl: artworkUrl,
-                        DjName: null, SegmentKind: null, CrosstalkScript: null, RotationRelax: null, Nudge: null);
+                        DjName: null, SegmentKind: null, CrosstalkScript: null, RotationRelax: null, Nudge: null, Handoff: null);
                 }
                 else
                 {
@@ -346,6 +346,7 @@ public sealed class PlayoutFeeder(
                         pm?.PersonaPick, pm?.SegmentKind)
                     {
                         CrosstalkScript = pm?.CrosstalkScript,
+                        Handoff = pm?.Handoff,
                         RotationRelax = pm?.RotationRelax,
                         Nudge = pm?.Nudge,
                     });
@@ -492,7 +493,7 @@ public sealed class PlayoutFeeder(
                 // stamped, handed back on EnginePushResult — never re-resolved.
                 pushedMeta[item.MediaId] = new PushedItemMeta(
                     item.Title, item.Artist, gainDb, item.DurationMs, item.PersonaPick, pushResult.ArtworkUrl,
-                    item.DjName, item.SegmentKind, item.CrosstalkScript, item.RotationRelax, item.Nudge);
+                    item.DjName, item.SegmentKind, item.CrosstalkScript, item.RotationRelax, item.Nudge, item.Handoff);
                 feederOwnedIds.Add(item.MediaId);
                 MarkPendingAir(item.MediaId);   // claim (d) starts here (SPEC F57.1(d), gh-#88)
                 chainIds.Add(item.MediaId);

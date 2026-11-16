@@ -12,4 +12,5 @@ public static class DependencyNames
     public const string Ollama = "ollama";
     public const string Kokoro = "kokoro";
     public const string Piper = "piper";
+    public const string LlmContextWindow = "llm-context-window";
 }

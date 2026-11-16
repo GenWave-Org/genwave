@@ -102,7 +102,7 @@ namespace GenWave.Orchestration;
 /// snapshot it already tolerates.
 /// </para>
 /// </summary>
-public sealed class CachingScheduleResolver
+public sealed class CachingScheduleResolver : IOnAirSnapshotSource
 {
     readonly IScheduleStore store;
     readonly ScheduleResolver resolver;
@@ -232,6 +232,9 @@ public sealed class CachingScheduleResolver
         // here too) degrades to "no specials yet" exactly the way it degrades to no snapshot at all.
         return current is null ? null : resolver.Resolve(current, specials);
     }
+
+    /// <summary>The port <see cref="IOnAirSnapshotSource"/> reads: the same lock-free <see cref="TryGetCurrent"/> answer (SPEC F218.15).</summary>
+    OnAirSnapshot? IOnAirSnapshotSource.Current => TryGetCurrent();
 
     /// <summary>
     /// Synchronous, in-memory read of the cached <see cref="ScheduleWeekSnapshot"/> ITSELF (PLAN

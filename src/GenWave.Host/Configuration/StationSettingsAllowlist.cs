@@ -241,6 +241,11 @@ public static class StationSettingsAllowlist
         // that read exists; the key/allowlist row itself is what T357 owns.
         new("Station:Thumbs:Enabled", SettingApplyMode.Live, SettingKind.Boolean, "", SettingGroup.Community),
 
+        // DJ life extraction's live off-switch (SPEC F218.17, STORY-537, PLAN T704a): OptionsMonitorLifeExtractionSwitch
+        // reads it per accepted copy, so a PUT here stops (or resumes) the extraction model calls with no api
+        // restart. Default on; seeded in appsettings.json. Grouped with the other LLM-backed settings.
+        new("Memory:LifeExtraction:Enabled", SettingApplyMode.Live, SettingKind.Boolean, "", SettingGroup.Voice),
+
         // TTS/LLM endpoint liveness (SPEC F36.1–F36.4, T8): KokoroTtsSynthesizer/KokoroVoiceLister
         // and LlmCopyWriter read these via IOptionsMonitor per call (no boot-frozen BaseAddress), so
         // a PUT here reroutes the very next render/voices call — no api restart. Llm:Endpoint is
@@ -297,6 +302,9 @@ public static class StationSettingsAllowlist
             ChoiceSource = new SettingChoiceSource.Probe(LlmModelChoiceProbe.ProbeName),
         },
         new("Llm:TimeoutSeconds", SettingApplyMode.Live, SettingKind.Number, "seconds", SettingGroup.Voice, Min: 1, Max: 300),
+        // F218.21 — the context window for an endpoint with no Ollama /api/ps. Blank = unset (unknown).
+        // LlmContextWindow reads IOptionsMonitor<LlmOptions> on every health cycle, so a PUT lands on the next one.
+        new("Llm:ContextTokens", SettingApplyMode.Live, SettingKind.Number, "tokens", SettingGroup.Voice, Min: 1, Max: 10_000_000),
 
         // F44.2 allowlist completion (closes gitea-#197) — six more boot-frozen consumers migrate to a
         // live provider/IOptionsMonitor read at use time:

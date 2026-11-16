@@ -46,7 +46,26 @@ public sealed partial class BreakPlanner
             CounterpartShowName: handoff.CounterpartShowName)
         {
             Speaker = handoff.Speaker is { } s ? s with { Voice = handoff.Voice } : null,
+            Handoff = HandoffBetween(kind, handoff),
         }, handoff.PersonaId);
+
+    // SPEC F218.15(b): both sides known and distinct, else no handoff to remember (a same-persona show
+    // transition has no counterpart; a music-only half never resolved one).
+    static HandoffParticipants? HandoffBetween(SegmentKind kind, HandoffContext handoff)
+    {
+        if (handoff is not { PersonaId: { } self, PersonaName: { } selfName, CounterpartPersonaId: { } other, CounterpartName: { } otherName, BoundaryAt: { } boundaryAt }
+            || self == other)
+            return null;
+
+        var me = new CrosstalkParticipant(self, selfName);
+        var them = new CrosstalkParticipant(other, otherName);
+        return kind switch
+        {
+            SegmentKind.SignOff => new HandoffParticipants(me, them, boundaryAt),
+            SegmentKind.SignOn => new HandoffParticipants(them, me, boundaryAt),
+            _ => null,
+        };
+    }
 
     // Verbatim copy of Orchestrator.BuildTimeDateRequest (SPEC F110.3/F141.2): LocalNow carries the
     // deferral's own armed Due, never a drain-time StationLocalNow() read. Speaker (PLAN T527, SPEC
@@ -64,6 +83,8 @@ public sealed partial class BreakPlanner
     // Verbatim copy of Orchestrator.BuildContextSegmentRequestAsync (SPEC F107.3/F107.6/F107.7),
     // split into a guard (ValidateContextContent, below) and this assembly step purely to stay
     // under the ~30-line method budget — every log line stays byte-identical to the original.
+    // ContextProviderKey is the deferral's own Discriminator (null when absent): "(unknown)" is a log
+    // label only, so a keyless segment is never remembered as "read the (unknown)" (PLAN T702c).
     // Speaker (PLAN T527, SPEC F188.4/F189.4): resolved off the SAME PersonaId the voice/name tuple
     // just named, and — per round-2 review finding F1 — the request's stamped Voice is this method's
     // own already-resolved contextVoice term; the snapshot aligns to it, never the reverse, so the
@@ -92,6 +113,7 @@ public sealed partial class BreakPlanner
             ContextFacts: content.SegmentFacts)
         {
             Speaker = speaker,
+            ContextProviderKey = deferral.Discriminator,
         }, contextPersonaId);
 
         return (contextReq, providerKey);

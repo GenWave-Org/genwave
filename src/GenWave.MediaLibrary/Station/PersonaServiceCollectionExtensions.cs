@@ -59,6 +59,10 @@ public static class PersonaServiceCollectionExtensions
                 new Lazy<NpgsqlDataSource>(() => new NpgsqlDataSourceBuilder(connectionString).Build()),
                 sp.GetRequiredService<IOptions<PersonaMemoryOptions>>()));
         services.AddSingleton<IQuirkSpendLedger>(sp => sp.GetRequiredService<PersonaMemoryRepository>());
+        services.AddSingleton<IMemoryRecallStore>(sp => sp.GetRequiredService<PersonaMemoryRepository>());
+        services.AddSingleton<IEpisodeStore>(sp => sp.GetRequiredService<PersonaMemoryRepository>());
+        services.AddSingleton<ILifeStore>(sp => sp.GetRequiredService<PersonaMemoryRepository>());
+        services.AddSingleton<IPersonaMemoryAdmin>(sp => sp.GetRequiredService<PersonaMemoryRepository>());
         return services.AddSingleton<IPersonaMemory>(sp => sp.GetRequiredService<PersonaMemoryRepository>());
     }
 

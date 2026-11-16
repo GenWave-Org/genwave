@@ -128,6 +128,25 @@ public static class FeatureContextSegmentsAirAtBoundaries
             // instead. This project's own seam is the SegmentRequest the Orchestrator hands down.
             var request = Assert.Single(tts.Requests, r => r.Kind == SegmentKind.ContextSegment);
             Assert.Equal(Facts, request.ContextFacts);
+            Assert.Equal("weather", request.ContextProviderKey);
+        }
+
+        [Fact]
+        public async Task AKeylessContextDeferralCarriesNoProviderKey()
+        {
+            var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-08-08T00:00:00Z"));
+            var queue = new SpeechDeferralQueue(clock);
+            var tts = new FakeTtsSegmentSource();
+            var orchestrator = BuildOrchestrator(queue, clock, tts);
+
+            var content = new ContextSegmentFacts("Sunny and seventy-two degrees.", clock.GetUtcNow().AddHours(1));
+            queue.Enqueue(SpeechDeferralKind.Context, "cadence elapsed", context: content);
+
+            await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
+
+            // "(unknown)" is a log label only; the stamp stays null so FactReadBy's fallback can fire.
+            var request = Assert.Single(tts.Requests, r => r.Kind == SegmentKind.ContextSegment);
+            Assert.Null(request.ContextProviderKey);
         }
     }
 

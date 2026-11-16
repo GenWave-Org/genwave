@@ -57,7 +57,7 @@ internal sealed class BenchRunner(HttpClient http, BenchArgs args, TimeProvider 
 
             // The writer's own path: a reply hygiene rejects (empty, reasoning-only) has no text to air, so it
             // fails the gate and is neither scored nor remembered; an over-length one is scored as trimmed.
-            if (LlmCopyWriter.TextOf(LlmCopyWriter.CleanupOf(reply, cfg.MaxCopyChars)) is not { } copy)
+            if (LlmCopyWriter.TextOf(LlmCopyWriter.CleanupOf(reply, cfg.MaxCopyChars, card.Name)) is not { } copy)
             {
                 continue;
             }

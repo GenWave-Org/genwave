@@ -22,4 +22,12 @@ public sealed record SegmentCopy(string Text, bool FreshPerAiring)
     /// <c>Deconstruct</c> arity stay unchanged (the <see cref="SegmentRequest.CrosstalkAiredThisBreak"/> precedent).
     /// </summary>
     public long? UtteranceId { get; init; }
+
+    /// <summary>
+    /// SPEC F218.15 — the context fact the accepted copy actually used, or <see langword="null"/> when none
+    /// was offered or the copy never claimed anything from it. Rides to the renderer so
+    /// <see cref="Events.SegmentGenerated.FactRead"/> can name it. Init-only, for the same reason as
+    /// <see cref="UtteranceId"/>.
+    /// </summary>
+    public FactReadOnAir? FactRead { get; init; }
 }

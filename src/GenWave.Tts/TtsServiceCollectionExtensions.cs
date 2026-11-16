@@ -232,6 +232,15 @@ public static class TtsServiceCollectionExtensions
         services.AddHttpClient<OllamaHealthProbe>();
         services.AddSingleton<IDependencyProbe>(sp => sp.GetRequiredService<OllamaHealthProbe>());
 
+        // LLM context window (SPEC F218.21, STORY-539): the probe rides the same cadence; one
+        // LlmContextWindow instance serves both the probe (writer) and ILlmContextWindow (readers).
+        // IHttpClientFactory comes from the typed AddHttpClient<OllamaHealthProbe>() above.
+        services.AddSingleton<OllamaContextClient>();
+        services.AddSingleton<LlmContextWindow>();
+        services.AddSingleton<ILlmContextWindow>(sp => sp.GetRequiredService<LlmContextWindow>());
+        services.AddSingleton<LlmContextWindowProbe>();
+        services.AddSingleton<IDependencyProbe>(sp => sp.GetRequiredService<LlmContextWindowProbe>());
+
         services.AddHttpClient<KokoroHealthProbe>();
         services.AddSingleton<IDependencyProbe>(sp => sp.GetRequiredService<KokoroHealthProbe>());
 
@@ -286,6 +295,9 @@ public static class TtsServiceCollectionExtensions
             // F35.6/T7) — so the persona preview endpoint reuses the exact same prompt-building/
             // hygiene instance the feeder does, never a second parallel writer.
             .AddSingleton<LlmCopyWriter>()
+            // The life extractor's own completion seam (SPEC F218.17, PLAN T704): same endpoint/key/timeout, called
+            // only from the background LifeExtractionService, never from the render path.
+            .AddSingleton<ILifeClaimLlm, LifeClaimLlm>()
             .AddSingleton<IPersonaPreviewWriter>(sp => sp.GetRequiredService<LlmCopyWriter>())
             // IAnnouncementCopyWriter (SPEC F144.3, STORY-358, PLAN T342): the SAME "register
             // concretely once, expose under every seam it implements" idiom IPersonaPreviewWriter
