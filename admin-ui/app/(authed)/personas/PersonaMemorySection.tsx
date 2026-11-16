@@ -85,9 +85,9 @@ function offeredText(row: PersonaMemoryRow): string {
   return row.lastAiredAt === null ? times : `${times}, last ${formatUpSince(row.lastAiredAt)}`;
 }
 
-/** Episodes are stored as a lowercase predicate ("hosted a shift"); capitalise it for display only. */
+/** Episode and life rows are stored as a lowercase predicate ("hosted a shift"); capitalise for display only. */
 function displayText(row: PersonaMemoryRow): string {
-  if (row.kind !== "episode") return row.text;
+  if (row.kind !== "episode" && row.kind !== "life") return row.text;
   return row.text.charAt(0).toUpperCase() + row.text.slice(1);
 }
 

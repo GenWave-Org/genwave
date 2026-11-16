@@ -175,6 +175,19 @@ describe("Feature: I can see and shape a DJ's memory", () => {
       expect(within(region).getByRole("textbox", { name: "Memory text" })).toHaveValue("hosted a shift on Sunday");
     });
 
+    it("Life rows start with a capital in the view while Edit keeps the stored text", async () => {
+      const life = memoryRow({ id: 32, kind: "life", source: "extracted", text: "has a cat named Shadow" });
+      makeFetchMock({ "GET /api/personas/1/memory": { status: 200, body: [life] } });
+      const region = await openMemory();
+
+      await openTab(region, "Life");
+      const row = within(region).getByTestId("memory-row-32");
+      expect(within(row).getByText("Has a cat named Shadow")).toBeInTheDocument();
+
+      await click(within(row).getByRole("button", { name: "Edit" }));
+      expect(within(region).getByRole("textbox", { name: "Memory text" })).toHaveValue("has a cat named Shadow");
+    });
+
     it("each open section's Add label points at its own textbox", async () => {
       makeFetchMock({ "GET /api/personas/2/memory": { status: 200, body: [] } });
       render(
