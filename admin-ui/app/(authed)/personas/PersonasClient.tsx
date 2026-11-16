@@ -17,6 +17,7 @@ import { PersonaFace } from "./PersonaFace";
 import { PersonaFaceEditor } from "./PersonaFaceEditor";
 import { PersonaImportPanel } from "./PersonaImportPanel";
 import { PersonaPreview } from "./PersonaPreview";
+import { PersonaMemorySection } from "./PersonaMemorySection";
 import { PersonaTasteSection } from "./PersonaTasteSection";
 import { usePersonaVoiceWarning } from "./use-persona-voice-warning";
 import type { PersonaDto } from "./types";
@@ -232,6 +233,7 @@ export function PersonasClient({
   const [firingPersona, setFiringPersona] = useState<PersonaDto | null>(null);
   const [isFiring, setIsFiring] = useState(false);
   const [expandedTasteIds, setExpandedTasteIds] = useState<ReadonlySet<number>>(new Set());
+  const [expandedMemoryIds, setExpandedMemoryIds] = useState<ReadonlySet<number>>(new Set());
 
   // Worn faces (SPEC F128.5/.6/.9, STORY-333, PLAN T296) — a per-persona cache-bust counter
   // (`PersonaFace`'s own remarks: 0 means "no write yet this session", so the first render never
@@ -278,6 +280,16 @@ export function PersonasClient({
     } catch {
       // stale list until the next action — not a lost write.
     }
+  }
+
+  /** Toggles the Memory disclosure for one persona row (SPEC F218.25) — same shape as the Taste toggle. */
+  function toggleMemory(id: number): void {
+    setExpandedMemoryIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   }
 
   /** Toggles the Taste disclosure for one persona row (SPEC F86.7) — mirrors LlmCallsFeed's own
@@ -406,6 +418,7 @@ export function PersonasClient({
   function renderPersonaRow(persona: PersonaDto, section: "scheduled" | "bench"): ReactNode {
     const isOnAir = onAirPersonaName !== null && persona.name === onAirPersonaName;
     const isTasteExpanded = expandedTasteIds.has(persona.id);
+    const isMemoryExpanded = expandedMemoryIds.has(persona.id);
     return (
       <Fragment key={persona.id}>
         <tr className="border-b border-line last:border-b-0">
@@ -464,6 +477,15 @@ export function PersonasClient({
                 >
                   {isTasteExpanded ? "Hide taste" : "Taste"}
                 </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  aria-expanded={isMemoryExpanded}
+                  aria-label={`${isMemoryExpanded ? "Hide" : "Show"} memory for ${persona.name}`}
+                  onClick={() => toggleMemory(persona.id)}
+                >
+                  {isMemoryExpanded ? "Hide memory" : "Memory"}
+                </Button>
               </div>
               <PersonaPreview target={{ kind: "saved", personaId: persona.id, voice: persona.voice }} />
             </div>
@@ -474,6 +496,15 @@ export function PersonasClient({
             <td colSpan={4} className="py-3">
               <div className="rounded-[6px] border border-line bg-surface-2 p-3">
                 <PersonaTasteSection personaId={persona.id} personaName={persona.name} />
+              </div>
+            </td>
+          </tr>
+        )}
+        {isMemoryExpanded && (
+          <tr className="border-b border-line last:border-b-0">
+            <td colSpan={4} className="py-3">
+              <div className="rounded-[6px] border border-line bg-surface-2 p-3">
+                <PersonaMemorySection personaId={persona.id} personaName={persona.name} />
               </div>
             </td>
           </tr>
