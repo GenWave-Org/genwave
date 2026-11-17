@@ -232,4 +232,64 @@ public static class FeatureEpisodeRetentionSql
         [Fact]
         public void AnOldQuirkIsNotAnEpisodeAndStays() => Assert.Equal(["accrued quirk, 29 days old"], quirks);
     }
+
+    // gh-#1010: a shared event lives while either side remembers it, and goes once both episodes are evicted
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioAnEventGoesWithItsLastEpisode(DatabaseFixture db) : IAsyncLifetime
+    {
+        long eventsAfterOneSideForgot;
+        long eventsAfterBothForgot;
+        long freshEventsAfterBothForgot;
+
+        static async Task<long> CountEventsAsync(DatabaseFixture db, string summary)
+        {
+            await using var conn = await db.StationDataSource.OpenConnectionAsync();
+            return await conn.QuerySingleAsync<long>(
+                "select count(*) from station.memory_event where summary = @summary", new { summary });
+        }
+
+        public async Task InitializeAsync()
+        {
+            await db.ResetStationAsync();
+            await ResetMemoryEventsAsync(db);
+            var dusty = await CreatePersonaAsync(db, "Dusty");
+            var flip = await CreatePersonaAsync(db, "Flip");
+
+            await using (var conn = await db.StationDataSource.OpenConnectionAsync())
+                await conn.ExecuteAsync(
+                    """
+                    with e as (
+                        insert into station.memory_event (occurred_at, kind, summary)
+                        values (now() - interval '29 days', 'crosstalk', 'old crosstalk')
+                        returning id)
+                    insert into station.persona_memory (persona_id, kind, content, source, occurred_at, event_id)
+                    select p, 'episode', 'talked on air, 29 days ago', 'accrued', now() - interval '29 days', e.id
+                    from e, unnest(array[@dusty, @flip]::integer[]) as p
+                    """,
+                    new { dusty, flip });
+
+            var at = DateTimeOffset.UtcNow;
+            await Repo(db).AppendAsync(new NewEpisode(dusty, "a new day", at), CancellationToken.None);
+            eventsAfterOneSideForgot = await CountEventsAsync(db, "old crosstalk");
+
+            await Repo(db).AppendSharedAsync(
+                new NewMemoryEvent("crosstalk", "fresh crosstalk", at),
+                [new NewEpisode(dusty, "talked again", at), new NewEpisode(flip, "talked again", at)],
+                CancellationToken.None);
+            eventsAfterBothForgot = await CountEventsAsync(db, "old crosstalk");
+            freshEventsAfterBothForgot = await CountEventsAsync(db, "fresh crosstalk");
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void TheEventSurvivesWhileFlipStillRemembersIt() => Assert.Equal(1, eventsAfterOneSideForgot);
+
+        [Fact]
+        public void TheEventIsGoneOnceBothEpisodesAreEvicted() => Assert.Equal(0, eventsAfterBothForgot);
+
+        [Fact]
+        public void TheNewEventStays() => Assert.Equal(1, freshEventsAfterBothForgot);
+    }
 }
