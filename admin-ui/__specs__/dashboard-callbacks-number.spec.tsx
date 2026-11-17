@@ -27,13 +27,25 @@ afterEach(cleanup);
 
 describe("STORY-551 — the callback count on the Status page", () => {
   it("AC2 — shows Callbacks per DJ-hour as 0.75", () => {
-    render(<StatusTiles status={makeStatus({ perDjHour: 0.75 })} error={false} />);
+    render(<StatusTiles status={makeStatus({ perDjHour: 0.75, asks: 8, used: 5 })} error={false} />);
 
     expect(within(callbacksTile()).getByText("0.75")).toBeInTheDocument();
   });
 
+  it("T743 — adds 5 aired of 8 asked · last 7 days under the number", () => {
+    render(<StatusTiles status={makeStatus({ perDjHour: 0.75, asks: 8, used: 5 })} error={false} />);
+
+    expect(within(callbacksTile()).getByText("5 aired of 8 asked · last 7 days")).toBeInTheDocument();
+  });
+
+  it("T743 — hides the line with no offers", () => {
+    render(<StatusTiles status={makeStatus({ perDjHour: null, asks: 0, used: 0 })} error={false} />);
+
+    expect(within(callbacksTile()).queryByText(/asked/)).not.toBeInTheDocument();
+  });
+
   it("AC3 — reads None yet with no offers", () => {
-    render(<StatusTiles status={makeStatus({ perDjHour: null })} error={false} />);
+    render(<StatusTiles status={makeStatus({ perDjHour: null, asks: 0, used: 0 })} error={false} />);
 
     expect(within(callbacksTile()).getByText("None yet")).toBeInTheDocument();
   });

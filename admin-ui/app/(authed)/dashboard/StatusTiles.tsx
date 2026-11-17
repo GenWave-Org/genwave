@@ -12,7 +12,7 @@ import {
   gardenerCountPhrase,
   type GardenerOpenCounts,
 } from "@/lib/gardener-api";
-import { CALLBACKS_LABEL, callbacksPerDjHourText } from "@/lib/callbacks-copy";
+import { CALLBACKS_LABEL, callbacksCountsLine, callbacksPerDjHourText } from "@/lib/callbacks-copy";
 import { NO_REPEATS_LINE, djRepeatLine, isQuietWeek, overuseLine } from "@/lib/repeats-copy";
 
 /** SPEC F31.4–F31.5 — non-empty SafeScope with zero playable tracks: the drain would go silent. */
@@ -350,9 +350,16 @@ export function StatusTiles({ status, error, timeZone }: StatusTilesProps): Reac
             <TileUnavailable />
           )}
           {status !== null && status.callbacks !== undefined && status.callbacks !== null && (
-            <p className="text-[1.4rem] font-semibold tabular-nums text-ink">
-              {callbacksPerDjHourText(status.callbacks.perDjHour)}
-            </p>
+            <>
+              <p className="text-[1.4rem] font-semibold tabular-nums text-ink">
+                {callbacksPerDjHourText(status.callbacks.perDjHour)}
+              </p>
+              {callbacksCountsLine(status.callbacks.asks, status.callbacks.used) !== null && (
+                <p className="mt-1 text-[0.75rem] text-mute">
+                  {callbacksCountsLine(status.callbacks.asks, status.callbacks.used)}
+                </p>
+              )}
+            </>
           )}
         </Tile>
 

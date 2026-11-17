@@ -46,6 +46,22 @@ public static class FeatureTheCallbackCount
         }
     }
 
+    // T743 — the line under the number
+    public sealed class ScenarioTheCountsBehindTheNumber
+    {
+        // Given 12 used out of 20 asked
+
+        [Fact]
+        public async Task TheStatusResponseCarriesAsksAndUsed()
+        {
+            var body = await StatusAsync(new FakeCallbackRateReader(new CallbackRate(Asks: 20, Used: 12, Hours: 16)));
+
+            var callbacks = body.GetProperty("callbacks");
+            Assert.Equal(20, callbacks.GetProperty("asks").GetInt32());
+            Assert.Equal(12, callbacks.GetProperty("used").GetInt32());
+        }
+    }
+
     // AC3 — nothing yet (sad path)
     public sealed class ScenarioNothingYet
     {

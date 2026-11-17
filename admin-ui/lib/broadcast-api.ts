@@ -146,6 +146,10 @@ export interface StatusResponse {
 
 export interface CallbacksStatus {
   perDjHour: number | null;
+  /** Offers made in the window; the line under the number is hidden when 0. */
+  asks: number;
+  /** Offers the DJ actually used on air. */
+  used: number;
 }
 
 /** SPEC F218.29 — one DJ's repeat numbers: `catches` is every repeat caught, `trims` the ones fixed by

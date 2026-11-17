@@ -54,8 +54,9 @@ public sealed class StatusController(
     /// version: { app, build, schema: { expected, applied } },
     /// repeats: { djs: [{ personaId, name, catches, trims, fallbacks }],
     ///            overused: [{ personaId, name, phrase, maxPerShift, occurrences, lastSaidAt (ISO-8601 UTC) }] } | null,
-    /// callbacks: { perDjHour: number | null } | null }</c>. <c>callbacks.perDjHour</c> (F218.47) is the
-    /// station-wide used / DJ-hours over 7 days, null with no offers or no hours; <c>callbacks</c> itself is
+    /// callbacks: { perDjHour: number | null, asks: number, used: number } | null }</c>. <c>callbacks.perDjHour</c> (F218.47) is the
+    /// station-wide used / DJ-hours over 7 days, null with no offers or no hours; <c>asks</c> and <c>used</c> are the
+    /// offers and on-air uses behind it (T743); <c>callbacks</c> itself is
     /// null when the station database could not be read.
     ///
     /// <c>Station:SafeScope:LibraryIds</c> is read via <see cref="IOptionsMonitor{TOptions}.CurrentValue"/>
@@ -282,7 +283,7 @@ public sealed class StatusController(
                 }),
             },
             // SPEC F218.47, STORY-551: "Callbacks per DJ-hour". Null when the station database could not be read.
-            callbacks = callbacks is null ? null : new { perDjHour = callbacks.PerDjHour },
+            callbacks = callbacks is null ? null : new { perDjHour = callbacks.PerDjHour, asks = callbacks.Asks, used = callbacks.Used },
         });
     }
 
