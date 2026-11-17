@@ -137,6 +137,42 @@ public sealed class DatabaseFixture : IAsyncLifetime
     }
 
     /// <summary>
+    /// For specs that simulate a pre-migration database by dropping <c>station.utterance</c>,
+    /// <c>station.persona_memory</c> or <c>station.persona.definition</c>: first drops the F218 objects
+    /// that depend on them (db/51 views, db/52 <c>memory_offer</c> + <c>callback_rate</c>) so the drop
+    /// is not refused (2BP01). Explicit, not CASCADE, so nothing else is stripped silently. Pair with
+    /// <see cref="ReplayMigrations"/> in a <c>finally</c> once the spec has finished.
+    /// </summary>
+    public async Task DropMemoryDependentsAsync()
+    {
+        await using var conn = await StationDataSource.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            """
+            drop view if exists station.callback_rate;
+            drop view if exists station.v_repeat_catches_7d;
+            drop view if exists station.v_catchphrase_per_shift;
+            drop table if exists station.memory_offer;
+            """;
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    /// <summary>
+    /// Re-runs every <c>db/*-migration.sh</c> in ordinal order (what migrate.sh does on upgrade; all are
+    /// idempotent) so whatever a spec dropped, including objects a future script adds that
+    /// <see cref="DropMemoryDependentsAsync"/> does not know yet, is back for the specs that follow. It writes
+    /// no <c>station.schema_migration</c> journal rows (migrate.sh does). Called from a <c>finally</c>, so a throw
+    /// here replaces the spec's own failure; its message names the script.
+    /// </summary>
+    public void ReplayMigrations()
+    {
+        var scripts = Directory.GetFiles(Path.Combine(RepoRoot, "db"), "*-migration.sh")
+            .OrderBy(path => Path.GetFileName(path), StringComparer.Ordinal);
+        foreach (var script in scripts)
+            RunFileInContainer(script);
+    }
+
+    /// <summary>
     /// Truncate <c>station.booth_log</c> and reset its identity (STORY-195). CASCADE (STORY-215,
     /// PLAN T70): once <c>station.persona_taste_thumb</c> exists (SPEC F84.5) its FK into
     /// <c>station.booth_log</c> makes Postgres refuse a plain TRUNCATE regardless of row count — same

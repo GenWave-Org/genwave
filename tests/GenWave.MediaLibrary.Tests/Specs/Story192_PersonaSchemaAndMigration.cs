@@ -49,49 +49,59 @@ public static class FeaturePersonaSchemaAndMigration
         {
             // Given the database after migration (simulate a pre-STORY-192 database first, so this
             // proves db/11's own DDL — not just db/06's fresh-init shape).
-            await using (var conn = await db.StationDataSource.OpenConnectionAsync())
+            try
             {
-                await conn.ExecuteAsync("drop table if exists station.persona_memory");
-                await conn.ExecuteAsync("alter table station.persona drop column if exists slug");
-                await conn.ExecuteAsync("alter table station.persona drop column if exists definition");
-                await conn.ExecuteAsync("alter table station.persona drop column if exists enabled");
+                await using (var conn = await db.StationDataSource.OpenConnectionAsync())
+                {
+                    await db.DropMemoryDependentsAsync(); // db/51 views read persona.definition, db/52 memory_offer FKs persona_memory
+                    await conn.ExecuteAsync("drop table if exists station.persona_memory");
+                    await conn.ExecuteAsync("alter table station.persona drop column if exists slug");
+                    await conn.ExecuteAsync("alter table station.persona drop column if exists definition");
+                    await conn.ExecuteAsync("alter table station.persona drop column if exists enabled");
+                }
+
+                RunCardMigrationScript(db);
+
+                // When the persona and persona_memory tables are inspected...
+                await using var conn2 = await db.StationDataSource.OpenConnectionAsync();
+
+                // Then persona has slug UNIQUE NOT NULL, definition jsonb NOT NULL, enabled boolean NOT NULL.
+                Assert.Equal("text", await ColumnTypeAsync(conn2, "persona", "slug"));
+                Assert.True(await HasUniqueConstraintOnAsync(conn2, "persona", "slug"));
+                Assert.Equal("jsonb", await ColumnTypeAsync(conn2, "persona", "definition"));
+                Assert.Equal("boolean", await ColumnTypeAsync(conn2, "persona", "enabled"));
+
+                // And persona_memory has a CASCADE FK into persona...
+                var deleteRule = await conn2.QuerySingleOrDefaultAsync<string>(
+                    """
+                    select rc.delete_rule
+                    from information_schema.referential_constraints rc
+                    join information_schema.table_constraints tc
+                      on tc.constraint_name = rc.constraint_name and tc.constraint_schema = rc.constraint_schema
+                    where tc.table_schema = 'station' and tc.table_name = 'persona_memory'
+                      and tc.constraint_type = 'FOREIGN KEY'
+                    """);
+                Assert.Equal("CASCADE", deleteRule);
+
+                // ...plus the (persona_id, kind, last_aired_at DESC NULLS FIRST) recall index. Postgres's
+                // canonical index definition omits "NULLS FIRST" for a DESC column because that ordering
+                // IS the default for DESC (it only ever prints a NULLS clause that overrides the
+                // default) — so a plain "... last_aired_at DESC)" with no "NULLS LAST" override already
+                // proves the nulls-first semantics F71.1 specifies.
+                var indexDef = await conn2.QuerySingleOrDefaultAsync<string>(
+                    "select indexdef from pg_indexes where schemaname = 'station' and indexname = 'persona_memory_recall'");
+                Assert.NotNull(indexDef);
+                Assert.Contains("persona_id", indexDef);
+                Assert.Contains("kind", indexDef);
+                Assert.Contains("last_aired_at DESC", indexDef);
+                Assert.DoesNotContain("NULLS LAST", indexDef);
             }
-
-            RunCardMigrationScript(db);
-
-            // When the persona and persona_memory tables are inspected...
-            await using var conn2 = await db.StationDataSource.OpenConnectionAsync();
-
-            // Then persona has slug UNIQUE NOT NULL, definition jsonb NOT NULL, enabled boolean NOT NULL.
-            Assert.Equal("text", await ColumnTypeAsync(conn2, "persona", "slug"));
-            Assert.True(await HasUniqueConstraintOnAsync(conn2, "persona", "slug"));
-            Assert.Equal("jsonb", await ColumnTypeAsync(conn2, "persona", "definition"));
-            Assert.Equal("boolean", await ColumnTypeAsync(conn2, "persona", "enabled"));
-
-            // And persona_memory has a CASCADE FK into persona...
-            var deleteRule = await conn2.QuerySingleOrDefaultAsync<string>(
-                """
-                select rc.delete_rule
-                from information_schema.referential_constraints rc
-                join information_schema.table_constraints tc
-                  on tc.constraint_name = rc.constraint_name and tc.constraint_schema = rc.constraint_schema
-                where tc.table_schema = 'station' and tc.table_name = 'persona_memory'
-                  and tc.constraint_type = 'FOREIGN KEY'
-                """);
-            Assert.Equal("CASCADE", deleteRule);
-
-            // ...plus the (persona_id, kind, last_aired_at DESC NULLS FIRST) recall index. Postgres's
-            // canonical index definition omits "NULLS FIRST" for a DESC column because that ordering
-            // IS the default for DESC (it only ever prints a NULLS clause that overrides the
-            // default) — so a plain "... last_aired_at DESC)" with no "NULLS LAST" override already
-            // proves the nulls-first semantics F71.1 specifies.
-            var indexDef = await conn2.QuerySingleOrDefaultAsync<string>(
-                "select indexdef from pg_indexes where schemaname = 'station' and indexname = 'persona_memory_recall'");
-            Assert.NotNull(indexDef);
-            Assert.Contains("persona_id", indexDef);
-            Assert.Contains("kind", indexDef);
-            Assert.Contains("last_aired_at DESC", indexDef);
-            Assert.DoesNotContain("NULLS LAST", indexDef);
+            finally
+            {
+                // After the assertions (db/50 adds a second FK to persona_memory, which would break the
+                // delete_rule check above), and even when they fail: the shared fixture must get db/50-52 back.
+                db.ReplayMigrations();
+            }
         }
 
         static Task<string?> ColumnTypeAsync(NpgsqlConnection conn, string table, string column) =>
