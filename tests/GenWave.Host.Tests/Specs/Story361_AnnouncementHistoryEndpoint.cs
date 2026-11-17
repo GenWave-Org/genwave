@@ -40,7 +40,7 @@ public static class FeatureAnnouncementHistoryEndpoint
                 HistoryRows =
                 [
                     new AnnouncementHistoryEntry(
-                        5, "Declined one", false, "declined", "station went public", 1,
+                        5, "Declined one", false, "declined", "declined by the owner", 1,
                         new DateTime(2026, 8, 22, 10, 0, 0, DateTimeKind.Utc),
                         new DateTime(2026, 8, 22, 10, 15, 0, DateTimeKind.Utc), null),
                     new AnnouncementHistoryEntry(
@@ -61,7 +61,7 @@ public static class FeatureAnnouncementHistoryEndpoint
             var declined = rows.Single(r => r.Id == 5);
             var aired = rows.Single(r => r.Id == 4);
             Assert.Equal(
-                (State: "declined", Reason: "station went public", Count: 1, Aired: (DateTime?)null),
+                (State: "declined", Reason: "declined by the owner", Count: 1, Aired: (DateTime?)null),
                 (State: declined.State, Reason: declined.DeclineReason, Count: declined.CollapseCount, Aired: declined.AiredAt));
             Assert.Equal(
                 (State: "aired", Reason: (string?)null, Count: 3, Aired: (DateTime?)new DateTime(2026, 8, 22, 9, 5, 0, DateTimeKind.Utc)),

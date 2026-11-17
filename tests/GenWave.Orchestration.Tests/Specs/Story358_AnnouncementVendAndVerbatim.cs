@@ -218,44 +218,6 @@ public static class FeatureAnnouncementVendAndVerbatim
     }
 
     // -------------------------------------------------------------------------
-    // Scenario: SPEC F145.2's defense-in-depth vend refusal (STORY-359 AC2)
-    // -------------------------------------------------------------------------
-
-    public sealed class ScenarioTheVendRefusesWhilePublic
-    {
-        [Fact]
-        public async Task NoAnnouncementVendsWhileSpectatorModeIsOn()
-        {
-            // FakeAnnouncementSource.RefuseVend stands in for the real SPEC F145.2 SpectatorMode
-            // refusal, which lives behind a Host-side decorator this test assembly cannot reach (see
-            // that fake's own remarks) — from the Orchestrator's own vantage point, a refused claim
-            // and a genuinely empty one are indistinguishable, which is the whole point of F145.2's
-            // "the Orchestrator never reads privacy state" ruling.
-            var announcementSource = new FakeAnnouncementSource { RefuseVend = true };
-            announcementSource.Pending.Enqueue(new AnnouncementItem(401, "Message", Verbatim: true, RequestedVoice: null));
-            var renderer = new FakeVerbatimSegmentRenderer();
-            var tts = new FakeTtsSegmentSource();
-            var cadence = new CadenceConfig
-            {
-                LeadInBeforeEachTrack = true,
-                BackAnnounceAfterEachTrack = false,
-                StationIdEveryNUnits = 0,
-            };
-            var orchestrator = BuildOrchestrator(announcementSource, renderer, tts, cadence);
-            var ctx = new PlayoutContext([]);
-
-            var produced = new List<MediaItem>();
-            for (var i = 0; i < 4; i++)
-            {
-                var item = await orchestrator.GetNextAsync(ctx, CancellationToken.None);
-                if (item is not null) produced.Add(item);
-            }
-
-            Assert.DoesNotContain(produced, i => i.SegmentKind == SegmentKind.Announcement);
-        }
-    }
-
-    // -------------------------------------------------------------------------
     // Scenario: the announcement id is recoverable from the MediaId (PLAN T341 extension)
     // -------------------------------------------------------------------------
 

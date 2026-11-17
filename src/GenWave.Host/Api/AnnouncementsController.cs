@@ -11,7 +11,7 @@ namespace GenWave.Host.Api;
 
 /// <summary>
 /// <c>POST /api/announcements</c> (the House Voice's front door) and <c>GET /api/announcements</c>
-/// (the history read, SPEC F146.2) — SPEC F143.1/.4/.5, F145.1's endpoint half, F145.3/.4's token
+/// (the history read, SPEC F146.2) — SPEC F143.1/.4/.5, F145.3/.4's token
 /// door; STORY-357, STORY-359, STORY-360, STORY-361; PLAN T339/T340/T344. The now-playing read
 /// (<c>GET /api/announcements/now-playing</c>) moved to its own <see cref="AnnouncementNowPlayingController"/>
 /// at T351 (SPEC F145.6, STORY-366) — see that class's own remarks for why it needed to leave this
@@ -41,9 +41,7 @@ namespace GenWave.Host.Api;
 /// </para>
 ///
 /// <para>
-/// <b>Gate order (F143.4/F145.1, all enforced BEFORE any row write):</b> SpectatorMode (403, F145.1's
-/// privacy hard rule — checked first, so a public station never even has its message content
-/// inspected) → message required/blank (400) → message length (400, SPEC F143.4) → voice length (400,
+/// <b>Gate order (F143.4, all enforced BEFORE any row write):</b> message required/blank (400) → message length (400, SPEC F143.4) → voice length (400,
 /// T339 review finding F2) → <c>ttlSeconds</c> bounds (400, SPEC F143.1's 60–3600s) → pending depth
 /// (429, SPEC F143.4 — a store read, so it runs after every purely synchronous check) → the
 /// accepted-rate cap (429, SPEC F143.4, T339 review finding F1) → the store's own collapse-aware
@@ -93,7 +91,6 @@ namespace GenWave.Host.Api;
 public sealed class AnnouncementsController(
     IAnnouncementStore announcementStore,
     AnnouncementAcceptedRateLimiter acceptedRateLimiter,
-    IOptionsMonitor<StationOptions> stationMonitor,
     IOptionsMonitor<AnnouncementsOptions> announcementsMonitor,
     ILogger<AnnouncementsController> logger) : ControllerBase
 {
@@ -129,14 +126,6 @@ public sealed class AnnouncementsController(
     [RequestSizeLimit(8192)]
     public async Task<IActionResult> Post([FromBody] AnnouncementRequest request, CancellationToken ct)
     {
-        // F145.1 — checked first, before this action even looks at the message: a public station
-        // structurally never processes house-event content, let alone stores it.
-        if (stationMonitor.CurrentValue.SpectatorMode)
-        {
-            logger.LogWarning("Announcement refused reason=spectator-mode");
-            return StatusCode(StatusCodes.Status403Forbidden, SpectatorModeProblem());
-        }
-
         // Read once per call (reviewer-named carry-forward) — every gate below sees the SAME
         // snapshot, so a live PUT mid-request can never let one gate see an old cap and another see
         // a new one.
@@ -250,13 +239,6 @@ public sealed class AnnouncementsController(
     static AnnouncementHistoryDto ToHistoryDto(AnnouncementHistoryEntry entry) => new(
         entry.Id, entry.Message, entry.Verbatim, entry.State, entry.DeclineReason, entry.CollapseCount,
         entry.CreatedAt, entry.ExpiresAt, entry.AiredAt);
-
-    static ProblemDetails SpectatorModeProblem() => new()
-    {
-        Status = StatusCodes.Status403Forbidden,
-        Title  = "Announcements are disabled.",
-        Detail = "The station is public (Station:SpectatorMode is on) — a public stream never carries the house's events (SPEC F145.1).",
-    };
 
     static ProblemDetails BlankMessageProblem() => new()
     {

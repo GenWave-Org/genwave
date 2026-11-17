@@ -222,7 +222,7 @@ using GenWave.Core.Domain;
 /// </para>
 ///
 /// <para>
-/// <b>Owner announcements (SPEC F144.1/F144.2, F145.2, STORY-358, PLAN T341):</b> the claim seam
+/// <b>Owner announcements (SPEC F144.1/F144.2, STORY-358, PLAN T341):</b> the claim seam
 /// (<c>IAnnouncementSource</c>) is the crosstalkPlanner precedent one feature over — an optional
 /// constructor dependency, feature dark whenever null (no Host wiring). PLAN T522 moves the claim
 /// itself onto <see cref="BreakPlanner"/> (its own <c>announcementSource</c> constructor parameter,
@@ -234,10 +234,8 @@ using GenWave.Core.Domain;
 /// class now) oldest deliverable announcements, atomically claimed the moment this unit
 /// decides to vend them, and places each as a <see cref="SegmentKind.Announcement"/> segment after
 /// the back-announce and before the lead-in — exactly like <see cref="SegmentKind.Crosstalk"/>'s own
-/// placement one paragraph up, just a different pair of steps in the SAME unit. The station never
-/// reads <c>Station:SpectatorMode</c> to decide whether to vend (SPEC F145.2's "the Orchestrator
-/// never reads privacy state" ruling): an empty claim — refused because the station is public, or
-/// genuinely nothing pending — looks identical from here, and needs no different handling either way.
+/// placement one paragraph up, just a different pair of steps in the SAME unit. An empty
+/// claim means nothing is pending, and needs no special handling.
 /// <see cref="BreakRenderer"/>'s own <c>IVerbatimSegmentRenderer</c> seam renders each claimed item's
 /// exact message text with ZERO LLM involvement (SPEC F144.2) — a SEPARATE seam from
 /// <c>ITtsSegmentSource</c>, never routed through it, because neither <see cref="SegmentRequest"/>

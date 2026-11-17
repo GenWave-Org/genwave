@@ -62,10 +62,8 @@ public sealed class AnnouncementNowPlayingController(NowPlayingService nowPlayin
     /// Reuses the SAME in-memory <see cref="NowPlayingService"/> read <see cref="LiveController.GetNowPlaying"/>
     /// and <see cref="SpectatorController.GetNowPlaying"/> already use — no engine telnet call, no DB
     /// read, no new poller — projected down to <see cref="AnnouncementNowPlayingDto"/>'s minimal shape
-    /// (see that record's own remarks for why it carries only title/artist/DJ name). No SpectatorMode
-    /// gate here (unlike <see cref="AnnouncementsController.Post"/>): a public station's privacy floor
-    /// is the token door's own fail-closed contract (this class's own remarks), never a spectator-mode
-    /// check this action would otherwise have to duplicate.
+    /// (see that record's own remarks for why it carries only title/artist/DJ name). Access is governed
+    /// by the token door's own fail-closed contract (this class's own remarks).
     /// </summary>
     [HttpGet]
     public IActionResult NowPlaying()

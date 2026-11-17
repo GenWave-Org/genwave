@@ -17,9 +17,7 @@ public interface IAnnouncementSource
     /// single-feeder pull model (one caller at a time; no concurrent-claim race to guard against
     /// beyond that).
     /// <para>
-    /// Returns an empty list when nothing is deliverable, or when vending itself is refused — e.g.
-    /// the station is public (SPEC F145.1's vend half). The refusal decision belongs to the
-    /// implementation behind this seam; the Orchestrator never reads privacy state to make it.
+    /// Returns an empty list when nothing is deliverable (drained, or every row expired).
     /// </para>
     /// <para>
     /// The SPEC F144.1 cap (callers pass 2 today) is the CALLER's choice, not this seam's own — this

@@ -3,10 +3,10 @@ using GenWave.Core.Abstractions;
 namespace GenWave.Host.Tests.Fakes;
 
 /// <summary>
-/// Stateful double for <see cref="IAnnouncementLifecycle"/> (STORY-358/359, PLAN T343) — mirrors
+/// Stateful double for <see cref="IAnnouncementLifecycle"/> (STORY-358, PLAN T343) — mirrors
 /// <see cref="FakeAnnouncementStore"/>'s own "record every call, script every outcome" shape one seam
 /// over. Shared across the lifecycle guardians' own spec files (the aired-confirmation drain, the
-/// guardian sweep loop, the privacy-flip drain) rather than re-declared per file, since all three
+/// guardian sweep loop) rather than re-declared per file, since both
 /// exercise this same seam.
 /// </summary>
 sealed class FakeAnnouncementLifecycle : IAnnouncementLifecycle
@@ -54,26 +54,6 @@ sealed class FakeAnnouncementLifecycle : IAnnouncementLifecycle
     /// <summary>Scripts <see cref="ExpireStaleAsync"/>'s own return count.</summary>
     public int ExpireStaleResult { get; set; }
 
-    /// <summary>Every reason <see cref="DeclineAllLiveAsync"/> was called with, in call order.</summary>
-    public List<string> DeclineAllLiveCalls { get; } = [];
-
-    /// <summary>The reason stamped by the MOST RECENT <see cref="DeclineAllLiveAsync"/> call, or
-    /// <see langword="null"/> if it was never called.</summary>
-    public string? LastDeclineReason { get; private set; }
-
-    /// <summary>Seeds the ids <see cref="DeclineAllLiveAsync"/> should treat as currently
-    /// <c>pending</c> — a scenario populates this to prove the flip declines them.</summary>
-    public List<long> PendingIds { get; } = [];
-
-    /// <summary>Seeds the ids <see cref="DeclineAllLiveAsync"/> should treat as currently
-    /// <c>claimed</c> — a scenario populates this to prove the flip declines them too, alongside
-    /// <see cref="PendingIds"/>, in the SAME bulk call.</summary>
-    public List<long> ClaimedIds { get; } = [];
-
-    /// <summary>Every id <see cref="DeclineAllLiveAsync"/> actually declined on its most recent call
-    /// — <see cref="PendingIds"/> ∪ <see cref="ClaimedIds"/> at the moment it ran.</summary>
-    public IReadOnlyList<long> DeclinedIds { get; private set; } = [];
-
     /// <summary>Every method name, in call order — proves ordering claims (e.g. the guardian sweep
     /// runs <see cref="ExpireStaleAsync"/> before <see cref="FindClaimedPastGraceAsync"/>) without
     /// needing a separate mock-framework call-sequence feature.</summary>
@@ -115,21 +95,5 @@ sealed class FakeAnnouncementLifecycle : IAnnouncementLifecycle
         CallOrder.Add(nameof(ExpireStaleAsync));
         ExpireStaleCalls.Add(now);
         return Task.FromResult(ExpireStaleResult);
-    }
-
-    public Task<int> DeclineAllLiveAsync(string reason, CancellationToken ct)
-    {
-        CallOrder.Add(nameof(DeclineAllLiveAsync));
-        DeclineAllLiveCalls.Add(reason);
-        LastDeclineReason = reason;
-
-        var declined = new List<long>(PendingIds.Count + ClaimedIds.Count);
-        declined.AddRange(PendingIds);
-        declined.AddRange(ClaimedIds);
-        DeclinedIds = declined;
-        PendingIds.Clear();
-        ClaimedIds.Clear();
-
-        return Task.FromResult(declined.Count);
     }
 }

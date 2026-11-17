@@ -31,20 +31,14 @@ namespace GenWave.MediaLibrary.Station;
 /// vend-only claim seam this class's own remarks above deferred to "a Host-side adapter" turns out
 /// to need nothing this class doesn't already have — <see cref="ClaimOldestAsync"/>'s own SQL IS the
 /// claim, so <see cref="ClaimDeliverableAsync"/> below is a thin, mapping-only wrapper over it, the
-/// SAME shape <see cref="InsertOrCollapseAsync"/> already is over <see cref="InsertAsync"/>. The
-/// SPEC F145.2 SpectatorMode refusal is deliberately NOT here: it lives behind a Host-side decorator
-/// (the <c>MediaExistencePushGuard</c>/gh-#612 wrap-in-DI shape) registered OVER this class's own
-/// <see cref="IAnnouncementSource"/> registration, so this repository — and every caller of the
-/// narrower seam, including <c>GenWave.Orchestration.Orchestrator</c> — never reads Host privacy
-/// state at all. See <see cref="AnnouncementServiceCollectionExtensions.AddAnnouncementStore"/> for
-/// the registration/decoration split.
+/// SAME shape <see cref="InsertOrCollapseAsync"/> already is over <see cref="InsertAsync"/>. See
+/// <see cref="AnnouncementServiceCollectionExtensions.AddAnnouncementStore"/> for the registration.
 /// </para>
 ///
 /// <para>
-/// <b>ALSO implements <see cref="IAnnouncementLifecycle"/> directly (PLAN T343).</b> The three
+/// <b>ALSO implements <see cref="IAnnouncementLifecycle"/> directly (PLAN T343).</b> The
 /// lifecycle guardians' own seam — every member on it (<see cref="MarkAiredAsync"/>,
-/// <see cref="FindClaimedPastGraceAsync"/>, <see cref="ReArmAsync"/>, <see cref="ExpireStaleAsync"/>,
-/// <see cref="DeclineAllLiveAsync"/>) was ALREADY on this class since T337; T343's own job was
+/// <see cref="FindClaimedPastGraceAsync"/>, <see cref="ReArmAsync"/>, <see cref="ExpireStaleAsync"/>) was ALREADY on this class since T337; T343's own job was
 /// narrower still — give Host a seam to depend on rather than the concrete repository type, the SAME
 /// "repository implements the port directly" shape this class's own remarks already establish twice
 /// above.
@@ -340,8 +334,7 @@ sealed class AnnouncementRepository(Lazy<NpgsqlDataSource> dataSource)
 
     /// <summary>
     /// <c>pending|claimed -&gt; declined</c>, stamping <see cref="AnnouncementRow.DeclineReason"/> and
-    /// <c>state_changed_at</c> (SPEC F143.2/F145.2 — e.g. the private-&gt;public flip declines every
-    /// live row with reason <c>"station went public"</c>). Bulk by design: <paramref name="ids"/> may
+    /// <c>state_changed_at</c> (SPEC F143.2). Bulk by design: <paramref name="ids"/> may
     /// name zero, one, or many rows; a row already terminal (aired/expired/declined) is silently
     /// skipped by the guarded <c>WHERE</c>, never re-declined over its own history. Returns the number
     /// of rows actually declined.
@@ -358,29 +351,6 @@ sealed class AnnouncementRepository(Lazy<NpgsqlDataSource> dataSource)
             where id = any(@Ids) and state in ('pending', 'claimed')
             """,
             new { Ids = ids.ToArray(), Reason = reason },
-            cancellationToken: ct));
-    }
-
-    /// <summary>
-    /// <see cref="IAnnouncementLifecycle.DeclineAllLiveAsync"/> — the private→public flip's own bulk
-    /// sweep (SPEC F145.2, PLAN T343): every row CURRENTLY <c>pending</c> or <c>claimed</c> declines,
-    /// unconditionally, stamping <paramref name="reason"/>. Deliberately not built on
-    /// <see cref="MarkDeclinedAsync"/>'s id-list shape — the flip has no candidate list to hand it, so
-    /// this is its own single <c>UPDATE ... WHERE state IN (...)</c>, the same "finds its own
-    /// candidates" shape <see cref="ExpireStaleAsync"/> already is, rather than a list-then-decline
-    /// round trip that would open a window between the two calls. Returns the number of rows declined
-    /// (zero is a normal outcome — nothing was live at the moment of the flip).
-    /// </summary>
-    public async Task<int> DeclineAllLiveAsync(string reason, CancellationToken ct)
-    {
-        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
-        return await conn.ExecuteAsync(new CommandDefinition(
-            """
-            update station.announcement
-            set state = 'declined', decline_reason = @Reason, state_changed_at = now()
-            where state in ('pending', 'claimed')
-            """,
-            new { Reason = reason },
             cancellationToken: ct));
     }
 

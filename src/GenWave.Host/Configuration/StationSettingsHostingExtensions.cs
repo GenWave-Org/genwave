@@ -228,15 +228,9 @@ static class StationSettingsHostingExtensions
         //
         // The vend-only IAnnouncementSource seam (SPEC F144.1, PLAN T341) is registered in the SAME
         // call (T341 review finding F9 — folded from a separate AddAnnouncementSource call that had
-        // to run AFTER this one, a call-order hazard nothing enforced), wrapped with the SPEC F145.2
-        // SpectatorMode refusal here, at the ONLY layer that is allowed to read Station:SpectatorMode:
-        // neither AnnouncementRepository (MediaLibrary) nor Orchestrator (GenWave.Orchestration) ever
-        // sees it. Mirrors PlayoutServiceCollectionExtensions' own MediaExistencePushGuard wrap
-        // (gh-#612) one project over — see SpectatorModeAnnouncementVendGuard's own remarks.
-        builder.Services.AddAnnouncementStore(
-            stationConnStr,
-            (inner, sp) => new SpectatorModeAnnouncementVendGuard(
-                inner, sp.GetRequiredService<IOptionsMonitor<StationOptions>>()));
+        // to run AFTER this one, a call-order hazard nothing enforced). Announcements do not depend on
+        // Station:SpectatorMode (gh-#958): the LAN listener page's audience is the house itself.
+        builder.Services.AddAnnouncementStore(stationConnStr);
 
         // The ad spot lifecycle store + brief store (SPEC F159.1, F159.2, F162.2; STORY-389; PLAN
         // T398) — same station_svc connection string as every registration above;

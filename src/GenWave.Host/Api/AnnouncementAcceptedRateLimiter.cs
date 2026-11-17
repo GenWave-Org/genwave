@@ -8,7 +8,7 @@ namespace GenWave.Host.Api;
 /// The station-wide ACCEPTED-rate cap for <c>POST /api/announcements</c> (SPEC F143.4, STORY-357,
 /// PLAN T339 review finding F1) — a single <see cref="FixedWindowRateLimiter"/> shared by every
 /// caller, acquired by <see cref="AnnouncementsController.Post"/> ONLY after every other refusal gate
-/// (SpectatorMode, message/voice length, ttl bounds, pending depth) has already let the request
+/// (message/voice length, ttl bounds, pending depth) has already let the request
 /// through, so a refused request never spends a permit from this budget.
 ///
 /// <para>
