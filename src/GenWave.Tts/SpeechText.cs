@@ -111,7 +111,8 @@ public static partial class SpeechText
 
     private static string ExpandUnits(string text)
     {
-        var withFahrenheit = DegreeFahrenheitRx().Replace(text, " degrees Fahrenheit");
+        var withMoney = MoneyRx().Replace(text, SpokenMoney);
+        var withFahrenheit = DegreeFahrenheitRx().Replace(withMoney, " degrees Fahrenheit");
         var withCelsius = DegreeCelsiusRx().Replace(withFahrenheit, " degrees Celsius");
         var withDegrees = DegreeRx().Replace(withCelsius, " degrees");
 
@@ -419,6 +420,43 @@ public static partial class SpeechText
     // Digit-anchored: 50% -> 50 percent
     [GeneratedRegex(@"(?<=\d)%")]
     private static partial Regex PercentRx();
+
+    // gh-#949: a dollar amount, "$" leading its digits. Thousands commas, any decimal, and a trailing
+    // scale word ("$2 million") are all part of the amount. Without this the flatten drops the "$"
+    // and "$2.50" airs as "two point five zero".
+    [GeneratedRegex(@"(?<![\w$])\$(?<whole>\d{1,3}(?:,\d{3})+|\d+)(?:\.(?<frac>\d+))?(?!\d)(?:\s+(?<scale>thousand|million|billion|trillion)\b)?", RegexOptions.IgnoreCase)]
+    private static partial Regex MoneyRx();
+
+    /// <summary>
+    /// gh-#949: <c>$3</c> → "3 dollars", <c>$1</c> → "1 dollar", <c>$2.50</c> → "2 dollars and 50 cents",
+    /// <c>$5.00</c> → "5 dollars", <c>$0.99</c> → "99 cents", <c>$2 million</c> → "2 million dollars". A
+    /// decimal that is not two cent digits stays a decimal: <c>$2.5</c> → "2.5 dollars". The digits stay
+    /// digits; the engine reads them.
+    /// </summary>
+    private static string SpokenMoney(Match match)
+    {
+        // Thousands commas go: the flatten would keep each one as a spoken pause ("1, 200").
+        var whole = match.Groups["whole"].Value.Replace(",", string.Empty);
+        var frac = match.Groups["frac"];
+        var scale = match.Groups["scale"];
+
+        if (scale.Success)
+            return frac.Success
+                ? $"{whole}.{frac.Value} {scale.Value} dollars"
+                : $"{whole} {scale.Value} dollars";
+
+        if (frac.Success && frac.Value.Length != 2)
+            return $"{whole}.{frac.Value} dollars";
+
+        var cents = frac.Success ? int.Parse(frac.Value, System.Globalization.CultureInfo.InvariantCulture) : 0;
+        var dollars = whole == "1" ? "1 dollar" : $"{whole} dollars";
+        var centWords = cents == 1 ? "1 cent" : $"{cents} cents";
+
+        if (cents == 0)
+            return dollars;
+
+        return whole.All(static c => c == '0') ? centWords : $"{dollars} and {centWords}";
+    }
 
     [GeneratedRegex(@"\s+")]
     private static partial Regex WhitespaceRx();

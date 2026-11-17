@@ -208,9 +208,9 @@ public static class FeatureSpeechTextNormalization
             var result = SpeechText.Normalize("The price is set.", corrections);
 
             // Then  the replacement text is literal, not a regex group reference (F68.5)
-            // The leading $ is loose (space before it), so the gh-#541 flatten drops it; the claim —
-            // no group-0 expansion ever ran — still shows, since an expansion would inject the match.
-            Assert.Equal("the cost is 0 today is set.", result);
+            // The literal "$0" then reads as money (gh-#949); the claim — no group-0 expansion ever
+            // ran — still shows, since an expansion would inject the match.
+            Assert.Equal("the cost is 0 dollars today is set.", result);
         }
 
         [Fact]
