@@ -206,14 +206,23 @@ describe("Feature: I can see and shape a DJ's memory", () => {
       expect(firstBox.id).not.toBe(secondBox.id);
     });
 
-    it("lists the memory lazily: only once the section is opened", async () => {
+    it("reads the memory once on mount, and opening the section reads it once more", async () => {
       const mockFetch = makeFetchMock({});
       render(
         <ConfirmDialogProvider>
           <PersonasClient initialPersonas={[REX]} />
         </ConfirmDialogProvider>
       );
-      expect(callsTo(mockFetch, "GET", "/api/personas/1/memory")).toHaveLength(0);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      // The mount read is T741's thin-lore count (F218.49); the section itself stays lazy.
+      expect(callsTo(mockFetch, "GET", "/api/personas/1/memory")).toHaveLength(1);
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Show memory for Radio Rex" }));
+        await Promise.resolve();
+      });
+      expect(callsTo(mockFetch, "GET", "/api/personas/1/memory")).toHaveLength(2);
     });
 
     it("pending rows are flagged", async () => {

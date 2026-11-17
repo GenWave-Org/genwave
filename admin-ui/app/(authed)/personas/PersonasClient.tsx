@@ -10,6 +10,7 @@ import { readErrorMessage } from "@/lib/problem-details";
 import { useVoiceList } from "@/lib/use-voice-list";
 import { VoiceControl } from "../safe-content/VoiceControl";
 import { BulkApplySuggestedModal } from "./BulkApplySuggestedModal";
+import { DraftThinLoreButton } from "./DraftThinLoreButton";
 import { FireModal } from "./FireModal";
 import { PersonaAvatarPackPicker } from "./PersonaAvatarPackPicker";
 import { PersonaExportLink } from "./PersonaExportLink";
@@ -247,6 +248,19 @@ export function PersonasClient({
   // refreshes both together.
   const [avatarVersion, setAvatarVersion] = useState<ReadonlyMap<number, number>>(new Map());
   const [showBulkApplyModal, setShowBulkApplyModal] = useState(false);
+  // Per DJ, bumped after "Draft lore for thin DJs" stores drafts for that DJ, so only its open Memory
+  // section remounts and re-reads its list (the drafts then show on its Lore tab).
+  const [memoryRefresh, setMemoryRefresh] = useState<ReadonlyMap<number, number>>(new Map());
+  // Bumped when a Memory section changes a DJ's notes, so the thin-lore button re-reads its counts.
+  const [loreCountsKey, setLoreCountsKey] = useState(0);
+
+  function refreshMemorySections(personaIds: readonly number[]): void {
+    setMemoryRefresh((prev) => {
+      const next = new Map(prev);
+      for (const id of personaIds) next.set(id, (next.get(id) ?? 0) + 1);
+      return next;
+    });
+  }
 
   function bumpAvatarVersion(personaId: number): void {
     setAvatarVersion((prev) => {
@@ -509,9 +523,11 @@ export function PersonasClient({
             <td colSpan={4} className="py-3">
               <div className="rounded-[6px] border border-line bg-surface-2 p-3">
                 <PersonaMemorySection
+                  key={memoryRefresh.get(persona.id) ?? 0}
                   personaId={persona.id}
                   personaName={persona.name}
                   lifeExtractionOff={lifeExtractionOff}
+                  onChanged={() => setLoreCountsKey((n) => n + 1)}
                 />
               </div>
             </td>
@@ -759,9 +775,14 @@ export function PersonasClient({
               Community Catalog avatar pack card would need its OWN persona-roster fetch to compute
               the identical mapping). Opens BulkApplySuggestedModal — no request fires until its own
               Confirm. */}
-          <Button type="button" variant="secondary" onClick={() => setShowBulkApplyModal(true)}>
-            Apply suggested faces
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {/* "Draft lore for thin DJs" (SPEC F218.49, T741): drafts lore for every DJ with fewer than
+                3 live notes, one DJ at a time. */}
+            <DraftThinLoreButton personas={personas} refreshKey={loreCountsKey} onDrafted={refreshMemorySections} />
+            <Button type="button" variant="secondary" onClick={() => setShowBulkApplyModal(true)}>
+              Apply suggested faces
+            </Button>
+          </div>
         </div>
 
         {personas.length === 0 ? (

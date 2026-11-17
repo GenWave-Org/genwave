@@ -28,6 +28,8 @@ interface PersonaMemorySectionProps {
   personaName: string;
   /** True only when `Memory:LifeExtraction:Enabled` is known to be false (derived by the page). */
   lifeExtractionOff?: boolean;
+  /** Called after any change to this DJ's memory succeeded (add, approve, forget, delete, edit, suggest). */
+  onChanged?: () => void;
 }
 
 interface MemoryKindView {
@@ -224,6 +226,7 @@ export function PersonaMemorySection({
   personaId,
   personaName,
   lifeExtractionOff = false,
+  onChanged,
 }: PersonaMemorySectionProps): ReactNode {
   const confirm = useConfirm();
   const [status, setStatus] = useState<LoadStatus>({ kind: "loading" });
@@ -259,6 +262,7 @@ export function PersonaMemorySection({
     setBusy(true);
     try {
       await action();
+      onChanged?.();
       return true;
     } catch (err) {
       toast.error(errorText(err));
