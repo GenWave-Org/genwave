@@ -157,7 +157,8 @@ describe("Feature: I can see and shape a DJ's memory", () => {
 
       expect(within(within(region).getByTestId("memory-row-40")).getByText("Not asked yet")).toBeInTheDocument();
       expect(within(within(region).getByTestId("memory-row-41")).getByText("Asked once · Aired once")).toBeInTheDocument();
-      expect(within(within(region).getByTestId("memory-row-42")).getByText(/^Asked 5 times · Aired 3 times, last /)).toBeInTheDocument();
+      expect(within(within(region).getByTestId("memory-row-42")).getByText(/^Asked 5 times · Aired 3 times, last [A-Z][a-z]{2} \d{1,2} at \d{1,2}:\d{2}\s?[AP]M$/)).toBeInTheDocument();
+      expect(within(region).getByTestId("memory-row-42").textContent?.match(/·/g)).toHaveLength(1);
     });
 
     it("Lately explains itself and shows episode text starting with a capital", async () => {

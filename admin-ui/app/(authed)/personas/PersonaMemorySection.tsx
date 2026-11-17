@@ -7,7 +7,7 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/components/ui/toast";
-import { formatUpSince } from "@/lib/format-clock";
+import { formatDayAtTime } from "@/lib/format-clock";
 import {
   MEMORY_TEXT_MAX_CHARS,
   MemoryApiError,
@@ -90,7 +90,7 @@ function askedAiredText(row: PersonaMemoryRow): string {
   const aired =
     row.airedCount === 0
       ? "Not aired yet"
-      : `Aired ${countTimes(row.airedCount)}${row.lastAiredAt === null ? "" : `, last ${formatUpSince(row.lastAiredAt)}`}`;
+      : `Aired ${countTimes(row.airedCount)}${row.lastAiredAt === null ? "" : `, last ${formatDayAtTime(row.lastAiredAt)}`}`;
   if (row.askedCount === 0) return row.airedCount === 0 ? "Not asked yet" : aired;
   return `Asked ${countTimes(row.askedCount)} · ${aired}`;
 }

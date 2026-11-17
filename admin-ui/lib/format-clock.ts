@@ -52,6 +52,29 @@ export function formatUpSince(iso: string, options: ClockFormatOptions = {}): st
 }
 
 /**
+ * Formats an ISO timestamp as `Nov 17 at 7:16 AM` (short month, day, "at", locale time-of-day — 12h or 24h by
+ * locale) with no middot of its own, so a row can join it to other segments with one. In the given zone or the
+ * browser's local zone by default.
+ */
+export function formatDayAtTime(iso: string, options: ClockFormatOptions = {}): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return "unknown";
+  }
+  const monthDay = new Intl.DateTimeFormat(options.locale, {
+    month: "short",
+    day: "numeric",
+    timeZone: options.timeZone,
+  }).format(date);
+  const time = new Intl.DateTimeFormat(options.locale, {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: options.timeZone,
+  }).format(date);
+  return `${monthDay} at ${time}`;
+}
+
+/**
  * Formats an ISO timestamp as `Sun Nov 8` (short weekday, short month, day; no year, no comma) in the
  * given zone or the browser's local zone by default. Built from parts so the shape is locale-stable.
  */
