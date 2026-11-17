@@ -1,10 +1,12 @@
 // STORY-551 — The callback count, the view half (gh-#1001 · SPEC F218.40–F218.51 · PLAN slice 3)
 //
-// BDD specification — xUnit. Postgres-backed (Category=Integration, shared DatabaseFixture; add [Collection(DatabaseCollection.Name)] on activation).
-// Every fact is pending at plan time (2026-11-16); the named task activates its facts, watches them fail,
-// then makes them pass.
+// BDD specification — xUnit. Postgres-backed (Category=Integration, shared DatabaseFixture). T730 activated the view
+// facts; T738 added the station-wide read (summed, not averaged).
 
 using Dapper;
+using GenWave.MediaLibrary.Station;
+using Microsoft.Extensions.Logging.Abstractions;
+using Npgsql;
 
 namespace GenWave.MediaLibrary.Tests.Specs;
 
@@ -108,5 +110,58 @@ public static class FeatureTheCallbackCountView
 
             Assert.Null(row);
         }
+    }
+
+    // F218.47 — the station-wide read sums rows; it is not a mean of per-DJ rates
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioTheStationWideRead(DatabaseFixture db) : IAsyncLifetime
+    {
+        // Given Flip: 1 used of 2 asks over 1 hour, Tony: 1 used of 3 asks over 3 hours
+
+        GenWave.Core.Domain.CallbackRate? rate;
+
+        public async Task InitializeAsync()
+        {
+            await db.ResetStationAsync();
+            await using var conn = await db.StationDataSource.OpenConnectionAsync();
+            var flip = await conn.QuerySingleAsync<int>("insert into station.persona (name) values ('Flip') returning id");
+            var tony = await conn.QuerySingleAsync<int>("insert into station.persona (name) values ('Tony') returning id");
+            await conn.ExecuteAsync(
+                "insert into station.persona_memory (persona_id, kind, content, source) values (@flip, 'lore', 'a', 'authored'), (@tony, 'lore', 'b', 'authored')",
+                new { flip, tony });
+            await conn.ExecuteAsync(
+                """
+                insert into station.memory_offer (memory_id, persona_id, used)
+                select m.id, m.persona_id, u
+                from station.persona_memory m
+                join (values ('Flip', true), ('Flip', false), ('Tony', true), ('Tony', false), ('Tony', false)) v(n, u)
+                  on v.n = (select name from station.persona p where p.id = m.persona_id)
+                """);
+            await conn.ExecuteAsync(
+                """
+                insert into station.utterance (persona_id, kind, segment_kind, shift_key, text, fallback, written_at)
+                select p.id, 'patter', 'LeadIn', 'a', 't', false, date_trunc('hour', now()) - make_interval(hours => h)
+                from station.persona p
+                join (values ('Flip', 1), ('Tony', 1), ('Tony', 2), ('Tony', 3)) v(n, h) on v.n = p.name
+                """);
+            rate = await new CallbackRateRepository(
+                new Lazy<NpgsqlDataSource>(() => db.StationDataSource), NullLogger<CallbackRateRepository>.Instance)
+                .ReadAsync(CancellationToken.None);
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void ItSumsAsksUsedAndHoursAcrossDJs()
+        {
+            Assert.NotNull(rate);
+            Assert.Equal((5, 2, 4), (rate.Asks, rate.Used, rate.Hours));
+        }
+
+        [Fact]
+        public void TheRateIsTotalUsedOverTotalHoursNotTheMeanOfRates() =>
+            // The mean of per-DJ rates would be (1/1 + 1/3) / 2 = 0.667; summed it is 2/4.
+            Assert.Equal(0.5m, rate?.PerDjHour);
     }
 }

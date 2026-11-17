@@ -15,7 +15,7 @@ public static class UtteranceServiceCollectionExtensions
     /// <see cref="PersonaServiceCollectionExtensions.AddPersonaStore"/> registers <see cref="IPersonaStore"/>, and binds/validates
     /// <see cref="UtteranceOptions"/> (<c>Memory:UtteranceRetentionDays</c>) from
     /// <paramref name="configuration"/>. Also registers <see cref="IRepeatNumbersReader"/> (SPEC F218.29,
-    /// STORY-542), the read side over the same utterance and booth data.
+    /// STORY-542), the read side over the same utterance and booth data, and <see cref="ICallbackRateReader"/> (F218.47).
     /// </summary>
     public static IServiceCollection AddUtteranceStore(
         this IServiceCollection services, string connectionString, IConfiguration configuration)
@@ -30,6 +30,11 @@ public static class UtteranceServiceCollectionExtensions
             new RepeatNumbersRepository(
                 new Lazy<NpgsqlDataSource>(() => new NpgsqlDataSourceBuilder(connectionString).Build()),
                 sp.GetRequiredService<ILogger<RepeatNumbersRepository>>()));
+
+        services.AddSingleton<ICallbackRateReader>(sp =>
+            new CallbackRateRepository(
+                new Lazy<NpgsqlDataSource>(() => new NpgsqlDataSourceBuilder(connectionString).Build()),
+                sp.GetRequiredService<ILogger<CallbackRateRepository>>()));
 
         return services.AddSingleton<IUtteranceStore>(sp =>
             new UtteranceRepository(
