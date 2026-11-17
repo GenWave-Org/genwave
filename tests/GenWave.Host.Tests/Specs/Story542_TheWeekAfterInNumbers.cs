@@ -170,20 +170,10 @@ public static class FeatureTheWeekAfterInNumbers
         public void TheViewTextIsIdentical()
         {
             var root = RepoRootLocator.Find(AppContext.BaseDirectory);
-            var fresh = ViewBlock(Path.Combine(root, "db", "06-station-settings-migration.sh"));
-            var upgrade = ViewBlock(Path.Combine(root, "db", "51-repeat-views-migration.sh"));
+            var fresh = MirroredSqlBlock.Read(Path.Combine(root, "db", "06-station-settings-migration.sh"), "f218-repeat-views");
+            var upgrade = MirroredSqlBlock.Read(Path.Combine(root, "db", "51-repeat-views-migration.sh"), "f218-repeat-views");
 
             Assert.Equal(fresh, upgrade);
-        }
-
-        static string ViewBlock(string path)
-        {
-            var lines = File.ReadAllLines(path)
-                .SkipWhile(l => !l.Contains("-- begin f218-repeat-views", StringComparison.Ordinal))
-                .TakeWhile(l => !l.Contains("-- end f218-repeat-views", StringComparison.Ordinal))
-                .ToList();
-            Assert.NotEmpty(lines);
-            return string.Join('\n', lines);
         }
     }
 

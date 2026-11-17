@@ -443,6 +443,64 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	FROM station.persona p;
 	-- end f218-repeat-views
 
+	-- begin f218-memory-offer
+	-- F218.40-F218.47 (STORY-550, STORY-551; PLAN T730): one row per ask, written before the model call; used flips
+	-- when the line airs with the memory in it. Mirrored verbatim between db/06 and db/52 (a spec pins the text equal).
+	CREATE TABLE IF NOT EXISTS station.memory_offer (
+	  id            bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, -- bigint: one row per ask, no cap on the table's growth rate
+	  memory_id     integer NOT NULL REFERENCES station.persona_memory(id) ON DELETE CASCADE,
+	  persona_id    integer NOT NULL REFERENCES station.persona(id) ON DELETE CASCADE,
+	  utterance_id  integer REFERENCES station.utterance(id) ON DELETE SET NULL, -- nullable-fk: unset until the line is written, and a pruned line leaves the ask
+	  offered_at    timestamptz NOT NULL DEFAULT now(),
+	  used          boolean NOT NULL DEFAULT false,
+	  matched_words text[] NOT NULL DEFAULT '{}'
+	);
+	CREATE INDEX IF NOT EXISTS memory_offer_persona_recent ON station.memory_offer (persona_id, offered_at DESC);
+	CREATE INDEX IF NOT EXISTS memory_offer_memory ON station.memory_offer (memory_id, offered_at DESC);
+
+	-- Marker ledger for data-shaped (non-DDL) fixes in the station schema: one row per applied fix key.
+	-- Twin of library.one_time_fix (db/34), which station_svc cannot reach.
+	CREATE TABLE IF NOT EXISTS station.one_time_fix (
+	  key        text        PRIMARY KEY, -- deliberate: same shape as db/34's ledger; the key is the identity, nothing references it
+	  applied_at timestamptz NOT NULL DEFAULT now()
+	);
+
+	-- callback_rate: per DJ over the last 7 days. asks = offers, used = offers that aired, hours = distinct UTC clock
+	-- hours holding a non-fallback line, used_per_hour = used / hours (NULL when the DJ had no hours on air).
+	CREATE OR REPLACE VIEW station.callback_rate AS
+	WITH offer AS (
+	  SELECT persona_id, count(*)::integer AS asks, (count(*) FILTER (WHERE used))::integer AS used
+	  FROM station.memory_offer
+	  WHERE offered_at >= now() - interval '7 days'
+	  GROUP BY persona_id
+	),
+	airtime AS (
+	  SELECT persona_id, count(DISTINCT date_trunc('hour', written_at AT TIME ZONE 'UTC'))::integer AS hours
+	  FROM station.utterance
+	  WHERE NOT fallback AND written_at >= now() - interval '7 days'
+	  GROUP BY persona_id
+	)
+	SELECT COALESCE(o.persona_id, a.persona_id) AS persona_id,
+	       COALESCE(o.asks, 0) AS asks,
+	       COALESCE(o.used, 0) AS used,
+	       COALESCE(a.hours, 0) AS hours,
+	       CASE WHEN COALESCE(a.hours, 0) = 0 THEN NULL
+	            ELSE COALESCE(o.used, 0)::numeric / a.hours END AS used_per_hour
+	FROM offer o
+	FULL JOIN airtime a ON a.persona_id = o.persona_id;
+	-- end f218-memory-offer
+
+	-- Pre-claim for db/52's one-time count reset (outside the mirrored block on purpose). compose.yaml mounts
+	-- only db/01 and db/06, so a raw `docker compose up` on a fresh volume runs this script and never db/52.
+	-- Fresh DB: no counts, claim now, nothing to reset. Upgraded box still holding old "offered" counts: left
+	-- unclaimed so db/52 resets them. Upgraded box with no counts: claimed, harmless.
+	INSERT INTO station.one_time_fix (key)
+	SELECT 'f218-callback-counts-reset'
+	WHERE NOT EXISTS (SELECT 1 FROM station.persona_memory
+	                  WHERE kind IN ('lore','episode','life')
+	                    AND (aired_count <> 0 OR last_aired_at IS NOT NULL))
+	ON CONFLICT (key) DO NOTHING;
+
 	-- The weekly format-clock grid (SPEC F91.1, F91.2; STORY-240, STORY-242; PLAN T118) that replaces
 	-- the single owner-toggled Station:Persona:ActiveId. day_of_week is System.DayOfWeek's own 0-6
 	-- numbering (0 = Sunday) — no translation ever happens between this column and the C# side.
