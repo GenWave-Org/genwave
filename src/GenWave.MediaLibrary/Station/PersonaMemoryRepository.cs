@@ -101,9 +101,24 @@ sealed partial class PersonaMemoryRepository(Lazy<NpgsqlDataSource> dataSource, 
 
         foreach (var personaId in episodes.Select(e => e.PersonaId).Distinct())
             await EvictAsync(conn, tx, personaId, MemoryKinds.Episode, ct);
+        await DeleteOrphanedEventsAsync(conn, tx, ct);
 
         await tx.CommitAsync(ct);
     }
+
+    /// <summary>
+    /// Deletes every shared <c>memory_event</c> no <c>persona_memory</c> row points at any more (gh-#1010): an event
+    /// lives while any participant still remembers it. The FK is <c>ON DELETE SET NULL</c>, so evicting or deleting
+    /// the rows never removes the event on its own. Whole-table, so it also sweeps events a deleted persona left.
+    /// </summary>
+    static async Task DeleteOrphanedEventsAsync(NpgsqlConnection conn, NpgsqlTransaction tx, CancellationToken ct) =>
+        await conn.ExecuteAsync(new CommandDefinition(
+            """
+            delete from station.memory_event e
+            where not exists (select 1 from station.persona_memory m where m.event_id = e.id)
+            """,
+            transaction: tx,
+            cancellationToken: ct));
 
     sealed record NewRow(
         long PersonaId, string Kind, string Content, PersonaMemorySource Source, DateTimeOffset? OccurredAt, long? EventId);

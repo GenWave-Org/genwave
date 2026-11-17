@@ -98,9 +98,15 @@ sealed partial class PersonaMemoryRepository : IPersonaMemoryAdmin
     public async Task<bool> DeleteAsync(long personaId, long rowId, CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
-        return await conn.ExecuteAsync(new CommandDefinition(
+        await using var tx = await conn.BeginTransactionAsync(ct);
+        var deleted = await conn.ExecuteAsync(new CommandDefinition(
             "delete from station.persona_memory where persona_id = @personaId and id = @rowId and kind = any(@kinds)",
             new { personaId, rowId, kinds = MemoryKinds.OperatorShaped },
+            transaction: tx,
             cancellationToken: ct)) > 0;
+        if (deleted)
+            await DeleteOrphanedEventsAsync(conn, tx, ct);
+        await tx.CommitAsync(ct);
+        return deleted;
     }
 }

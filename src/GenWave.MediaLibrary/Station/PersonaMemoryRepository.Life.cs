@@ -129,7 +129,8 @@ sealed partial class PersonaMemoryRepository
     /// (see <c>HasClaimAsync</c>), so it neither counts toward the cap nor is evicted.
     /// </summary>
     static async Task EvictLifeAsync(
-        NpgsqlConnection conn, NpgsqlTransaction tx, long personaId, IReadOnlyList<long> keepIds, CancellationToken ct) =>
+        NpgsqlConnection conn, NpgsqlTransaction tx, long personaId, IReadOnlyList<long> keepIds, CancellationToken ct)
+    {
         await conn.ExecuteAsync(new CommandDefinition(
             """
             delete from station.persona_memory
@@ -146,4 +147,7 @@ sealed partial class PersonaMemoryRepository
             new { PersonaId = personaId, KeepIds = keepIds.ToArray(), Cap = LifeMemoryRules.Cap },
             transaction: tx,
             cancellationToken: ct));
+
+        await DeleteOrphanedEventsAsync(conn, tx, ct);
+    }
 }
