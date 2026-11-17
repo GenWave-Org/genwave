@@ -115,45 +115,102 @@ public static class FeatureOneMemoryAskedForDirectly
     }
 
     // AC4 — only intros and back-announces
-    public sealed class ScenarioOnlyIntrosAndBackAnnounces
+    public sealed class ScenarioOnlyIntrosAndBackAnnounces : IAsyncLifetime
     {
         // Given an eligible memory and a draw that always passes
         // When  a sign-on, sign-off, context segment and crosstalk exchange are written
+        readonly CallbackSpecHarness h = new();
 
-        [Fact(Skip = "pending: T736 — see docs/PLAN.md")]
-        public void ThePlannerIsNeverAskedForThoseSegmentKinds() => Assert.Fail("pending: T736 — the planner is never asked for those segment kinds");
+        public async Task InitializeAsync()
+        {
+            foreach (var kind in new[] { SegmentKind.SignOn, SegmentKind.SignOff, SegmentKind.ContextSegment, SegmentKind.Crosstalk })
+                await h.Writer.WriteAsync(CallbackSpecHarness.Request(kind), CancellationToken.None);
+        }
 
-        [Fact(Skip = "pending: T736 — see docs/PLAN.md")]
-        public void NoPromptCarriesAnAsk() => Assert.Fail("pending: T736 — no prompt carries an ask");
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void ThePlannerIsNeverAskedForThoseSegmentKinds() => Assert.Equal(0, h.Store.EligibleReads);
+
+        [Fact]
+        public void NoOfferRowIsWritten() => Assert.Empty(h.Store.Offers);
+
+        [Fact]
+        public void NoPromptCarriesAnAsk() =>
+            Assert.DoesNotContain(LlmPromptBuilder.CallbackAskLabel, h.Prompts);
+
+        [Fact]
+        public void ThePromptsWereActuallySent() => Assert.NotEmpty(h.UserPrompts);
     }
 
     // AC5 — on air, the writer asks
-    public sealed class ScenarioOnAirTheWriterAsks
+    public sealed class ScenarioOnAirTheWriterAsks : IAsyncLifetime
     {
         // When  a track intro is written on air
+        readonly CallbackSpecHarness h = new();
+        readonly CallbackSpecHarness backAnnounce = new();
 
-        [Fact(Skip = "pending: T736 — see docs/PLAN.md")]
-        public void ThePromptSentToTheModelCarriesTheAskForThatMemory() => Assert.Fail("pending: T736 — the prompt sent to the model carries the ask for that memory");
+        public async Task InitializeAsync()
+        {
+            await h.Writer.WriteAsync(CallbackSpecHarness.RecordableRequest(SegmentKind.LeadIn), CancellationToken.None);
+            await backAnnounce.Writer.WriteAsync(CallbackSpecHarness.RecordableRequest(SegmentKind.BackAnnounce), CancellationToken.None);
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void ThePromptSentToTheModelCarriesTheAskForThatMemory() =>
+            Assert.Contains(LlmPromptBuilder.CallbackAskLabel + CallbackSpecHarness.MemoryText, h.Prompts);
+
+        [Fact]
+        public void ABackAnnounceCarriesItToo() =>
+            Assert.Contains(LlmPromptBuilder.CallbackAskLabel + CallbackSpecHarness.MemoryText, backAnnounce.Prompts);
+
+        [Fact]
+        public void TheOfferRowIsWrittenForTheDJ() =>
+            Assert.Equal(QuirkSpecHarness.PersonaId, Assert.Single(h.Store.Offers).PersonaId);
     }
 
     // AC6 — preview never asks (sad path)
-    public sealed class ScenarioPreviewNeverAsks
+    public sealed class ScenarioPreviewNeverAsks : IAsyncLifetime
     {
         // When  a preview is written
+        readonly CallbackSpecHarness h = new();
 
-        [Fact(Skip = "pending: T736 — see docs/PLAN.md")]
-        public void NoOfferIsWritten() => Assert.Fail("pending: T736 — no offer is written");
+        public async Task InitializeAsync() =>
+            await h.Writer.WritePreviewAsync(CallbackSpecHarness.Request(SegmentKind.LeadIn), personaOverride: null, CancellationToken.None);
 
-        [Fact(Skip = "pending: T736 — see docs/PLAN.md")]
-        public void ThePreviewPromptCarriesNoAsk() => Assert.Fail("pending: T736 — the preview prompt carries no ask");
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void NoOfferIsWritten() => Assert.Empty(h.Store.Offers);
+
+        [Fact]
+        public void ThePlannerWasNeverAsked() => Assert.Equal(0, h.Store.EligibleReads);
+
+        [Fact]
+        public void ThePreviewPromptCarriesNoAsk()
+        {
+            Assert.NotEmpty(h.UserPrompts);
+            Assert.DoesNotContain(LlmPromptBuilder.CallbackAskLabel, h.Prompts);
+        }
     }
 
     // AC7 — memory off (sad path)
-    public sealed class ScenarioMemoryOff
+    public sealed class ScenarioMemoryOff : IAsyncLifetime
     {
         // Given the model's context is under 8192 tokens
+        readonly CallbackSpecHarness h = new(budget: MemoryBudget.Off);
 
-        [Fact(Skip = "pending: T736 — see docs/PLAN.md")]
-        public void NoOfferIsWrittenWhenMemoryIsOff() => Assert.Fail("pending: T736 — no offer is written when memory is off");
+        public async Task InitializeAsync() =>
+            await h.Writer.WriteAsync(CallbackSpecHarness.RecordableRequest(SegmentKind.LeadIn), CancellationToken.None);
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void NoOfferIsWrittenWhenMemoryIsOff() => Assert.Empty(h.Store.Offers);
+
+        [Fact]
+        public void TheBreakStillAirsItsLine() => Assert.Single(h.Utterances.Recorded);
     }
 }

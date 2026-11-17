@@ -246,6 +246,11 @@ public static class StationSettingsAllowlist
         // restart. Default on; seeded in appsettings.json. Grouped with the other LLM-backed settings.
         new("Memory:LifeExtraction:Enabled", SettingApplyMode.Live, SettingKind.Boolean, "", SettingGroup.Voice),
 
+        // How often a DJ calls back on a memory (SPEC F218.41, STORY-548, PLAN T736): BreakCallbacks reads
+        // ICallbackRate (IOptionsMonitor<MemoryCallbackOptions>) per break, so a PUT applies to the very next
+        // break with no api restart. 0 turns callbacks off; 6 is the ceiling the planner clamps to.
+        new("Memory:CallbacksPerHour", SettingApplyMode.Live, SettingKind.Number, "per hour", SettingGroup.Voice, Min: 0, Max: 6),
+
         // TTS/LLM endpoint liveness (SPEC F36.1–F36.4, T8): KokoroTtsSynthesizer/KokoroVoiceLister
         // and LlmCopyWriter read these via IOptionsMonitor per call (no boot-frozen BaseAddress), so
         // a PUT here reroutes the very next render/voices call — no api restart. Llm:Endpoint is

@@ -41,4 +41,13 @@ public sealed class MemoryRecallSource(IMemoryRecallStore store) : IMemoryRecall
 
         return packet;
     }
+
+    public async Task<MemoryPacket> NeverMentionAsync(long personaId, MemoryBudget budget, CancellationToken ct)
+    {
+        if (!budget.MemoryOn)
+            return MemoryPacket.Empty;
+
+        var neverMention = await store.RecentlyForgottenAsync(personaId, NeverMentionWindow, NeverMentionLimit, ct);
+        return new MemoryPacket([], [], [], neverMention);
+    }
 }

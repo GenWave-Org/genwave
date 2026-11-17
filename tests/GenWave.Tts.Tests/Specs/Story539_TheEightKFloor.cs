@@ -92,12 +92,17 @@ public static class FeatureTheEightKFloor
     }
 
     // AC6 — Memories are colour, and the gate knows them
-    public sealed class ScenarioMemoriesAreColourAndTheGateKnowsThem : IAsyncLifetime
+    public sealed class ScenarioAContextBreakCarriesNoMemory : IAsyncLifetime
     {
         // Given a context (weather) break - the gate only checks a fact block there, so the fact is not vacuous
-        // (on a LeadIn there is no fact block and it would pass anyway) - and a recalled episode "read the weather: high of 4 °C with sleet, Tuesday"
-        // When  the copy says "like Tuesday's sleet"
-        const string Copy = "Cloudy at 12 out there, like Tuesday's sleet at 4 degrees.";
+        // (on a LeadIn there is no fact block and it would pass anyway) - and a recall source holding the episode "read the weather: high of 4 °C with sleet, Tuesday"
+        // When  the copy says only what the context facts say
+        //
+        // T736 amendment (F218.40/F218.42): this fact used to pass because the recalled episode joined the gate's facts,
+        // so "like Tuesday's sleet at 4 degrees" cleared the number check. A context segment never carries a memory any
+        // more (only a LeadIn/BackAnnounce callback ask does, and its text joins the facts only there), so the copy now
+        // passes on the context facts alone, and the episode is in neither the prompt nor the facts.
+        const string Copy = "Cloudy at 12 out there.";
         const string Episode = "read the weather: high of 4 °C with sleet, Tuesday";
         SegmentCopy aired = new("", false);
         string prompt = "";
@@ -119,8 +124,11 @@ public static class FeatureTheEightKFloor
 
         [Fact]
         public void ThePromptNoLongerCarriesTheMayReferLine() =>
-            // Retired by F218.42; the memory still reaches the gate's facts until T736 swaps in the ask.
+            // Retired by F218.42.
             Assert.DoesNotContain("You may refer to these if it fits", prompt);
+
+        [Fact]
+        public void TheContextPromptCarriesNoMemory() => Assert.DoesNotContain("sleet", prompt);
     }
 
     // F218.22 - rows are only spent when the prompt will carry them
@@ -387,13 +395,19 @@ public static class FeatureTheEightKFloor
     {
         public Task<MemoryPacket> TakeAsync(long personaId, MemoryBudget budget, CancellationToken ct) =>
             Task.FromResult(new MemoryPacket([], [new RecalledMemory(1, "episode", episode, null)], [], []));
+
+        public Task<MemoryPacket> NeverMentionAsync(long personaId, MemoryBudget budget, CancellationToken ct) =>
+            TakeAsync(personaId, budget, ct);
     }
 
     sealed class CountingRecall(bool throws) : IMemoryRecallSource
     {
         public int Takes { get; private set; }
 
-        public Task<MemoryPacket> TakeAsync(long personaId, MemoryBudget budget, CancellationToken ct)
+        public Task<MemoryPacket> TakeAsync(long personaId, MemoryBudget budget, CancellationToken ct) =>
+            throw new InvalidOperationException("the writer no longer takes rows (T736)");
+
+        public Task<MemoryPacket> NeverMentionAsync(long personaId, MemoryBudget budget, CancellationToken ct)
         {
             Takes++;
             return throws
