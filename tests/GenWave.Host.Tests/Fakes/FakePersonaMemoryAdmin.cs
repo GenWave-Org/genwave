@@ -14,10 +14,10 @@ sealed class FakePersonaMemoryAdmin : IPersonaMemoryAdmin
     static readonly DateTime SeedEpoch = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
     long nextId = 1;
 
-    public long Seed(long personaId, string kind, string source, string content, int airedCount = 0, DateTime? approvedAt = null)
+    public long Seed(long personaId, string kind, string source, string content, int airedCount = 0, DateTime? approvedAt = null, int askedCount = 0)
     {
         var id = nextId++;
-        rows.Add((personaId, new PersonaMemoryAdminRow(id, kind, source, content, airedCount, null, SeedEpoch.AddSeconds(id), approvedAt, null)));
+        rows.Add((personaId, new PersonaMemoryAdminRow(id, kind, source, content, airedCount, null, SeedEpoch.AddSeconds(id), approvedAt, null, askedCount)));
         return id;
     }
 

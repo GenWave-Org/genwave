@@ -15,6 +15,7 @@ sealed class CallbackStore(Lazy<NpgsqlDataSource> dataSource) : ICallbackStore
     internal static readonly TimeSpan LoreRest = TimeSpan.FromHours(6);
     internal static readonly TimeSpan OtherRest = TimeSpan.FromHours(48);
     internal static readonly TimeSpan AskRest = TimeSpan.FromHours(2);
+    /// <summary>Days an offer row is kept AND the window the Memory tab's asked count covers (F218.48); the two must stay equal.</summary>
     internal const int OfferRetentionDays = 28;
 
     public async Task<IReadOnlyList<RecalledMemory>> EligibleAsync(long personaId, CancellationToken ct)

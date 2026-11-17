@@ -19,6 +19,8 @@ export interface PersonaMemoryRow {
   source: MemorySource;
   text: string;
   airedCount: number;
+  /** Offers to the DJ in the last 28 days (server constant CallbackStore.OfferRetentionDays). */
+  askedCount: number;
   lastAiredAt: string | null;
   createdAt: string;
   approvedAt: string | null;

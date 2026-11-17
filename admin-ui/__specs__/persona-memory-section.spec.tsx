@@ -32,6 +32,7 @@ function memoryRow(overrides: Partial<PersonaMemoryRow> & Pick<PersonaMemoryRow,
   return {
     source: "authored",
     airedCount: 0,
+    askedCount: 0,
     lastAiredAt: null,
     createdAt: "2026-11-01T10:00:00Z",
     approvedAt: "2026-11-01T10:00:00Z",
