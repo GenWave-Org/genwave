@@ -18,6 +18,7 @@ export interface PersonaMemoryRow {
   kind: MemoryKind;
   source: MemorySource;
   text: string;
+  /** Times the DJ used it on air (SPEC F218.46); `lastAiredAt` is the last such use. */
   airedCount: number;
   /** Offers to the DJ in the last 28 days (server constant CallbackStore.OfferRetentionDays). */
   askedCount: number;

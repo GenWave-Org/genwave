@@ -78,11 +78,19 @@ function errorText(err: unknown): string {
   return err instanceof MemoryApiError ? err.message : "Something went wrong. Try again.";
 }
 
-// `airedCount`/`lastAiredAt` are the wire names: the count is how often the row was offered to the model, not how often it aired.
-function offeredText(row: PersonaMemoryRow): string {
-  if (row.airedCount === 0) return "Not offered yet";
-  const times = row.airedCount === 1 ? "Offered once" : `Offered ${row.airedCount} times`;
-  return row.lastAiredAt === null ? times : `${times}, last ${formatUpSince(row.lastAiredAt)}`;
+function countTimes(count: number): string {
+  return count === 1 ? "once" : `${count} times`;
+}
+
+// `askedCount` = offers in the last 28 days; `airedCount` = how often the DJ actually used the memory on air,
+// `lastAiredAt` = when it was last used (F218.46). Asked 0 but aired > 0 happens once the offers age out of the 28 days.
+function askedAiredText(row: PersonaMemoryRow): string {
+  const aired =
+    row.airedCount === 0
+      ? "Not aired yet"
+      : `Aired ${countTimes(row.airedCount)}${row.lastAiredAt === null ? "" : `, last ${formatUpSince(row.lastAiredAt)}`}`;
+  if (row.askedCount === 0) return row.airedCount === 0 ? "Not asked yet" : aired;
+  return `Asked ${countTimes(row.askedCount)} · ${aired}`;
 }
 
 /** Episode and life rows are stored as a lowercase predicate ("hosted a shift"); capitalise for display only. */
@@ -134,7 +142,7 @@ function MemoryRowItem({ row, busy, onChange, onDelete }: MemoryRowItemProps): R
         <Chip>{SOURCE_LABELS[row.source]}</Chip>
         {row.pending && <Chip className="border-accent-2 text-ink">Waiting for your OK</Chip>}
         {row.forgotten && <Chip>Forgotten</Chip>}
-        <span>{offeredText(row)}</span>
+        <span>{askedAiredText(row)}</span>
       </div>
 
       <div className="flex flex-wrap gap-2">
