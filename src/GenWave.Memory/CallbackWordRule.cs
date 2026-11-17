@@ -2,7 +2,7 @@ namespace GenWave.Memory;
 
 /// <summary>
 /// The callback word rule (SPEC F218.45, pure): a line uses a memory when it shares at least one distinctive word
-/// with it. Distinctive = four or more letters (digits do not count) as written in the memory, not a stop word, not excluded.
+/// with it. Distinctive = four or more letters (digits do not count) as written in the memory, not a <see cref="CallbackStopWords"/> word, not excluded.
 /// Words are lowercased by <see cref="RepetitionText.Tokens"/> and compared by <see cref="CallbackWordForms"/>.
 /// </summary>
 public static class CallbackWordRule
@@ -24,6 +24,6 @@ public static class CallbackWordRule
 
     static IEnumerable<string> DistinctiveWords(string memory, CallbackExclusions exclusions) =>
         RepetitionText.Tokens(memory)
-            .Where(word => word.Length >= MinLetters && word.All(char.IsLetter) && !RepetitionCheck.StopWords.Contains(word) && !exclusions.Contains(word))
+            .Where(word => word.Length >= MinLetters && word.All(char.IsLetter) && !CallbackStopWords.All.Contains(word) && !exclusions.Contains(word))
             .Distinct(StringComparer.Ordinal);
 }

@@ -107,6 +107,21 @@ public static class FeatureEveryAskLeavesARecordWordRule
         public void UnrelatedWordsAreNotEqual(string a, string b) => Assert.False(CallbackWordRule.Used(a, b, Exclusions("Granny Static")).Used);
     }
 
+    public sealed class ScenarioCommonPatterWordsAreNotAMatch
+    {
+        [Fact]
+        public void TookOverFromCaptainFlipHasNoDistinctiveWord() =>
+            Assert.False(CallbackWordRule.HasDistinctiveWord("took over from Captain Flip", Exclusions("Captain Flip")));
+
+        [Fact]
+        public void LivesInAHouseWithAViewIsNotUsedByTheHouseOfBlues() =>
+            Assert.False(CallbackWordRule.Used("lives in a house with a view of the mountains", "live from the house of blues", Exclusions("Granny Static")).Used);
+
+        [Fact]
+        public void LivesInAHouseWithAViewIsUsedByTheMountainsAreOut() =>
+            Assert.True(CallbackWordRule.Used("lives in a house with a view of the mountains", "the mountains are out tonight", Exclusions("Granny Static")).Used);
+    }
+
     public sealed class ScenarioTheMatchedWordsAndEligibility
     {
         [Fact]
