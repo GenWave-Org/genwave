@@ -1,20 +1,12 @@
 namespace GenWave.Core.Domain;
 
 /// <summary>
-/// What one break's prompt may remember (SPEC F218.22, F218.19): the lore, episodes (newest first) and
-/// life rows chosen under the <see cref="MemoryBudget"/>, plus the never-mention list. Every row in
-/// the three blocks has already been marked aired.
+/// What one break's prompt must avoid (SPEC F218.19): the never-mention list. Memory rows no longer ride
+/// here; since F218.40 only a callback ask carries one memory.
 /// </summary>
 /// <param name="NeverMention">Claim texts forgotten within the last 7 days, newest first.</param>
-public sealed record MemoryPacket(
-    IReadOnlyList<RecalledMemory> Lore,
-    IReadOnlyList<RecalledMemory> Episodes,
-    IReadOnlyList<RecalledMemory> Life,
-    IReadOnlyList<string> NeverMention)
+public sealed record MemoryPacket(IReadOnlyList<string> NeverMention)
 {
-    /// <summary>Lore, then episodes, then life: every recalled row in prompt order.</summary>
-    public IReadOnlyList<RecalledMemory> Rows => [.. Lore, .. Episodes, .. Life];
-
-    /// <summary>Nothing remembered, nothing to avoid.</summary>
-    public static MemoryPacket Empty { get; } = new([], [], [], []);
+    /// <summary>Nothing to avoid.</summary>
+    public static MemoryPacket Empty { get; } = new([]);
 }

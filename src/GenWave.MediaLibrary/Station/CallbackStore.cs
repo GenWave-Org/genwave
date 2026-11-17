@@ -20,7 +20,7 @@ sealed class CallbackStore(Lazy<NpgsqlDataSource> dataSource) : ICallbackStore
     public async Task<IReadOnlyList<RecalledMemory>> EligibleAsync(long personaId, CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
-        // Draft/forgotten/lore-source predicates match PersonaMemoryRepository.CandidatesAsync. last_aired_at is
+        // Draft/forgotten/lore-source predicates are the same ones the retired row recall used (T737). last_aired_at is
         // only ever set by a used ask (F218.46), so it is the "used" clock.
         var rows = await conn.QueryAsync<RecalledMemory>(new CommandDefinition(
             """

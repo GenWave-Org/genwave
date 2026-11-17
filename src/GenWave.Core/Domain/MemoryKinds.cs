@@ -3,10 +3,10 @@ namespace GenWave.Core.Domain;
 /// <summary>The <c>station.persona_memory.kind</c> values recall and the quirk ledger rely on (SPEC F218).</summary>
 public static class MemoryKinds
 {
-    /// <summary>Authored or approved backstory; recalled up to <see cref="MemoryBudget.LoreLimit"/> per prompt.</summary>
+    /// <summary>Authored or approved backstory; offered as a callback ask (F218.40).</summary>
     public const string Lore = "lore";
 
-    /// <summary>Something that happened on air; recalled newest first.</summary>
+    /// <summary>Something that happened on air; offered as a callback ask (F218.40).</summary>
     public const string Episode = "episode";
 
     /// <summary>A timeless fact about the DJ's off-air life.</summary>

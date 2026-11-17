@@ -211,15 +211,8 @@ public static class FeatureAnInventedLifeThatStaysConsistent
         {
             var store = new InMemoryPersonaMemory(new FakeTimeProvider());
             store.Add(MemoryKinds.Life, "has a beagle named Gus", source: "extracted", forgottenAgo: TimeSpan.FromHours(1));
-            store.Add(MemoryKinds.Life, "plays the banjo", source: "extracted");
-            packet = new MemoryRecallSource(store).TakeAsync(1, MemoryBudget.Standard, CancellationToken.None).GetAwaiter().GetResult();
+            packet = new MemoryRecallSource(store).NeverMentionAsync(1, MemoryBudget.Standard, CancellationToken.None).GetAwaiter().GetResult();
         }
-
-        [Fact]
-        public void TheRowIsNotInWhatYouRemember() => Assert.DoesNotContain("has a beagle named Gus", packet.Life.Select(m => m.Content));
-
-        [Fact]
-        public void AnUnforgottenLifeRowIsStillRemembered() => Assert.Equal(["plays the banjo"], packet.Life.Select(m => m.Content));
 
         [Fact]
         public void ItsClaimIsInTheNeverMentionList() => Assert.Equal(["has a beagle named Gus"], packet.NeverMention);
@@ -238,12 +231,12 @@ public static class FeatureAnInventedLifeThatStaysConsistent
             var store = new InMemoryPersonaMemory(new FakeTimeProvider());
             store.Add(MemoryKinds.Life, "has a beagle named Gus", source: "extracted", forgottenAgo: TimeSpan.FromDays(8));
             store.Add(MemoryKinds.Life, "grew up in Red Deer", source: "extracted", forgottenAgo: TimeSpan.FromDays(6));
-            packet = new MemoryRecallSource(store).TakeAsync(1, MemoryBudget.Standard, CancellationToken.None).GetAwaiter().GetResult();
+            packet = new MemoryRecallSource(store).NeverMentionAsync(1, MemoryBudget.Standard, CancellationToken.None).GetAwaiter().GetResult();
         }
 
         [Fact]
-        public void ItsClaimIsInNeitherBlock() =>
-            Assert.DoesNotContain("has a beagle named Gus", packet.Life.Select(m => m.Content).Concat(packet.NeverMention));
+        public void ItsClaimIsNotInTheNeverMentionList() =>
+            Assert.DoesNotContain("has a beagle named Gus", packet.NeverMention);
 
         [Fact]
         public void ARowForgottenSixDaysAgoIsStillInTheNeverMentionList() => Assert.Equal(["grew up in Red Deer"], packet.NeverMention);

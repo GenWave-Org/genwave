@@ -358,13 +358,6 @@ static class LlmPromptBuilder
 
     static string TrimTo(string text, int maxChars) => text.Length <= maxChars ? text : text[..maxChars];
 
-    /// <summary>Transitional (T736 swaps its call site for <see cref="CallbackFacts"/>, T737 deletes it): recalled rows for the gate fact block.</summary>
-    public static string? MemoryFacts(MemoryPacket memory)
-    {
-        var rows = memory.Rows.Select(r => MemoryLine(r.Content)).ToList();
-        return rows.Count == 0 ? null : string.Join('\n', rows);
-    }
-
     /// <summary>SPEC F218.10 - heading of the recent-lines block. Public so a spec pins it.</summary>
     public const string RecentLinesHeading = "Recent lines, do not reuse their phrasing:";
 

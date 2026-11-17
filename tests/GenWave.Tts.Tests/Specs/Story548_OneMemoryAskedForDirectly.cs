@@ -69,12 +69,11 @@ public static class FeatureOneMemoryAskedForDirectly
     // AC2 — no ask, no memory rows
     public sealed class ScenarioNoAskNoMemoryRows
     {
-        // Given no callback ask (and a packet that still holds rows)
+        // Given no callback ask (T737: a packet can no longer hold rows, so the absence is by construction)
         // When  the on-air prompt is built
-        static readonly MemoryPacket Rows = new(
-            [Row(MemoryKinds.Lore, "the van")], [Row(MemoryKinds.Episode, "the quiz")], [Row(MemoryKinds.Life, "a dog")], []);
+        static readonly MemoryPacket NoAsk = MemoryPacket.Empty;
 
-        readonly BreakPrompt prompt = Compose(SegmentKind.LeadIn, Rows, null);
+        readonly BreakPrompt prompt = Compose(SegmentKind.LeadIn, NoAsk, null);
 
         [Fact]
         public void ItContainsNoSomethingYouRememberLine() =>
@@ -94,7 +93,7 @@ public static class FeatureOneMemoryAskedForDirectly
         [Fact]
         public void ItIsByteIdenticalToTheMemoryOffPrompt()
         {
-            foreach (var actual in new[] { prompt, Compose(SegmentKind.LeadIn, new MemoryPacket([], [], [], []), null) })
+            foreach (var actual in new[] { prompt, Compose(SegmentKind.LeadIn, new MemoryPacket([]), null) })
             {
                 Assert.Equal(MemoryOffSystem, actual.System);
                 Assert.Equal(MemoryOffUser, actual.User);
@@ -107,7 +106,7 @@ public static class FeatureOneMemoryAskedForDirectly
     {
         // Given a claim forgotten 2 days ago and no callback ask
         readonly BreakPrompt prompt = Compose(
-            SegmentKind.LeadIn, new MemoryPacket([], [], [], ["has a dog named Daisy"]), null);
+            SegmentKind.LeadIn, new MemoryPacket(["has a dog named Daisy"]), null);
 
         [Fact]
         public void TheNeverMentionListStillNamesTheClaim() =>

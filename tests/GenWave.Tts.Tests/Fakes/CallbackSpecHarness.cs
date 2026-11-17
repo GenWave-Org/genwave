@@ -67,8 +67,6 @@ sealed class CallbackSpecHarness
 
     sealed class NoMemoryRecall : IMemoryRecallSource
     {
-        public Task<MemoryPacket> TakeAsync(long personaId, MemoryBudget budget, CancellationToken ct) => Task.FromResult(MemoryPacket.Empty);
-
         public Task<MemoryPacket> NeverMentionAsync(long personaId, MemoryBudget budget, CancellationToken ct) =>
             Task.FromResult(MemoryPacket.Empty);
     }

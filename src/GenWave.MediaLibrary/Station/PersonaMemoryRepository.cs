@@ -13,13 +13,11 @@ namespace GenWave.MediaLibrary.Station;
 /// discipline <see cref="PersonaRepository"/> documents for its own <see cref="Lazy{T}"/> constructor
 /// parameter.
 ///
-/// <b>One clock, the database's:</b> every stored timestamp (<c>created_at</c>'s default,
-/// <c>last_aired_at</c> in <see cref="MarkAiredAsync"/>) and every recall-window comparison in
-/// <see cref="RecallAsync"/> is computed with Postgres's own <c>now()</c>/<c>make_interval</c>, never
-/// this process's <see cref="TimeProvider"/> or <see cref="DateTime.UtcNow"/>. A host container and its
-/// database can drift seconds apart; F71.5's mark-before-render guarantee only holds if the timestamp
-/// a row is stamped with and the window comparison that later excludes it are measured by the SAME
-/// clock, so all of it stays in SQL rather than splitting the math across two clocks.
+/// <b>One clock, the database's:</b> every stored timestamp (<c>created_at</c>'s default) and every
+/// window comparison (the never-mention window, retention eviction) is computed with Postgres's own
+/// <c>now()</c>/<c>make_interval</c>, never this process's <see cref="TimeProvider"/> or
+/// <see cref="DateTime.UtcNow"/>. A host container and its database can drift seconds apart, so a row's
+/// stamp and the comparison that later reads it stay on the SAME clock, in SQL.
 ///
 /// Retention eviction (F71.6) runs as a second statement inside <see cref="RecordAsync"/>'s own
 /// transaction, in application code — not a <c>plpgsql</c> trigger/function — because
@@ -248,51 +246,6 @@ sealed partial class PersonaMemoryRepository(Lazy<NpgsqlDataSource> dataSource, 
     /// <summary>Writes one accrued <c>quirk</c> row; the F71.6 cap evicts the oldest spends, never the newest.</summary>
     public async Task RecordSpendAsync(long personaId, string content, CancellationToken ct) =>
         await RecordAsync(personaId, QuirkKind, content, PersonaMemorySource.Accrued, ct);
-
-    /// <summary>
-    /// Recall candidates for one block (F218.22). Eligibility: not forgotten, not an unapproved draft,
-    /// and lore only when authored or drafted-and-approved. The aired gate and every window run on
-    /// Postgres's <c>now()</c> (see this class's remarks). Episodes order by when they happened (falling
-    /// back to creation), newest first; lore and life order never-aired first, then least recently aired.
-    /// </summary>
-    public async Task<IReadOnlyList<RecalledMemory>> CandidatesAsync(long personaId, MemoryCandidateQuery query, CancellationToken ct)
-    {
-        var order = query.Order switch
-        {
-            MemoryRecallOrder.NewestFirst => "coalesce(occurred_at, created_at) desc, id desc",
-            MemoryRecallOrder.LeastRecentlyAired => "last_aired_at asc nulls first, id",
-            _ => throw new ArgumentOutOfRangeException(nameof(query), query.Order, "Unknown recall order."),
-        };
-
-        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
-        var rows = await conn.QueryAsync<RecalledMemory>(new CommandDefinition(
-            $"""
-            select id::bigint as id, kind, content, occurred_at
-            from station.persona_memory
-            where persona_id = @PersonaId
-              and kind = @Kind
-              and forgotten_at is null
-              and (source <> 'drafted' or approved_at is not null)
-              and (kind <> 'lore' or source in ('authored', 'drafted'))
-              and (last_aired_at is null or last_aired_at <= now() - make_interval(secs => @NotAiredWithinSeconds))
-            order by {order}
-            limit @Take
-            """,
-            new { PersonaId = personaId, query.Kind, NotAiredWithinSeconds = query.NotAiredWithin.TotalSeconds, query.Take },
-            cancellationToken: ct));
-
-        return rows.ToList();
-    }
-
-    /// <summary>One <c>update … where id = any(@ids)</c>, on the database clock (see this class's remarks).</summary>
-    public async Task MarkAiredAsync(IReadOnlyList<long> ids, CancellationToken ct)
-    {
-        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(new CommandDefinition(
-            "update station.persona_memory set aired_count = aired_count + 1, last_aired_at = now() where id = any(@ids)",
-            new { ids = ids.ToArray() },
-            cancellationToken: ct));
-    }
 
     /// <summary>Claims of any row forgotten within the window (F218.19), newest forgotten first.</summary>
     public async Task<IReadOnlyList<string>> RecentlyForgottenAsync(long personaId, TimeSpan within, int take, CancellationToken ct)
