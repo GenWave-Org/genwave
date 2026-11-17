@@ -441,13 +441,18 @@ public sealed partial class SettingValidator
         return null;
     }
 
+    // NumberStyles.Float minus the whitespace flags (gh-#883): "3 " parses in .NET but Liquidsoap's
+    // float_of_string rejects it, so the engine silently fell back to its default.
+    const NumberStyles StrictDouble =
+        NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint | NumberStyles.AllowExponent;
+
     // Inclusive both bounds — reads Min/Max off the key's own AllowedSetting row (PLAN T572) rather
     // than a literal pair, used for the F53.1-ceilinged doubles that already had an inclusive floor,
     // e.g. GW_SAFE_GAP_SECONDS, and for the pre-existing Loudness:* keys. setting.Min/Max are
     // null-checked, never null-forgiven, for every Number-kind allowlist entry.
     static bool IsDoubleInRange(string v, AllowedSetting setting) =>
         setting.Min.HasValue && setting.Max.HasValue
-        && double.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out var d)
+        && double.TryParse(v, StrictDouble, CultureInfo.InvariantCulture, out var d)
         && d >= setting.Min.Value && d <= setting.Max.Value;
 
     // Exclusive lower bound, inclusive upper bound — reads Min/Max off the key's own AllowedSetting
@@ -456,7 +461,7 @@ public sealed partial class SettingValidator
     // ceiling).
     static bool IsDoubleAboveAndAtMost(string v, AllowedSetting setting) =>
         setting.Min.HasValue && setting.Max.HasValue
-        && double.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out var d)
+        && double.TryParse(v, StrictDouble, CultureInfo.InvariantCulture, out var d)
         && d > setting.Min.Value && d <= setting.Max.Value;
 
     static bool IsBool(string v) =>

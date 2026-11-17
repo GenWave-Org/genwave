@@ -10,6 +10,7 @@ function isPublicPath(pathname: string): boolean {
     PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/")) ||
     pathname.startsWith("/_next/") ||
     pathname.startsWith("/favicon") ||
+    pathname.startsWith("/fonts/") ||
     pathname === "/icon.png"
   );
 }
@@ -38,6 +39,7 @@ export const config = {
   // browser's same-origin API/login calls to /login. icon.png (STORY-106, the App Router
   // favicon convention — the operator's GenWave-logo.png, which superseded R11's SVG mark)
   // is exempted the same way favicon.ico already is — a 307 to /login for an
-  // <img>/<link rel="icon"> request serves a redirect body, not the icon.
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|icon.png).*)"],
+  // <img>/<link rel="icon"> request serves a redirect body, not the icon. /fonts/ likewise
+  // (gh-#841): signed out, the login page's woff2 requests got the login HTML back.
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|icon.png|fonts/).*)"],
 };

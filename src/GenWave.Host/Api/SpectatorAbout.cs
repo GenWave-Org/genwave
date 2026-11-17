@@ -24,10 +24,15 @@ namespace GenWave.Host.Api;
 /// the same silence as <c>POST /spectator/api/requests</c>' own 404 — no distinguishable "requests
 /// are closed" state either way.
 /// </param>
+/// <param name="StartedAt">
+/// When the host process started (UTC, <see cref="ProcessStartTime"/>, gh-#959). The page shows
+/// "Up for" from it, so the 5-minute output cache never makes the uptime stale.
+/// </param>
 public sealed record SpectatorAbout(
     string StationName,
     string Version,
     string License,
     string ProjectUrl,
     string StreamUrl,
-    bool RequestsEnabled);
+    bool RequestsEnabled,
+    DateTimeOffset StartedAt);

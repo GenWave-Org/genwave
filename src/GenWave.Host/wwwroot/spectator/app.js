@@ -406,6 +406,27 @@ function renderDefinitionList(elementId, rows) {
 
 // ── About (fetched once) ─────────────────────────────────────────────────────
 
+/** @type {number|null} — host start instant (ms) from the about fetch; null until it arrives (gh-#959). */
+let startedAtMs = null;
+
+/** Mirrors admin-ui/lib/format-clock.ts formatUptime, so both About cards read the same. */
+function formatUptime(uptimeSeconds) {
+  const total = Math.max(0, Math.floor(uptimeSeconds));
+  const plural = (n, word) => `${n} ${n === 1 ? word : word + "s"}`;
+  if (total < 60) return "less than a minute";
+  if (total < 3600) return plural(Math.floor(total / 60), "minute");
+  if (total < 86400) return plural(Math.floor(total / 3600), "hour");
+  return `${plural(Math.floor(total / 86400), "day")}, ${plural(Math.floor((total % 86400) / 3600), "hour")}`;
+}
+
+/** Re-derived from the start instant each tick, so the cached about response never goes stale. */
+function renderUptime() {
+  const el = document.getElementById("about-uptime");
+  if (!el) return;
+  el.textContent = startedAtMs === null ? "—" : formatUptime((Date.now() - startedAtMs) / 1000);
+}
+
+
 async function loadAbout() {
   try {
     const about = await fetchJson("/spectator/api/about");
@@ -422,12 +443,19 @@ async function loadAbout() {
     sourceLink.textContent = about.projectUrl;
     sourceLink.rel = "noopener noreferrer";
 
+    const parsedStart = Date.parse(about.startedAt);
+    startedAtMs = Number.isNaN(parsedStart) ? null : parsedStart;
+    const uptime = document.createElement("span");
+    uptime.id = "about-uptime";
+
     renderDefinitionList("about-grid", [
       ["Station", about.stationName],
+      ["Up for", uptime],
       ["Version", about.version],
       ["License", about.license],
       ["Source", sourceLink],
     ]);
+    renderUptime();
 
     const player = document.getElementById("player");
     const hint = document.getElementById("player-hint");
@@ -1111,6 +1139,7 @@ function init() {
   }, HISTORY_STATS_POLL_MS);
   setInterval(renderNowPlaying, CLOCK_TICK_MS);
   setInterval(probeThumbsPresence, THUMBS_PRESENCE_POLL_MS);
+  setInterval(renderUptime, 60_000);
 }
 
 init();

@@ -204,6 +204,7 @@ public static class FeatureRequestsArtworkGate
             "SpectatorAbout.License",
             "SpectatorAbout.ProjectUrl",
             "SpectatorAbout.RequestsEnabled",
+            "SpectatorAbout.StartedAt",
             "SpectatorAbout.StationName",
             "SpectatorAbout.StreamUrl",
             "SpectatorAbout.Version",

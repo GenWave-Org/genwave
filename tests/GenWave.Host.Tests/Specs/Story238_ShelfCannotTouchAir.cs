@@ -109,6 +109,10 @@ file sealed class ShelfCannotTouchAirWebFactory(
             services.AddSingleton<IMediaCatalog>(new FakeMediaCatalog(ready: null));
             services.RemoveAll<IActivePersonaAccessor>();
             services.AddSingleton<IActivePersonaAccessor>(new FakeActivePersonaAccessor());
+            // about.startedAt (gh-#959) is each host's own boot instant; one fixed value keeps the
+            // cross-config byte diff about config, not about when each host happened to start.
+            services.RemoveAll<ProcessStartTime>();
+            services.AddSingleton(new ProcessStartTime(new DateTimeOffset(2026, 11, 17, 0, 0, 0, TimeSpan.Zero)));
             if (publicPort is int p)
                 services.AddSingleton<IStartupFilter>(new CatalogPortStartupFilter(p));
         });
