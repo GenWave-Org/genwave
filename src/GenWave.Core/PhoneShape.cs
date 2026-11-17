@@ -6,7 +6,8 @@ namespace GenWave.Core;
 /// The one phone-shape regex (SPEC F197.1, PLAN T544, STORY-464 AC1/AC2; widened at gh-#856) —
 /// NANP-shaped digit runs, matched the SAME way everywhere in GenWave: <c>ddd-dddd</c>,
 /// <c>ddd-ddd-dddd</c>, <c>(ddd) ddd-dddd</c>, <c>(ddd)[sep]?dddd</c> (the exchange itself
-/// parenthesized), or a bare 7+ digit run — separators are <c>-</c>/<c>.</c>/space throughout.
+/// parenthesized), or a bare 7+ digit run — separators are <c>-</c>/<c>.</c>/space throughout, plus a
+/// comma in the ten-digit shape (gh-#950).
 /// <c>GenWave.Ads.PhoneShapeCheck</c> (the 555 phone rule, SPEC F160.3) references
 /// <see cref="Regex"/> instead of keeping its own copy of the pattern — this is the ONE place the
 /// shape is spelled out; nothing outside this file may redeclare it.
@@ -29,6 +30,9 @@ public static partial class PhoneShape
     //
     // gh-#856: the second alternative covers "(555) 0142" — the exchange itself parenthesized, not
     // the area code; its mandatory closing "\)" is itself the anchor, so no leading \b is needed.
-    [GeneratedRegex(@"\(?\b\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}\b|\(\d{3}\)[-.\s]?\d{4}\b|\b\d{3}[-.\s]\d{4}\b|\b\d{7,}\b")]
+    //
+    // gh-#950: the full ten-digit shape also takes a comma between groups ("800, 555, 0199", a number
+    // read slowly). Only that shape: a comma-grouped "100, 1980" is a list, not a phone.
+    [GeneratedRegex(@"\(?\b\d{3}\)?(?:,\s?|[-.\s])\d{3}(?:,\s?|[-.\s])\d{4}\b|\(\d{3}\)[-.\s]?\d{4}\b|\b\d{3}[-.\s]\d{4}\b|\b\d{7,}\b")]
     private static partial Regex PhoneShapedRun();
 }
