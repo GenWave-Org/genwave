@@ -140,7 +140,8 @@ public sealed class LlmCopyWriter(
     ISentenceTrimmer? sentenceTrimmer = null, // T714: absent means a repeat always re-asks, exactly the pre-trim behaviour
     ILlmContextWindow? contextWindow = null, // T701: absent (or either seam absent) means no memory, exactly the pre-memory behaviour
     IMemoryRecallSource? memoryRecall = null,
-    ILifeExtractor? lifeExtractor = null) // T704: absent means no life extraction, exactly the pre-extractor behaviour
+    ILifeExtractor? lifeExtractor = null, // T704: absent means no life extraction, exactly the pre-extractor behaviour
+    BreakCallbacks? callbacks = null) // T736: absent means no callback breaks, exactly the pre-callback behaviour
     : ISegmentCopyWriter, IPersonaPreviewWriter, IAnnouncementCopyWriter
 {
     readonly IStationEventSink events = events ?? NoOpStationEventSink.Instance;
@@ -270,8 +271,8 @@ public sealed class LlmCopyWriter(
     /// The template rung after an LLM miss (SPEC F218.1): same copy the plain fallback returns, run
     /// through <see cref="RecordTemplateCopyAsync"/>.
     /// </summary>
-    async Task<SegmentCopy> FallbackAndRecordAsync(SegmentRequest request, CancellationToken ct) =>
-        await RecordTemplateCopyAsync(request, await fallback.WriteAsync(request, ct), ct);
+    async Task<SegmentCopy> FallbackAndRecordAsync(SegmentRequest request, CallbackAsk? ask, CancellationToken ct) =>
+        await RecordTemplateCopyAsync(request, await fallback.WriteAsync(request, ct), ct, ask);
 
     /// <summary>
     /// The ONE seam for template copy that airs in an LLM's place (SPEC F218.1): stored with
@@ -280,10 +281,17 @@ public sealed class LlmCopyWriter(
     /// that never air template copy (<see cref="TemplateCopyPolicy"/>) and kinds this writer does not
     /// author are returned untouched.
     /// </summary>
-    internal async Task<SegmentCopy> RecordTemplateCopyAsync(SegmentRequest request, SegmentCopy templated, CancellationToken ct) =>
-        IsLlmAuthored(request.Kind) && !TemplateCopyPolicy.NeverAirsTemplateCopy(request.Kind)
-            ? await RecordAsync(request, templated, fallbackCopy: true, ct)
-            : templated;
+    internal async Task<SegmentCopy> RecordTemplateCopyAsync(
+        SegmentRequest request, SegmentCopy templated, CancellationToken ct, CallbackAsk? ask = null)
+    {
+        if (!IsLlmAuthored(request.Kind) || TemplateCopyPolicy.NeverAirsTemplateCopy(request.Kind))
+        {
+            await SettleCallbackAsync(ask, utteranceId: null, templated.Text, fallbackCopy: true, ct);
+            return templated;
+        }
+
+        return await RecordAsync(request, templated, fallbackCopy: true, ask, ct);
+    }
 
     /// <summary>
     /// The ONE definition of the fact block the truth gate checks a render against: the owner's announcement
@@ -323,7 +331,22 @@ public sealed class LlmCopyWriter(
     /// the planner left unstamped (no persona, no shift key) is not recorded. A store fault is logged
     /// and costs only the record, never the segment (SPEC F12.4).
     /// </summary>
-    async Task<SegmentCopy> RecordAsync(SegmentRequest request, SegmentCopy copy, bool fallbackCopy, CancellationToken ct)
+    async Task<SegmentCopy> RecordAsync(
+        SegmentRequest request, SegmentCopy copy, bool fallbackCopy, CallbackAsk? ask, CancellationToken ct)
+    {
+        var recorded = await RecordUtteranceAsync(request, copy, fallbackCopy, ct);
+        await SettleCallbackAsync(ask, recorded.UtteranceId, copy.Text, fallbackCopy, ct);
+        return recorded;
+    }
+
+    /// <summary>
+    /// SPEC F218.44 - settles the break's offer with the recorded line: the utterance id (null when the write failed or
+    /// there was nothing to write to), the word rule's verdict, or unused for a template line. No ask, nothing to do.
+    /// </summary>
+    Task SettleCallbackAsync(CallbackAsk? ask, long? utteranceId, string line, bool fallbackCopy, CancellationToken ct) =>
+        ask is null || callbacks is null ? Task.CompletedTask : callbacks.SettleAsync(ask, utteranceId, line, fallbackCopy, ct);
+
+    async Task<SegmentCopy> RecordUtteranceAsync(SegmentRequest request, SegmentCopy copy, bool fallbackCopy, CancellationToken ct)
     {
         if (utteranceStore is null || request.PersonaId is not { } personaId
             || !ShiftKey.TryParse(request.ShiftKeyText, out var shiftKey))
@@ -366,6 +389,9 @@ public sealed class LlmCopyWriter(
         // before cfg is ever assigned.
         LlmOptions? cfg = null;
         Persona? persona = null;
+        // T736: the break's callback ask is planned inside the single-flight section and settled below, wherever
+        // the line ends up recorded - the model's copy or the template that replaced it.
+        var callbackSlot = new CallbackSlot();
         try
         {
             // CurrentValue is read INSIDE the try (T3 review finding): a live edit that leaves
@@ -374,7 +400,7 @@ public sealed class LlmCopyWriter(
             // (F12.4), not escape past the fallback ladder toward the caller.
             cfg = optionsMonitor.CurrentValue;
             if (string.IsNullOrEmpty(cfg.Endpoint))
-                return await FallbackAndRecordAsync(request, ct);
+                return await FallbackAndRecordAsync(request, callbackSlot.Ask, ct);
 
             // Resolved ONLY on this LLM path (F35.2) — templated kinds and the disabled writer
             // never call the accessor at all, so a persona plays no part in copy they never touch.
@@ -412,7 +438,7 @@ public sealed class LlmCopyWriter(
             // why the field can no longer be touched out here.
             var cleanup = await RequestCleanedCompletionAsync(
                 cfg, request, persona, card, updateTasteMemory: true, spendQuirks: true, patterFact, showFlavorFact,
-                queueWaitBudget: null, announcementMessage: null, ct);
+                queueWaitBudget: null, announcementMessage: null, callbackSlot, ct);
             var cleaned = TextOf(cleanup);
             if (cleaned is null)
             {
@@ -439,7 +465,7 @@ public sealed class LlmCopyWriter(
                     LogFailure(request, persona, cfg.Model, attemptedAt, exception: null,
                         reason: DescribeNullTextReason(cleanup, cfg.ReasoningEffort));
                 }
-                return await FallbackAndRecordAsync(request, ct);
+                return await FallbackAndRecordAsync(request, callbackSlot.Ask, ct);
             }
 
             // A sentence-boundary salvage (SPEC F123.2-F123.4, STORY-319, PLAN T263) is a SUCCESS at
@@ -459,7 +485,8 @@ public sealed class LlmCopyWriter(
             if (persona is not null)
                 lifeExtractor?.Enqueue(new AcceptedCopy(persona.Id, persona.Name, cleaned));
             return await RecordAsync(
-                request, new SegmentCopy(cleaned, FreshPerAiring: true) { FactRead = factRead }, fallbackCopy: false, ct);
+                request, new SegmentCopy(cleaned, FreshPerAiring: true) { FactRead = factRead }, fallbackCopy: false,
+                callbackSlot.Ask, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -475,7 +502,7 @@ public sealed class LlmCopyWriter(
             // carrying the exception type/status plus call context (F69.7).
             statusHolder.Record(LlmAttemptOutcome.Failed, attemptedAt);
             LogFailure(request, persona, cfg?.Model, attemptedAt, ex, reason: null);
-            return await FallbackAndRecordAsync(request, ct);
+            return await FallbackAndRecordAsync(request, callbackSlot.Ask, ct);
         }
     }
 
@@ -528,7 +555,7 @@ public sealed class LlmCopyWriter(
             var cleanup = await RequestCleanedCompletionAsync(
                 cfg, request, personaOverride, card: null, updateTasteMemory: false, spendQuirks: false, patterFact: null,
                 showFlavorFact: null, queueWaitBudget: TimeSpan.FromSeconds(cfg.PreviewQueueWaitSeconds),
-                announcementMessage: null, ct);
+                announcementMessage: null, callbackSlot: null, ct);
             var cleaned = TextOf(cleanup);
             // DescribeNullTextReason (review round-2 finding F2, PLAN T332): the SAME reason
             // WriteAsync's own failure WARN already names, reused here rather than a second, hardcoded
@@ -678,7 +705,7 @@ public sealed class LlmCopyWriter(
 
             var cleanup = await RequestCleanedCompletionAsync(
                 cfg, request, persona, card, updateTasteMemory: false, spendQuirks: true, patterFact: null, showFlavorFact: null,
-                queueWaitBudget: null, announcementMessage: message, ct);
+                queueWaitBudget: null, announcementMessage: message, callbackSlot: null, ct);
             var cleaned = TextOf(cleanup);
             if (cleaned is null)
             {
@@ -857,21 +884,19 @@ public sealed class LlmCopyWriter(
     }
 
     /// <summary>
-    /// This break's memory (SPEC F218.22), or <see cref="MemoryPacket.Empty"/> when recall is not wanted, memory is
-    /// off, or there is no persona section to carry it (rows spent but never shown would be hidden for nothing). A recall fault costs this break its memory, never the segment (F12.4).
+    /// The never-mention list for this break (SPEC F218.19), or <see cref="MemoryPacket.Empty"/> when recall is not wanted,
+    /// memory is off, or there is no persona section to carry it. Rows no longer reach the prompt (F218.40) and nothing is
+    /// marked aired here: a callback ask carries the one memory (<see cref="PlanCallbackAsync"/>). A fault costs this
+    /// break the list, never the segment (F12.4).
     /// </summary>
     async Task<MemoryPacket> RecallMemoryAsync(SegmentRequest request, bool onAir, bool hasPersonaSection, CancellationToken ct)
     {
-        if (!onAir || !hasPersonaSection || memoryRecall is null || contextWindow is null || request.PersonaId is not { } personaId)
-            return MemoryPacket.Empty;
-
-        var budget = contextWindow.Budget;
-        if (!budget.MemoryOn)
+        if (memoryRecall is null || !MemoryOnAir(request, onAir, hasPersonaSection, out var personaId, out var budget))
             return MemoryPacket.Empty;
 
         try
         {
-            return await memoryRecall.TakeAsync(personaId, budget, ct);
+            return await memoryRecall.NeverMentionAsync(personaId, budget, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -882,6 +907,31 @@ public sealed class LlmCopyWriter(
             logger.LogWarning(ex, "Memory recall failed for {Kind}; this break airs without memory", request.Kind);
             return MemoryPacket.Empty;
         }
+    }
+
+    /// <summary>
+    /// SPEC F218.40/F218.41 - the callback ask for this break, planned INSIDE the single-flight section so the offer row
+    /// is written before the render dispatches (F218.44). Null for a preview or any off-air call (no
+    /// <paramref name="slot"/>), memory off (F218.21), no persona section, or a kind that carries none. The ask is also
+    /// parked in <paramref name="slot"/> so the recording caller settles it, fallback line included.
+    /// </summary>
+    async Task<CallbackAsk?> PlanCallbackAsync(
+        SegmentRequest request, Persona? persona, PersonaCard? card, bool hasPersonaSection, CallbackSlot? slot, CancellationToken ct)
+    {
+        if (callbacks is null || slot is null || !CallbackKinds.Carries(request.Kind)
+            || !MemoryOnAir(request, onAir: true, hasPersonaSection, out _, out _))
+            return null;
+
+        slot.Ask = await callbacks.AskAsync(request, persona, card, ct);
+        return slot.Ask;
+    }
+
+    /// <summary>The F218.21 "memory is on" gate both memory paths share: on air, a persona section, a persona, and a window at the 8192 floor.</summary>
+    bool MemoryOnAir(SegmentRequest request, bool onAir, bool hasPersonaSection, out long personaId, out MemoryBudget budget)
+    {
+        personaId = request.PersonaId ?? 0;
+        budget = contextWindow?.Budget ?? MemoryBudget.Off;
+        return onAir && hasPersonaSection && request.PersonaId is not null && budget.MemoryOn;
     }
 
     static string? CombineFacts(string? contextFacts, string? memoryFacts) =>
@@ -1014,7 +1064,7 @@ public sealed class LlmCopyWriter(
     async Task<LlmCopyCleanupResult> RequestCleanedCompletionAsync(
         LlmOptions cfg, SegmentRequest request, Persona? persona, PersonaCard? card,
         bool updateTasteMemory, bool spendQuirks, ContextPatterFact? patterFact, ShowFlavorFact? showFlavorFact,
-        TimeSpan? queueWaitBudget, string? announcementMessage, CancellationToken ct)
+        TimeSpan? queueWaitBudget, string? announcementMessage, CallbackSlot? callbackSlot, CancellationToken ct)
     {
         // LOW-5 (PLAN T342 round 2, parameter-shape finding): announcementMessage carries FOUR
         // distinct meanings through the rest of this method — which LlmCallKind to stamp, which
@@ -1120,13 +1170,17 @@ public sealed class LlmCopyWriter(
             var recentEntries = await ReadRecentEntriesAsync(request, checkRepeats || useTaglines, ct);
             var taglines = EvaluateTaglines(
                 card, quirkSelection, await ReadTaglineEntriesAsync(request, recentEntries, useTaglines, ct), onAir: spendQuirks);
-            // T701 (F218.22): recall spends rows (marks them aired), so on-air only, inside the critical section.
-            var memory = await RecallMemoryAsync(
-                request, spendQuirks && requiredCore is null, LlmPromptBuilder.HasPersonaSection(persona, card, quirkSelection), ct);
-            // F218.23: recalled text is part of the facts, so a number or weekday quoted from a memory passes the gate.
-            // Only where a fact check already runs (context/announcement lanes): a LeadIn has no fact block, and
-            // memory must not switch the digit/condition-word check on for ordinary patter.
-            var factBlock = CombineFacts(contextFactBlock, LlmPromptBuilder.MemoryFacts(memory));
+            // T701/T736 (F218.19, F218.40): on-air only, inside the critical section. The prompt carries the never-mention
+            // list and, for a callback break, the one asked-for memory; the offer row is written before the render.
+            var onAirBreak = spendQuirks && requiredCore is null;
+            var hasPersonaSection = LlmPromptBuilder.HasPersonaSection(persona, card, quirkSelection);
+            var memory = await RecallMemoryAsync(request, onAirBreak, hasPersonaSection, ct);
+            var callbackAsk = await PlanCallbackAsync(
+                request, persona, card, hasPersonaSection, onAirBreak ? callbackSlot : null, ct);
+            // F218.42/F218.23: the asked-for memory joins the facts only where a fact check already runs. Callbacks ride
+            // LeadIn/BackAnnounce only (F218.40), which have no fact block, so today this arm is inert: memory must not
+            // switch the digit/condition-word check on for ordinary patter.
+            var factBlock = CombineFacts(contextFactBlock, callbackAsk is null ? null : LlmPromptBuilder.CallbackFacts(callbackAsk));
             // F218.37: the block never waits for the memory budget; previews list it too.
             IReadOnlyList<string> recentLines = recentEntries.Take(LlmPromptBuilder.RecentLinesInPrompt).Select(e => e.Text).ToList();
             // Read HERE — after WaitAsync above, i.e. already inside the single-flight critical
@@ -1156,6 +1210,7 @@ public sealed class LlmCopyWriter(
             {
                 Taglines = taglines,
                 Memory = memory,
+                Callback = callbackAsk,
                 AnnouncementMessage = requiredCore,
                 PatterFact = patterFact?.Fact,
                 ShowFlavor = showFlavorFact,

@@ -5,6 +5,7 @@ using GenWave.Host.Options;
 using GenWave.Memory;
 using GenWave.MediaLibrary.Station;
 using GenWave.Orchestration;
+using GenWave.Tts;
 
 namespace GenWave.Host.Configuration;
 
@@ -109,6 +110,15 @@ static class StationSettingsHostingExtensions
 
         // Memory recall (SPEC F218.22, STORY-539, PLAN T700) — LlmCopyWriter consumes it for the prompt.
         builder.Services.AddSingleton<IMemoryRecallSource, MemoryRecallSource>();
+
+        // Callback breaks (SPEC F218.40-F218.45, STORY-548/550, PLAN T736) - the planner draws and writes the offer
+        // row (its store is registered with the persona stores), BreakCallbacks is LlmCopyWriter's fail-open door to
+        // it, and the rate is Memory:CallbacksPerHour read live. The writer resolves BreakCallbacks optionally.
+        builder.Services
+            .AddOptions<MemoryCallbackOptions>().BindConfiguration(MemoryCallbackOptions.Section).Services
+            .AddSingleton<ICallbackRate, OptionsMonitorCallbackRate>()
+            .AddSingleton<ICallbackPlanner, CallbackPlanner>()
+            .AddSingleton<BreakCallbacks>();
 
         // Repetition check (SPEC F218.11, STORY-534, PLAN T693) — pure; LlmCopyWriter resolves it
         // optionally and runs it after the truth gate, memory on or off.

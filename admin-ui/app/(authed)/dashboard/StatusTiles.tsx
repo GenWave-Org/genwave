@@ -12,6 +12,7 @@ import {
   gardenerCountPhrase,
   type GardenerOpenCounts,
 } from "@/lib/gardener-api";
+import { CALLBACKS_LABEL, callbacksCountsLine, callbacksPerDjHourText } from "@/lib/callbacks-copy";
 import { NO_REPEATS_LINE, djRepeatLine, isQuietWeek, overuseLine } from "@/lib/repeats-copy";
 
 /** SPEC F31.4–F31.5 — non-empty SafeScope with zero playable tracks: the drain would go silent. */
@@ -337,6 +338,28 @@ export function StatusTiles({ status, error, timeZone }: StatusTilesProps): Reac
           )}
           {status !== null && status.repeats !== undefined && status.repeats !== null && (
             <RepeatsTileBody repeats={status.repeats} timeZone={timeZone} />
+          )}
+        </Tile>
+
+        {/* SPEC F218.47, STORY-551 AC2/AC3, PLAN T738 — callbacks per DJ-hour beside the Repeats panel. `callbacks`
+            is null when the api could not read the station database, absent on an older api; `perDjHour` is
+            null with no offers yet. */}
+        <Tile label={CALLBACKS_LABEL}>
+          {loading && <TileSkeleton />}
+          {(neverLoaded || (status !== null && (status.callbacks === undefined || status.callbacks === null))) && (
+            <TileUnavailable />
+          )}
+          {status !== null && status.callbacks !== undefined && status.callbacks !== null && (
+            <>
+              <p className="text-[1.4rem] font-semibold tabular-nums text-ink">
+                {callbacksPerDjHourText(status.callbacks.perDjHour)}
+              </p>
+              {callbacksCountsLine(status.callbacks.asks, status.callbacks.used) !== null && (
+                <p className="mt-1 text-[0.75rem] text-mute">
+                  {callbacksCountsLine(status.callbacks.asks, status.callbacks.used)}
+                </p>
+              )}
+            </>
           )}
         </Tile>
 

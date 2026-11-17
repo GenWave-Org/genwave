@@ -5,8 +5,8 @@ using Microsoft.Extensions.Time.Testing;
 namespace GenWave.Memory.Tests.Fakes;
 
 /// <summary>
-/// In-memory stand-in for the persona_memory table, mirroring PersonaMemoryRepository's recall SQL
-/// (persona scope, eligibility, aired gate, ordering and tiebreaks) on a fake clock.
+/// In-memory stand-in for the persona_memory table, mirroring PersonaMemoryRepository's never-mention SQL
+/// (persona scope, forgotten window, ordering and tiebreaks) on a fake clock.
 /// </summary>
 public sealed class InMemoryPersonaMemory(FakeTimeProvider clock) : IMemoryRecallStore
 {
@@ -50,42 +50,11 @@ public sealed class InMemoryPersonaMemory(FakeTimeProvider clock) : IMemoryRecal
         return row;
     }
 
-    public Task<IReadOnlyList<RecalledMemory>> CandidatesAsync(long personaId, MemoryCandidateQuery query, CancellationToken ct)
-    {
-        var now = clock.GetUtcNow().UtcDateTime;
-        var eligible = rows.Where(r => r.PersonaId == personaId
-            && r.Kind == query.Kind
-            && r.ForgottenAt is null
-            && (r.Source != "drafted" || r.ApprovedAt is not null)
-            && (r.Kind != MemoryKinds.Lore || r.Source is "authored" or "drafted")
-            && (r.LastAiredAt is null || r.LastAiredAt <= now - query.NotAiredWithin));
-        var ordered = query.Order switch
-        {
-            MemoryRecallOrder.NewestFirst => eligible.OrderByDescending(r => r.OccurredAt ?? r.CreatedAt).ThenByDescending(r => r.Id),
-            MemoryRecallOrder.LeastRecentlyAired => eligible.OrderBy(r => r.LastAiredAt is null ? 0 : 1).ThenBy(r => r.LastAiredAt).ThenBy(r => r.Id),
-            _ => throw new ArgumentOutOfRangeException(nameof(query), query.Order, "Unknown recall order."),
-        };
-        IReadOnlyList<RecalledMemory> result = ordered.Take(query.Take)
-            .Select(r => new RecalledMemory(r.Id, r.Kind, r.Content, r.OccurredAt)).ToList();
-        return Task.FromResult(result);
-    }
-
     public Task<IReadOnlyList<string>> RecentlyForgottenAsync(long personaId, TimeSpan within, int take, CancellationToken ct)
     {
         var now = clock.GetUtcNow().UtcDateTime;
         IReadOnlyList<string> result = rows.Where(r => r.PersonaId == personaId && r.ForgottenAt is { } f && f >= now - within)
             .OrderByDescending(r => r.ForgottenAt).ThenByDescending(r => r.Id).Take(take).Select(r => r.Content).ToList();
         return Task.FromResult(result);
-    }
-
-    public Task MarkAiredAsync(IReadOnlyList<long> ids, CancellationToken ct)
-    {
-        foreach (var row in rows.Where(r => ids.Contains(r.Id)))
-        {
-            row.AiredCount++;
-            row.LastAiredAt = clock.GetUtcNow().UtcDateTime;
-        }
-
-        return Task.CompletedTask;
     }
 }

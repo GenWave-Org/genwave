@@ -332,32 +332,40 @@ public static class FeatureAiredKindStamp
             // NOT EXISTS can never repair (unlike station.show/segment_schedule.show_id here, which
             // db/33's own CREATE/ADD COLUMN restores below) — dropping the whole table instead keeps it
             // self-healing the same way every other table in this file already is.
-            await using (var conn = await db.StationDataSource.OpenConnectionAsync())
+            try
             {
-                await conn.ExecuteAsync("drop table if exists station.schedule_special");
-                await conn.ExecuteAsync("alter table station.segment_schedule drop column if exists show_id");
-                await conn.ExecuteAsync("drop table if exists station.utterance"); // F218 db/50: FK into station.show, must go first (no consumer yet)
-                await conn.ExecuteAsync("drop table if exists station.show");
-                await conn.ExecuteAsync("alter table station.booth_log drop column if exists segment_kind");
+                await using (var conn = await db.StationDataSource.OpenConnectionAsync())
+                {
+                    await conn.ExecuteAsync("drop table if exists station.schedule_special");
+                    await conn.ExecuteAsync("alter table station.segment_schedule drop column if exists show_id");
+                    await db.DropMemoryDependentsAsync(); // db/51 views + db/52 memory_offer depend on utterance
+                    await conn.ExecuteAsync("drop table if exists station.utterance"); // F218 db/50: FK into station.show, must go first
+                    await conn.ExecuteAsync("drop table if exists station.show");
+                    await conn.ExecuteAsync("alter table station.booth_log drop column if exists segment_kind");
+                }
+
+                Assert.False(await TableExistsAsync(db, "show"));
+                Assert.Null(await QueryColumnAsync(db, "segment_schedule", "show_id"));
+                Assert.Null(await QueryColumnAsync(db, "booth_log", "segment_kind"));
+
+                RunMigrationScript(db);
+
+                Assert.True(await TableExistsAsync(db, "show"));
+
+                var showId = await QueryColumnAsync(db, "segment_schedule", "show_id");
+                Assert.NotNull(showId);
+                Assert.Equal("integer", showId.Value.DataType);
+                Assert.Equal("YES", showId.Value.IsNullable);
+
+                var segmentKind = await QueryColumnAsync(db, "booth_log", "segment_kind");
+                Assert.NotNull(segmentKind);
+                Assert.Equal("text", segmentKind.Value.DataType);
+                Assert.Equal("YES", segmentKind.Value.IsNullable);
             }
-
-            Assert.False(await TableExistsAsync(db, "show"));
-            Assert.Null(await QueryColumnAsync(db, "segment_schedule", "show_id"));
-            Assert.Null(await QueryColumnAsync(db, "booth_log", "segment_kind"));
-
-            RunMigrationScript(db);
-
-            Assert.True(await TableExistsAsync(db, "show"));
-
-            var showId = await QueryColumnAsync(db, "segment_schedule", "show_id");
-            Assert.NotNull(showId);
-            Assert.Equal("integer", showId.Value.DataType);
-            Assert.Equal("YES", showId.Value.IsNullable);
-
-            var segmentKind = await QueryColumnAsync(db, "booth_log", "segment_kind");
-            Assert.NotNull(segmentKind);
-            Assert.Equal("text", segmentKind.Value.DataType);
-            Assert.Equal("YES", segmentKind.Value.IsNullable);
+            finally
+            {
+                db.ReplayMigrations(); // utterance (db/50) and its dependents (db/51, db/52) were dropped above
+            }
         }
     }
 

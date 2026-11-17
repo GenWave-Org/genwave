@@ -206,7 +206,8 @@ public static class FeatureLlmStatus
             AppVersion.From("0.0.0-test"),
             new SchemaVersionStatus(),
             new EngineSettingsStatus(),
-            new FakeRepeatNumbersReader())
+            new FakeRepeatNumbersReader(),
+            new FakeCallbackRateReader())
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
         };

@@ -7,10 +7,13 @@ namespace GenWave.MediaLibrary.Station;
 // The operator's half (SPEC F218.19/.20/.24): list and edit rows, each statement scoped by persona AND row id.
 sealed partial class PersonaMemoryRepository : IPersonaMemoryAdmin
 {
-    const string AdminColumns =
-        """
+    // The asked-count window is CallbackStore.OfferRetentionDays (F218.48); an int constant, so interpolating it is injection-safe.
+    static readonly string AdminColumns =
+        $"""
         id::bigint as id, kind, source, content, aired_count as AiredCount, last_aired_at as LastAiredAt,
-        created_at as CreatedAt, approved_at as ApprovedAt, forgotten_at as ForgottenAt
+        created_at as CreatedAt, approved_at as ApprovedAt, forgotten_at as ForgottenAt,
+        (select count(*)::integer from station.memory_offer o
+          where o.memory_id = station.persona_memory.id and o.offered_at >= now() - interval '{CallbackStore.OfferRetentionDays} days') as AskedCount
         """;
 
     public async Task<IReadOnlyList<PersonaMemoryAdminRow>> ListForAdminAsync(long personaId, string? kind, CancellationToken ct)

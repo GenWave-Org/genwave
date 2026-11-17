@@ -136,6 +136,20 @@ export interface StatusResponse {
    * backward tolerance" convention as `rotation`/`gardener`/`plugins` above).
    */
   repeats?: RepeatsStatus | null;
+  /**
+   * SPEC F218.47, STORY-551, PLAN T738 — the station-wide "Callbacks per DJ-hour" over the last 7 days.
+   * `perDjHour` is `null` with no offers yet; `callbacks` is `null` when the api could not read the station
+   * database; absent on an api that predates it.
+   */
+  callbacks?: CallbacksStatus | null;
+}
+
+export interface CallbacksStatus {
+  perDjHour: number | null;
+  /** Offers made in the window; the line under the number is hidden when 0. */
+  asks: number;
+  /** Offers the DJ actually used on air. */
+  used: number;
 }
 
 /** SPEC F218.29 — one DJ's repeat numbers: `catches` is every repeat caught, `trims` the ones fixed by

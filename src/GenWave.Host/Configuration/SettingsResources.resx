@@ -398,6 +398,12 @@
   <data name="Memory:LifeExtraction:Enabled.Help" xml:space="preserve">
     <value>After each written DJ line, a second model call looks for new personal details the DJ mentioned (a pet, a home, a habit) and remembers them for next time. Turn this off to stop those extra model calls; what is already remembered stays.</value>
   </data>
+  <data name="Memory:CallbacksPerHour.Label" xml:space="preserve">
+    <value>Memories each DJ brings up per hour</value>
+  </data>
+  <data name="Memory:CallbacksPerHour.Help" xml:space="preserve">
+    <value>About how many times an hour each DJ mentions one of their remembered details when talking before or after a song. Turn this to 0 to stop it; the most it allows is 6.</value>
+  </data>
   <data name="Admin:PlayHistoryCapacity.Label" xml:space="preserve">
     <value>Play history capacity</value>
   </data>

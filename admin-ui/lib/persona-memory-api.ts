@@ -18,7 +18,10 @@ export interface PersonaMemoryRow {
   kind: MemoryKind;
   source: MemorySource;
   text: string;
+  /** Times the DJ used it on air (SPEC F218.46); `lastAiredAt` is the last such use. */
   airedCount: number;
+  /** Offers to the DJ in the last 28 days (server constant CallbackStore.OfferRetentionDays). */
+  askedCount: number;
   lastAiredAt: string | null;
   createdAt: string;
   approvedAt: string | null;
@@ -30,7 +33,15 @@ export interface PersonaMemoryRow {
 /** `PATCH` body — send exactly one field. `approved` can only be `true`. */
 export type PersonaMemoryChange = { text: string } | { approved: true } | { forgotten: boolean };
 
-export class MemoryApiError extends Error {}
+export class MemoryApiError extends Error {
+  /** HTTP status of the failed call; undefined for a network error. */
+  readonly status: number | undefined;
+
+  constructor(message: string, status?: number) {
+    super(message);
+    this.status = status;
+  }
+}
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
 
@@ -38,7 +49,7 @@ async function send(url: string, init: RequestInit): Promise<Response> {
   try {
     return await apiFetch(url, { credentials: "include", ...init });
   } catch (err) {
-    if (isApiFetchResponseError(err)) throw new MemoryApiError(await readErrorMessage(err));
+    if (isApiFetchResponseError(err)) throw new MemoryApiError(await readErrorMessage(err), err.status);
     throw new MemoryApiError("Network error — check your connection.");
   }
 }

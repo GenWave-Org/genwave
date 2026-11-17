@@ -32,4 +32,7 @@ internal sealed record BreakPromptInputs(
 
     /// <summary>What this on-air break remembers (F218.22); null or empty adds no block.</summary>
     public MemoryPacket? Memory { get; init; }
+
+    /// <summary>The one memory this lead-in or back-announce is asked to work in (F218.40); null adds no ask.</summary>
+    public CallbackAsk? Callback { get; init; }
 }

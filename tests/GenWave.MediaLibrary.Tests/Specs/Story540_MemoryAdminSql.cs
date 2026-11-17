@@ -41,7 +41,7 @@ public static class FeatureMemoryAdminSql
         long drafted;
         long life;
         IReadOnlyList<PersonaMemoryAdminRow> listed = [];
-        PersonaMemoryAdminRow added = new(0, "", "", "", 0, null, DateTime.MinValue, null, null);
+        PersonaMemoryAdminRow added = new(0, "", "", "", 0, null, DateTime.MinValue, null, null, 0);
 
         public async Task InitializeAsync()
         {
@@ -187,6 +187,33 @@ public static class FeatureMemoryAdminSql
             var listed = await Repo(db).ListForAdminAsync(sal, "lore", CancellationToken.None);
 
             Assert.Equal(new[] { "newest", "middle", "oldest" }, listed.Select(r => r.Content).ToArray());
+        }
+    }
+
+    // STORY-552 AC1 (SPEC F218.48) — asked = offers in the last 28 days, by Postgres now()
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioTheRowCountsItsRecentOffers(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task FourOffersInTheWindowCountAndOneFrom29DaysAgoDoesNot()
+        {
+            await db.ResetStationAsync();
+            var sal = await CreatePersonaAsync(db, "Sal");
+            var memory = await PlantAsync(db, sal, "lore", "authored", "grew up above a bakery");
+            var untouched = await PlantAsync(db, sal, "lore", "authored", "never asked");
+            await using (var conn = await db.StationDataSource.OpenConnectionAsync())
+            {
+                foreach (var days in new[] { 0, 1, 10, 27, 29 })
+                    await conn.ExecuteAsync(
+                        "insert into station.memory_offer (memory_id, persona_id, offered_at) values (@memory, @sal, now() - make_interval(days => @days))",
+                        new { memory, sal, days });
+            }
+
+            var listed = await Repo(db).ListForAdminAsync(sal, null, CancellationToken.None);
+
+            Assert.Equal(4, listed.Single(r => r.Id == memory).AskedCount);
+            Assert.Equal(0, listed.Single(r => r.Id == untouched).AskedCount);
         }
     }
 }

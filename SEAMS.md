@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **150 seams across 9 projects.**
+> **154 seams across 9 projects.**
 
 ## GenWave.Ads (2 seams)
 
@@ -66,7 +66,7 @@
 |---|---|---|---|
 | `GenWave.Core.Abstractions.IAppVersion` | `GenWave.Core.AppVersion` | Singleton | — |
 
-## GenWave.Host (38 seams)
+## GenWave.Host (39 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -75,6 +75,7 @@
 | `GenWave.Core.Abstractions.IAudiencePostureProvider` | `GenWave.Host.Options.OptionsMonitorAudiencePostureProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.IBoundaryBiasProvider` | `GenWave.Host.Options.OptionsMonitorBoundaryBiasProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.ICadenceProvider` | `GenWave.Host.Options.OptionsMonitorCadenceProvider` | Singleton | — |
+| `GenWave.Core.Abstractions.ICallbackRate` | `GenWave.Host.Options.OptionsMonitorCallbackRate` | Singleton | — |
 | `GenWave.Core.Abstractions.IContextCacheRootProvider` | `GenWave.Host.Options.OptionsMonitorContextCacheRootProvider` | Singleton | also registered: `GenWave.Core.Abstractions.NoOpContextCacheRootProvider` (GenWave.Core) |
 | `GenWave.Core.Abstractions.IContextSettingsProvider` | `GenWave.Host.Options.ConfigurationContextSettingsProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.ICrosstalkScopeProvider` | `GenWave.Host.Options.OptionsMonitorCrosstalkScopeProvider` | Singleton | — |
@@ -119,7 +120,7 @@
 | `GenWave.Core.Abstractions.IEnergyAnalyzer` | `GenWave.Loudness.FfmpegEnergyAnalyzer` | Singleton | — |
 | `GenWave.Core.Abstractions.ILoudnessAnalyzer` | `GenWave.Loudness.FfmpegLoudnessAnalyzer` | Singleton | — |
 
-## GenWave.MediaLibrary (66 seams)
+## GenWave.MediaLibrary (68 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -141,6 +142,8 @@
 | `GenWave.Core.Abstractions.IBoothLogAppender` | `GenWave.MediaLibrary.Station.BoothLogRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IBoothLogEventConsumer` | `GenWave.MediaLibrary.Station.BoothLogWriter` | Singleton | — |
 | `GenWave.Core.Abstractions.IBoothLogReader` | `GenWave.MediaLibrary.Station.BoothLogRepository` | Singleton | — |
+| `GenWave.Core.Abstractions.ICallbackRateReader` | `GenWave.MediaLibrary.Station.CallbackRateRepository` | Singleton | — |
+| `GenWave.Core.Abstractions.ICallbackStore` | `GenWave.MediaLibrary.Station.CallbackStore` | Singleton | — |
 | `GenWave.Core.Abstractions.IDeadFileReporter` | `GenWave.MediaLibrary.Garden.DeadFileReporter` | Singleton | — |
 | `GenWave.Core.Abstractions.IEpisodeStore` | `GenWave.MediaLibrary.Station.PersonaMemoryRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IExplicitClassifier` | `GenWave.MediaLibrary.ExplicitClassification.OllamaExplicitClassifier` | Singleton | — |
@@ -190,10 +193,11 @@
 | `GenWave.Core.Abstractions.IVoicePackStore` | `GenWave.MediaLibrary.Station.VoicePackRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IYearLookup` | `GenWave.MediaLibrary.YearLookup.MusicBrainzYearLookup` | Singleton | — |
 
-## GenWave.Memory (6 seams)
+## GenWave.Memory (7 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
+| `GenWave.Core.Abstractions.ICallbackPlanner` | `GenWave.Memory.CallbackPlanner` | Singleton | — |
 | `GenWave.Core.Abstractions.ILifeExtractor` | `GenWave.Memory.LifeExtractionService` | Singleton | — |
 | `GenWave.Core.Abstractions.IMemoryRecallSource` | `GenWave.Memory.MemoryRecallSource` | Singleton | — |
 | `GenWave.Core.Abstractions.IQuirkSelector` | `GenWave.Memory.QuirkSelector` | Singleton | — |

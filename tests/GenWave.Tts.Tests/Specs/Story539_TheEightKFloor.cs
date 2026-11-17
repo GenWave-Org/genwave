@@ -40,10 +40,11 @@ public static class FeatureTheEightKFloor
             Assert.Equal("context window 4096 < 8192, memory off", window.MemoryOffReason);
 
         // The recent-lines block stays on (F218.37). The recall source WOULD return rows: only the 4096
-        // window keeps them out (positive control: Scenario8kIsGreenAndMemoryIsOn, identical setup at 8192).
+        // window keeps them out (memory-on evidence is Scenario8kIsGreenAndMemoryIsOn: the tile reason is null,
+        // so recall is taken at 8192; prompt rows are no longer the signal, F218.40-F218.42).
         [Fact]
         public void TheNextPromptHasNoWhatYouRememberBlock() =>
-            Assert.DoesNotContain(LlmPromptBuilder.MemoryHeading, prompt);
+            Assert.DoesNotContain("What you remember", prompt);
     }
 
     // AC2 — 8k is green and memory is on
@@ -67,8 +68,9 @@ public static class FeatureTheEightKFloor
         public void TheLLMTileIsGreen() => Assert.Null(window.MemoryOffReason);
 
         [Fact]
-        public void TheNextPromptHasAWhatYouRememberBlock() =>
-            Assert.Contains(LlmPromptBuilder.MemoryHeading, prompt);
+        public void TheNextPromptHasNoWhatYouRememberBlock() =>
+            // Retired by F218.40-F218.42: only a callback ask carries a memory now.
+            Assert.DoesNotContain("What you remember", prompt);
     }
 
     // AC3 — A declared window stands in for non-Ollama endpoints
@@ -90,13 +92,17 @@ public static class FeatureTheEightKFloor
     }
 
     // AC6 — Memories are colour, and the gate knows them
-    public sealed class ScenarioMemoriesAreColourAndTheGateKnowsThem : IAsyncLifetime
+    public sealed class ScenarioAContextBreakCarriesNoMemory : IAsyncLifetime
     {
         // Given a context (weather) break - the gate only checks a fact block there, so the fact is not vacuous
-        // (on a LeadIn there is no fact block and it would pass anyway) - and a recalled episode "read the weather: high of 4 °C with sleet, Tuesday"
-        // When  the copy says "like Tuesday's sleet"
-        const string Copy = "Cloudy at 12 out there, like Tuesday's sleet at 4 degrees.";
-        const string Episode = "read the weather: high of 4 °C with sleet, Tuesday";
+        // (on a LeadIn there is no fact block and it would pass anyway) - and memory on
+        // When  the copy says only what the context facts say
+        //
+        // T736 amendment (F218.40/F218.42): this fact used to pass because the recalled episode joined the gate's facts,
+        // so "like Tuesday's sleet at 4 degrees" cleared the number check. A context segment never carries a memory any
+        // more (only a LeadIn/BackAnnounce callback ask does, and its text joins the facts only there), so the copy now
+        // passes on the context facts alone, and no ask line is in the prompt (T737: a recall packet can no longer hold an episode).
+        const string Copy = "Cloudy at 12 out there.";
         SegmentCopy aired = new("", false);
         string prompt = "";
 
@@ -105,7 +111,7 @@ public static class FeatureTheEightKFloor
             var prompts = new List<string>();
             var writer = QuirkSpecHarness.WriterFor(
                 QuirkSpecHarness.Card([], null), new NoQuirks(), httpOverride: QuirkSpecHarness.CapturingHttp(prompts, Copy),
-                contextWindow: new FixedWindow(MemoryBudget.Standard), memoryRecall: new FixedRecall(Episode));
+                contextWindow: new FixedWindow(MemoryBudget.Standard), memoryRecall: new FixedRecall());
             aired = await writer.WriteAsync(Arrange.ContextRequest("Weather: 12 degrees and cloudy."), CancellationToken.None);
             prompt = prompts[0];
         }
@@ -116,8 +122,12 @@ public static class FeatureTheEightKFloor
         public void TheTruthGatePasses() => Assert.Equal(Copy, aired.Text);
 
         [Fact]
-        public void ThePromptSaysTheDJMayReferToMemoriesNeverMust() =>
-            Assert.Contains(LlmPromptBuilder.MemoryMayReferLine, prompt);
+        public void ThePromptNoLongerCarriesTheMayReferLine() =>
+            // Retired by F218.42.
+            Assert.DoesNotContain("You may refer to these if it fits", prompt);
+
+        [Fact]
+        public void TheContextPromptCarriesNoMemory() => Assert.DoesNotContain(LlmPromptBuilder.CallbackAskLabel, prompt);
     }
 
     // F218.22 - rows are only spent when the prompt will carry them
@@ -148,7 +158,7 @@ public static class FeatureTheEightKFloor
         public Task DisposeAsync() => Task.CompletedTask;
 
         [Fact]
-        public void RecallIsNeverTaken() => Assert.Equal(0, recall.Takes);
+        public void NeverMentionIsNeverRead() => Assert.Equal(0, recall.Reads);
     }
 
     public sealed class ScenarioAPersonaWithASoulDoesSpend : IAsyncLifetime
@@ -167,7 +177,7 @@ public static class FeatureTheEightKFloor
         public Task DisposeAsync() => Task.CompletedTask;
 
         [Fact]
-        public void RecallIsTakenOnce() => Assert.Equal(1, recall.Takes);
+        public void NeverMentionIsReadOnce() => Assert.Equal(1, recall.Reads);
     }
 
     public sealed class ScenarioAPreviewNeverSpends : IAsyncLifetime
@@ -186,7 +196,7 @@ public static class FeatureTheEightKFloor
         public Task DisposeAsync() => Task.CompletedTask;
 
         [Fact]
-        public void RecallIsNeverTaken() => Assert.Equal(0, recall.Takes);
+        public void NeverMentionIsNeverRead() => Assert.Equal(0, recall.Reads);
     }
 
     public sealed class ScenarioAnAnnouncementNeverSpends : IAsyncLifetime
@@ -205,7 +215,7 @@ public static class FeatureTheEightKFloor
         public Task DisposeAsync() => Task.CompletedTask;
 
         [Fact]
-        public void RecallIsNeverTaken() => Assert.Equal(0, recall.Takes);
+        public void NeverMentionIsNeverRead() => Assert.Equal(0, recall.Reads);
     }
 
     public sealed class ScenarioARecallFaultStillAirsLlmCopy : IAsyncLifetime
@@ -225,7 +235,7 @@ public static class FeatureTheEightKFloor
         public Task DisposeAsync() => Task.CompletedTask;
 
         [Fact]
-        public void RecallWasAttemptedOnce() => Assert.Equal(1, recall.Takes);
+        public void NeverMentionReadWasAttemptedOnce() => Assert.Equal(1, recall.Reads);
 
         [Fact]
         public void TheLlmCopyAired() => Assert.Equal("Coming up next a classic from the vault.", copy.Text);
@@ -380,22 +390,22 @@ public static class FeatureTheEightKFloor
         public string? MemoryOffReason => null;
     }
 
-    sealed class FixedRecall(string episode) : IMemoryRecallSource
+    sealed class FixedRecall : IMemoryRecallSource
     {
-        public Task<MemoryPacket> TakeAsync(long personaId, MemoryBudget budget, CancellationToken ct) =>
-            Task.FromResult(new MemoryPacket([], [new RecalledMemory(1, "episode", episode, null)], [], []));
+        public Task<MemoryPacket> NeverMentionAsync(long personaId, MemoryBudget budget, CancellationToken ct) =>
+            Task.FromResult(MemoryPacket.Empty);
     }
 
     sealed class CountingRecall(bool throws) : IMemoryRecallSource
     {
-        public int Takes { get; private set; }
+        public int Reads { get; private set; }
 
-        public Task<MemoryPacket> TakeAsync(long personaId, MemoryBudget budget, CancellationToken ct)
+        public Task<MemoryPacket> NeverMentionAsync(long personaId, MemoryBudget budget, CancellationToken ct)
         {
-            Takes++;
+            Reads++;
             return throws
                 ? throw new InvalidOperationException("recall store down")
-                : Task.FromResult(new MemoryPacket([], [new RecalledMemory(1, "episode", "won the pub quiz", null)], [], []));
+                : Task.FromResult(new MemoryPacket(["won the pub quiz"]));
         }
     }
 
@@ -444,7 +454,7 @@ public static class FeatureTheEightKFloor
             await QuirkSpecHarness.WriterFor(
                     QuirkSpecHarness.Card([], null), new NoQuirks(),
                     onSystemPrompt: p => { prompt = p; return Task.CompletedTask; },
-                    contextWindow: new FixedWindow(budget), memoryRecall: new FixedRecall("won the pub quiz on a Tuesday"))
+                    contextWindow: new FixedWindow(budget), memoryRecall: new FixedRecall())
                 .WriteAsync(QuirkSpecHarness.Request(null), CancellationToken.None);
             return prompt ?? throw new InvalidOperationException("No completion request was captured");
         }

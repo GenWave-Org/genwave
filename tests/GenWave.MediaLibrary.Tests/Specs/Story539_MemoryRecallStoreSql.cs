@@ -1,8 +1,12 @@
-// STORY-539 / STORY-537 / STORY-538 — DJ memory recall store SQL (SPEC F218.19, F218.22 · PLAN T700)
+// STORY-539 / STORY-537 / STORY-538 — DJ memory recall store SQL (SPEC F218.19 · PLAN T700, amended T737)
+//
+// T737 retired the row-recall facts (lore sources, the 48 h aired gate, episode order, mark-aired): since SPEC
+// F218.40 only a callback ask carries a memory, and its eligibility and settle facts live in
+// Story550_EveryAskLeavesARecord_Store. What stays is the never-mention list.
 //
 // BDD specification — xUnit. Postgres-backed (Category=Integration, shared DatabaseFixture — a
 // throwaway postgres:16.4 container the fixture starts and tears down itself). The recall SQL
-// (eligibility, the 48 h aired gate, the 7 d never-mention window, ordering) runs on now(), so only a
+// (the 7 d never-mention window, ordering, cap) runs on now(), so only a
 // real database exercises it; the fake used by GenWave.Memory.Tests mirrors it and is pinned by this file.
 
 using Dapper;
@@ -14,7 +18,6 @@ namespace GenWave.MediaLibrary.Tests.Specs;
 
 public static class FeatureMemoryRecallStoreSql
 {
-    static readonly TimeSpan RecallGap = TimeSpan.FromHours(48);
     static readonly TimeSpan NeverMentionWindow = TimeSpan.FromDays(7);
 
     // ---------------------------------------------------------------------
@@ -68,152 +71,6 @@ public static class FeatureMemoryRecallStoreSql
             });
     }
 
-    static async Task<(int AiredCount, DateTime? LastAiredAt)> AiredStateAsync(DatabaseFixture db, long id)
-    {
-        await using var conn = await db.StationDataSource.OpenConnectionAsync();
-        return await conn.QuerySingleAsync<(int, DateTime?)>(
-            "select aired_count, last_aired_at from station.persona_memory where id = @id", new { id });
-    }
-
-    static async Task<IReadOnlyList<string>> ContentsAsync(
-        DatabaseFixture db, long personaId, string kind, MemoryRecallOrder order, int take = 10) =>
-        (await Repo(db).CandidatesAsync(personaId, new(kind, take, RecallGap, order), CancellationToken.None))
-            .Select(m => m.Content).ToList();
-
-    // ---------------------------------------------------------------------
-    // Lore sources (F218.22, STORY-538)
-    // ---------------------------------------------------------------------
-
-    [Collection(DatabaseCollection.Name)]
-    [Trait("Category", "Integration")]
-    public sealed class ScenarioLoreSources(DatabaseFixture db) : IAsyncLifetime
-    {
-        IReadOnlyList<string> recalled = [];
-
-        public async Task InitializeAsync()
-        {
-            // Given one lore row of each source (the drafted one both approved and pending)
-            await db.ResetStationAsync();
-            var persona = await CreatePersonaAsync(db, "Lore DJ");
-            await InsertAsync(db, persona, MemoryKinds.Lore, "authored lore", source: "authored");
-            await InsertAsync(db, persona, MemoryKinds.Lore, "approved draft", source: "drafted", approved: true);
-            await InsertAsync(db, persona, MemoryKinds.Lore, "pending draft", source: "drafted");
-            await InsertAsync(db, persona, MemoryKinds.Lore, "accrued lore", source: "accrued");
-            await InsertAsync(db, persona, MemoryKinds.Lore, "extracted lore", source: "extracted");
-
-            // When lore is recalled
-            recalled = await ContentsAsync(db, persona, MemoryKinds.Lore, MemoryRecallOrder.LeastRecentlyAired);
-        }
-
-        public Task DisposeAsync() => Task.CompletedTask;
-
-        [Fact]
-        public void AnAuthoredRowIsRecalled() => Assert.Contains("authored lore", recalled);
-
-        [Fact]
-        public void AnApprovedDraftIsRecalled() => Assert.Contains("approved draft", recalled);
-
-        [Fact]
-        public void APendingDraftIsNotRecalled() => Assert.DoesNotContain("pending draft", recalled);
-
-        [Fact]
-        public void AnAccruedRowIsNotRecalled() => Assert.DoesNotContain("accrued lore", recalled);
-
-        [Fact]
-        public void AnExtractedRowIsNotRecalled() => Assert.DoesNotContain("extracted lore", recalled);
-    }
-
-    // ---------------------------------------------------------------------
-    // The 48 h aired gate and forgotten rows (F218.22, F218.19)
-    // ---------------------------------------------------------------------
-
-    [Collection(DatabaseCollection.Name)]
-    [Trait("Category", "Integration")]
-    public sealed class ScenarioAiredGateAndForgotten(DatabaseFixture db) : IAsyncLifetime
-    {
-        IReadOnlyList<string> recalled = [];
-
-        public async Task InitializeAsync()
-        {
-            // Given life rows aired 47 h ago, aired 49 h ago, never aired, and forgotten
-            await db.ResetStationAsync();
-            var persona = await CreatePersonaAsync(db, "Gate DJ");
-            await InsertAsync(db, persona, MemoryKinds.Life, "aired 47h", airedAgo: TimeSpan.FromHours(47));
-            await InsertAsync(db, persona, MemoryKinds.Life, "aired 49h", airedAgo: TimeSpan.FromHours(49));
-            await InsertAsync(db, persona, MemoryKinds.Life, "never aired");
-            await InsertAsync(db, persona, MemoryKinds.Life, "forgotten", forgottenAgo: TimeSpan.FromHours(1));
-
-            // When life rows are recalled
-            recalled = await ContentsAsync(db, persona, MemoryKinds.Life, MemoryRecallOrder.LeastRecentlyAired);
-        }
-
-        public Task DisposeAsync() => Task.CompletedTask;
-
-        [Fact]
-        public void ARowAired47HoursAgoIsSkipped() => Assert.DoesNotContain("aired 47h", recalled);
-
-        [Fact]
-        public void ARowAired49HoursAgoIsRecalled() => Assert.Contains("aired 49h", recalled);
-
-        [Fact]
-        public void ANeverAiredRowIsRecalled() => Assert.Contains("never aired", recalled);
-
-        [Fact]
-        public void AForgottenRowIsNeverRecalled() => Assert.DoesNotContain("forgotten", recalled);
-
-        [Fact]
-        public void NeverAiredComesBeforeLeastRecentlyAired() =>
-            Assert.Equal(["never aired", "aired 49h"], recalled);
-    }
-
-    // ---------------------------------------------------------------------
-    // Episode order and the RecalledMemory mapping (F218.22)
-    // ---------------------------------------------------------------------
-
-    [Collection(DatabaseCollection.Name)]
-    [Trait("Category", "Integration")]
-    public sealed class ScenarioEpisodeOrder(DatabaseFixture db) : IAsyncLifetime
-    {
-        static readonly DateTime FiveDaysAgo = DateTime.UtcNow.AddDays(-5);
-        // Whole seconds, so the round trip through timestamptz (microseconds) is exact.
-        static readonly DateTime TenMinutesAgo = new(DateTime.UtcNow.AddMinutes(-10).Ticks / TimeSpan.TicksPerSecond * TimeSpan.TicksPerSecond, DateTimeKind.Utc);
-
-        long fixedInstantId;
-        IReadOnlyList<RecalledMemory> recalled = [];
-
-        public async Task InitializeAsync()
-        {
-            // Given three episodes: one that happened 5 days ago, one at 10 minutes ago (the newest
-            // occurred_at), and one with no occurred_at created 1 hour ago
-            await db.ResetStationAsync();
-            var persona = await CreatePersonaAsync(db, "Episode DJ");
-            await InsertAsync(db, persona, MemoryKinds.Episode, "five days ago", occurredAt: FiveDaysAgo);
-            fixedInstantId = await InsertAsync(db, persona, MemoryKinds.Episode, "fixed instant",
-                occurredAt: TenMinutesAgo);
-            await InsertAsync(db, persona, MemoryKinds.Episode, "created an hour ago", createdAgo: TimeSpan.FromHours(1));
-
-            // When episodes are recalled newest first
-            recalled = await Repo(db).CandidatesAsync(persona,
-                new(MemoryKinds.Episode, 10, RecallGap, MemoryRecallOrder.NewestFirst), CancellationToken.None);
-        }
-
-        public Task DisposeAsync() => Task.CompletedTask;
-
-        [Fact]
-        public void TheyComeNewestFirstFallingBackToCreatedAt() =>
-            Assert.Equal(["fixed instant", "created an hour ago", "five days ago"], recalled.Select(m => m.Content));
-
-        [Fact]
-        public void ARowMapsToARecalledMemoryIncludingOccurredAt() =>
-            Assert.Equal(
-                new RecalledMemory(fixedInstantId, MemoryKinds.Episode, "fixed instant", TenMinutesAgo),
-                recalled.Single(m => m.Id == fixedInstantId));
-
-        [Fact]
-        public void ARowWithoutOccurredAtMapsToNull() =>
-            Assert.Null(recalled.Single(m => m.Content == "created an hour ago").OccurredAt);
-    }
-
     // ---------------------------------------------------------------------
     // Persona scope (F218.22, F218.19)
     // ---------------------------------------------------------------------
@@ -222,7 +79,6 @@ public static class FeatureMemoryRecallStoreSql
     [Trait("Category", "Integration")]
     public sealed class ScenarioPersonaScope(DatabaseFixture db) : IAsyncLifetime
     {
-        IReadOnlyList<string> candidates = [];
         IReadOnlyList<string> neverMention = [];
 
         public async Task InitializeAsync()
@@ -236,15 +92,11 @@ public static class FeatureMemoryRecallStoreSql
             await InsertAsync(db, b, MemoryKinds.Life, "B life");
             await InsertAsync(db, b, MemoryKinds.Life, "B forgotten", forgottenAgo: TimeSpan.FromHours(1));
 
-            // When persona A's life rows and never-mention list are read
-            candidates = await ContentsAsync(db, a, MemoryKinds.Life, MemoryRecallOrder.LeastRecentlyAired);
+            // When persona A's never-mention list is read
             neverMention = await Repo(db).RecentlyForgottenAsync(a, NeverMentionWindow, 10, CancellationToken.None);
         }
 
         public Task DisposeAsync() => Task.CompletedTask;
-
-        [Fact]
-        public void APersonaBRowNeverAppearsForPersonaA() => Assert.Equal(["A life"], candidates);
 
         [Fact]
         public void APersonaBForgottenClaimNeverAppearsInPersonaAsNeverMention() =>
@@ -311,43 +163,5 @@ public static class FeatureMemoryRecallStoreSql
 
         [Fact]
         public void ItKeepsTheNewestTen() => Assert.Equal("claim 10", neverMention[^1]);
-    }
-
-    // ---------------------------------------------------------------------
-    // Marking aired (F71.5)
-    // ---------------------------------------------------------------------
-
-    [Collection(DatabaseCollection.Name)]
-    [Trait("Category", "Integration")]
-    public sealed class ScenarioMarkAired(DatabaseFixture db) : IAsyncLifetime
-    {
-        (int AiredCount, DateTime? LastAiredAt) first, second, untouched;
-
-        public async Task InitializeAsync()
-        {
-            // Given three never-aired rows
-            await db.ResetStationAsync();
-            var persona = await CreatePersonaAsync(db, "Mark DJ");
-            var a = await InsertAsync(db, persona, MemoryKinds.Life, "first");
-            var b = await InsertAsync(db, persona, MemoryKinds.Life, "second");
-            var c = await InsertAsync(db, persona, MemoryKinds.Life, "untouched");
-
-            // When two of them are marked aired in one call
-            await Repo(db).MarkAiredAsync([a, b], CancellationToken.None);
-            first = await AiredStateAsync(db, a);
-            second = await AiredStateAsync(db, b);
-            untouched = await AiredStateAsync(db, c);
-        }
-
-        public Task DisposeAsync() => Task.CompletedTask;
-
-        [Fact]
-        public void EachMarkedRowsAiredCountIncrements() => Assert.Equal([1, 1], [first.AiredCount, second.AiredCount]);
-
-        [Fact]
-        public void EachMarkedRowGetsALastAiredAt() => Assert.All([first.LastAiredAt, second.LastAiredAt], t => Assert.NotNull(t));
-
-        [Fact]
-        public void AnUnmarkedRowIsLeftAlone() => Assert.Equal((0, (DateTime?)null), untouched);
     }
 }

@@ -38,7 +38,8 @@ public sealed class StatusController(
     IAppVersion appVersion,
     SchemaVersionStatus schemaVersionStatus,
     EngineSettingsStatus engineSettingsStatus,
-    IRepeatNumbersReader repeatNumbersReader) : ControllerBase
+    IRepeatNumbersReader repeatNumbersReader,
+    ICallbackRateReader callbackRateReader) : ControllerBase
 {
     /// <summary>
     /// GET /api/status — cookie-auth (covered by the deny-by-default fallback policy when
@@ -52,7 +53,11 @@ public sealed class StatusController(
     /// plugins: [{ name, version, contracts, state, reason? }],
     /// version: { app, build, schema: { expected, applied } },
     /// repeats: { djs: [{ personaId, name, catches, trims, fallbacks }],
-    ///            overused: [{ personaId, name, phrase, maxPerShift, occurrences, lastSaidAt (ISO-8601 UTC) }] } | null }</c>.
+    ///            overused: [{ personaId, name, phrase, maxPerShift, occurrences, lastSaidAt (ISO-8601 UTC) }] } | null,
+    /// callbacks: { perDjHour: number | null, asks: number, used: number } | null }</c>. <c>callbacks.perDjHour</c> (F218.47) is the
+    /// station-wide used / DJ-hours over 7 days, null with no offers or no hours; <c>asks</c> and <c>used</c> are the
+    /// offers and on-air uses behind it (T743); <c>callbacks</c> itself is
+    /// null when the station database could not be read.
     ///
     /// <c>Station:SafeScope:LibraryIds</c> is read via <see cref="IOptionsMonitor{TOptions}.CurrentValue"/>
     /// on every call — not a boot-time snapshot — so a live <c>PUT /api/settings</c> edit
@@ -173,6 +178,7 @@ public sealed class StatusController(
         var degradation = degradationController.Evaluate();
         var voice = voiceHealthReader.Evaluate();
         var repeats = await repeatNumbersReader.ReadAsync(ct);
+        var callbacks = await callbackRateReader.ReadAsync(ct);
 
         return Ok(new
         {
@@ -276,6 +282,8 @@ public sealed class StatusController(
                     lastSaidAt = o.LastSaidAt,
                 }),
             },
+            // SPEC F218.47, STORY-551: "Callbacks per DJ-hour". Null when the station database could not be read.
+            callbacks = callbacks is null ? null : new { perDjHour = callbacks.PerDjHour, asks = callbacks.Asks, used = callbacks.Used },
         });
     }
 
