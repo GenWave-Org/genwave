@@ -1,5 +1,5 @@
 // @jest-environment jsdom
-// PLAN T738 — "Callbacks per DJ-hour" on the Status page (SPEC F218.47, STORY-551 AC2, AC3)
+// PLAN T738 — "Memories per DJ-hour" on the Status page (SPEC F218.47, STORY-551 AC2, AC3)
 // Runner: Jest (jsdom). The api half is GenWave.Host.Tests/Specs/Story551_TheCallbackCount.cs.
 
 import { describe, it, expect, afterEach } from "@jest/globals";
@@ -20,13 +20,13 @@ function makeStatus(callbacks: StatusResponse["callbacks"]): StatusResponse {
 }
 
 function callbacksTile(): HTMLElement {
-  return screen.getByRole("group", { name: "Callbacks per DJ-hour" });
+  return screen.getByRole("group", { name: "Memories per DJ-hour" });
 }
 
 afterEach(cleanup);
 
 describe("STORY-551 — the callback count on the Status page", () => {
-  it("AC2 — shows Callbacks per DJ-hour as 0.75", () => {
+  it("AC2 — shows Memories per DJ-hour as 0.75", () => {
     render(<StatusTiles status={makeStatus({ perDjHour: 0.75, asks: 8, used: 5 })} error={false} />);
 
     expect(within(callbacksTile()).getByText("0.75")).toBeInTheDocument();
