@@ -74,7 +74,7 @@ public sealed class InMemoryCallbackStore(TimeProvider time) : ICallbackStore
         return offer;
     }
 
-    public Task<IReadOnlyList<RecalledMemory>> EligibleAsync(long personaId, int take, CancellationToken ct)
+    public Task<IReadOnlyList<RecalledMemory>> EligibleAsync(long personaId, CancellationToken ct)
     {
         var now = time.GetUtcNow();
         DateTimeOffset? LastAsk(Memory m) => offers.Where(o => o.MemoryId == m.Id).Select(o => (DateTimeOffset?)o.OfferedAt).Max();
@@ -85,7 +85,6 @@ public sealed class InMemoryCallbackStore(TimeProvider time) : ICallbackStore
             .Where(m => m.LastAiredAt is not { } aired || aired <= now - (m.Kind == "lore" ? LoreRest : OtherRest))
             .Where(m => LastAsk(m) is not { } ask || ask <= now - AskRest)
             .OrderBy(m => LastAsk(m) is null ? 0 : 1).ThenBy(LastAsk).ThenByDescending(m => m.CreatedAt).ThenByDescending(m => m.Id)
-            .Take(take)
             .Select(m => new RecalledMemory(m.Id, m.Kind, m.Content, null))
             .ToList();
         return Task.FromResult(result);

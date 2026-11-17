@@ -353,7 +353,7 @@ public static class FeatureEveryAskLeavesARecordStore
         public Task DisposeAsync() => Task.CompletedTask;
 
         async Task<IReadOnlyList<long>> EligibleIdsAsync() =>
-            (await world.Store.EligibleAsync(world.Persona, 10, CancellationToken.None)).Select(m => m.Id).ToList();
+            (await world.Store.EligibleAsync(world.Persona, CancellationToken.None)).Select(m => m.Id).ToList();
 
         [Fact]
         public async Task LoreUsed5HoursAgoIsNotEligible()

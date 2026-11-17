@@ -10,11 +10,13 @@ namespace GenWave.Core.Abstractions;
 public interface ICallbackStore
 {
     /// <summary>
-    /// Up to <paramref name="take"/> memories the persona may call back on: not forgotten, not an unapproved draft,
+    /// Every memory the persona may call back on: not forgotten, not an unapproved draft,
     /// kind lore/episode/life, not used within its rest (lore 6 h, episode and life 48 h) and not asked within 2 h.
-    /// Least recently asked first (never asked first), then newest.
+    /// Least recently asked first (never asked first), then newest. Deliberately unbounded: accrued episodes are capped
+    /// at 50, extracted life at 100, and lore is hand-written or drafted (tens per DJ). The planner must see all of them so
+    /// memories without a distinctive word cannot starve the rest.
     /// </summary>
-    Task<IReadOnlyList<RecalledMemory>> EligibleAsync(long personaId, int take, CancellationToken ct);
+    Task<IReadOnlyList<RecalledMemory>> EligibleAsync(long personaId, CancellationToken ct);
 
     /// <summary>Elapsed time since the persona's last used ask and last ask of any outcome.</summary>
     Task<CallbackOfferHistory> LastOfferAsync(long personaId, CancellationToken ct);

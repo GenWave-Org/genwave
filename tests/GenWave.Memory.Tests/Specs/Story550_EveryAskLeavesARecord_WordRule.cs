@@ -4,6 +4,8 @@
 // Every fact is pending at plan time (2026-11-16); the named task activates its facts, watches them fail,
 // then makes them pass.
 
+using GenWave.Memory.Tests.Fakes;
+
 namespace GenWave.Memory.Tests.Specs;
 
 public static class FeatureEveryAskLeavesARecordWordRule
@@ -16,8 +18,28 @@ public static class FeatureEveryAskLeavesARecordWordRule
         // Given a callback break
         // When  the planner returns the ask
 
-        [Fact(Skip = "pending: T734 — see docs/PLAN.md")]
-        public void AnOfferExistsWithTheMemoryTheDJAndUsedFalse() => Assert.Fail("pending: T734 — an offer exists with the memory the DJ and used false");
+        [Fact]
+        public async Task AnOfferExistsWithTheMemoryTheDJAndUsedFalse()
+        {
+            var h = new CallbackPlannerHarness();
+            var memory = h.Seed();
+            var ask = await h.PlanAsync();
+            var offer = Assert.Single(h.Store.Offers);
+            Assert.Equal(ask?.OfferId, offer.Id);
+            Assert.Equal(memory.Id, offer.MemoryId);
+            Assert.Equal(CallbackPlannerHarness.Persona, offer.PersonaId);
+            Assert.False(offer.Used);
+        }
+
+        [Fact]
+        public async Task AFallbackLineLeavesUsedFalse()
+        {
+            var h = new CallbackPlannerHarness();
+            h.Seed();
+            var ask = await h.PlanAsync() ?? throw new InvalidOperationException("no ask");
+            await h.Planner.SettleAsync(ask, 5, "like Daisy chasin' her tail", true, CancellationToken.None);
+            Assert.False(Assert.Single(h.Store.Offers).Used);
+        }
     }
 
     // AC2 — settled with the line
@@ -25,8 +47,18 @@ public static class FeatureEveryAskLeavesARecordWordRule
     {
         // Given the aired line "like Daisy chasin' her tail"
 
-        [Fact(Skip = "pending: T734 — see docs/PLAN.md")]
-        public void TheOfferHasTheUtteranceIdUsedTrueAndMatchedWordDaisy() => Assert.Fail("pending: T734 — the offer has the utterance id used true and matched word daisy");
+        [Fact]
+        public async Task TheOfferHasTheUtteranceIdUsedTrueAndMatchedWordDaisy()
+        {
+            var h = new CallbackPlannerHarness();
+            h.Seed("has a dog named Daisy");
+            var ask = await h.PlanAsync(exclusions: "Rusty Strings") ?? throw new InvalidOperationException("no ask");
+            await h.Planner.SettleAsync(ask, 42, "like Daisy chasin' her tail", false, CancellationToken.None);
+            var offer = Assert.Single(h.Store.Offers);
+            Assert.Equal(42, offer.UtteranceId);
+            Assert.True(offer.Used);
+            Assert.Equal(["daisy"], offer.MatchedWords);
+        }
     }
 
     // AC3 — the word rule (table)

@@ -17,7 +17,7 @@ sealed class CallbackStore(Lazy<NpgsqlDataSource> dataSource) : ICallbackStore
     internal static readonly TimeSpan AskRest = TimeSpan.FromHours(2);
     internal const int OfferRetentionDays = 28;
 
-    public async Task<IReadOnlyList<RecalledMemory>> EligibleAsync(long personaId, int take, CancellationToken ct)
+    public async Task<IReadOnlyList<RecalledMemory>> EligibleAsync(long personaId, CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
         // Draft/forgotten/lore-source predicates match PersonaMemoryRepository.CandidatesAsync. last_aired_at is
@@ -38,7 +38,6 @@ sealed class CallbackStore(Lazy<NpgsqlDataSource> dataSource) : ICallbackStore
                   where o.memory_id = m.id and o.offered_at > now() - make_interval(secs => @AskRestSeconds))
             order by (select max(o.offered_at) from station.memory_offer o where o.memory_id = m.id) asc nulls first,
                      coalesce(m.occurred_at, m.created_at) desc, m.id desc
-            limit @Take
             """,
             new
             {
@@ -46,7 +45,6 @@ sealed class CallbackStore(Lazy<NpgsqlDataSource> dataSource) : ICallbackStore
                 LoreRestSeconds = LoreRest.TotalSeconds,
                 OtherRestSeconds = OtherRest.TotalSeconds,
                 AskRestSeconds = AskRest.TotalSeconds,
-                Take = take,
             },
             cancellationToken: ct));
 
