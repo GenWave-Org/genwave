@@ -1,6 +1,6 @@
-/** SPEC F218.47, STORY-551 — the "Callbacks per DJ-hour" number's wording, in plain words (no radio jargon, gh-#707). */
+/** SPEC F218.47, STORY-551 — the "Memories per DJ-hour" number (Dean picked "Memories" 11-17)'s wording, in plain words (no radio jargon, gh-#707). */
 
-export const CALLBACKS_LABEL = "Callbacks per DJ-hour";
+export const CALLBACKS_LABEL = "Memories per DJ-hour";
 export const NO_CALLBACKS_YET = "None yet";
 
 /** The line under the number, e.g. "5 aired of 8 asked · last 7 days"; null with no offers (the tile says "None yet"). */
