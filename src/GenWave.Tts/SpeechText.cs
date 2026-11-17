@@ -199,7 +199,15 @@ public static partial class SpeechText
         // grouping entirely.
         foreach (Match phone in PhoneShape.Regex.Matches(text))
         {
-            result.Append(FlattenProse(text[cursor..phone.Index]));
+            // gh-#950: a "1-" country prefix sits outside the shared shape (the ad validator compares
+            // digits exactly), so it is spoken here with the number it leads, never left as a digit.
+            var prose = text[cursor..phone.Index];
+            var prefix = CountryOnePrefixRx().Match(prose);
+            if (prefix.Success)
+                prose = prose[..prefix.Index];
+
+            result.Append(FlattenProse(prose));
+            result.Append(prefix.Success ? "one, " : string.Empty);
             result.Append(SpokenPhoneNumber(phone.Value));
             cursor = phone.Index + phone.Length;
         }
@@ -420,6 +428,10 @@ public static partial class SpeechText
     // Digit-anchored: 50% -> 50 percent
     [GeneratedRegex(@"(?<=\d)%")]
     private static partial Regex PercentRx();
+
+    // gh-#950: a lone "1" plus one separator, right at the end of the prose before a phone match.
+    [GeneratedRegex(@"(?<![\w.,])1(?:,\s?|[-.\s])$")]
+    private static partial Regex CountryOnePrefixRx();
 
     // gh-#949: a dollar amount, "$" leading its digits. Thousands commas, any decimal, and a trailing
     // scale word ("$2 million") are all part of the amount. Without this the flatten drops the "$"
