@@ -1,43 +1,188 @@
 // STORY-550 — Every ask leaves a record, the store half (gh-#1001 · SPEC F218.40–F218.51 · PLAN slice 3)
 //
 // BDD specification — xUnit. Postgres-backed (Category=Integration, shared DatabaseFixture; add [Collection(DatabaseCollection.Name)] on activation).
-// Every fact is pending at plan time (2026-11-16); the named task activates its facts, watches them fail,
-// then makes them pass.
+// Activated by T733 (store half); the migration facts landed with T730.
 
 using Dapper;
+using GenWave.Core.Abstractions;
+using GenWave.MediaLibrary.Station;
 
 namespace GenWave.MediaLibrary.Tests.Specs;
+
+/// <summary>Shared seeding for the callback store scenarios: one persona, rows planted with ages the database clock reads.</summary>
+sealed class CallbackStoreWorld(DatabaseFixture db)
+{
+    public ICallbackStore Store { get; } = new CallbackStore(new Lazy<Npgsql.NpgsqlDataSource>(() => db.StationDataSource));
+    public int Persona { get; private set; }
+
+    public async Task ResetAsync()
+    {
+        await db.ResetStationAsync();
+        await using var conn = await db.StationDataSource.OpenConnectionAsync();
+        Persona = await conn.QuerySingleAsync<int>("insert into station.persona (name) values ('Flip') returning id");
+    }
+
+    public async Task<int> MemoryAsync(string kind = "lore", string source = "authored", string? approvedAt = null, bool forgotten = false,
+        TimeSpan? usedAgo = null, int airedCount = 0)
+    {
+        await using var conn = await db.StationDataSource.OpenConnectionAsync();
+        return await conn.QuerySingleAsync<int>(
+            """
+            insert into station.persona_memory (persona_id, kind, content, source, aired_count, last_aired_at, approved_at, forgotten_at)
+            values (@Persona, @kind, 'm', @source, @airedCount,
+                    case when @usedSeconds::float8 is null then null else now() - make_interval(secs => @usedSeconds::float8) end,
+                    case when @approvedAt then now() end, case when @forgotten then now() end)
+            returning id
+            """,
+            new { Persona, kind, source, airedCount, usedSeconds = usedAgo?.TotalSeconds, approvedAt = approvedAt is not null, forgotten });
+    }
+
+    public async Task AskedAsync(int memory, TimeSpan ago, bool used = false)
+    {
+        await using var conn = await db.StationDataSource.OpenConnectionAsync();
+        await conn.ExecuteAsync(
+            "insert into station.memory_offer (memory_id, persona_id, offered_at, used) values (@memory, @Persona, now() - make_interval(secs => @secs), @used)",
+            new { memory, Persona, secs = ago.TotalSeconds, used });
+    }
+
+    public async Task<(int AiredCount, DateTime? LastAired)> MemoryCountersAsync(int memory)
+    {
+        await using var conn = await db.StationDataSource.OpenConnectionAsync();
+        return await conn.QuerySingleAsync<(int, DateTime?)>(
+            "select aired_count, last_aired_at from station.persona_memory where id = @memory", new { memory });
+    }
+
+    public async Task<(bool Used, int? UtteranceId, string[] Words)> OfferAsync(long offer)
+    {
+        await using var conn = await db.StationDataSource.OpenConnectionAsync();
+        return await conn.QuerySingleAsync<(bool, int?, string[])>(
+            "select used, utterance_id, matched_words from station.memory_offer where id = @offer", new { offer });
+    }
+
+    public async Task<int> UtteranceAsync()
+    {
+        await using var conn = await db.StationDataSource.OpenConnectionAsync();
+        return await conn.QuerySingleAsync<int>(
+            "insert into station.utterance (persona_id, kind, segment_kind, shift_key, text) values (@Persona, 'patter', 'LeadIn', 'a', 't') returning id",
+            new { Persona });
+    }
+
+    public async Task<int> OfferCountAsync()
+    {
+        await using var conn = await db.StationDataSource.OpenConnectionAsync();
+        return await conn.QuerySingleAsync<int>("select count(*)::int from station.memory_offer");
+    }
+}
 
 public static class FeatureEveryAskLeavesARecordStore
 {
     // AC1 — written before the model call
+    [Collection(DatabaseCollection.Name)]
     [Trait("Category", "Integration")]
-    public sealed class ScenarioTheOfferRow
+    public sealed class ScenarioTheOfferRow(DatabaseFixture db) : IAsyncLifetime
     {
         // When  OfferAsync runs
+        readonly CallbackStoreWorld world = new(db);
 
-        [Fact(Skip = "pending: T733 — see docs/PLAN.md")]
-        public void AMemoryOfferRowExistsWithUsedFalseAndNoUtterance() => Assert.Fail("pending: T733 — a memory offer row exists with used false and no utterance");
+        public Task InitializeAsync() => world.ResetAsync();
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public async Task AMemoryOfferRowExistsWithUsedFalseAndNoUtterance()
+        {
+            var memory = await world.MemoryAsync();
+
+            var offer = await world.Store.OfferAsync(memory, world.Persona, CancellationToken.None);
+
+            var (used, utterance, words) = await world.OfferAsync(offer);
+            Assert.False(used);
+            Assert.Null(utterance);
+            Assert.Empty(words);
+        }
     }
 
     // AC4 — use starts the rest
+    [Collection(DatabaseCollection.Name)]
     [Trait("Category", "Integration")]
-    public sealed class ScenarioUseStartsTheRest
+    public sealed class ScenarioUseStartsTheRest(DatabaseFixture db) : IAsyncLifetime
     {
         // Given an offer settled as used
+        readonly CallbackStoreWorld world = new(db);
+        int memory;
+        long offer;
+        int utterance;
 
-        [Fact(Skip = "pending: T733 — see docs/PLAN.md")]
-        public void TheMemorysAiredCountIsOneHigherAndLastAiredIsSet() => Assert.Fail("pending: T733 — the memorys aired count is one higher and last aired is set");
+        public async Task InitializeAsync()
+        {
+            await world.ResetAsync();
+            memory = await world.MemoryAsync();
+            utterance = await world.UtteranceAsync();
+            offer = await world.Store.OfferAsync(memory, world.Persona, CancellationToken.None);
+            await world.Store.SettleAsync(offer, utterance, true, ["kettle"], CancellationToken.None);
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public async Task TheMemorysAiredCountIsOneHigherAndLastAiredIsSet()
+        {
+            var (count, last) = await world.MemoryCountersAsync(memory);
+            Assert.Equal(1, count);
+            Assert.NotNull(last);
+
+            var (used, utteranceId, words) = await world.OfferAsync(offer);
+            Assert.True(used);
+            Assert.Equal(utterance, utteranceId);
+            Assert.Equal(["kettle"], words);
+        }
+
+        [Fact]
+        public async Task ASecondSettleOfTheSameOfferDoesNotCountAgain()
+        {
+            await world.Store.SettleAsync(offer, utterance, true, ["kettle"], CancellationToken.None);
+
+            Assert.Equal(1, (await world.MemoryCountersAsync(memory)).AiredCount);
+        }
     }
 
     // AC5 — a miss leaves the memory alone
+    [Collection(DatabaseCollection.Name)]
     [Trait("Category", "Integration")]
-    public sealed class ScenarioAMissLeavesTheMemoryAlone
+    public sealed class ScenarioAMissLeavesTheMemoryAlone(DatabaseFixture db) : IAsyncLifetime
     {
         // Given an offer settled as not used
+        readonly CallbackStoreWorld world = new(db);
+        int memory;
+        long offer;
 
-        [Fact(Skip = "pending: T733 — see docs/PLAN.md")]
-        public void TheMemorysAiredCountAndLastAiredAreUnchanged() => Assert.Fail("pending: T733 — the memorys aired count and last aired are unchanged");
+        public async Task InitializeAsync()
+        {
+            await world.ResetAsync();
+            memory = await world.MemoryAsync();
+            offer = await world.Store.OfferAsync(memory, world.Persona, CancellationToken.None);
+            await world.Store.SettleAsync(offer, null, false, [], CancellationToken.None);
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public async Task TheMemorysAiredCountAndLastAiredAreUnchanged()
+        {
+            var (count, last) = await world.MemoryCountersAsync(memory);
+            Assert.Equal(0, count);
+            Assert.Null(last);
+            Assert.False((await world.OfferAsync(offer)).Used);
+        }
+
+        [Fact]
+        public async Task TheAskStillCountsAsTheLastAskButNotTheLastUse()
+        {
+            var history = await world.Store.LastOfferAsync(world.Persona, CancellationToken.None);
+
+            Assert.NotNull(history.SinceLastAsk);
+            Assert.Null(history.SinceLastUsed);
+        }
     }
 
     // AC6 — the migration resets old counts
@@ -167,31 +312,129 @@ public static class FeatureEveryAskLeavesARecordStore
     }
 
     // AC8 — 28 days (sad path)
+    [Collection(DatabaseCollection.Name)]
     [Trait("Category", "Integration")]
-    public sealed class ScenarioTwentyEightDays
+    public sealed class ScenarioTwentyEightDays(DatabaseFixture db) : IAsyncLifetime
     {
         // Given an offer 29 days old
         // When  the next offer is written
+        readonly CallbackStoreWorld world = new(db);
+        int memory;
 
-        [Fact(Skip = "pending: T733 — see docs/PLAN.md")]
-        public void The29DayOldOfferIsGone() => Assert.Fail("pending: T733 — the 29 day old offer is gone");
+        public async Task InitializeAsync()
+        {
+            await world.ResetAsync();
+            memory = await world.MemoryAsync();
+            await world.AskedAsync(memory, TimeSpan.FromDays(29));
+            await world.AskedAsync(memory, TimeSpan.FromDays(27));
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public async Task The29DayOldOfferIsGone()
+        {
+            await world.Store.OfferAsync(memory, world.Persona, CancellationToken.None);
+
+            Assert.Equal(2, await world.OfferCountAsync());
+        }
     }
 
+
     // STORY-549 AC4, AC5, AC8 — the store's eligibility query
+    [Collection(DatabaseCollection.Name)]
     [Trait("Category", "Integration")]
-    public sealed class ScenarioEligibilityInSQL
+    public sealed class ScenarioEligibilityInSQL(DatabaseFixture db) : IAsyncLifetime
     {
+        readonly CallbackStoreWorld world = new(db);
 
-        [Fact(Skip = "pending: T733 — see docs/PLAN.md")]
-        public void LoreUsed5HoursAgoIsNotEligible() => Assert.Fail("pending: T733 — lore used 5 hours ago is not eligible");
+        public Task InitializeAsync() => world.ResetAsync();
 
-        [Fact(Skip = "pending: T733 — see docs/PLAN.md")]
-        public void AMemoryAsked90MinutesAgoAndNotUsedIsNotEligible() => Assert.Fail("pending: T733 — a memory asked 90 minutes ago and not used is not eligible");
+        public Task DisposeAsync() => Task.CompletedTask;
 
-        [Fact(Skip = "pending: T733 — see docs/PLAN.md")]
-        public void AnUnapprovedDraftAndAForgottenRowAreNotEligible() => Assert.Fail("pending: T733 — an unapproved draft and a forgotten row are not eligible");
+        async Task<IReadOnlyList<long>> EligibleIdsAsync() =>
+            (await world.Store.EligibleAsync(world.Persona, 10, CancellationToken.None)).Select(m => m.Id).ToList();
 
-        [Fact(Skip = "pending: T733 — see docs/PLAN.md")]
-        public void NeverOfferedRowsComeFirst() => Assert.Fail("pending: T733 — never offered rows come first");
+        [Fact]
+        public async Task LoreUsed5HoursAgoIsNotEligible()
+        {
+            var lore = await world.MemoryAsync(usedAgo: TimeSpan.FromHours(5), airedCount: 1);
+
+            Assert.DoesNotContain(lore, await EligibleIdsAsync());
+        }
+
+        [Fact]
+        public async Task LoreUsed7HoursAgoIsEligible()
+        {
+            var lore = await world.MemoryAsync(usedAgo: TimeSpan.FromHours(7), airedCount: 1);
+
+            Assert.Contains(lore, await EligibleIdsAsync());
+        }
+
+        [Theory]
+        [InlineData("episode")]
+        [InlineData("life")]
+        public async Task EpisodeAndLifeRestFor48Hours(string kind)
+        {
+            var at47 = await world.MemoryAsync(kind, "extracted", usedAgo: TimeSpan.FromHours(47), airedCount: 1);
+            var at49 = await world.MemoryAsync(kind, "extracted", usedAgo: TimeSpan.FromHours(49), airedCount: 1);
+
+            var eligible = await EligibleIdsAsync();
+
+            Assert.DoesNotContain(at47, eligible);
+            Assert.Contains(at49, eligible);
+        }
+
+        [Fact]
+        public async Task AMemoryAsked90MinutesAgoAndNotUsedIsNotEligible()
+        {
+            var memory = await world.MemoryAsync();
+            await world.AskedAsync(memory, TimeSpan.FromMinutes(90));
+
+            Assert.DoesNotContain(memory, await EligibleIdsAsync());
+        }
+
+        [Fact]
+        public async Task AMemoryAsked3HoursAgoAndNotUsedIsEligible()
+        {
+            var memory = await world.MemoryAsync();
+            await world.AskedAsync(memory, TimeSpan.FromHours(3));
+
+            Assert.Contains(memory, await EligibleIdsAsync());
+        }
+
+        [Fact]
+        public async Task AnUnapprovedDraftAndAForgottenRowAreNotEligible()
+        {
+            var draft = await world.MemoryAsync("episode", "drafted");
+            var forgotten = await world.MemoryAsync(forgotten: true);
+            var approved = await world.MemoryAsync("episode", "drafted", approvedAt: "now");
+
+            var eligible = await EligibleIdsAsync();
+
+            Assert.DoesNotContain(draft, eligible);
+            Assert.DoesNotContain(forgotten, eligible);
+            Assert.Contains(approved, eligible);
+        }
+
+        [Fact]
+        public async Task QuirksAreNeverEligible()
+        {
+            var quirk = await world.MemoryAsync("quirk");
+
+            Assert.DoesNotContain(quirk, await EligibleIdsAsync());
+        }
+
+        [Fact]
+        public async Task NeverOfferedRowsComeFirst()
+        {
+            var askedLongAgo = await world.MemoryAsync();
+            var neverOffered = await world.MemoryAsync();
+            var askedRecently = await world.MemoryAsync();
+            await world.AskedAsync(askedLongAgo, TimeSpan.FromDays(3));
+            await world.AskedAsync(askedRecently, TimeSpan.FromHours(5));
+
+            Assert.Equal([neverOffered, askedLongAgo, askedRecently], await EligibleIdsAsync());
+        }
     }
 }

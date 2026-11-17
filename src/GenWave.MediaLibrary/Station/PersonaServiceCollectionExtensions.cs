@@ -54,10 +54,11 @@ public static class PersonaServiceCollectionExtensions
             .ValidateOnStart();
 
         // One repository serves both contracts (the spend ledger rides the same table and cap).
+        // One lazy station data source serves the repository and the callback store.
+        var dataSource = new Lazy<NpgsqlDataSource>(() => new NpgsqlDataSourceBuilder(connectionString).Build());
         services.AddSingleton(sp =>
-            new PersonaMemoryRepository(
-                new Lazy<NpgsqlDataSource>(() => new NpgsqlDataSourceBuilder(connectionString).Build()),
-                sp.GetRequiredService<IOptions<PersonaMemoryOptions>>()));
+            new PersonaMemoryRepository(dataSource, sp.GetRequiredService<IOptions<PersonaMemoryOptions>>()));
+        services.AddSingleton<ICallbackStore>(_ => new CallbackStore(dataSource));
         services.AddSingleton<IQuirkSpendLedger>(sp => sp.GetRequiredService<PersonaMemoryRepository>());
         services.AddSingleton<IMemoryRecallStore>(sp => sp.GetRequiredService<PersonaMemoryRepository>());
         services.AddSingleton<IEpisodeStore>(sp => sp.GetRequiredService<PersonaMemoryRepository>());
