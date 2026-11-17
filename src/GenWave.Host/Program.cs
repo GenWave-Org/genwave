@@ -168,15 +168,15 @@ builder.Services
     .AddGenWaveContextHost(cfg)
     // Playout chain: engine control → feeder → feeder service → PlayoutSupervisor (hosted).
     .AddGenWavePlayout()
-    // The announcement lifecycle guardians (SPEC F143.2/.3, F144.5/.6, F145.2; STORY-358/359,
-    // PLAN T343): the aired-confirmation and privacy-flip sinks/drains, plus the periodic
+    // The announcement lifecycle guardians (SPEC F143.2/.3, F144.5/.6; STORY-358,
+    // PLAN T343): the aired-confirmation sink/drain, plus the periodic
     // expire/re-arm sweep loop. Registered AFTER .AddGenWavePlayout() so this call's own
     // GenWave.Host.Announcements namespace narrative reads "the playout chain, then the guardians
     // that watch it" — resolution itself has no ordering dependency either way, since every
     // registration below is a lazy DI factory/hosted-service Add (see
     // AnnouncementLifecycleHostServiceCollectionExtensions' own remarks). Needs IAnnouncementLifecycle
-    // (AddGenWaveStationSettings, above) and IStationEventSink's own two new sink resolutions inside
-    // AddGenWavePlayout's own CompositeStationEventSink factory — both already registered by the time
+    // (AddGenWaveStationSettings, above) and IStationEventSink's own new sink resolution inside
+    // AddGenWavePlayout's own CompositeStationEventSink factory — already registered by the time
     // anything actually resolves IStationEventSink.
     .AddGenWaveAnnouncementLifecycle()
     // Crosstalk stock-timer loop (SPEC F127.7, STORY-328, PLAN T286): the thin Host shell that

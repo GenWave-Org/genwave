@@ -12,7 +12,6 @@ import { AnnouncementComposer } from "./AnnouncementComposer";
 import { AnnouncementHistoryList } from "./AnnouncementHistoryList";
 
 export interface AnnouncementsClientProps {
-  initialSpectatorMode: boolean;
   initialHistory: AnnouncementHistoryDto[];
   initialTokenStatus: AnnounceTokenStatusDto;
   /** Test-only injection point threaded down to the history list / token panel's own timestamp
@@ -27,15 +26,8 @@ export interface AnnouncementsClientProps {
  * history list (a successful send needs to appear) and the token status (generate/regenerate/revoke
  * each change it) — both children stay presentational, reporting outcomes upward rather than
  * fetching their own copies, the same split `SafeContentClient` keeps from its own children.
- *
- * SpectatorMode is read ONCE, server-side, at initial render (`initialSpectatorMode`) — this page
- * does not live-poll settings; an operator who flips the toggle mid-visit sees the notice on their
- * next navigation to this page, the same "read at render, not live-subscribed" posture every other
- * page in this shell takes toward settings it doesn't itself own. The send endpoint enforces the real
- * boundary regardless (SPEC F145.1) — this notice is a courtesy, never the security control.
  */
 export function AnnouncementsClient({
-  initialSpectatorMode,
   initialHistory,
   initialTokenStatus,
   timeZone,
@@ -55,10 +47,7 @@ export function AnnouncementsClient({
 
   return (
     <div className="flex flex-col gap-6">
-      <AnnouncementComposer
-        spectatorMode={initialSpectatorMode}
-        onSent={() => { void refreshHistory(); }}
-      />
+      <AnnouncementComposer onSent={() => { void refreshHistory(); }} />
 
       <section aria-label="Announcement history">
         <p className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-accent-2">

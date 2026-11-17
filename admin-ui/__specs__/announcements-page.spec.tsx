@@ -22,7 +22,6 @@ import type { AnnouncementHistoryDto } from "@/lib/announcements-api";
 
 function renderClient(overrides: Partial<AnnouncementsClientProps> = {}): ReturnType<typeof render> {
   const props: AnnouncementsClientProps = {
-    initialSpectatorMode: false,
     initialHistory: [],
     initialTokenStatus: { hasToken: false, lastUsedAt: null },
     timeZone: "UTC",
@@ -151,7 +150,7 @@ describe("Feature: The Announcements page", () => {
             makeHistoryEntry({ id: 2, state: "claimed" }),
             makeHistoryEntry({ id: 3, state: "aired", airedAt: "2026-08-22T10:05:00Z" }),
             makeHistoryEntry({ id: 4, state: "expired" }),
-            makeHistoryEntry({ id: 5, state: "declined", declineReason: "station went public" }),
+            makeHistoryEntry({ id: 5, state: "declined", declineReason: "declined by the owner" }),
           ]}
         />
       );
@@ -159,7 +158,7 @@ describe("Feature: The Announcements page", () => {
       for (const state of ["pending", "claimed", "aired", "expired", "declined"]) {
         expect(screen.getByText(state)).toBeInTheDocument();
       }
-      expect(screen.getByText("station went public")).toBeInTheDocument();
+      expect(screen.getByText("declined by the owner")).toBeInTheDocument();
     });
 
     it("renders collapse counts and aired timestamps (T344, STORY-361 AC2)", () => {
@@ -205,15 +204,6 @@ describe("Feature: The Announcements page", () => {
 
       expect(screen.queryByText("plaintext-token-value")).not.toBeInTheDocument();
       expect(screen.getByText(/09:30/)).toBeInTheDocument();
-    });
-  });
-
-  describe("Scenario: public mode says so", () => {
-    it("replaces the send with an explanation while SpectatorMode is on (T344, STORY-361 AC4)", () => {
-      renderClient({ initialSpectatorMode: true });
-
-      expect(screen.queryByLabelText("Message")).not.toBeInTheDocument();
-      expect(screen.getByText(/station is public/i)).toBeInTheDocument();
     });
   });
 });

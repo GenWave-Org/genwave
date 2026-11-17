@@ -12,8 +12,8 @@
 //
 // ALTITUDE — what "air" honestly means at each seam (read before any fact below):
 //
-//   * VEND: the real, container-resolved IAnnouncementSource (SpectatorModeAnnouncementVendGuard
-//     decorating AnnouncementRepository, both against the real ephemeral Postgres) — ClaimDeliverableAsync
+//   * VEND: the real, container-resolved IAnnouncementSource (AnnouncementRepository
+//     against the real ephemeral Postgres) — ClaimDeliverableAsync
 //     called directly. There is no HTTP surface for the vend step (it lives inside the Orchestrator's
 //     own background playout loop, which this file's WebApplicationFactory removes along with every
 //     other IHostedService, exactly as Story358_AnnouncementFlavorEndToEnd.cs's own header already
@@ -203,44 +203,20 @@ public static class FeaturePaWireProof
             Assert.Equal(HardDegradationArc.Message, arc.CapturedSpeechInput, StringComparer.OrdinalIgnoreCase);
     }
 
-    public sealed class ScenarioThePrivacyArcDeclinesAndRefuses : IClassFixture<PrivacyArc>
+    public sealed class ScenarioAnnouncementsWorkWhileSpectatorModeIsOn : IClassFixture<SpectatorModeArc>
     {
-        readonly PrivacyArc arc;
-        public ScenarioThePrivacyArcDeclinesAndRefuses(PrivacyArc arc) => this.arc = arc;
+        readonly SpectatorModeArc arc;
+        public ScenarioAnnouncementsWorkWhileSpectatorModeIsOn(SpectatorModeArc arc) => this.arc = arc;
 
         [Fact]
-        public void BeforeTheFlipTheUnclaimedRowReadsPending() =>
-            Assert.Equal("pending", arc.PendingStateBeforeFlip);
+        public void APostWhileSpectatorModeIsOnIsAccepted() =>
+            Assert.Equal(HttpStatusCode.OK, arc.PostStatus);
 
         [Fact]
-        public void BeforeTheFlipTheClaimedRowReadsClaimed() =>
-            Assert.Equal("claimed", arc.ClaimedStateBeforeFlip);
+        public void TheVendStillClaimsTheRow() => Assert.True(arc.VendClaimedTheRow);
 
         [Fact]
-        public void TheAlreadyAiredRowIsUntouchedByTheFlip() =>
-            Assert.Equal("aired", arc.AiredStateAfterFlip);
-
-        [Fact]
-        public void ThePendingRowDeclinesAtTheFlip() =>
-            Assert.Equal("declined", arc.DeclinedPendingStateAfterFlip);
-
-        [Fact]
-        public void TheClaimedRowDeclinesAtTheFlipToo() =>
-            Assert.Equal("declined", arc.DeclinedClaimedStateAfterFlip);
-
-        [Fact]
-        public void TheDeclineReasonIsExactlyStationWentPublic() =>
-            Assert.Equal("station went public", arc.DeclineReasonForPending);
-
-        [Fact]
-        public void APostWhilePublicIsFourOhThree() =>
-            Assert.Equal(HttpStatusCode.Forbidden, arc.PostWhilePublicStatus);
-
-        [Fact]
-        public void TheFourOhThreesDetailIsTheServersOwnF145Sentence() =>
-            Assert.Equal(
-                "The station is public (Station:SpectatorMode is on) — a public stream never carries the house's events (SPEC F145.1).",
-                arc.PostWhilePublicDetail);
+        public void TheRowStillReachesAired() => Assert.Equal("aired", arc.HistoryState);
     }
 
     public sealed class ScenarioTheTokenDoorVerbatimFlowEndToEnd : IClassFixture<TokenDoorArc>
@@ -473,16 +449,11 @@ public sealed class HardDegradationArc : IAsyncLifetime
     public Task DisposeAsync() => Task.CompletedTask;
 }
 
-public sealed class PrivacyArc : IAsyncLifetime
+public sealed class SpectatorModeArc : IAsyncLifetime
 {
-    public string PendingStateBeforeFlip { get; private set; } = "";
-    public string ClaimedStateBeforeFlip { get; private set; } = "";
-    public string AiredStateAfterFlip { get; private set; } = "";
-    public string DeclinedPendingStateAfterFlip { get; private set; } = "";
-    public string DeclinedClaimedStateAfterFlip { get; private set; } = "";
-    public string DeclineReasonForPending { get; private set; } = "";
-    public HttpStatusCode PostWhilePublicStatus { get; private set; }
-    public string PostWhilePublicDetail { get; private set; } = "";
+    public HttpStatusCode PostStatus { get; private set; }
+    public bool VendClaimedTheRow { get; private set; }
+    public string HistoryState { get; private set; } = "";
 
     public async Task InitializeAsync()
     {
@@ -493,64 +464,30 @@ public sealed class PrivacyArc : IAsyncLifetime
         var client = factory.CreateClient();
         await PaWireProofSupport.LoginAsync(client, PaWireProofWebFactory.Password);
 
-        var source = factory.Services.GetRequiredService<IAnnouncementSource>();
-        var renderer = factory.Services.GetRequiredService<IVerbatimSegmentRenderer>();
-
-        // Row A: the full private lifecycle to 'aired', before anything flips — proves an already-aired
-        // row is untouched by a later flip (it is no longer live, so DeclineAllLiveAsync never reaches it).
-        var idA = (await (await client.PostAsJsonAsync(
-                "/api/announcements", new { message = "Row A airs before the flip", verbatim = true }))
-            .Content.ReadFromJsonAsync<AnnouncementAcceptedWire>())!.Id;
-        var itemA = (await source.ClaimDeliverableAsync(2, CancellationToken.None)).Single(i => i.Id == idA);
-        var requestA = PaWireProofSupport.AnnouncementRequest(factory.Services);
-        var renderedA = await renderer.RenderAsync(requestA, new SegmentCopy(itemA.Message, FreshPerAiring: true), CancellationToken.None)
-            ?? throw new InvalidOperationException("row A render unexpectedly returned null");
-        await PaWireProofSupport.PublishAiredAndDrainAsync(factory, idA, renderedA);
-
-        // Row C: posted and claimed FIRST, while it is the only pending row left (row A's own claim
-        // above already emptied the pending pool) — left claimed, never rendered/aired. Claiming it
-        // before row B even exists is deliberate: ClaimDeliverableAsync claims OLDEST-first, so
-        // claiming after both rows existed would sweep up row B too (it would be the older of the
-        // two), defeating this scenario's own "one pending, one claimed" arrangement.
-        var idC = (await (await client.PostAsJsonAsync(
-                "/api/announcements", new { message = "Row C stays claimed until the flip", verbatim = true }))
-            .Content.ReadFromJsonAsync<AnnouncementAcceptedWire>())!.Id;
-        await source.ClaimDeliverableAsync(1, CancellationToken.None); // claims exactly C
-
-        // Row B: posted AFTER row C's own claim — left pending, never claimed (no further claim call
-        // reaches it).
-        var idB = (await (await client.PostAsJsonAsync(
-                "/api/announcements", new { message = "Row B stays pending until the flip", verbatim = true }))
-            .Content.ReadFromJsonAsync<AnnouncementAcceptedWire>())!.Id;
-
-        var interimHistory = await PaWireProofSupport.GetHistoryAsync(client);
-        PendingStateBeforeFlip = interimHistory.Single(r => r.Id == idB).State;
-        ClaimedStateBeforeFlip = interimHistory.Single(r => r.Id == idC).State;
-
-        // The flip — the REAL settings PUT (SettingsController -> StationSettingsStore.WriteAsync ->
-        // the real SettingChanged publish -> AnnouncementPrivacyFlipEventSink -> the real queue).
+        // gh-#958 — spectator mode is the LAN listener page, not a privacy switch for announcements.
         var put = await client.PutAsJsonAsync(
             "/api/settings", new[] { new { key = "Station:SpectatorMode", value = "true" } });
         if (put.StatusCode != HttpStatusCode.OK)
             throw new InvalidOperationException($"settings PUT unexpectedly returned {put.StatusCode}");
 
-        var flipReader = factory.Services.GetRequiredService<ChannelReader<AnnouncementPrivacyFlipSignal>>();
-        if (!flipReader.TryRead(out var flipSignal))
-            throw new InvalidOperationException("the privacy-flip queue carried no signal after the settings PUT");
-        await factory.Services.GetRequiredService<AnnouncementPrivacyFlipDrainService>()
-            .ProcessAsync(flipSignal!, CancellationToken.None);
+        var post = await client.PostAsJsonAsync(
+            "/api/announcements", new { message = "Dinner is ready", verbatim = true });
+        PostStatus = post.StatusCode;
+        var id = (await post.Content.ReadFromJsonAsync<AnnouncementAcceptedWire>())!.Id;
 
-        var finalHistory = await PaWireProofSupport.GetHistoryAsync(client);
-        AiredStateAfterFlip = finalHistory.Single(r => r.Id == idA).State;
-        DeclinedPendingStateAfterFlip = finalHistory.Single(r => r.Id == idB).State;
-        DeclinedClaimedStateAfterFlip = finalHistory.Single(r => r.Id == idC).State;
-        DeclineReasonForPending = finalHistory.Single(r => r.Id == idB).DeclineReason ?? "";
+        var source = factory.Services.GetRequiredService<IAnnouncementSource>();
+        var claimed = await source.ClaimDeliverableAsync(2, CancellationToken.None);
+        VendClaimedTheRow = claimed.Any(i => i.Id == id);
+        var item = claimed.Single(i => i.Id == id);
 
-        // The mid-flip POST — the door itself must now refuse (SPEC F145.1).
-        var postWhilePublic = await client.PostAsJsonAsync(
-            "/api/announcements", new { message = "Trying after the station went public", verbatim = true });
-        PostWhilePublicStatus = postWhilePublic.StatusCode;
-        PostWhilePublicDetail = await PaWireProofSupport.DetailAsync(postWhilePublic);
+        var request = PaWireProofSupport.AnnouncementRequest(factory.Services);
+        var renderer = factory.Services.GetRequiredService<IVerbatimSegmentRenderer>();
+        var rendered = await renderer.RenderAsync(request, new SegmentCopy(item.Message, FreshPerAiring: true), CancellationToken.None)
+            ?? throw new InvalidOperationException("render unexpectedly returned null");
+        await PaWireProofSupport.PublishAiredAndDrainAsync(factory, id, rendered);
+
+        var history = await PaWireProofSupport.GetHistoryAsync(client);
+        HistoryState = history.Single(r => r.Id == id).State;
     }
 
     public Task DisposeAsync() => Task.CompletedTask;
@@ -863,7 +800,6 @@ file sealed class PaWireProofWebFactory(
             // Re-registered as themselves (AddHostedService<T> never exposes T for direct resolution) —
             // the Story343_AnnouncementLifecycleSmoke.cs precedent this file's own header cites.
             services.AddSingleton<AnnouncementAiredDrainService>();
-            services.AddSingleton<AnnouncementPrivacyFlipDrainService>();
         });
     }
 }

@@ -29,8 +29,8 @@ public static class AnnouncementServiceCollectionExtensions
 {
     /// <summary>
     /// Registers <see cref="AnnouncementRepository"/> as a singleton — resolvable as itself, under
-    /// <see cref="IAnnouncementStore"/>, and (decorated by <paramref name="decorate"/>) under
-    /// <see cref="IAnnouncementSource"/> — over a dedicated <see cref="NpgsqlDataSource"/> built from
+    /// <see cref="IAnnouncementStore"/>, <see cref="IAnnouncementSource"/> and
+    /// <see cref="IAnnouncementLifecycle"/> — over a dedicated <see cref="NpgsqlDataSource"/> built from
     /// <paramref name="connectionString"/>. The data source build is wrapped in a <see cref="Lazy{T}"/>
     /// — mirrors every other station-schema store's own remarks: merely resolving the store must
     /// never be enough to trigger a connection attempt against an empty/dev-mode connection string.
@@ -40,40 +40,18 @@ public static class AnnouncementServiceCollectionExtensions
     /// lives here instead (see that handler's own remarks). <see cref="SqlMapper.AddTypeHandler{T}"/>
     /// writes into a static, process-wide dictionary keyed by type, so re-registering the same
     /// <see cref="AnnouncementStateTypeHandler.Instance"/> on a second call is a harmless overwrite.
-    ///
-    /// <para>
-    /// <b>Why <paramref name="decorate"/> is REQUIRED, not optional (T341 review finding F9 — the
-    /// prior split-call shape defaulted it to <see langword="null"/>, registering the inner
-    /// undecorated).</b> SPEC F145.2's defense-in-depth vend refusal (declining while
-    /// <c>Station:SpectatorMode</c> is on) is Host privacy state — this project has no reference to,
-    /// and must never read, that concept (the SAME "MediaLibrary layer never reads Host privacy
-    /// state" ruling this feature's own binding carry-forwards restate). This project's own ONE
-    /// caller (<c>GenWave.Host.Configuration.StationSettingsHostingExtensions</c>) always supplies a
-    /// real decorator (<c>SpectatorModeAnnouncementVendGuard</c>); a null-default here bought nothing
-    /// but a silent path to shipping the guard's own refusal unwired, which is exactly what the prior
-    /// split-call shape risked. A caller with genuinely no privacy state to enforce (a future non-Host
-    /// embedding of this library) still passes <c>(inner, _) =&gt; inner</c> explicitly — an honest,
-    /// visible no-op, never an implicit default.
-    /// </para>
     /// </summary>
     public static IServiceCollection AddAnnouncementStore(
         this IServiceCollection services,
-        string connectionString,
-        Func<IAnnouncementSource, IServiceProvider, IAnnouncementSource> decorate)
+        string connectionString)
     {
         SqlMapper.AddTypeHandler(AnnouncementStateTypeHandler.Instance);
         services.AddSingleton(
             _ => new AnnouncementRepository(new Lazy<NpgsqlDataSource>(() => new NpgsqlDataSourceBuilder(connectionString).Build())));
         services.AddSingleton<IAnnouncementStore>(sp => sp.GetRequiredService<AnnouncementRepository>());
-        services.AddSingleton<IAnnouncementSource>(
-            sp => decorate(sp.GetRequiredService<AnnouncementRepository>(), sp));
+        services.AddSingleton<IAnnouncementSource>(sp => sp.GetRequiredService<AnnouncementRepository>());
 
-        // The lifecycle guardians' own seam (SPEC F143.2/.3, F144.5/.6, F145.2; PLAN T343) — no
-        // decoration: unlike IAnnouncementSource's SpectatorMode vend refusal, none of T343's three
-        // guardians (aired confirmation, the re-arm/expiry sweep, the flip's decline sweep) is
-        // itself privacy-conditional — each one already runs at exactly the moment SPEC F143.2/F145.2
-        // name (a genuine TrackAired, a periodic sweep, the flip itself), so there is no Host-side
-        // refusal to wrap this registration in.
+        // The lifecycle guardians' own seam (SPEC F143.2/.3, F144.5/.6; PLAN T343).
         return services.AddSingleton<IAnnouncementLifecycle>(sp => sp.GetRequiredService<AnnouncementRepository>());
     }
 }

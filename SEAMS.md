@@ -66,12 +66,11 @@
 |---|---|---|---|
 | `GenWave.Core.Abstractions.IAppVersion` | `GenWave.Core.AppVersion` | Singleton | — |
 
-## GenWave.Host (39 seams)
+## GenWave.Host (38 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
 | `GenWave.Core.Abstractions.IAdCadenceProvider` | `GenWave.Host.Options.OptionsMonitorAdCadenceProvider` | Singleton | — |
-| `GenWave.Core.Abstractions.IAnnouncementSource` | `GenWave.Host.Announcements.SpectatorModeAnnouncementVendGuard` | Singleton | — |
 | `GenWave.Core.Abstractions.IAudiencePostureProvider` | `GenWave.Host.Options.OptionsMonitorAudiencePostureProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.IBoundaryBiasProvider` | `GenWave.Host.Options.OptionsMonitorBoundaryBiasProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.ICadenceProvider` | `GenWave.Host.Options.OptionsMonitorCadenceProvider` | Singleton | — |
@@ -120,7 +119,7 @@
 | `GenWave.Core.Abstractions.IEnergyAnalyzer` | `GenWave.Loudness.FfmpegEnergyAnalyzer` | Singleton | — |
 | `GenWave.Core.Abstractions.ILoudnessAnalyzer` | `GenWave.Loudness.FfmpegLoudnessAnalyzer` | Singleton | — |
 
-## GenWave.MediaLibrary (68 seams)
+## GenWave.MediaLibrary (69 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -134,6 +133,7 @@
 | `GenWave.Core.Abstractions.IAdminMediaReenrichment` | `GenWave.MediaLibrary.Catalog.MediaRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IAdminMediaWrite` | `GenWave.MediaLibrary.Catalog.MediaRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IAnnouncementLifecycle` | `GenWave.MediaLibrary.Station.AnnouncementRepository` | Singleton | — |
+| `GenWave.Core.Abstractions.IAnnouncementSource` | `GenWave.MediaLibrary.Station.AnnouncementRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IAnnouncementStore` | `GenWave.MediaLibrary.Station.AnnouncementRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IArtworkTokenStore` | `GenWave.MediaLibrary.Catalog.ArtworkTokenRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IAuthoredCatalogWriter` | `GenWave.MediaLibrary.Catalog.MediaRepository` | Singleton | — |

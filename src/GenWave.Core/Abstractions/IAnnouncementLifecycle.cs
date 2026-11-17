@@ -1,27 +1,17 @@
 namespace GenWave.Core.Abstractions;
 
 /// <summary>
-/// The announcement lifecycle guardians' own write/read seam (SPEC F143.2/.3, F144.5/.6, F145.2;
-/// STORY-358/359; PLAN T343) — the SAME "Core-level port a MediaLibrary repository implements
+/// The announcement lifecycle guardians' own write/read seam (SPEC F143.2/.3, F144.5/.6;
+/// STORY-358; PLAN T343) — the SAME "Core-level port a MediaLibrary repository implements
 /// directly" placement <see cref="IAnnouncementStore"/>'s own remarks already establish one seam
-/// over, narrowed to EXACTLY what T343's three guardians consume: the aired-confirmation sink/drain
-/// (<see cref="MarkAiredAsync"/>), the periodic sweep loop (<see cref="ExpireStaleAsync"/>,
-/// <see cref="FindClaimedPastGraceAsync"/>, <see cref="ReArmAsync"/>), and the private→public flip
-/// drain (<see cref="DeclineAllLiveAsync"/>). Every member below was ALREADY implemented on
+/// over, narrowed to EXACTLY what T343's guardians consume: the aired-confirmation sink/drain
+/// (<see cref="MarkAiredAsync"/>) and the periodic sweep loop (<see cref="ExpireStaleAsync"/>,
+/// <see cref="FindClaimedPastGraceAsync"/>, <see cref="ReArmAsync"/>). Every member below was ALREADY implemented on
 /// <c>AnnouncementRepository</c> at T337 (the durable store's own total, never-deletes lifecycle
 /// transitions) — this interface's own job is narrower: expose that existing capability through a
 /// seam GenWave.Host can depend on without widening <see cref="IAnnouncementStore"/>/
 /// <see cref="IAnnouncementSource"/> with lifecycle members neither of THEIR OWN callers (the
 /// endpoint, the vend) has any use for.
-///
-/// <para>
-/// <b><see cref="DeclineAllLiveAsync"/>, not an id-list overload.</b> SPEC F145.2's flip sweep
-/// declines EVERY currently pending/claimed row, unconditionally — there is no candidate list to
-/// hand it (unlike <see cref="FindClaimedPastGraceAsync"/>'s narrower re-arm candidate set), so the
-/// honest, race-free primitive is one bulk <c>UPDATE ... WHERE state IN (...)</c>, mirroring
-/// <see cref="ExpireStaleAsync"/>'s own "finds its own candidates" shape rather than a separate
-/// list-then-loop round trip that would open a TOCTOU window between the two calls.
-/// </para>
 /// </summary>
 public interface IAnnouncementLifecycle
 {
@@ -58,12 +48,4 @@ public interface IAnnouncementLifecycle
     /// Returns the count expired.
     /// </summary>
     Task<int> ExpireStaleAsync(DateTimeOffset now, CancellationToken ct);
-
-    /// <summary>
-    /// <c>pending|claimed -&gt; declined</c> (SPEC F145.2) for EVERY row currently live, stamping
-    /// <paramref name="reason"/> — the private→public flip's own "nothing is ever held waiting behind
-    /// the toggle" sweep. Returns the count declined (zero is a normal, silent outcome — no row was
-    /// live at the moment of the flip).
-    /// </summary>
-    Task<int> DeclineAllLiveAsync(string reason, CancellationToken ct);
 }

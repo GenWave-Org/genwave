@@ -1,8 +1,8 @@
-// STORY-358/359 — Lifecycle guardians (SPEC F143.2/.3, F144.5/.6, F145.2 · PLAN T343)
+// STORY-358 — Lifecycle guardians (SPEC F143.2/.3, F144.5/.6 · PLAN T343)
 //
-// Facts not already owned by Story358_AnnouncementAirConfirmation.cs / Story359_AnnouncementPrivacy.cs:
-// the sweep's own ordering guarantee, and the "a sink must never throw" contract every
-// IStationEventSink implementation promises (IStationEventSink's own remarks).
+// Facts not already owned by Story358_AnnouncementAirConfirmation.cs: the sweep's own ordering
+// guarantee, and the "a sink must never throw" contract every IStationEventSink implementation
+// promises (IStationEventSink's own remarks).
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
@@ -99,35 +99,6 @@ public static class FeatureAnnouncementLifecycleGuardians
 
             Assert.Null(ex);
             Assert.False(channel.Reader.TryRead(out _));
-        }
-
-        [Fact]
-        public void ThePrivacyFlipSinkNeverThrowsForAnUnrelatedEvent()
-        {
-            var channel = Channel.CreateBounded<AnnouncementPrivacyFlipSignal>(1);
-            var options = new FakeOptionsMonitor<StationOptions>(new StationOptions { SpectatorMode = true });
-            var sink = new AnnouncementPrivacyFlipEventSink(
-                channel.Writer, options, NullLogger<AnnouncementPrivacyFlipEventSink>.Instance);
-
-            var ex = Record.Exception(() => sink.Publish(new SettingChanged("Station:Theme")));
-
-            Assert.Null(ex);
-            Assert.False(channel.Reader.TryRead(out _));
-        }
-
-        [Fact]
-        public void ThePrivacyFlipSinkNeverThrowsWhenItsQueueIsFull()
-        {
-            var channel = Channel.CreateBounded<AnnouncementPrivacyFlipSignal>(1);
-            Assert.True(channel.Writer.TryWrite(new AnnouncementPrivacyFlipSignal())); // fill the one slot
-            var options = new FakeOptionsMonitor<StationOptions>(new StationOptions { SpectatorMode = true });
-            var sink = new AnnouncementPrivacyFlipEventSink(
-                channel.Writer, options, NullLogger<AnnouncementPrivacyFlipEventSink>.Instance);
-
-            var ex = Record.Exception(
-                () => sink.Publish(new SettingChanged(AnnouncementPrivacyFlipEventSink.SpectatorModeKey)));
-
-            Assert.Null(ex);
         }
     }
 }

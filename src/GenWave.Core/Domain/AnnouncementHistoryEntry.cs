@@ -21,7 +21,7 @@ namespace GenWave.Core.Domain;
 /// (SPEC F144.2) rather than DJ-flavored copy (F144.3).</param>
 /// <param name="State">The row's current lifecycle state, lowercase (SPEC F143.2).</param>
 /// <param name="DeclineReason">Non-null exactly when <see cref="State"/> is <c>"declined"</c>
-/// (SPEC F143.2/F143.4/F145.2's own decline reasons).</param>
+/// (SPEC F143.2/F143.4's own decline reasons).</param>
 /// <param name="CollapseCount">How many case-folded-identical submissions folded into this row
 /// (SPEC F143.5) — 1 when none did.</param>
 /// <param name="CreatedAt">When this row was first accepted.</param>

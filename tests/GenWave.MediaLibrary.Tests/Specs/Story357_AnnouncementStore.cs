@@ -381,11 +381,11 @@ public static class FeatureAnnouncementStoreLifecycle
                 ttl: null, CancellationToken.None);
 
             // When it is declined with a reason...
-            await repo.MarkDeclinedAsync([id], "station went public", CancellationToken.None);
+            await repo.MarkDeclinedAsync([id], "declined by the owner", CancellationToken.None);
 
             // Then the reason is stamped on the row.
             var row = await ReadRowAsync(db, id);
-            Assert.Equal("station went public", row.DeclineReason);
+            Assert.Equal("declined by the owner", row.DeclineReason);
         }
 
         [Fact]
@@ -401,7 +401,7 @@ public static class FeatureAnnouncementStoreLifecycle
             await Task.Delay(TimeSpan.FromMilliseconds(50));
 
             // When it is declined...
-            await repo.MarkDeclinedAsync([id], "station went public", CancellationToken.None);
+            await repo.MarkDeclinedAsync([id], "declined by the owner", CancellationToken.None);
 
             // Then state_changed_at moved forward — the decline is stamped, not silent.
             var afterDecline = await ReadRowAsync(db, id);
@@ -418,7 +418,7 @@ public static class FeatureAnnouncementStoreLifecycle
             var declinedId = await repo.InsertAsync(
                 "Declined one", verbatim: true, requestedVoice: null, source: AnnouncementSource.Token,
                 ttl: null, CancellationToken.None);
-            await repo.MarkDeclinedAsync([declinedId], "station went public", CancellationToken.None);
+            await repo.MarkDeclinedAsync([declinedId], "declined by the owner", CancellationToken.None);
 
             await repo.InsertAsync(
                 "Expired one", verbatim: true, requestedVoice: null, source: AnnouncementSource.Token,
@@ -519,8 +519,7 @@ public static class FeatureAnnouncementStoreLifecycle
 
     // ---------------------------------------------------------------------
     // PLAN T343 — the lifecycle guardians' own repository primitives: MarkAiredAsync's collapse-
-    // count return, FindClaimedPastGraceAsync's grace-filtered read, and DeclineAllLiveAsync's bulk
-    // pending+claimed sweep (SPEC F143.3, F144.5, F145.2).
+    // count return and FindClaimedPastGraceAsync's grace-filtered read (SPEC F143.3, F144.5).
     // ---------------------------------------------------------------------
 
     [Collection(DatabaseCollection.Name)]
@@ -654,89 +653,6 @@ public static class FeatureAnnouncementStoreLifecycle
         }
     }
 
-    [Collection(DatabaseCollection.Name)]
-    [Trait("Category", "Integration")]
-    public sealed class ScenarioDeclineAllLiveSweepsPendingAndClaimedTogether(DatabaseFixture db)
-    {
-        [Fact]
-        public async Task APendingRowDeclinesWithTheGivenReason()
-        {
-            // Given a pending announcement live at the moment the station goes public...
-            await db.ResetAnnouncementAsync();
-            var repo = Harness.AnnouncementRepo(db);
-            var id = await repo.InsertAsync(
-                "Dinner's ready", verbatim: true, requestedVoice: null, source: AnnouncementSource.Token,
-                ttl: null, CancellationToken.None);
-
-            // When the flip sweeps...
-            var declined = await repo.DeclineAllLiveAsync("station went public", CancellationToken.None);
-
-            // Then it declines, reason stamped.
-            Assert.Equal(1, declined);
-            var row = await ReadRowAsync(db, id);
-            Assert.Equal(AnnouncementState.Declined, row.State);
-            Assert.Equal("station went public", row.DeclineReason);
-        }
-
-        [Fact]
-        public async Task AClaimedRowDeclinesInTheSameSweepAsAPendingRow()
-        {
-            // Given one pending AND one claimed announcement, both live at the moment of the flip...
-            await db.ResetAnnouncementAsync();
-            var repo = Harness.AnnouncementRepo(db);
-            var pendingId = await repo.InsertAsync(
-                "Dinner's ready", verbatim: true, requestedVoice: null, source: AnnouncementSource.Token,
-                ttl: null, CancellationToken.None);
-            var toClaimId = await repo.InsertAsync(
-                "Storm's coming, bring the washing in", verbatim: true, requestedVoice: null,
-                source: AnnouncementSource.Token, ttl: null, CancellationToken.None);
-            var claimed = await repo.ClaimOldestAsync(10, DateTimeOffset.UtcNow, CancellationToken.None);
-            Assert.Contains(claimed, r => r.Id == toClaimId);
-
-            // When the flip sweeps ONCE...
-            var declined = await repo.DeclineAllLiveAsync("station went public", CancellationToken.None);
-
-            // Then BOTH rows decline — the pending one and the claimed one, together.
-            Assert.Equal(2, declined);
-            Assert.Equal(AnnouncementState.Declined, (await ReadRowAsync(db, pendingId)).State);
-            Assert.Equal(AnnouncementState.Declined, (await ReadRowAsync(db, toClaimId)).State);
-        }
-
-        [Fact]
-        public async Task AnAlreadyAiredRowIsNeverTouchedByTheFlip()
-        {
-            // Given an announcement that has already aired before the flip...
-            await db.ResetAnnouncementAsync();
-            var repo = Harness.AnnouncementRepo(db);
-            var airedId = await repo.InsertAsync(
-                "Dinner's ready", verbatim: true, requestedVoice: null, source: AnnouncementSource.Token,
-                ttl: null, CancellationToken.None);
-            var claimed = await repo.ClaimOldestAsync(1, DateTimeOffset.UtcNow, CancellationToken.None);
-            await repo.MarkAiredAsync(Assert.Single(claimed).Id, CancellationToken.None);
-
-            // When the flip sweeps...
-            var declined = await repo.DeclineAllLiveAsync("station went public", CancellationToken.None);
-
-            // Then the already-aired row is untouched — declined counts zero, its own state unchanged.
-            Assert.Equal(0, declined);
-            Assert.Equal(AnnouncementState.Aired, (await ReadRowAsync(db, airedId)).State);
-        }
-
-        [Fact]
-        public async Task NothingLiveMeansAHarmlessZeroCount()
-        {
-            // Given no announcements at all...
-            await db.ResetAnnouncementAsync();
-            var repo = Harness.AnnouncementRepo(db);
-
-            // When the flip sweeps anyway (a redundant re-write of SpectatorMode=true)...
-            var declined = await repo.DeclineAllLiveAsync("station went public", CancellationToken.None);
-
-            // Then it is a normal, silent zero — never an error.
-            Assert.Equal(0, declined);
-        }
-    }
-
     // ---------------------------------------------------------------------
     // T344 review finding F1 — the wire state mapping: IAnnouncementStore.HistoryAsync's explicit
     // interface implementation (ToStateText's five-way switch, PLAN T344) was exercised by NOTHING
@@ -781,7 +697,7 @@ public static class FeatureAnnouncementStoreLifecycle
             var declinedId = await repo.InsertAsync(
                 "Declined one", verbatim: true, requestedVoice: null, source: AnnouncementSource.Token,
                 ttl: TimeSpan.FromHours(1), CancellationToken.None);
-            await repo.MarkDeclinedAsync([declinedId], "station went public", CancellationToken.None);
+            await repo.MarkDeclinedAsync([declinedId], "declined by the owner", CancellationToken.None);
 
             var pendingId = await repo.InsertAsync(
                 "Pending one", verbatim: true, requestedVoice: null, source: AnnouncementSource.Token,

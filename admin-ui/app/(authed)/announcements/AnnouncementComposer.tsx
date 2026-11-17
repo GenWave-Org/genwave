@@ -18,9 +18,6 @@ const FIELD_INPUT_CLASSES =
   "h-9 rounded-[6px] border border-line bg-surface px-2 text-[0.85rem] text-ink disabled:opacity-50";
 
 export interface AnnouncementComposerProps {
-  /** SPEC F145.1/F146.3 — while true, the send is replaced with the public-mode notice instead of
-   * offering a control that will 403. */
-  spectatorMode: boolean;
   /** Fires after a genuinely accepted send (the id `AnnouncementAcceptedDto` carries) — the parent
    * owns turning that into a history refresh, mirroring SafeContentClient's own "child reports, parent
    * refetches" split (this endpoint returns id-only, so there is no created row to prepend locally). */
@@ -29,29 +26,16 @@ export interface AnnouncementComposerProps {
 
 /**
  * The Announcements page's send form (SPEC F146.1, STORY-361 AC1) — message box with a live 280
- * counter, verbatim toggle, optional TTL override, and the SpectatorMode notice (F146.3, AC4) that
- * replaces the send entirely rather than offering a control that would 403. POSTs through
+ * counter, verbatim toggle, and optional TTL override. POSTs through
  * `sendAnnouncement` — the same `POST /api/announcements` endpoint every other announcement source
  * uses; this form owns no parallel write path.
  */
-export function AnnouncementComposer({ spectatorMode, onSent }: AnnouncementComposerProps): ReactNode {
+export function AnnouncementComposer({ onSent }: AnnouncementComposerProps): ReactNode {
   const [message, setMessage] = useState("");
   const [verbatim, setVerbatim] = useState(false);
   const [ttlOverride, setTtlOverride] = useState("");
   const [isPending, setIsPending] = useState(false);
   const [fieldError, setFieldError] = useState<string | null>(null);
-
-  if (spectatorMode) {
-    return (
-      <section aria-label="Announcements disabled" className="rounded-[6px] border border-line bg-surface p-5">
-        <h2 className="font-display text-[1.1rem] text-ink">Send an announcement</h2>
-        <p className="mt-2 text-[0.85rem] text-mute">
-          Announcements are off while the station is public — a public stream never carries the
-          house&rsquo;s events. Turn off Spectator Mode in Settings to send one.
-        </p>
-      </section>
-    );
-  }
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>): Promise<void> {
     e.preventDefault();
