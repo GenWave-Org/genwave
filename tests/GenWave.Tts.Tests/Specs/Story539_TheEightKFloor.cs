@@ -40,10 +40,11 @@ public static class FeatureTheEightKFloor
             Assert.Equal("context window 4096 < 8192, memory off", window.MemoryOffReason);
 
         // The recent-lines block stays on (F218.37). The recall source WOULD return rows: only the 4096
-        // window keeps them out (positive control: Scenario8kIsGreenAndMemoryIsOn, identical setup at 8192).
+        // window keeps them out (memory-on evidence is Scenario8kIsGreenAndMemoryIsOn: the tile reason is null,
+        // so recall is taken at 8192; prompt rows are no longer the signal, F218.40-F218.42).
         [Fact]
         public void TheNextPromptHasNoWhatYouRememberBlock() =>
-            Assert.DoesNotContain(LlmPromptBuilder.MemoryHeading, prompt);
+            Assert.DoesNotContain("What you remember", prompt);
     }
 
     // AC2 — 8k is green and memory is on
@@ -67,8 +68,9 @@ public static class FeatureTheEightKFloor
         public void TheLLMTileIsGreen() => Assert.Null(window.MemoryOffReason);
 
         [Fact]
-        public void TheNextPromptHasAWhatYouRememberBlock() =>
-            Assert.Contains(LlmPromptBuilder.MemoryHeading, prompt);
+        public void TheNextPromptHasNoWhatYouRememberBlock() =>
+            // Retired by F218.40-F218.42: only a callback ask carries a memory now.
+            Assert.DoesNotContain("What you remember", prompt);
     }
 
     // AC3 — A declared window stands in for non-Ollama endpoints
@@ -116,8 +118,9 @@ public static class FeatureTheEightKFloor
         public void TheTruthGatePasses() => Assert.Equal(Copy, aired.Text);
 
         [Fact]
-        public void ThePromptSaysTheDJMayReferToMemoriesNeverMust() =>
-            Assert.Contains(LlmPromptBuilder.MemoryMayReferLine, prompt);
+        public void ThePromptNoLongerCarriesTheMayReferLine() =>
+            // Retired by F218.42; the memory still reaches the gate's facts until T736 swaps in the ask.
+            Assert.DoesNotContain("You may refer to these if it fits", prompt);
     }
 
     // F218.22 - rows are only spent when the prompt will carry them

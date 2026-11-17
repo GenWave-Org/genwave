@@ -269,8 +269,8 @@ static class LlmPromptBuilder
     /// there is an actual persona section for it to ride on. <paramref name="recentLines"/> (F218.10)
     /// rides the same way: only on an existing persona section, so a persona with no soul and no
     /// quirks gets no block and the neutral scaffold stays neutral. <paramref name="taglines"/>
-    /// (F218.32) is passed through to <see cref="BuildQuirksBlock"/>. <paramref name="memory"/> (F218.22)
-    /// is the same kind of rider: its blocks appear only when <see cref="HasPersonaSection"/> is true.
+    /// (F218.32) is passed through to <see cref="BuildQuirksBlock"/>. <paramref name="memory"/> (F218.19)
+    /// is the same kind of rider: its never-mention block appears only when <see cref="HasPersonaSection"/> is true.
     /// </summary>
     public static string? BuildPersonaSection(
         Persona? persona, PersonaCard? card, bool mentionOwnName = false, QuirkSelection? selection = null,
@@ -307,15 +307,6 @@ static class LlmPromptBuilder
         return lines.Count == 0 ? null : string.Join('\n', lines);
     }
 
-    /// <summary>SPEC F218.22 - heading of the memory block.</summary>
-    public const string MemoryHeading = "What you remember:";
-
-    /// <summary>SPEC F218.23 - memories are colour: the DJ may refer to them, never must.</summary>
-    public const string MemoryMayReferLine = "You may refer to these if it fits, but you never have to.";
-
-    /// <summary>SPEC F218.22 - nudge under the lore lines only; lore is the one kind recalled about once a shift.</summary>
-    public const string MemoryLoreNudgeLine = "Work one of these into this break if it fits naturally.";
-
     /// <summary>SPEC F218.19 - heading of the never-mention list.</summary>
     public const string NeverMentionHeading = "Never mention:";
 
@@ -323,24 +314,13 @@ static class LlmPromptBuilder
     public const int MemoryRowMaxChars = 240;
 
     /// <summary>
-    /// SPEC F218.22/F218.19/F218.23 - the memory block (lore, then the lore nudge when lore is present, then episodes newest
-    /// first, then life, then the may-refer line) and the never-mention block; each is absent when it has nothing to list.
-    /// Row text is flattened to one line so a stored newline cannot start a fake prompt section.
+    /// SPEC F218.19 - the never-mention block, absent when there is nothing to list. Memory rows no longer enter the
+    /// prompt (F218.40: only a callback ask carries one memory). Text is flattened to one line so a stored newline
+    /// cannot start a fake prompt section.
     /// </summary>
     public static IReadOnlyList<string> BuildMemoryBlocks(MemoryPacket memory)
     {
         var block = new List<string>();
-        var rows = memory.Rows;
-        if (rows.Count > 0)
-        {
-            block.Add(MemoryHeading);
-            block.AddRange(memory.Lore.Select(r => "- " + MemoryLine(r.Content)));
-            if (memory.Lore.Count > 0)
-                block.Add(MemoryLoreNudgeLine);
-            block.AddRange(memory.Episodes.Concat(memory.Life).Select(r => "- " + MemoryLine(r.Content)));
-            block.Add(MemoryMayReferLine);
-        }
-
         if (memory.NeverMention.Count > 0)
         {
             block.Add(NeverMentionHeading);
@@ -350,6 +330,26 @@ static class LlmPromptBuilder
         return block;
     }
 
+    /// <summary>SPEC F218.42 - label that opens the ask; the memory's text follows on the same line.</summary>
+    public const string CallbackAskLabel = "Something you remember: ";
+
+    /// <summary>SPEC F218.42 - the line under the ask: use it briefly, never announce the remembering.</summary>
+    public const string CallbackAskInstructionLine =
+        "Work it into this break in a few words of your own. Do not say that you are remembering it.";
+
+    /// <summary>
+    /// SPEC F218.42 - the ask block: the one memory, then the work-it-in line. The content is flattened and trimmed
+    /// like every memory line, so a stored newline cannot forge a section.
+    /// </summary>
+    public static IReadOnlyList<string> BuildCallbackAskLines(CallbackAsk ask) =>
+        [CallbackAskLabel + MemoryLine(ask.Memory.Content), CallbackAskInstructionLine];
+
+    /// <summary>
+    /// SPEC F218.42 - the ask's memory text for the truth gate's fact block, so the gate cannot reject the very
+    /// callback the prompt asked for.
+    /// </summary>
+    public static string CallbackFacts(CallbackAsk ask) => MemoryLine(ask.Memory.Content);
+
     static string MemoryLine(string text)
     {
         var flat = string.Join(' ', text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)).Trim();
@@ -358,7 +358,7 @@ static class LlmPromptBuilder
 
     static string TrimTo(string text, int maxChars) => text.Length <= maxChars ? text : text[..maxChars];
 
-    /// <summary>SPEC F218.23 - the recalled rows' text, one per line, for the truth gate's fact block; empty when none.</summary>
+    /// <summary>Transitional (T736 swaps its call site for <see cref="CallbackFacts"/>, T737 deletes it): recalled rows for the gate fact block.</summary>
     public static string? MemoryFacts(MemoryPacket memory)
     {
         var rows = memory.Rows.Select(r => MemoryLine(r.Content)).ToList();
@@ -926,7 +926,7 @@ static class LlmPromptBuilder
     /// </summary>
     public static string BuildUserContent(
         SegmentRequest request, string stationClockLine, IReadOnlyList<string> previouslyVoicedTasteNotes,
-        string? duePatterFact = null, ShowFlavorFact? dueShowFlavorFact = null)
+        string? duePatterFact = null, ShowFlavorFact? dueShowFlavorFact = null, CallbackAsk? callbackAsk = null)
     {
         var hasContextFacts = !string.IsNullOrWhiteSpace(request.ContextFacts);
         var lines = new List<string>
@@ -934,8 +934,13 @@ static class LlmPromptBuilder
             $"Station: {request.StationName}",
             $"Local time: {request.LocalNow.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)}",
             stationClockLine,
-            BuildSegmentLine(request.Kind, hasContextFacts),
         };
+
+        // SPEC F218.40/F218.42: only a lead-in or back-announce carries the ask, directly before the segment line.
+        if (callbackAsk is not null && CallbackKinds.Carries(request.Kind))
+            lines.AddRange(BuildCallbackAskLines(callbackAsk));
+
+        lines.Add(BuildSegmentLine(request.Kind, hasContextFacts));
 
         if (request.Kind is SegmentKind.SignOff or SegmentKind.SignOn)
         {

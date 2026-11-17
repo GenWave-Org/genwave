@@ -1,4 +1,5 @@
-// STORY-539 - T725: the lore lines carry a nudge; episodes and life do not.
+// STORY-539 - T725, amended by T735: the lore nudge, the may-refer line and the memory rows are RETIRED by
+// SPEC F218.40-F218.42 (only a callback ask carries one memory). These facts now pin their absence; the nudge and may-refer facts were merged into one absence fact.
 
 using GenWave.Core.Domain;
 
@@ -15,22 +16,17 @@ public static class FeatureTheLoreNudge
     {
         readonly IReadOnlyList<string> blocks = Blocks([Row(MemoryKinds.Lore, "the van")], [Row(MemoryKinds.Episode, "the quiz")]);
 
+        // F218.40-F218.42: the rows, the nudge and the may-refer line no longer reach the prompt.
         [Fact]
-        public void TheNudgeFollowsTheLoreLines() =>
-            Assert.Equal(["- the van", LlmPromptBuilder.MemoryLoreNudgeLine, "- the quiz"], blocks.Skip(1).Take(3));
-
-        [Fact]
-        public void TheBlockStillSaysTheDjNeverHasTo() => Assert.Contains(LlmPromptBuilder.MemoryMayReferLine, blocks);
+        public void NoRowsNudgeOrMayReferLineReachThePrompt() => Assert.Empty(blocks);
     }
 
     public sealed class ScenarioNoLore
     {
         [Fact]
-        public void EpisodesOnlyCarryNoNudge() =>
-            Assert.DoesNotContain(LlmPromptBuilder.MemoryLoreNudgeLine, Blocks([], [Row(MemoryKinds.Episode, "the quiz")]));
+        public void EpisodesOnlyCarryNothing() => Assert.Empty(Blocks([], [Row(MemoryKinds.Episode, "the quiz")]));
 
         [Fact]
-        public void NothingRememberedCarriesNoNudge() =>
-            Assert.DoesNotContain(LlmPromptBuilder.MemoryLoreNudgeLine, Blocks([], []));
+        public void NothingRememberedCarriesNothing() => Assert.Empty(Blocks([], []));
     }
 }

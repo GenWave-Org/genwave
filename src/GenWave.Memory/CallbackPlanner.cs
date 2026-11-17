@@ -20,7 +20,7 @@ public sealed class CallbackPlanner(ICallbackStore store, Random? random = null)
 
     public async Task<CallbackAsk?> PlanAsync(CallbackRequest request, CancellationToken ct)
     {
-        if (request.Kind is not (SegmentKind.LeadIn or SegmentKind.BackAnnounce) || request.CallbacksPerHour <= 0)
+        if (!CallbackKinds.Carries(request.Kind) || request.CallbacksPerHour <= 0)
             return null;
 
         var perHour = Math.Min(request.CallbacksPerHour, MaxCallbacksPerHour);

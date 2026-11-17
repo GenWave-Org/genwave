@@ -20,7 +20,8 @@ internal static class BreakPromptComposer
         var user = inputs.AnnouncementMessage is { } message
             ? LlmPromptBuilder.BuildAnnouncementUserContent(inputs.Request, clockLine, message)
             : LlmPromptBuilder.BuildUserContent(
-                inputs.Request, clockLine, inputs.PreviouslyVoicedTasteNotes, inputs.PatterFact, inputs.ShowFlavor);
+                inputs.Request, clockLine, inputs.PreviouslyVoicedTasteNotes, inputs.PatterFact, inputs.ShowFlavor,
+                inputs.Callback);
 
         return new BreakPrompt(system, user);
     }
