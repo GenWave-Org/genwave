@@ -119,7 +119,7 @@ public static class FeatureSettingsVersionGuard
         return new SettingsController(
             config,
             store,
-            new SettingValidator(config),
+            new SettingValidator(config, TestVoiceEngines.KokoroAndPiper()),
             NullLogger<SettingsController>.Instance,
             TestSettingCopy.Real(), TestSettingChoiceResolver.Default())
         {

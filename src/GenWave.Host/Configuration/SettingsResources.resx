@@ -342,6 +342,12 @@
   <data name="Tts:Fallback:Voice.Help" xml:space="preserve">
     <value>The Piper voice model the fallback service is expected to be running — display-only: Piper bakes one voice into the sidecar and has no per-request selector, so this is never sent with a render; it only documents what compose deployed. In a fallback profile chain each hop carries its own voice instead — honored on the wire for Kokoro-kind hops, display-only for Piper hops.</value>
   </data>
+  <data name="Tts:Engine.Label" xml:space="preserve">
+    <value>Voice engine</value>
+  </data>
+  <data name="Tts:Engine.Help" xml:space="preserve">
+    <value>The speech engine every spoken line is rendered with. Choose one of the engines configured for this station; the change applies to the next line, no restart needed.</value>
+  </data>
   <data name="Tts:EngineByKind.Label" xml:space="preserve">
     <value>Engine by speech kind</value>
   </data>

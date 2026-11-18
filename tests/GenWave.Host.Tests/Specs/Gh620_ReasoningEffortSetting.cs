@@ -5,6 +5,7 @@
 // LlmWishParser against a scripted FakeHttpMessageHandler (Story225's idiom) — the one poster
 // that lives in GenWave.Host. The setting's label/help copy is a SettingCopy/resx concern (SPEC
 // F205.4, PLAN T574/T576) — no client-side help-key mirror exists for this key to join anymore.
+using GenWave.Host.Tests.Support;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -29,7 +30,7 @@ public static class FeatureReasoningEffortSetting
         Path.Combine(RepoRoot, "src", "GenWave.Host", "appsettings.json");
 
     static SettingValidator BuildValidator() =>
-        new(new ConfigurationBuilder().Build());
+        new(new ConfigurationBuilder().Build(), TestVoiceEngines.KokoroAndPiper());
 
     // ---------------------------------------------------------------------
     // HAPPY PATH — the setting exists, seeded, allowlisted, validated

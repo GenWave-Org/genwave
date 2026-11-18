@@ -2,6 +2,7 @@
 // AC4 (release + demo) is manual (Dean) — no spec; it closes on his word (T408/T409).
 using GenWave.Architecture.Tests.Support;
 using GenWave.Host.Configuration;
+using GenWave.Tts;
 using Microsoft.Extensions.Configuration;
 
 namespace GenWave.Architecture.Tests.Specs;
@@ -166,7 +167,9 @@ public static class FeatureShipHonestPins
             // (deliberately not read off StationSettingsAllowlist.ByKey[key].Min/Max, PLAN T572 —
             // this pin's whole point is to catch the allowlist row itself drifting), matched against
             // that row's own Min/Max — change one, change the other.
-            var validator = new SettingValidator(new ConfigurationBuilder().Build());
+            var validator = new SettingValidator(
+                new ConfigurationBuilder().Build(),
+                new VoiceEngineRegistry(Microsoft.Extensions.Options.Options.Create(new VoiceEnginesOptions())));
 
             AssertRangeEnforced(validator, "Station:Ads:EveryNUnits", min: 0, max: 1000);
             AssertRangeEnforced(validator, "Station:Ads:TargetCount", min: 0, max: 100);

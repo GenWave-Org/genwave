@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
+using GenWave.Tts;
 
 namespace GenWave.Host.Api;
 
@@ -20,6 +22,8 @@ namespace GenWave.Host.Api;
 [Authorize(Policy = AuthorizationPolicies.Operator)]
 public sealed class VoicesController(
     ITtsVoiceLister voiceLister,
+    IVoiceEngineRegistry engines,
+    IOptionsMonitor<TtsOptions> ttsOptions,
     ILogger<VoicesController> logger) : ControllerBase
 {
     /// <summary>
@@ -46,6 +50,17 @@ public sealed class VoicesController(
             return BadGateway();
         }
     }
+
+    /// <summary>
+    /// GET /api/voices/engines — the engines in the registry plus which one <c>Tts:Engine</c> names
+    /// right now (SPEC F219.2), for the Settings "Voice engine" control. Read live, so a just-saved
+    /// choice shows on the next call.
+    /// </summary>
+    [HttpGet("voices/engines")]
+    public ActionResult<VoiceEnginesResponse> GetEngines() =>
+        new VoiceEnginesResponse(
+            ttsOptions.CurrentValue.Engine,
+            [.. engines.All.Select(e => new VoiceEngineSummary(e.Name, e.Profile.Name))]);
 
     ObjectResult BadGateway() =>
         StatusCode(StatusCodes.Status502BadGateway, new ProblemDetails

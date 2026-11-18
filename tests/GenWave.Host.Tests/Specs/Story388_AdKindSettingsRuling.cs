@@ -9,6 +9,7 @@
 // pins the settings-validation half only — no live stack or DB required, the Story100 in-process
 // pattern.
 
+using GenWave.Host.Tests.Support;
 using Microsoft.Extensions.Configuration;
 using GenWave.Host.Configuration;
 
@@ -17,7 +18,7 @@ namespace GenWave.Host.Tests.Specs;
 public static class FeatureAdKindSettingsRuling
 {
     static SettingValidator BuildValidator() =>
-        new(new ConfigurationBuilder().Build());
+        new(new ConfigurationBuilder().Build(), TestVoiceEngines.KokoroAndPiper());
 
     public sealed class ScenarioDocumentAccept
     {

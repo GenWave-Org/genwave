@@ -286,6 +286,10 @@ public static class StationSettingsAllowlist
         // wire for the piper engine.
         new("Tts:Fallback:Endpoint", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Voice),
         new("Tts:Fallback:Voice", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Voice),
+        // The engine every speech render uses (SPEC F219.2) — a name from the voice engine registry
+        // (Tts:Engines:<name>, GET /api/voices/engines); SettingValidator rejects any other name.
+        // Default "kokoro" lives in appsettings.json + TtsOptions.Engine.
+        new("Tts:Engine", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Voice),
         // Per-kind TTS engine override map (SPEC F70.3, STORY-191): a JSON-encoded object mapping
         // SegmentKind names to an engine name ("kokoro"/"piper"), e.g.
         // {"StationId":"piper","LeadIn":"kokoro"} — the same "single opaque string-kind setting"

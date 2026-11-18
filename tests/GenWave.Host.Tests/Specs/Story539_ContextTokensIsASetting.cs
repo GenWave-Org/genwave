@@ -35,7 +35,7 @@ public static class FeatureContextTokensIsASetting
         var config = new ConfigurationBuilder().Build();
         var store = new MemoryStore();
         var controller = new SettingsController(
-            config, store, new SettingValidator(config), NullLogger<SettingsController>.Instance,
+            config, store, new SettingValidator(config, TestVoiceEngines.KokoroAndPiper()), NullLogger<SettingsController>.Instance,
             TestSettingCopy.Real(), TestSettingChoiceResolver.Default())
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },

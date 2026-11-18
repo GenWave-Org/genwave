@@ -539,7 +539,7 @@ public static class FeatureSafeSeedOnBootInProcess
             var store = new FakeSeedSettingsStore();
             store.SeedOperatorRow(SafeLoopSeedMarkerStore.Key, "\"2026-01-01T00:00:00Z\"");
             var controller = new SettingsController(
-                config, store, new SettingValidator(config), NullLogger<SettingsController>.Instance,
+                config, store, new SettingValidator(config, TestVoiceEngines.KokoroAndPiper()), NullLogger<SettingsController>.Instance,
                 TestSettingCopy.Real(), TestSettingChoiceResolver.Default())
             {
                 ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },

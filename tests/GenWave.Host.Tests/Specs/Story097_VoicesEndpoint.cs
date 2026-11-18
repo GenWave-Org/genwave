@@ -86,7 +86,11 @@ file sealed class VoicesApiWebFactory(Uri kokoroBaseUri) : WebApplicationFactory
 public static class FeatureVoicesEndpoint
 {
     static VoicesController BuildController(ITtsVoiceLister voiceLister) =>
-        new(voiceLister, NullLogger<VoicesController>.Instance)
+        new(
+            voiceLister,
+            new VoiceEngineRegistry(Microsoft.Extensions.Options.Options.Create(new VoiceEnginesOptions())),
+            new FakeOptionsMonitor<TtsOptions>(new TtsOptions()),
+            NullLogger<VoicesController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
         };

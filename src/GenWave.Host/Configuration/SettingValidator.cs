@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using Microsoft.Extensions.Configuration;
 using GenWave.Core.Domain;
 using GenWave.Host.Theming;
+using GenWave.Tts;
 
 namespace GenWave.Host.Configuration;
 
@@ -27,6 +28,7 @@ public sealed partial class SettingValidator
 {
     readonly IConfiguration configuration;
     readonly ThemeCatalog themeCatalog;
+    readonly IVoiceEngineRegistry engines;
     readonly Dictionary<string, Func<string, bool>> validators;
 
     /// <param name="configuration">Read by <see cref="ValidateBatch"/>'s cross-field checks.</param>
@@ -41,12 +43,22 @@ public sealed partial class SettingValidator
     /// falls back to <see cref="ThemeCatalog.LoadShipped"/> — the exact shipped-only set this
     /// validator checked <c>Station:Theme</c> against before T183.
     /// </param>
-    public SettingValidator(IConfiguration configuration, ThemeCatalog? themeCatalog = null)
+    /// <param name="engines">
+    /// The DI-registered voice engine registry (SPEC F219.1) — the one source of the names
+    /// <c>Tts:Engine</c> accepts (F219.2). Required: a validator over a list production never uses
+    /// would hide registry-shaped bugs from the specs.
+    /// </param>
+    public SettingValidator(IConfiguration configuration, IVoiceEngineRegistry engines, ThemeCatalog? themeCatalog = null)
     {
         this.configuration = configuration;
+        this.engines = engines;
         this.themeCatalog = themeCatalog ?? ThemeCatalog.LoadShipped();
         validators = BuildValidators(this.themeCatalog);
+        validators["Tts:Engine"] = IsKnownEngineName;
     }
+
+    // Case-insensitive: the registry's own lookup is.
+    bool IsKnownEngineName(string name) => engines.Get(name) is not null;
 
     // ── Non-range constants ──────────────────────────────────────────────────────────────────────
     //    Every Number-key Min/Max moved onto its own AllowedSetting record (SPEC F205.1, STORY-477,
@@ -973,8 +985,11 @@ public sealed partial class SettingValidator
             => $"Value '{value}' is not valid for '{key}'. Must be an absolute http/https URL, or empty to disable the Piper fallback engine.",
         var k when k.Equals("Tts:EngineByKind", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be a JSON object mapping speech kind names " +
-               "(StationId, LeadIn, BackAnnounce, TimeDate) to \"kokoro\" or \"piper\", e.g. {{}} or " +
-               "{{\"StationId\":\"piper\"}}.",
+               "(StationId, LeadIn, BackAnnounce, TimeDate) to \"kokoro\" or \"piper\", e.g. {} or " +
+               "{\"StationId\":\"piper\"}.",
+        var k when k.Equals("Tts:Engine", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be one of the configured engines: " +
+               $"{string.Join(", ", engines.All.Select(e => e.Name))}.",
         var k when k.Equals("Llm:Endpoint", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an absolute http/https URL, or empty to disable LLM-authored copy.",
         var k when k.Equals("Llm:TimeoutSeconds", StringComparison.OrdinalIgnoreCase)

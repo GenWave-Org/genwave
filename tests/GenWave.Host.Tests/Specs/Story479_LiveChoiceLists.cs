@@ -151,7 +151,7 @@ public static class FeatureLiveModelAndVoiceLists
         new(
             config,
             store,
-            new SettingValidator(config),
+            new SettingValidator(config, TestVoiceEngines.KokoroAndPiper()),
             NullLogger<SettingsController>.Instance,
             TestSettingCopy.Real(),
             resolver)

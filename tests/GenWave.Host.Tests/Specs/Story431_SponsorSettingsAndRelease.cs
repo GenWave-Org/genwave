@@ -68,7 +68,7 @@ public static class FeatureSponsorSettingsOptionsLawsAndTheRelease
         [Fact]
         public void TheOutOfRangeErrorMessageSaysSponsor()
         {
-            var validator = new SettingValidator(new ConfigurationBuilder().Build());
+            var validator = new SettingValidator(new ConfigurationBuilder().Build(), TestVoiceEngines.KokoroAndPiper());
 
             var message = validator.Validate("Station:Ads:AntiRepeatWindow", "99");
 
@@ -188,7 +188,7 @@ public static class FeatureSponsorSettingsOptionsLawsAndTheRelease
             var controller = new SettingsController(
                 config,
                 new UnreachableSettingsStore(),
-                new SettingValidator(config),
+                new SettingValidator(config, TestVoiceEngines.KokoroAndPiper()),
                 NullLogger<SettingsController>.Instance,
                 TestSettingCopy.Real(), TestSettingChoiceResolver.Default())
             {

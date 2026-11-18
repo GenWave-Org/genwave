@@ -4,19 +4,147 @@
 
 namespace GenWave.Host.Tests.Specs;
 
+using System.Net;
+using System.Net.Http.Json;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
+using GenWave.Host.Configuration;
+
+// In-process settings store that drives a real live reload of the app's IConfiguration, so a PUT
+// is visible to the next request (the F19 contract) with no Postgres behind it.
+file sealed class EngineSettingProvider : ConfigurationProvider
+{
+    public void SetAndReload(string key, string value)
+    {
+        Set(key, value);
+        OnReload();
+    }
+}
+
+file sealed class EngineSettingSource(EngineSettingProvider provider) : IConfigurationSource
+{
+    public IConfigurationProvider Build(IConfigurationBuilder builder) => provider;
+}
+
+file sealed class EngineSettingsStore : IStationSettingsStore
+{
+    readonly EngineSettingProvider provider = new();
+
+    public EngineSettingsStore(IConfiguration configuration)
+    {
+        ((IConfigurationBuilder)configuration).Add(new EngineSettingSource(provider));
+    }
+
+    public Task WriteAsync(string key, object value, CancellationToken cancellationToken = default)
+    {
+        provider.SetAndReload(key, value?.ToString() ?? string.Empty);
+        return Task.CompletedTask;
+    }
+
+    public Task<IReadOnlyDictionary<string, string>> ReadAllAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyDictionary<string, string>>(new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
+}
+
+/// <summary>
+/// The real host with chatterbox optionally added to the engine registry (kokoro is seeded). No
+/// <c>Tts:PiperPrimaryEndpoint</c> is set either way — a Kokoro + fallback install, where the
+/// registry holds no piper.
+/// </summary>
+file sealed class EngineSettingFactory(bool withChatterbox) : WebApplicationFactory<Program>
+{
+    internal const string Password = "test-password-engine";
+
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        builder.UseEnvironment("Development");
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
+        builder.UseSetting("Admin:Password", Password);
+        if (withChatterbox)
+        {
+            builder.UseSetting("Tts:Engines:chatterbox:Endpoint", "http://chatterbox:8004");
+            builder.UseSetting("Tts:Engines:chatterbox:Profile", "chatterbox");
+        }
+
+        builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<IHostedService>();
+            services.RemoveAll<IStationSettingsStore>();
+            services.AddSingleton<IStationSettingsStore>(sp =>
+                new EngineSettingsStore(sp.GetRequiredService<IConfiguration>()));
+        });
+    }
+}
+
+/// <summary>Boots the host once per fact and logs in; each scenario inherits it.</summary>
+public abstract class EngineSettingScenario : IAsyncLifetime
+{
+    readonly WebApplicationFactory<Program> factory;
+
+    protected EngineSettingScenario(bool withChatterbox = true)
+    {
+        factory = new EngineSettingFactory(withChatterbox);
+        Client = factory.CreateClient();
+    }
+
+    protected HttpClient Client { get; }
+
+    public async Task InitializeAsync()
+    {
+        var login = await Client.PostAsJsonAsync("/api/auth/login", new { password = EngineSettingFactory.Password });
+        Assert.Equal(HttpStatusCode.NoContent, login.StatusCode);
+    }
+
+    public async Task DisposeAsync()
+    {
+        Client.Dispose();
+        await factory.DisposeAsync();
+    }
+
+    protected Task<HttpResponseMessage> PutEngineAsync(string engine) =>
+        Client.PutAsJsonAsync("/api/settings", new[] { new { key = "Tts:Engine", value = engine } });
+}
+
+file sealed record EngineSettingRow(string Key, string Value);
+
+file sealed record EngineSummaryRow(string Name, string Profile);
+
+file sealed record EnginesBody(string Active, List<EngineSummaryRow> Engines);
+
 public static class FeatureOneSettingSwitchesTheEngine
 {
     // AC1, AC3 — chatterbox in the registry; through the settings endpoint
-    public sealed class ScenarioSavingTheSetting
+    public sealed class ScenarioSavingTheSetting : EngineSettingScenario
     {
-        [Fact(Skip = "pending: T748")]
-        public void SettingChatterboxReturns200() { }
+        [Fact]
+        public async Task SettingChatterboxReturns200()
+        {
+            var response = await PutEngineAsync("chatterbox");
 
-        [Fact(Skip = "pending: T748")]
-        public void AFreshInstallReadsKokoro() { }
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
 
-        [Fact(Skip = "pending: T748")]
-        public void TheEnginesEndpointListsTheRegistry() { }
+        [Fact]
+        public async Task AFreshInstallReadsKokoro()
+        {
+            var rows = await Client.GetFromJsonAsync<List<EngineSettingRow>>("/api/settings");
+
+            Assert.NotNull(rows);
+            Assert.Equal("kokoro", Assert.Single(rows, r => r.Key == "Tts:Engine").Value);
+        }
+
+        [Fact]
+        public async Task TheEnginesEndpointListsTheRegistry()
+        {
+            var body = await Client.GetFromJsonAsync<EnginesBody>("/api/voices/engines");
+
+            Assert.NotNull(body);
+            Assert.Equal(["chatterbox", "kokoro"], body.Engines.Select(e => e.Name).Order().ToArray());
+        }
     }
 
     // AC2 — the engine changed, then a preview through the test host, no restart
@@ -31,9 +159,30 @@ public static class FeatureOneSettingSwitchesTheEngine
 
     // Sad path
     // AC6
-    public sealed class ScenarioAnUnknownEngine
+    public sealed class ScenarioAnUnknownEngine : EngineSettingScenario
     {
-        [Fact(Skip = "pending: T748")]
-        public void SettingNopeReturns400() { }
+        [Fact]
+        public async Task SettingNopeReturns400()
+        {
+            var response = await PutEngineAsync("nope");
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+    }
+
+    // F70.3 — the per-kind map still names wire kinds, not registry entries
+    public sealed class ScenarioPiperInAnEngineByKindMapOnAKokoroOnlyRegistry : EngineSettingScenario
+    {
+        public ScenarioPiperInAnEngineByKindMapOnAKokoroOnlyRegistry() : base(withChatterbox: false) { }
+
+        [Fact]
+        public async Task SettingStationIdToPiperReturns200()
+        {
+            var response = await Client.PutAsJsonAsync(
+                "/api/settings",
+                new[] { new { key = "Tts:EngineByKind", value = "{\"StationId\":\"piper\"}" } });
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
     }
 }

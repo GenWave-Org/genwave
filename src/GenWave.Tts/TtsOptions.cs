@@ -9,6 +9,10 @@ public sealed class TtsOptions
     [Required, Url]
     public string Endpoint { get; set; } = "http://kokoro:8880";
 
+    /// <summary>The engine every speech render uses (SPEC F219.2): a name in <see cref="IVoiceEngineRegistry"/>. Live setting <c>Tts:Engine</c>.</summary>
+    [Required]
+    public string Engine { get; set; } = VoiceEngineProfiles.KokoroName;
+
     [Required]
     public string Format { get; set; } = "wav";
 

@@ -6,6 +6,7 @@
 // not silently degrade the whole rule set inside SpeechCorrectionProvider. The rule-engine
 // semantics themselves are pinned in GenWave.Tts.Tests (Gh161_ContextAwareCorrections).
 
+using GenWave.Host.Tests.Support;
 using Microsoft.Extensions.Configuration;
 using GenWave.Host.Configuration;
 using Xunit;
@@ -16,7 +17,7 @@ public static class FeatureContextCorrectionsSettingShape
 {
     public sealed class ScenarioTtsCorrectionsShapeValidation
     {
-        readonly SettingValidator validator = new(new ConfigurationBuilder().Build());
+        readonly SettingValidator validator = new(new ConfigurationBuilder().Build(), TestVoiceEngines.KokoroAndPiper());
 
         [Theory]
         [InlineData("""[{"from":"MacLeod","to":"Muh-cloud"}]""")]                                  // pre-gh-#161 shape

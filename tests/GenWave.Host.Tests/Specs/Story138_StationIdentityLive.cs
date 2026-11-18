@@ -138,7 +138,7 @@ public static class FeatureStationIdentityLive
         var store = new SeededSettingsStore(seed, provider);
 
         var settingsController = new SettingsController(
-            root, store, new SettingValidator(root), NullLogger<SettingsController>.Instance,
+            root, store, new SettingValidator(root, TestVoiceEngines.KokoroAndPiper()), NullLogger<SettingsController>.Instance,
             TestSettingCopy.Real(), TestSettingChoiceResolver.Default())
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },

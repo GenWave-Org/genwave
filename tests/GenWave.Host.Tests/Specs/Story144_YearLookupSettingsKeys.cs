@@ -8,6 +8,7 @@
 // Energy pair); all three carry a SettingValidator entry. Idiom mirrors Story139_SettingsSurfaceCompletion
 // (V8) exactly.
 
+using GenWave.Host.Tests.Support;
 using Microsoft.Extensions.Configuration;
 using GenWave.Host.Configuration;
 
@@ -80,7 +81,7 @@ public static class FeatureYearLookupSettingsKeys
         [Fact]
         public void ANonBooleanEnabledIsRejected()
         {
-            var validator = new SettingValidator(BuildConfig(KeyDefaults()));
+            var validator = new SettingValidator(BuildConfig(KeyDefaults()), TestVoiceEngines.KokoroAndPiper());
 
             Assert.Null(validator.Validate("Library:YearLookup:Enabled", "true"));
             Assert.NotNull(validator.Validate("Library:YearLookup:Enabled", "not-a-bool"));
@@ -89,7 +90,7 @@ public static class FeatureYearLookupSettingsKeys
         [Fact]
         public void AMalformedEndpointUrlIsRejected()
         {
-            var validator = new SettingValidator(BuildConfig(KeyDefaults()));
+            var validator = new SettingValidator(BuildConfig(KeyDefaults()), TestVoiceEngines.KokoroAndPiper());
 
             Assert.Null(validator.Validate("Library:YearLookup:Endpoint", "https://musicbrainz.org/ws/2"));
             Assert.NotNull(validator.Validate("Library:YearLookup:Endpoint", "not-a-url"));
@@ -99,7 +100,7 @@ public static class FeatureYearLookupSettingsKeys
         [Fact]
         public void AnOutOfRangeMinScoreIsRejected()
         {
-            var validator = new SettingValidator(BuildConfig(KeyDefaults()));
+            var validator = new SettingValidator(BuildConfig(KeyDefaults()), TestVoiceEngines.KokoroAndPiper());
 
             Assert.Null(validator.Validate("Library:YearLookup:MinScore", "90"));
             Assert.Null(validator.Validate("Library:YearLookup:MinScore", "0"));

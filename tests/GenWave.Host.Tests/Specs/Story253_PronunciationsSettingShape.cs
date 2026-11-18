@@ -6,6 +6,7 @@
 // word/ipa or a missing pattern. Rule-engine semantics themselves (including P1/P2's degrade
 // behavior for a blank/close-paren ipa) are pinned in GenWave.Tts.Tests (Story252/Story253).
 
+using GenWave.Host.Tests.Support;
 using Microsoft.Extensions.Configuration;
 using GenWave.Host.Configuration;
 using Xunit;
@@ -16,7 +17,7 @@ public static class FeaturePronunciationsSettingShape
 {
     public sealed class ScenarioTtsPronunciationsShapeValidation
     {
-        readonly SettingValidator validator = new(new ConfigurationBuilder().Build());
+        readonly SettingValidator validator = new(new ConfigurationBuilder().Build(), TestVoiceEngines.KokoroAndPiper());
 
         [Theory]
         [InlineData("""[{"pattern":"MacLeod","word":"MacLeod","ipa":"/məˈklaʊd/"}]""")]
