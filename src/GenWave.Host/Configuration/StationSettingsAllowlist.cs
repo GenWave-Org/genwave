@@ -317,10 +317,9 @@ public static class StationSettingsAllowlist
 
         // F44.2 allowlist completion (closes gitea-#197) — six more boot-frozen consumers migrate to a
         // live provider/IOptionsMonitor read at use time:
-        //   • Tts:RenderBudgetSeconds — the Orchestrator's own copy used to be a TimeSpan computed
-        //     once in Program.cs; it now reads IRenderBudgetProvider fresh per unit. TtsPreviewController
-        //     and SafeSegmentsController already read IOptionsMonitor<TtsOptions> per call (T8/F29) —
-        //     unaffected by this change, just newly reachable through the settings API.
+        //   • Tts:RenderBudgetSeconds — the seeded kokoro/piper engines' budget, and the fallback when
+        //     no engine is configured (F219.6: each engine otherwise carries its own). Every render
+        //     path reads IRenderBudgetProvider fresh per unit; no boot-frozen copy remains.
         //   • Tts:BlurbRetentionHours — TtsSegmentSource's blurb GC sweep now reads
         //     IOptionsMonitor<TtsOptions>.CurrentValue per render instead of a frozen field (F34.6).
         //   • Llm:MaxCopyChars — LlmCopyWriter already reads IOptionsMonitor<LlmOptions> fresh per

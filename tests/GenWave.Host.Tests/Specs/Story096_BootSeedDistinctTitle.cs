@@ -5,6 +5,7 @@
 // distinctly from one an operator authors manually through POST /api/safe-segments, which still
 // defaults to the plain "Please Stand By" (SafeSegmentAuthor.DefaultTitle, F27.3 unchanged).
 
+using FakeRenderBudgetProvider = GenWave.TestSupport.Fakes.FakeRenderBudgetProvider;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -257,7 +258,7 @@ file static class EndpointFixture
             new BridgingAdminMediaLookup(writer),
             new FakeShowStore(),
             new FakeOptionsMonitor<StationOptions>(stationOptions),
-            new FakeOptionsMonitor<TtsOptions>(new TtsOptions()),
+            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
             NullLogger<SafeSegmentsController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },

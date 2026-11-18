@@ -10,6 +10,7 @@
 // needs to be a fake, mirroring Story078's fixture pattern but assembled locally since this project
 // does not reference GenWave.Tts.Tests' Fakes assembly.
 
+using FakeRenderBudgetProvider = GenWave.TestSupport.Fakes.FakeRenderBudgetProvider;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -279,7 +280,7 @@ file static class EndpointFixture
             new BridgingAdminMediaLookup(writer),
             new FakeShowStore(),
             new FakeOptionsMonitor<StationOptions>(stationOptions),
-            new FakeOptionsMonitor<TtsOptions>(new TtsOptions()),
+            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
             NullLogger<SafeSegmentsController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },

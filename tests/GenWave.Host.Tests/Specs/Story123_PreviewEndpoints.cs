@@ -19,6 +19,7 @@
 //
 // See docs/PLAN.md Epic T.
 
+using FakeRenderBudgetProvider = GenWave.TestSupport.Fakes.FakeRenderBudgetProvider;
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Hosting;
@@ -240,7 +241,7 @@ file static class PreviewControllerFactory
         new(
             synthesizer,
             new FakeOptionsMonitor<StationOptions>(stationOptions ?? DefaultStationOptions()),
-            new FakeOptionsMonitor<TtsOptions>(ttsOptions ?? new TtsOptions()),
+            new FakeRenderBudgetProvider(TimeSpan.FromSeconds((ttsOptions ?? new TtsOptions()).RenderBudgetSeconds)),
             // T274 (SPEC F126.1): the preview now resolves rules/pace through these same three
             // real, cheap-to-construct DI seams TtsSegmentSource uses — no station/card rules
             // configured here reproduces this suite's pre-T274 "empty rules" shape exactly (an

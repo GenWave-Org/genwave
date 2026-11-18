@@ -16,6 +16,7 @@
 // real ffmpeg mixing, real Postgres selectability, and the cookie/Content-Type pipeline all
 // need the live stack.
 
+using FakeRenderBudgetProvider = GenWave.TestSupport.Fakes.FakeRenderBudgetProvider;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -114,7 +115,7 @@ file static class SafeSegmentsControllerFactory
             adminLookup,
             showStore ?? new FakeShowStore(),
             new FakeOptionsMonitor<StationOptions>(stationOptions ?? DefaultStationOptions()),
-            new FakeOptionsMonitor<TtsOptions>(ttsOptions ?? new TtsOptions()),
+            new FakeRenderBudgetProvider(TimeSpan.FromSeconds((ttsOptions ?? new TtsOptions()).RenderBudgetSeconds)),
             NullLogger<SafeSegmentsController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },

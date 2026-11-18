@@ -1,3 +1,4 @@
+using GenWave.Tts;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
@@ -83,10 +84,10 @@ static class StationOptionsServiceCollectionExtensions
             // PUT /api/settings rotation edit applies to both without an api restart.
             .AddSingleton<IRotationSettingsProvider, OptionsMonitorRotationSettingsProvider>()
             // Live render-budget seam (SPEC F44.2, closes gitea-#197 — the same F30.1/gitea-#211 precedent):
-            // wraps IOptionsMonitor<TtsOptions> and re-reads CurrentValue on every call, so a live
-            // PUT /api/settings edit to Tts:RenderBudgetSeconds applies to the very next unit's
-            // renders.
-            .AddSingleton<IRenderBudgetProvider, OptionsMonitorRenderBudgetProvider>()
+            // reads the ACTIVE voice engine's own budget (SPEC F219.6) on every call, so a saved
+            // Tts:Engine or a live PUT /api/settings edit to Tts:RenderBudgetSeconds (which moves the
+            // seeded kokoro/piper entries) applies to the very next unit's renders.
+            .AddSingleton<IRenderBudgetProvider, ActiveEngineRenderBudgetProvider>()
             // Boundary-bias seam (SPEC F74.3, STORY-198): wraps IOptionsMonitor<StationOptions> so a
             // config-provider reload of Station:BoundaryBias:LookaheadMinutes reaches the
             // Orchestrator without a restart — but, unlike the four bindings above, this knob is

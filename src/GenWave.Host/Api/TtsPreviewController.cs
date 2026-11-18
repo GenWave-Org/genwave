@@ -14,7 +14,7 @@ namespace GenWave.Host.Api;
 /// F126.1; STORY-123, STORY-323). Calls <see cref="ITtsSynthesizer"/> — the same production Kokoro
 /// client patter uses — directly, with no <c>TtsSegmentSource</c> in front of it: no loudness/cue
 /// measurement, no <c>MediaItem</c>, no catalog row, no engine annotation. Bounded by
-/// <c>Tts:RenderBudgetSeconds</c>, mirroring <c>SafeSegmentsController</c>'s render-budget/502 shape.
+/// the active engine's render budget, mirroring <c>SafeSegmentsController</c>'s render-budget/502 shape.
 ///
 /// <para>
 /// <b>The audition renders through the resolved rules</b> (SPEC F126.1, PLAN T274; amending
@@ -62,7 +62,7 @@ namespace GenWave.Host.Api;
 public sealed class TtsPreviewController(
     ITtsSynthesizer synthesizer,
     IOptionsMonitor<StationOptions> stationMonitor,
-    IOptionsMonitor<TtsOptions> ttsMonitor,
+    IRenderBudgetProvider renderBudget,
     PronunciationRuleProvider pronunciations,
     ActivePersonaPronunciationRulesCache personaPronunciations,
     ActivePersonaPaceCache personaPace,
@@ -102,7 +102,7 @@ public sealed class TtsPreviewController(
             return BadRequest(candidateProblem);
 
         var voice  = string.IsNullOrWhiteSpace(request.Voice) ? stationMonitor.CurrentValue.Voice : request.Voice;
-        var budget = TimeSpan.FromSeconds(ttsMonitor.CurrentValue.RenderBudgetSeconds);
+        var budget = renderBudget.Current;
 
         // The AUDITION event itself (SPEC F126.5, T274 review finding F2) — one Information line
         // per accepted request, logged unconditionally here (before the render can fail), naming
@@ -133,7 +133,7 @@ public sealed class TtsPreviewController(
         {
             // boundedCts fired on the render budget, not the caller disconnecting.
             logger.LogWarning(
-                "TTS preview synthesis exceeded Tts:RenderBudgetSeconds={BudgetSeconds}s", budget.TotalSeconds);
+                "TTS preview synthesis exceeded the active engine's render budget of {BudgetSeconds}s", budget.TotalSeconds);
             return BadGateway();
         }
         catch (Exception ex)

@@ -9,6 +9,7 @@
 // duplicate-helper precedent); IShowStore is the one exception — no scenario here names a showId,
 // so the shared Fakes.FakeShowStore's empty-roster default is enough.
 
+using FakeRenderBudgetProvider = GenWave.TestSupport.Fakes.FakeRenderBudgetProvider;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -97,7 +98,7 @@ file static class Gh149ControllerFactory
                     BedPadSeconds = 1.5,
                 },
             }),
-            new FakeOptionsMonitor<TtsOptions>(new TtsOptions()),
+            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
             NullLogger<SafeSegmentsController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },

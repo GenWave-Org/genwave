@@ -4,10 +4,14 @@
 
 using System.Text.Json;
 using GenWave.Core.Domain;
+using GenWave.Orchestration;
+using GenWave.TestSupport;
+using GenWave.TestSupport.Fakes;
 using GenWave.Tts.Tests.Fakes;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 
 namespace GenWave.Tts.Tests.Specs;
 
@@ -147,14 +151,65 @@ public static class FeatureEnginesAreAList
             Assert.Equal(["ref-a", "ref-b"], voices);
     }
 
-    // AC6 — a render that takes 60 s (fake clock)
-    public sealed class ScenarioTheBudgetIsPerEngine
+    // AC6 — a render that takes 60 s (fake clock), planned and rendered through the real chain
+    public sealed class ScenarioTheBudgetIsPerEngine : IAsyncLifetime
     {
-        [Fact(Skip = "pending: T747")]
-        public void ItPassesOnChatterbox() { }
+        static readonly TimeSpan Render = TimeSpan.FromSeconds(60);
+        static readonly DateTimeOffset Start = new(2030, 1, 7, 9, 0, 0, TimeSpan.Zero);
 
-        [Fact(Skip = "pending: T747")]
-        public void ItTimesOutOnKokoro() { }
+        SlotOutcome chatterbox = new FailedOutcome();
+        SlotOutcome kokoro = new FailedOutcome();
+
+        public async Task InitializeAsync()
+        {
+            var services = FeatureEnginesAreAList.Build(new Dictionary<string, string?>
+            {
+                ["Tts:Engines:chatterbox:Endpoint"] = "http://chatterbox:8004",
+                ["Tts:Engines:chatterbox:Profile"] = "chatterbox",
+                ["Tts:Engines:chatterbox:RenderBudgetSeconds"] = "120",
+            });
+            chatterbox = await RenderThroughBreakAsync(services, "chatterbox");
+            kokoro = await RenderThroughBreakAsync(services, "kokoro");
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void ItPassesOnChatterbox() => Assert.IsType<RenderedOutcome>(chatterbox);
+
+        [Fact]
+        public void ItTimesOutOnKokoro() => Assert.IsType<TimedOutOutcome>(kokoro);
+
+        // Plans one lead-in with the real active-engine budget, renders it through BreakRenderer
+        // against a TTS fake that finishes after 60 s on the shared fake clock.
+        static async Task<SlotOutcome> RenderThroughBreakAsync(ServiceProvider services, string engine)
+        {
+            var clock = new FakeTimeProvider(Start);
+            var budget = new ActiveEngineRenderBudgetProvider(
+                new NamedEngine(services.GetRequiredService<IVoiceEngineRegistry>(), engine),
+                services.GetRequiredService<IOptionsMonitor<TtsOptions>>());
+            var chain = new BreakPlannerBuilder().WithTime(clock).WithRenderBudget(budget).Build();
+            var track = TestData.MakeTrackRef("t1").ToMediaItem();
+            var context = new BreakContext(
+                1, track, track, "DJ Alpha", new CadenceConfig { LeadInBeforeEachTrack = true, BackAnnounceAfterEachTrack = false },
+                new StationIdentity("station-1", "GenWave", "voice-station"), Start, null,
+                new HashSet<SpeechDeferralKind>(), TimeSpan.Zero);
+            var plan = await chain.Planner.PlanAsync(context, CancellationToken.None);
+
+            var tts = new FakeTtsSegmentSource { RenderDelay = Render, TimeProvider = clock };
+            var rendering = new BreakRenderer(tts, clock).RenderAsync(plan, CancellationToken.None);
+
+            // Advance to whichever deadline (render or budget) comes first, so the race has one winner.
+            clock.Advance(plan.RenderBudget < Render ? plan.RenderBudget : Render);
+            var outcomes = await rendering;
+            return Assert.Single(outcomes);
+        }
+
+        sealed class NamedEngine(IVoiceEngineRegistry registry, string name) : IActiveVoiceEngine
+        {
+            public string Name => name;
+            public VoiceEngine? Current => registry.Get(name);
+        }
     }
 
     // Sad path
@@ -181,6 +236,22 @@ public static class FeatureEnginesAreAList
                 ["Tts:Engines:y:Profile"] = "chatterbox",
             }).GetRequiredService<IVoiceEngineRegistry>());
             Assert.Contains("Tts:Engines:y:Endpoint", ex.Message);
+        }
+    }
+
+    // Sad path — a budget past the ceiling would overflow CancelAfter
+    public sealed class ScenarioAHugeBudget
+    {
+        [Fact]
+        public void ItFailsBootNamingTheKey()
+        {
+            var ex = Assert.Throws<OptionsValidationException>(() => FeatureEnginesAreAList.Build(new Dictionary<string, string?>
+            {
+                ["Tts:Engines:z:Endpoint"] = "http://z:1",
+                ["Tts:Engines:z:Profile"] = "chatterbox",
+                ["Tts:Engines:z:RenderBudgetSeconds"] = "601",
+            }).GetRequiredService<IVoiceEngineRegistry>());
+            Assert.Contains("Tts:Engines:z:RenderBudgetSeconds", ex.Message);
         }
     }
 

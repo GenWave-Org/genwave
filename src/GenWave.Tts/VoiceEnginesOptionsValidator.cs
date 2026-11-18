@@ -2,9 +2,12 @@ namespace GenWave.Tts;
 
 using Microsoft.Extensions.Options;
 
-/// <summary>Boot validation for <c>Tts:Engines</c> (SPEC F219.1): unknown profile, blank endpoint or non-positive budget fails with the key named.</summary>
+/// <summary>Boot validation for <c>Tts:Engines</c> (SPEC F219.1): unknown profile, blank endpoint or out-of-range budget fails with the key named.</summary>
 public sealed class VoiceEnginesOptionsValidator : IValidateOptions<VoiceEnginesOptions>
 {
+    /// <summary>Same ceiling as the <c>Tts:RenderBudgetSeconds</c> setting.</summary>
+    const int MaxRenderBudgetSeconds = 600;
+
     public ValidateOptionsResult Validate(string? name, VoiceEnginesOptions options)
     {
         var failures = new List<string>();
@@ -21,8 +24,8 @@ public sealed class VoiceEnginesOptionsValidator : IValidateOptions<VoiceEngines
             if (string.IsNullOrWhiteSpace(entry.Endpoint))
                 failures.Add($"{prefix}:Endpoint must not be blank.");
 
-            if (entry.RenderBudgetSeconds <= 0)
-                failures.Add($"{prefix}:RenderBudgetSeconds must be a positive number of seconds.");
+            if (entry.RenderBudgetSeconds is <= 0 or > MaxRenderBudgetSeconds)
+                failures.Add($"{prefix}:RenderBudgetSeconds must be between 1 and {MaxRenderBudgetSeconds} seconds.");
         }
 
         return failures.Count > 0 ? ValidateOptionsResult.Fail(failures) : ValidateOptionsResult.Success;

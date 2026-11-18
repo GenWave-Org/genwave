@@ -66,7 +66,7 @@
 |---|---|---|---|
 | `GenWave.Core.Abstractions.IAppVersion` | `GenWave.Core.AppVersion` | Singleton | — |
 
-## GenWave.Host (38 seams)
+## GenWave.Host (37 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -85,7 +85,6 @@
 | `GenWave.Core.Abstractions.ILlmBatchGate` | `GenWave.Host.Enrichment.LlmBatchGate` | Singleton | — |
 | `GenWave.Core.Abstractions.IOnAirRenderSignal` | `GenWave.Host.Playout.OnAirRenderGate` | Singleton | — |
 | `GenWave.Core.Abstractions.IPersonaCardByIdSource` | `GenWave.Host.Configuration.PersonaCardByIdStore` | Singleton | — |
-| `GenWave.Core.Abstractions.IRenderBudgetProvider` | `GenWave.Host.Options.OptionsMonitorRenderBudgetProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.IRequestOverrideEnvelopeProvider` | `GenWave.Host.Options.OptionsMonitorRequestOverrideEnvelopeProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.IRotationSettingsProvider` | `GenWave.Host.Options.OptionsMonitorRotationSettingsProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.ISafeScopeProvider` | `GenWave.Host.Options.OptionsMonitorSafeScopeProvider` | Singleton | — |
@@ -220,7 +219,7 @@
 | `GenWave.Orchestration.IRandomSource` | `GenWave.Orchestration.SystemRandomSource` | Singleton | — |
 | `GenWave.Orchestration.IRequestFulfillmentSource` | `GenWave.Orchestration.RequestFulfillmentProvider` | Singleton | also registered: `GenWave.Orchestration.NoOpRequestFulfillmentSource` (GenWave.Orchestration) |
 
-## GenWave.Tts (22 seams)
+## GenWave.Tts (23 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -229,6 +228,7 @@
 | `GenWave.Core.Abstractions.ILifeClaimLlm` | `GenWave.Tts.LifeClaimLlm` | Singleton | — |
 | `GenWave.Core.Abstractions.ILlmModelLister` | `GenWave.Tts.OpenAiModelLister` | Singleton | — |
 | `GenWave.Core.Abstractions.IPersonaPreviewWriter` | `GenWave.Tts.LlmCopyWriter` | Singleton | — |
+| `GenWave.Core.Abstractions.IRenderBudgetProvider` | `GenWave.Tts.ActiveEngineRenderBudgetProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.ISegmentCopyWriter` | `GenWave.Tts.DegradationGatedCopyWriter` | Singleton | wraps: `GenWave.Tts.LlmCopyWriter` (GenWave.Tts), `GenWave.Tts.TemplateCopyWriter` (GenWave.Tts) |
 | `GenWave.Core.Abstractions.ISpeakerSnapshotSource` | `GenWave.Tts.SpeakerSnapshotSource` | Singleton | — |
 | `GenWave.Core.Abstractions.ITtsSegmentSource` | `GenWave.Tts.TtsSegmentSource` | Singleton | — |

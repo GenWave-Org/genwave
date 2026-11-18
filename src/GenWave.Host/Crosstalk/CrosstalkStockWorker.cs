@@ -92,6 +92,7 @@ public sealed class CrosstalkStockWorker(
     IStationIdentityProvider identityProvider,
     IStationClockProvider stationClock,
     IOptionsMonitor<TtsOptions> ttsOptions,
+    IRenderBudgetProvider renderBudgetProvider,
     OnAirRenderGate onAirRenderGate,
     ILogger<CrosstalkStockWorker> log,
     TimeProvider timeProvider,
@@ -219,7 +220,7 @@ public sealed class CrosstalkStockWorker(
 
             var onAir = scheduleResolver.TryGetCurrent();
             var nowPlayingSnapshot = nowPlaying.GetSnapshot(SingleStation.IdString);
-            var renderBudget = TimeSpan.FromSeconds(ttsOptions.CurrentValue.RenderBudgetSeconds);
+            var renderBudget = renderBudgetProvider.Current;
 
             if (DecideAttempt(planner, onAir, nowPlayingSnapshot, now, onAirRenderGate.InFlight, renderBudget, cooldownUntil)
                 is not { } attempt)
@@ -458,7 +459,7 @@ public sealed class CrosstalkStockWorker(
             while (await timer.WaitForNextTickAsync(ct))
             {
                 var snapshot = nowPlaying.GetSnapshot(SingleStation.IdString);
-                var renderBudget = TimeSpan.FromSeconds(ttsOptions.CurrentValue.RenderBudgetSeconds);
+                var renderBudget = renderBudgetProvider.Current;
                 var isOpen = BreakWindowOpen(timeProvider.GetUtcNow(), snapshot, renderBudget, onAirRenderGate.InFlight);
 
                 if (isOpen)
