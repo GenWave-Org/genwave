@@ -4,7 +4,7 @@ namespace GenWave.Host.Tests.Support;
 /// SPEC F218.5 / PLAN T683 (the T524 precedent): <c>QuirkRule</c> and
 /// <c>PersonaCard.QuirkRules</c> (and, PLAN T684, the init-only <c>PersonaId</c>/<c>ShowId</c>/<c>ShiftKeyText</c>/
 /// <c>UtteranceId</c>/<c>Text</c> members on <c>SegmentRequest</c>/<c>SegmentCopy</c>/<c>SegmentGenerated</c>; and, PLAN T685,
-/// the new <c>TrackProvenAired</c> event published beside <c>TrackAired</c>; and, PLAN T693/T714, the new <c>RepeatCaught</c> event and its <c>RepeatOutcome</c>; and, PLAN T709, <c>QuirkRule.MaxPerHour</c>/<c>MinBreaksApart</c>; and, PLAN T702, <c>CrosstalkParticipant</c>/<c>FactReadOnAir</c> and the init-only <c>Host</c>/<c>Neighbor</c>/<c>FactRead</c> members; and, PLAN T702a, <c>SegmentRequest.ContextProviderKey</c>; and, PLAN T726, <c>HandoffParticipants</c> and the init-only <c>Handoff</c> members on <c>SegmentRequest</c>/<c>MediaItem</c>/<c>TrackAired</c>) are an additive contract change that landed in
+/// the new <c>TrackProvenAired</c> event published beside <c>TrackAired</c>; and, PLAN T693/T714, the new <c>RepeatCaught</c> event and its <c>RepeatOutcome</c>; and, PLAN T709, <c>QuirkRule.MaxPerHour</c>/<c>MinBreaksApart</c>; and, PLAN T702, <c>CrosstalkParticipant</c>/<c>FactReadOnAir</c> and the init-only <c>Host</c>/<c>Neighbor</c>/<c>FactRead</c> members; and, PLAN T702a, <c>SegmentRequest.ContextProviderKey</c>; and, PLAN T751, <c>PersonaCard.Voices</c>/<c>VoicesByEngine</c>/<c>WithVoice</c>; and, PLAN T726, <c>HandoffParticipants</c> and the init-only <c>Handoff</c> members on <c>SegmentRequest</c>/<c>MediaItem</c>/<c>TrackAired</c>) are an additive contract change that landed in
 /// <c>src/GenWave.Abstractions</c> BEFORE the package that carries it is published. The committed
 /// baseline fixture stays byte-identical to the published surface (never hand-edited); the gap is
 /// tolerated only by passing these EXACT added lines — named line by line, no wildcard — to
@@ -74,5 +74,9 @@ public static class PendingPublicationSurfaceAllowlist
         "GenWave.Core.Domain.MediaItem::PROPERTY GenWave.Core.Domain.HandoffParticipants Handoff { public get; public init; }",
         "GenWave.Core.Domain.SegmentRequest::PROPERTY GenWave.Core.Domain.HandoffParticipants Handoff { public get; public init; }",
         "GenWave.Core.Events.TrackAired::PROPERTY GenWave.Core.Domain.HandoffParticipants Handoff { public get; public init; }",
+        // PLAN T751: the per-engine voice map and its one lockstep rule (F219.7).
+        "GenWave.Core.Domain.PersonaCard::PROPERTY System.Collections.Generic.IReadOnlyDictionary<System.String,System.String> Voices { public get; public init; }",
+        "GenWave.Core.Domain.PersonaCard::METHOD System.Collections.Generic.IReadOnlyDictionary<System.String,System.String> VoicesByEngine()",
+        "GenWave.Core.Domain.PersonaCard::METHOD GenWave.Core.Domain.PersonaCard WithVoice(GenWave.Core.Domain.VoiceSpec voice)",
     ];
 }

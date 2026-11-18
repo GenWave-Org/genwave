@@ -187,12 +187,8 @@ sealed class PersonaRepository(Lazy<NpgsqlDataSource> dataSource) : IPersonaStor
         var rebuiltSoul = LegacyPersonaCardMapper.BuildSoul(draft.Backstory, draft.Style);
         var soul = draft.Soul ?? (rebuiltSoul.Length > 0 ? rebuiltSoul : existing.Soul);
 
-        return existing with
-        {
-            Name = draft.Name,
-            Soul = soul,
-            Voice = existing.Voice with { VoiceId = draft.Voice },
-        };
+        return (existing with { Name = draft.Name, Soul = soul })
+            .WithVoice(existing.Voice with { VoiceId = draft.Voice });
     }
 
     /// <summary>

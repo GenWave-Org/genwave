@@ -39,6 +39,10 @@ namespace GenWave.Core.Domain;
 /// same way: nullable, omitted from JSON when null, so an old card round-trips byte-identically.
 /// <see cref="Quirks"/> stays authoritative for older readers; every rule's text also appears in it
 /// (the import route enforces this, <c>PersonaCardQuirkRulesValidator</c>).
+///
+/// <see cref="Voices"/> (SPEC F219.7) is the per-engine voice map, additive the same way: nullable,
+/// omitted from JSON when null, schema stays major 1. <see cref="Voice"/> stays authoritative for older
+/// readers. Writers keep lockstep through <see cref="WithVoice"/>; imports are checked by PersonaCardVoicesValidator.
 /// </summary>
 public sealed record PersonaCard(
     int SchemaVersion,
@@ -70,6 +74,42 @@ public sealed record PersonaCard(
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyOrder(100)]
     public IReadOnlyList<QuirkRule>? QuirkRules { get; init; }
+
+    /// <summary>
+    /// SPEC F219.7 (PLAN T751) — the voice this persona uses on each TTS engine, <c>{engine: voiceId}</c>;
+    /// <see langword="null"/> on every card built before this field existed, and then omitted from JSON
+    /// so those cards round-trip byte-identically. Read through <see cref="VoicesByEngine"/> (which
+    /// covers the absent case); write through <see cref="WithVoice"/>, which
+    /// keeps this and <see cref="Voice"/> in lockstep. Init-only body property for the same reason as
+    /// <see cref="QuirkRules"/>: the published constructor must not change.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyOrder(101)]
+    public IReadOnlyDictionary<string, string>? Voices { get; init; }
+
+    /// <summary>
+    /// The voice per engine, always populated: <see cref="Voices"/> when present, else the one-entry map
+    /// <c>{Voice.Engine: Voice.VoiceId}</c> (F219.7). Never serialized (it is a method).
+    /// </summary>
+    public IReadOnlyDictionary<string, string> VoicesByEngine() =>
+        Voices ?? new Dictionary<string, string> { [Voice.Engine] = Voice.VoiceId };
+
+    /// <summary>
+    /// THE lockstep rule for writers that set <see cref="Voice"/> (F219.7): returns a card whose
+    /// <see cref="Voice"/> is <paramref name="voice"/> and whose map agrees with it. When
+    /// <see cref="Voices"/> is absent it stays absent (the one-entry read-through already agrees, and an
+    /// old card stays byte-stable); when present, only the entry for <c>voice.Engine</c> is replaced or
+    /// added, so the other engines' voices survive.
+    /// </summary>
+    public PersonaCard WithVoice(VoiceSpec voice) =>
+        Voices is null
+            ? this with { Voice = voice }
+            : this with { Voice = voice, Voices = Merge(Voices, voice.Engine, voice.VoiceId) };
+
+    private static Dictionary<string, string> Merge(IReadOnlyDictionary<string, string> map, string engine, string voiceId)
+    {
+        return new Dictionary<string, string>(map) { [engine] = voiceId };
+    }
 
     /// <summary>
     /// The only <see cref="SchemaVersion"/> major this codebase writes or, on import, accepts (SPEC
