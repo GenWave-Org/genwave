@@ -127,6 +127,12 @@ export interface SettingControlProps {
    */
   isDirty?: boolean;
   /**
+   * The last-SAVED value (SettingsForm's re-baselined `original`). It changes exactly when a save
+   * lands, so a control that mirrors server state (`VoiceEngineSettingControl`) can refetch on it.
+   * Optional so controls that don't care ignore it.
+   */
+  savedValue?: string;
+  /**
    * The closed set of valid `(value, label)` pairs, straight off {@link SettingDto.choices} —
    * present for a `choice` or `multi-choice` setting (T175, SPEC F102.14). Optional so every
    * existing registered control (Corrections, EngineByKind, Audience), none of which read it, is

@@ -18,6 +18,7 @@ import { AudienceSettingControl } from "./AudienceSettingControl";
 import { ChoiceSettingControl } from "./ChoiceSettingControl";
 import { CorrectionsSettingControl } from "./CorrectionsSettingControl";
 import { EngineByKindSettingControl } from "./EngineByKindSettingControl";
+import { VoiceEngineSettingControl } from "./VoiceEngineSettingControl";
 import { MultiChoiceSettingControl } from "./MultiChoiceSettingControl";
 import { PersonaSettingControl } from "./PersonaSettingControl";
 import { SafeScopeAvailabilityBadge } from "./SafeScopeAvailabilityBadge";
@@ -113,6 +114,7 @@ const EMPTY_LIST_POLICIES: Record<string, EmptyListPolicy> = {
  */
 const SETTING_CONTROL_REGISTRY: Record<string, ComponentType<SettingControlProps>> = {
   "Tts:Corrections": CorrectionsSettingControl,
+  "Tts:Engine": VoiceEngineSettingControl,
   "Tts:EngineByKind": EngineByKindSettingControl,
   "Station:Audience": AudienceSettingControl,
   // T175 (SPEC F102.14, STORY-265) — ChoiceSettingControl is generic over `setting.choices`, not
@@ -822,6 +824,7 @@ function SettingField({
           onChange={onSemanticChange}
           disabled={isPending}
           isDirty={value !== savedValue}
+          savedValue={savedValue}
           choices={setting.choices}
           choicesStale={setting.choicesStale}
           choicesFailed={setting.choicesFailed}

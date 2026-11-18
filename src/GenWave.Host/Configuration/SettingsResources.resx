@@ -378,7 +378,7 @@
     <value>Speech render time limit</value>
   </data>
   <data name="Tts:RenderBudgetSeconds.Help" xml:space="preserve">
-    <value>How long a single TTS render is allowed to take before it is abandoned.</value>
+    <value>How long a single TTS render is allowed to take before it is abandoned. Applies to the Kokoro and Piper engines, and to any other engine that has no time limit of its own. Other engines set theirs in their own configuration.</value>
   </data>
   <data name="Tts:BlurbRetentionHours.Label" xml:space="preserve">
     <value>Speech clip cache lifetime</value>
