@@ -62,6 +62,17 @@ public static class TtsServiceCollectionExtensions
             .ValidateOnStart();
         services.AddSingleton<IValidateOptions<TtsFallbackOptions>, TtsFallbackOptionsValidator>();
 
+        // Engine registry (SPEC F219.1, F219.6) — Tts:Engines:<name>, seeded from the legacy
+        // Tts:Endpoint / Tts:PiperPrimaryEndpoint keys; an unknown profile or blank endpoint fails boot.
+        // Nothing consumes it yet; PrimaryVoiceEngine below is unchanged.
+        services
+            .AddOptions<VoiceEnginesOptions>()
+            .Bind(configuration.GetSection(VoiceEnginesOptions.Section))
+            .PostConfigure<IOptions<TtsOptions>>((engines, tts) => VoiceEngineSeeding.Seed(engines, tts.Value))
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<VoiceEnginesOptions>, VoiceEnginesOptionsValidator>();
+        services.AddSingleton<IVoiceEngineRegistry, VoiceEngineRegistry>();
+
         // Per-kind engine override map (SPEC F70.3, STORY-191) — a raw JSON leaf, not
         // DataAnnotations-validated: malformed JSON (or an unknown kind/engine entry) degrades to
         // no per-kind overrides with a WARN (TtsEngineByKindProvider) rather than failing boot,
