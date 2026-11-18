@@ -6,6 +6,10 @@ import { useEffect, useState } from "react";
 export interface VoiceEngineEntry {
   name: string;
   profile: string;
+  /** The render time limit in force for this engine, in seconds (a saved override, else its own configured value). */
+  renderBudgetSeconds: number;
+  /** The engine's own configured limit, in seconds: what it keeps when its override is cleared. */
+  configRenderBudgetSeconds: number;
 }
 
 export interface VoiceEngines {
@@ -28,7 +32,12 @@ function isVoiceEngines(raw: unknown): raw is VoiceEngines {
     obj["engines"].every((entry: unknown) => {
       if (typeof entry !== "object" || entry === null) return false;
       const e = entry as Record<string, unknown>;
-      return typeof e["name"] === "string" && typeof e["profile"] === "string";
+      return (
+        typeof e["name"] === "string" &&
+        typeof e["profile"] === "string" &&
+        typeof e["renderBudgetSeconds"] === "number" &&
+        typeof e["configRenderBudgetSeconds"] === "number"
+      );
     })
   );
 }

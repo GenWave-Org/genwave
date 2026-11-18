@@ -19,6 +19,7 @@ import { ChoiceSettingControl } from "./ChoiceSettingControl";
 import { CorrectionsSettingControl } from "./CorrectionsSettingControl";
 import { EngineByKindSettingControl } from "./EngineByKindSettingControl";
 import { VoiceEngineSettingControl } from "./VoiceEngineSettingControl";
+import { EngineRenderBudgetsSettingControl } from "./EngineRenderBudgetsSettingControl";
 import { MultiChoiceSettingControl } from "./MultiChoiceSettingControl";
 import { PersonaSettingControl } from "./PersonaSettingControl";
 import { SafeScopeAvailabilityBadge } from "./SafeScopeAvailabilityBadge";
@@ -116,6 +117,7 @@ const SETTING_CONTROL_REGISTRY: Record<string, ComponentType<SettingControlProps
   "Tts:Corrections": CorrectionsSettingControl,
   "Tts:Engine": VoiceEngineSettingControl,
   "Tts:EngineByKind": EngineByKindSettingControl,
+  "Tts:EngineRenderBudgets": EngineRenderBudgetsSettingControl,
   "Station:Audience": AudienceSettingControl,
   // T175 (SPEC F102.14, STORY-265) — ChoiceSettingControl is generic over `setting.choices`, not
   // Theme-specific; a future SettingKind.Choice setting registers the SAME component here.

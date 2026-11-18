@@ -348,6 +348,12 @@
   <data name="Tts:Engine.Help" xml:space="preserve">
     <value>The speech engine every spoken line is rendered with. Choose one of the engines configured for this station; the change applies to the next line, no restart needed.</value>
   </data>
+  <data name="Tts:EngineRenderBudgets.Label" xml:space="preserve">
+    <value>Time limit per voice engine</value>
+  </data>
+  <data name="Tts:EngineRenderBudgets.Help" xml:space="preserve">
+    <value>How many seconds one line may take to render with each engine, from 1 to 600. Leave a field empty to use that engine's own limit. A change applies to the next line, no restart needed.</value>
+  </data>
   <data name="Tts:EngineByKind.Label" xml:space="preserve">
     <value>Engine by speech kind</value>
   </data>
@@ -378,7 +384,7 @@
     <value>Speech render time limit</value>
   </data>
   <data name="Tts:RenderBudgetSeconds.Help" xml:space="preserve">
-    <value>How long a single TTS render is allowed to take before it is abandoned. Applies to the Kokoro and Piper engines, and to any other engine that has no time limit of its own. Other engines set theirs in their own configuration.</value>
+    <value>How long a single TTS render is allowed to take before it is abandoned. Applies to the Kokoro and Piper engines, and to any other engine that has no time limit of its own. Each engine can have its own time limit under Time limit per voice engine; that wins over this value.</value>
   </data>
   <data name="Tts:BlurbRetentionHours.Label" xml:space="preserve">
     <value>Speech clip cache lifetime</value>

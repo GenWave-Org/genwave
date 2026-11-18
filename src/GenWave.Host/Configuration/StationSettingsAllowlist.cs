@@ -300,6 +300,10 @@ public static class StationSettingsAllowlist
         // is legal and is the default (F70.3): every kind falls through to the existing F70.1
         // health-based Kokoro/Piper routing, unchanged.
         new("Tts:EngineByKind", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Voice),
+        // Per-engine render time limits (SPEC F219.6, T750a): a JSON object {engine: seconds}, each key a
+        // registry engine, each value 1-600. A present entry overrides that engine's own configured limit;
+        // GenWave.Tts.EngineRenderBudget reads it per render, so a PUT applies to the next one. Blank = no overrides.
+        new("Tts:EngineRenderBudgets", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Voice),
         new("Llm:Endpoint", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Voice),
         // Live model roster (SPEC F205.7, STORY-479, PLAN T580) — Station:Voice's LLM-side sibling
         // immediately above: SettingsController's choice resolver lists the configured Llm:Endpoint's

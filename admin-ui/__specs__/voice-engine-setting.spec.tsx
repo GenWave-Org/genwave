@@ -14,8 +14,8 @@ import { settingDto } from "./setting-fixture";
 const ENGINES_BODY = {
   active: "kokoro",
   engines: [
-    { name: "kokoro", profile: "kokoro" },
-    { name: "chatterbox", profile: "chatterbox" },
+    { name: "kokoro", profile: "kokoro", renderBudgetSeconds: 30, configRenderBudgetSeconds: 30 },
+    { name: "chatterbox", profile: "chatterbox", renderBudgetSeconds: 120, configRenderBudgetSeconds: 120 },
   ],
 };
 

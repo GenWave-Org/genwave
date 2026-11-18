@@ -55,10 +55,16 @@ public sealed partial class SettingValidator
         this.themeCatalog = themeCatalog ?? ThemeCatalog.LoadShipped();
         validators = BuildValidators(this.themeCatalog);
         validators["Tts:Engine"] = IsKnownEngineName;
+        validators["Tts:EngineRenderBudgets"] = IsValidEngineRenderBudgets;
     }
 
     // Case-insensitive: the registry's own lookup is.
     bool IsKnownEngineName(string name) => engines.Get(name) is not null;
+
+    // Tts:EngineRenderBudgets (T750a): a JSON object of registry engine name -> whole seconds within the
+    // engine budget bounds; blank means no overrides.
+    bool IsValidEngineRenderBudgets(string v) =>
+        EngineRenderBudget.TryParse(v) is { } budgets && budgets.Keys.All(IsKnownEngineName);
 
     // ── Non-range constants ──────────────────────────────────────────────────────────────────────
     //    Every Number-key Min/Max moved onto its own AllowedSetting record (SPEC F205.1, STORY-477,
@@ -990,6 +996,11 @@ public sealed partial class SettingValidator
         var k when k.Equals("Tts:Engine", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be one of the configured engines: " +
                $"{string.Join(", ", engines.All.Select(e => e.Name))}.",
+        var k when k.Equals("Tts:EngineRenderBudgets", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be a JSON object mapping a configured engine " +
+               $"({string.Join(", ", engines.All.Select(e => e.Name))}) to whole seconds between " +
+               $"{VoiceEnginesOptionsValidator.MinRenderBudgetSeconds} and {VoiceEnginesOptionsValidator.MaxRenderBudgetSeconds}, " +
+               "e.g. {} for none, or one entry per engine with its seconds.",
         var k when k.Equals("Llm:Endpoint", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an absolute http/https URL, or empty to disable LLM-authored copy.",
         var k when k.Equals("Llm:TimeoutSeconds", StringComparison.OrdinalIgnoreCase)

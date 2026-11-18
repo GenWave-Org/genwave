@@ -19,6 +19,12 @@ public sealed class TtsOptions
     [Range(1, int.MaxValue)]
     public int RenderBudgetSeconds { get; set; } = 30;
 
+    /// <summary>
+    /// Live setting <c>Tts:EngineRenderBudgets</c> (SPEC F219.6, T750a): a JSON object <c>{engine: seconds}</c>
+    /// that overrides an engine's own render budget. Blank means no overrides. Read through <see cref="EngineRenderBudget"/>.
+    /// </summary>
+    public string? EngineRenderBudgets { get; set; }
+
     [Required]
     public string CacheRoot { get; set; } = "/tts";
 

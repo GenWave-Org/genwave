@@ -212,6 +212,101 @@ public static class FeatureEnginesAreAList
         }
     }
 
+    // T750a — Tts:EngineRenderBudgets overrides an engine's own budget, live
+    public sealed class ScenarioASettingsBudgetForTheActiveEngine
+    {
+        readonly TestOptionsMonitor<TtsOptions> options = new(new TtsOptions
+        {
+            RenderBudgetSeconds = 30,
+            EngineRenderBudgets = "{\"chatterbox\":45}",
+        });
+        readonly ActiveEngineRenderBudgetProvider provider;
+
+        public ScenarioASettingsBudgetForTheActiveEngine() =>
+            provider = new ActiveEngineRenderBudgetProvider(new FixedEngine(ChatterboxWithBudget120), options);
+
+        [Fact]
+        public void ItWinsOverTheEnginesConfigValue() =>
+            Assert.Equal(TimeSpan.FromSeconds(45), provider.Current);
+
+        [Fact]
+        public void ItMatchesTheEngineNameIgnoringCase()
+        {
+            options.CurrentValue = new TtsOptions { EngineRenderBudgets = "{\"Chatterbox\":50}" };
+
+            Assert.Equal(TimeSpan.FromSeconds(50), provider.Current);
+        }
+
+        [Fact]
+        public void ALiveChangeAppliesToTheNextRead()
+        {
+            options.CurrentValue = new TtsOptions { EngineRenderBudgets = "{\"chatterbox\":200}" };
+
+            Assert.Equal(TimeSpan.FromSeconds(200), provider.Current);
+        }
+
+        [Fact]
+        public void ClearingItRestoresTheEnginesConfigValue()
+        {
+            options.CurrentValue = new TtsOptions { EngineRenderBudgets = "" };
+
+            Assert.Equal(TimeSpan.FromSeconds(120), provider.Current);
+        }
+    }
+
+    // T750a — an override for some other engine leaves the active engine's own value alone
+    public sealed class ScenarioASettingsBudgetForAnotherEngine
+    {
+        [Fact]
+        public void TheActiveEngineKeepsItsConfigValue()
+        {
+            var options = new TtsOptions { RenderBudgetSeconds = 30, EngineRenderBudgets = "{\"kokoro\":10}" };
+            var provider = new ActiveEngineRenderBudgetProvider(new FixedEngine(ChatterboxWithBudget120), new TestOptionsMonitor<TtsOptions>(options));
+
+            Assert.Equal(TimeSpan.FromSeconds(120), provider.Current);
+        }
+    }
+
+    // T750a — no active engine: the Tts budget, even with overrides present
+    public sealed class ScenarioNoActiveEngineWithOverrides
+    {
+        [Fact]
+        public void ItFallsBackToTheTtsBudget()
+        {
+            var options = new TtsOptions { RenderBudgetSeconds = 33, EngineRenderBudgets = "{\"chatterbox\":45}" };
+            var provider = new ActiveEngineRenderBudgetProvider(new FixedEngine(null), new TestOptionsMonitor<TtsOptions>(options));
+
+            Assert.Equal(TimeSpan.FromSeconds(33), provider.Current);
+        }
+    }
+
+    // T750a sad path — a stored value the reader cannot use never breaks a render
+    public sealed class ScenarioAnUnreadableSettingsBudget
+    {
+        [Theory]
+        [InlineData("not json")]
+        [InlineData("[45]")]
+        [InlineData("{\"chatterbox\":0}")]
+        [InlineData("{\"chatterbox\":601}")]
+        [InlineData("{\"chatterbox\":\"45\"}")]
+        public void TheEnginesConfigValueStillApplies(string stored)
+        {
+            var options = new TtsOptions { EngineRenderBudgets = stored };
+            var provider = new ActiveEngineRenderBudgetProvider(new FixedEngine(ChatterboxWithBudget120), new TestOptionsMonitor<TtsOptions>(options));
+
+            Assert.Equal(TimeSpan.FromSeconds(120), provider.Current);
+        }
+    }
+
+    static readonly VoiceEngine ChatterboxWithBudget120 =
+        new("chatterbox", "http://chatterbox:8004", VoiceEngineProfiles.Find("chatterbox") ?? throw new InvalidOperationException("no chatterbox profile"), 120);
+
+    sealed class FixedEngine(VoiceEngine? engine) : IActiveVoiceEngine
+    {
+        public string Name => engine?.Name ?? "gone";
+        public VoiceEngine? Current => engine;
+    }
+
     // Sad path
     // AC7, AC8 — unknown profile; blank endpoint
     public sealed class ScenarioABadEngineEntry

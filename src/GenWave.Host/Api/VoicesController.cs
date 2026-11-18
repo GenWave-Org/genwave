@@ -60,7 +60,8 @@ public sealed class VoicesController(
     public ActionResult<VoiceEnginesResponse> GetEngines() =>
         new VoiceEnginesResponse(
             ttsOptions.CurrentValue.Engine,
-            [.. engines.All.Select(e => new VoiceEngineSummary(e.Name, e.Profile.Name))]);
+            [.. engines.All.Select(e => new VoiceEngineSummary(
+                e.Name, e.Profile.Name, EngineRenderBudget.For(e, ttsOptions.CurrentValue), e.RenderBudgetSeconds))]);
 
     ObjectResult BadGateway() =>
         StatusCode(StatusCodes.Status502BadGateway, new ProblemDetails
