@@ -13,6 +13,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using GenWave.Core;
+using GenWave.Host.Api;
 using GenWave.Core.Abstractions;
 using GenWave.Tts;
 
@@ -87,6 +88,16 @@ public static class FeatureSpectatorAbout
             await using var factory = new SpectatorAboutWebFactory("https://demo.example/stream");
             var body = await FetchAboutAsync(factory);
             Assert.Equal("https://demo.example/stream", body.GetProperty("streamUrl").GetString());
+        }
+
+        [Fact]
+        public async Task StartedAtIsWhenTheProcessStarted()
+        {
+            // gh-#959 — the page derives "Up for" from this instant
+            await using var factory = new SpectatorAboutWebFactory("https://demo.example/stream");
+            var body = await FetchAboutAsync(factory);
+            var expected = factory.Services.GetRequiredService<ProcessStartTime>().Value;
+            Assert.Equal(expected, body.GetProperty("startedAt").GetDateTimeOffset());
         }
 
         [Fact(Skip = OperatorGated)]

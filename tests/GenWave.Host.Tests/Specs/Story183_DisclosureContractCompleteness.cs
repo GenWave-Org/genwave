@@ -96,11 +96,13 @@ public static class FeatureDisclosureContractCompleteness
             ["ready", "enriching", "failed"]),
 
         // about (SPEC F62.8, F65.3; requestsEnabled added by SPEC F87.11, STORY-229, PLAN T92 —
-        // the one new pinned public field the requests epic adds to this shape)
+        // the one new pinned public field the requests epic adds to this shape; startedAt added by
+        // gh-#959 for the listener page's uptime)
         new(typeof(SpectatorAbout),
             new SpectatorAbout("GenWave Radio", "2.0.0", "AGPL-3.0-or-later",
-                "https://github.com/GenWave-Org/genwave", "https://demo.example/stream", true),
-            ["stationName", "version", "license", "projectUrl", "streamUrl", "requestsEnabled"]),
+                "https://github.com/GenWave-Org/genwave", "https://demo.example/stream", true,
+                new DateTimeOffset(2026, 11, 17, 0, 0, 0, TimeSpan.Zero)),
+            ["stationName", "version", "license", "projectUrl", "streamUrl", "requestsEnabled", "startedAt"]),
 
         // play-history (SPEC F62.6) — no media id, gain/loudness, or duration on either entry
         new(typeof(SpectatorPlayHistoryTrackEntry),

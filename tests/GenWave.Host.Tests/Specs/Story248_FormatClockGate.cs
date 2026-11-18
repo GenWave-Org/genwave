@@ -152,6 +152,7 @@ public static class FeatureFormatClockGate
             "SpectatorAbout.License",
             "SpectatorAbout.ProjectUrl",
             "SpectatorAbout.RequestsEnabled",
+            "SpectatorAbout.StartedAt",
             "SpectatorAbout.StationName",
             "SpectatorAbout.StreamUrl",
             "SpectatorAbout.Version",
