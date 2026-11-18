@@ -36,6 +36,7 @@ using GenWave.Host.Api;
 using GenWave.Host.Engine;
 using GenWave.Host.Options;
 using GenWave.Host.Tests.Fakes;
+using GenWave.Host.Tests.Support;
 using GenWave.Tts;
 
 namespace GenWave.Host.Tests.Specs;
@@ -164,7 +165,7 @@ public static class FeatureStatusEndpoint
         // unrelated to it, so an unprobed (null-verdict) reader is enough to leave the
         // catalog/safeScope assertions unaffected (mirrors degradationController immediately above).
         var voiceHealthReader = new VoiceHealthReader(
-            new PrimaryVoiceEngine(DependencyNames.Kokoro), new FakeDependencyHealth());
+            TestVoiceEngines.Active(DependencyNames.Kokoro), new FakeDependencyHealth());
 
         return new(
             catalog,

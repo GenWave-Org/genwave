@@ -77,7 +77,7 @@ public static class FeatureEnginesAreAList
                 .GetAwaiter().GetResult();
             client.RenderAsync(Engine("chatterbox", "http://chatterbox:8004", VoiceEngineProfiles.Chatterbox), Context(), default)
                 .GetAwaiter().GetResult();
-            new KokoroTtsSynthesizer(new HttpClient(handler), options)
+            TestKokoro.Synthesizer(new HttpClient(handler), options)
                 .SynthesizeAsync(Context(), default).GetAwaiter().GetResult();
 
             kokoroBody = JsonDocument.Parse(sent[0].Body);

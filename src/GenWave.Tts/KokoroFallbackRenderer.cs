@@ -7,7 +7,7 @@ using GenWave.Core.Domain;
 
 /// <summary>
 /// Kokoro-engine hop renderer for the gh-#147 fallback chain — the same
-/// <c>POST /v1/audio/speech</c> wire shape as <see cref="KokoroTtsSynthesizer"/>, but pointed at
+/// <c>POST /v1/audio/speech</c> wire shape as <see cref="SpeechEngineClient"/>, but pointed at
 /// the HOP's own <see cref="TtsFallbackProfile.Endpoint"/> (a second Kokoro deployment, a remote
 /// bring-your-own HTTP server — F70.1's "remote" engine role) rather than <c>Tts:Endpoint</c>.
 ///
@@ -29,7 +29,7 @@ using GenWave.Core.Domain;
 /// <see cref="TtsRenderContext"/> (T134) now reaches this render (T137 widened
 /// <see cref="IFallbackProfileRenderer.RenderAsync"/> to carry it instead of a bare
 /// <c>(text, requestVoice)</c> pair): a kokoro-kind hop reads <see cref="TtsRenderContext.Rules"/>
-/// the identical way <see cref="KokoroTtsSynthesizer"/>'s own context-aware overload does (SPEC
+/// the identical way <see cref="SpeechEngineClient"/>'s own context-aware overload does (SPEC
 /// F97.6), so the same DJ line carries the same pronunciation whichever Kokoro-kind renderer
 /// actually renders it — primary or fallback hop. As of T140 (SPEC F98.2) this hop ALSO reads
 /// <see cref="TtsRenderContext.Pace"/> the same way, so a fallback hop never renders a persona's
@@ -41,7 +41,7 @@ public sealed class KokoroFallbackRenderer(
     HttpClient http,
     IOptionsMonitor<TtsOptions> ttsOptions,
     // Optional, defaulted — same "production DI always wires it, no existing test construction site
-    // needs to change" posture as KokoroTtsSynthesizer's own PronunciationRuleHitReporter parameter;
+    // needs to change" posture as SpeechEngineClient's own PronunciationRuleHitReporter parameter;
     // see its remarks for the full rationale.
     PronunciationRuleHitReporter? ruleHits = null) : IFallbackProfileRenderer
 {
@@ -54,7 +54,7 @@ public sealed class KokoroFallbackRenderer(
 
         // Engine-aware sentence pauses AND pronunciation markup (gh-#116, F97): a kokoro-KIND hop
         // shares the same composed KokoroSpeechMarkup.Render seam as the primary
-        // (KokoroTtsSynthesizer), so both Kokoro request paths tag identically — Piper hops
+        // (SpeechEngineClient), so both Kokoro request paths tag identically — Piper hops
         // (PiperTtsSynthesizer) never do. context.Rules rides in from TtsSegmentSource (SPEC
         // F97.6) exactly like the primary's own context-aware overload reads it — this hop never
         // resolves a rule set of its own from any provider or ambient accessor. The out-matches
@@ -83,7 +83,7 @@ public sealed class KokoroFallbackRenderer(
 
         // Path.GetDirectoryName always returns a non-null string when the path is produced
         // by Path.Combine with a non-empty CacheRoot; the guard below satisfies the compiler
-        // without using the null-forgiving operator (mirrors KokoroTtsSynthesizer).
+        // without using the null-forgiving operator (mirrors SpeechEngineClient).
         var dir = Path.GetDirectoryName(path);
         if (dir is not null)
         {
@@ -93,7 +93,7 @@ public sealed class KokoroFallbackRenderer(
         await File.WriteAllBytesAsync(path, bytes, ct);
 
         // ONLY now — after THIS hop's own engine accepted the render AND the audio landed on disk
-        // (review finding, PLAN T142; mirrors KokoroTtsSynthesizer's identical ordering note).
+        // (review finding, PLAN T142; mirrors SpeechEngineClient's identical ordering note).
         // Reporting any earlier would double-count the one line that airs: the primary composes the
         // same markup, reports, THEN its own POST fails and FallbackTtsSynthesizer retries here,
         // where this hop composes the identical markup again and would report again for the one
@@ -102,7 +102,7 @@ public sealed class KokoroFallbackRenderer(
         // as context.Rules (T137) and context.Pace (T140): an audition that falls over onto a
         // fallback hop must never count a hit here either — a preview reaches THIS renderer whenever
         // the primary fails mid-audition, and without this the fallback hop would silently re-enable
-        // the exact counting KokoroTtsSynthesizer's own isAudition gate just excluded.
+        // the exact counting SpeechEngineClient's own isAudition gate just excluded.
         ruleHits?.Report(matches, context.Kind, context.IsAudition);
 
         return path;

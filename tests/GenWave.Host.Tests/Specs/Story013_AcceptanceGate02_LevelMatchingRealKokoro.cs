@@ -84,7 +84,7 @@ public static class FeatureAcceptanceGate02LevelMatchingRealKokoro
         var ttsOptsMonitor = new FakeOptionsMonitor<TtsOptions>(ttsOptionsValue);
 
         var http        = new HttpClient();
-        var synthesizer = new KokoroTtsSynthesizer(http, ttsOptsMonitor);
+        var synthesizer = TestKokoro.Synthesizer(http, ttsOptsMonitor);
         var analyzer    = new FfmpegAnalyzer();
 
         var correctionsProvider = new SpeechCorrectionProvider(

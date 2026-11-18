@@ -5,4 +5,8 @@ public sealed record VoiceEngine(
     string Name,
     string Endpoint,
     VoiceEngineProfile Profile,
-    int RenderBudgetSeconds);
+    int RenderBudgetSeconds)
+{
+    /// <summary>The <see cref="IDependencyHealth"/> key this engine's liveness is read under (kokoro and piper are probed; others read no verdict).</summary>
+    public string DependencyName => Profile.Name;
+}

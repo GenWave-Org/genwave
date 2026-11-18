@@ -11,7 +11,7 @@ using GenWave.Core.Domain;
 /// <c>POST {Endpoint}/v1/audio/speech</c> and <c>GET {Endpoint}/v1/audio/voices</c> for ANY
 /// <see cref="VoiceEngine"/>. The engine (endpoint + profile) is a per-call argument, so adding an
 /// engine is configuration, not a new client. No boot-frozen BaseAddress (F36): the absolute URI is
-/// built per call. Piper's bare text/plain wire is a different contract and is not served here.
+/// built per call. Piper's bare text/plain wire is a different contract, rendered by <see cref="RenderPiperAsync"/> against the same engine endpoint.
 /// </summary>
 public sealed class SpeechEngineClient(
     HttpClient http,
@@ -40,6 +40,10 @@ public sealed class SpeechEngineClient(
         ruleHits?.Report(matches, context.Kind, context.IsAudition);
         return path;
     }
+
+    /// <summary>Renders over Piper's bare text/plain wire at the engine's own endpoint (SPEC F99.4, F219.1).</summary>
+    public Task<string> RenderPiperAsync(VoiceEngine engine, TtsRenderContext context, CancellationToken ct) =>
+        PiperWireProtocol.RenderAsync(http, engine.Endpoint, context, optionsMonitor.CurrentValue, ct);
 
     public async Task<IReadOnlyList<string>> ListVoicesAsync(VoiceEngine engine, CancellationToken ct)
     {

@@ -58,7 +58,7 @@ public static class FeatureEndpointLiveRepoint
             var cacheRoot = NewCacheRoot();
             var monitor = new TestOptionsMonitor<TtsOptions>(
                 new TtsOptions { Endpoint = stubA.BaseUri.ToString(), CacheRoot = cacheRoot, Format = "wav" });
-            var synthesizer = new KokoroTtsSynthesizer(new HttpClient(), monitor);
+            var synthesizer = TestKokoro.Synthesizer(new HttpClient(), monitor);
 
             await synthesizer.SynthesizeAsync("hello there", "af_heart", CancellationToken.None);
             Assert.Equal(1, stubA.SpeechCallCount);
@@ -168,7 +168,7 @@ public static class FeatureEndpointLiveRepoint
             // endpoint it came from).
             var monitor = new TestOptionsMonitor<TtsOptions>(new TtsOptions { Endpoint = stubA.BaseUri.ToString() });
             var lister = new CachedVoiceLister(
-                new KokoroVoiceLister(new HttpClient(), monitor), monitor, TimeSpan.FromMinutes(5));
+                TestKokoro.Lister(new HttpClient(), monitor), monitor, TimeSpan.FromMinutes(5));
 
             var before = await lister.ListVoicesAsync(CancellationToken.None);
             Assert.Equal(new[] { "af_heart" }, before);
@@ -204,7 +204,7 @@ public static class FeatureEndpointLiveRepoint
             // controller included, by Story097's ScenarioKokoroUnreachable).
             var monitor = new TestOptionsMonitor<TtsOptions>(
                 new TtsOptions { Endpoint = stubWithNoVoicesRoute.BaseUri.ToString() });
-            var lister = new KokoroVoiceLister(new HttpClient(), monitor);
+            var lister = TestKokoro.Lister(new HttpClient(), monitor);
 
             var act = async () => await lister.ListVoicesAsync(CancellationToken.None);
 

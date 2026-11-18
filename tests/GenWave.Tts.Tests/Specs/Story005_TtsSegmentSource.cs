@@ -622,7 +622,7 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
                 requests.Add(request.Content is null ? "" : await request.Content.ReadAsStringAsync(ct));
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3, 4]) };
             });
-            var synth = new KokoroTtsSynthesizer(
+            var synth = TestKokoro.Synthesizer(
                 new HttpClient(handler),
                 new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav", SentencePauseSeconds = 0 }));
             var opts = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav", SentencePauseSeconds = 0 });
@@ -682,7 +682,7 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
                 requests.Add(request.Content is null ? "" : await request.Content.ReadAsStringAsync(ct));
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3, 4]) };
             });
-            var synth = new KokoroTtsSynthesizer(
+            var synth = TestKokoro.Synthesizer(
                 new HttpClient(handler),
                 new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav", SentencePauseSeconds = 0 }));
             var opts = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav", SentencePauseSeconds = 0 });
@@ -738,7 +738,7 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
                 requests.Add(request.Content is null ? "" : await request.Content.ReadAsStringAsync(ct));
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3, 4]) };
             });
-            var synth = new KokoroTtsSynthesizer(
+            var synth = TestKokoro.Synthesizer(
                 new HttpClient(handler),
                 new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav", SentencePauseSeconds = 0 }));
             var opts = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav", SentencePauseSeconds = 0 });

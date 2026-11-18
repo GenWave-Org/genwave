@@ -164,7 +164,7 @@ public sealed class PronunciationRuleSet
     /// shape <c>TtsRenderContext.Rules</c> carries (SPEC F97.6) — the mirrored, dependency-free
     /// contract type <c>GenWave.Core.Domain</c> carries because that project cannot reference
     /// <c>GenWave.Tts</c>, where this compiled matcher lives (see <see cref="ContextPronunciationRule"/>'s
-    /// own remarks). The ONE seam every Kokoro-kind renderer (<see cref="KokoroTtsSynthesizer"/>,
+    /// own remarks). The ONE seam every Kokoro-kind renderer (<see cref="SpeechEngineClient"/>,
     /// <see cref="KokoroFallbackRenderer"/>) now resolves a context's rules through, replacing what
     /// used to be an identical private conversion duplicated in each renderer (T137 review finding) —
     /// a future field added to the mirrored pair only ever needs updating here. An empty list maps

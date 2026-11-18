@@ -96,7 +96,7 @@ public static class FeatureQualityYouCanSee
                 new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3, 4]) }));
             try
             {
-                var kokoro = new KokoroTtsSynthesizer(
+                var kokoro = TestKokoro.Synthesizer(
                     new HttpClient(handler),
                     new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
                     reporter);

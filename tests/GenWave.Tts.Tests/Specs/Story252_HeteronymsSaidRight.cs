@@ -75,7 +75,7 @@ public static class FeatureHeteronymsSaidRight
                         Content = new ByteArrayContent([1, 2, 3, 4]),
                     };
                 });
-                var synth = new KokoroTtsSynthesizer(
+                var synth = TestKokoro.Synthesizer(
                     new HttpClient(handler),
                     new TestOptionsMonitor<TtsOptions>(
                         new TtsOptions { CacheRoot = cacheRoot, Format = "wav", SentencePauseSeconds = 0 }));
@@ -714,7 +714,7 @@ public static class FeatureHeteronymsSaidRight
                 var opts = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" });
                 var source = new TtsSegmentSource(
                     new FakeSegmentCopyWriter(Copy),
-                    new KokoroTtsSynthesizer(new HttpClient(handler), opts),
+                    TestKokoro.Synthesizer(new HttpClient(handler), opts),
                     new FakeLoudnessAnalyzer(),
                     new FakeCueAnalyzer(),
                     NoCorrections.Provider(),
@@ -810,7 +810,7 @@ public static class FeatureHeteronymsSaidRight
                 {
                     Profiles = [new TtsFallbackProfile { Engine = DependencyNames.Piper, Endpoint = "http://piper:5000", Voice = "" }],
                 });
-                var kokoro = new KokoroTtsSynthesizer(new HttpClient(kokoroHandler), opts);
+                var kokoro = TestKokoro.Synthesizer(new HttpClient(kokoroHandler), opts);
                 var fallback = new FallbackTtsSynthesizer(
                     kokoro, [piper], health, fallbackOptions, NullLogger<FallbackTtsSynthesizer>.Instance);
                 var normalizing = new NormalizingTtsSynthesizer(

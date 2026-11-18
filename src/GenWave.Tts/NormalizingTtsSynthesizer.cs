@@ -15,7 +15,7 @@ using GenWave.Core.Logging;
 ///
 /// Decorates the concrete synthesizer (mirrors <see cref="CachedVoiceLister"/>'s decorator shape
 /// one seam over on <see cref="ITtsVoiceLister"/>) rather than being folded into
-/// <see cref="KokoroTtsSynthesizer"/> itself, so the HTTP client stays a pure Kokoro adapter and
+/// <see cref="SpeechEngineClient"/> itself, so the HTTP client stays a pure Kokoro adapter and
 /// this stays a pure text-hand-off concern — two reasons to change, two classes.
 ///
 /// Also implements <see cref="ISpeechNormalizationPreview"/> (SPEC F68.6, STORY-186 AC2): the admin

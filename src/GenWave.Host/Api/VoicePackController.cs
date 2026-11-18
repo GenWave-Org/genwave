@@ -38,7 +38,7 @@ namespace GenWave.Host.Api;
 /// closed-set membership check moved out of the serializer): the manifest's declared engine must both
 /// be in <see cref="SupportedEngines"/> (mirrors db/45's own <c>check (engine in ('kokoro'))</c> on
 /// <c>station.voice_pack</c> — the single seam gh-#614's future engine widening edits) AND equal
-/// <see cref="PrimaryVoiceEngine"/>; either failing ⇒ 400, <c>Type = "not_supported_engine"</c>, SPEC
+/// the active engine (<see cref="IActiveVoiceEngine"/>); either failing ⇒ 400, <c>Type = "not_supported_engine"</c>, SPEC
 /// F164.2 → VOICE-ID COLLISION CHECK (stock via <see cref="ITtsVoiceLister"/>, installed via
 /// <see cref="IVoicePackStore.FindInstalledVoiceIdsAsync"/>: any collision ⇒ 409, SPEC F166.4) → fetch
 /// every declared asset (<see cref="CatalogInstallShell.FetchAllAssetsAsync"/>) → cross-check the
@@ -80,7 +80,7 @@ public sealed class VoicePackController(
     CatalogProxyService catalogProxyService,
     CommunityCatalogAccessor catalogAccessor,
     IVoicePackStore voicePackStore,
-    PrimaryVoiceEngine primaryVoiceEngine,
+    IActiveVoiceEngine activeVoiceEngine,
     ITtsVoiceLister voiceLister,
     IVoiceListingCache voiceListingCache,
     IOptions<PacksOptions> packsOptions,
@@ -292,7 +292,7 @@ public sealed class VoicePackController(
     /// only shape-checked there) → ENGINE CHECK (SPEC F164.2, T413 review round 2 finding B2): the
     /// manifest's declared engine must both be in <see cref="SupportedEngines"/> (mirrors db/45's own
     /// <c>check (engine in ('kokoro'))</c> — the single seam gh-#614's future engine widening edits)
-    /// AND equal <see cref="PrimaryVoiceEngine"/>; either failing ⇒ 400, <c>Type =
+    /// AND equal the active engine (<see cref="IActiveVoiceEngine"/>); either failing ⇒ 400, <c>Type =
     /// "not_supported_engine"</c>.
     ///
     /// <para>
@@ -334,9 +334,10 @@ public sealed class VoicePackController(
         if (manifest is null)
             return (BadRequest(CatalogInstallShell.MalformedManifestProblem(CatalogEntryKind.VoicePack, slug)), null, null);
 
-        if (Array.IndexOf(SupportedEngines, manifest.Engine) < 0 ||
-            !string.Equals(manifest.Engine, primaryVoiceEngine.DependencyName, StringComparison.Ordinal))
-            return (BadRequest(NotSupportedEngineProblem(slug, manifest.Engine, primaryVoiceEngine.DependencyName)), null, null);
+        var stationEngine = activeVoiceEngine.Current?.DependencyName ?? activeVoiceEngine.Name;
+        if (activeVoiceEngine.Current is null || Array.IndexOf(SupportedEngines, manifest.Engine) < 0 ||
+            !string.Equals(manifest.Engine, stationEngine, StringComparison.Ordinal))
+            return (BadRequest(NotSupportedEngineProblem(slug, manifest.Engine, stationEngine)), null, null);
 
         return (null, content, manifest);
     }

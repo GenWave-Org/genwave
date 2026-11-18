@@ -8,7 +8,7 @@ using GenWave.Core.Domain;
 /// <see cref="VoiceEngineProfile"/>: <c>speed</c> is present only when the profile has speed, and
 /// Kokoro IPA / <c>[pause:Ns]</c> markup is applied only when the profile says so. Applied here,
 /// below the normalizer chokepoint, so upstream cache keys never see markup. The single place the
-/// body is built — <see cref="KokoroTtsSynthesizer"/> and <see cref="SpeechEngineClient"/> share it.
+/// body is built; <see cref="SpeechEngineClient"/> is its only caller.
 /// </summary>
 static class SpeechRequestBody
 {

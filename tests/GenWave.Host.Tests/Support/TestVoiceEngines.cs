@@ -18,4 +18,8 @@ public static class TestVoiceEngines
             options.Engines[name] = new VoiceEngineEntry { Endpoint = $"http://{name}:8000", Profile = name };
         return new VoiceEngineRegistry(Options.Create(options));
     }
+
+    /// <summary>An active-engine lookup over one named engine, as a station with that <c>Tts:Engine</c> reads it.</summary>
+    public static IActiveVoiceEngine Active(string name) => new ActiveVoiceEngine(
+        With(name), new FakeOptionsMonitor<TtsOptions>(new TtsOptions { Engine = name }));
 }

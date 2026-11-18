@@ -28,7 +28,7 @@ public sealed class TtsOptions
 
     /// <summary>
     /// Digital-silence pause appended after each sentence on the KOKORO request path only
-    /// (gh-#116): <see cref="KokoroTtsSynthesizer"/> and <see cref="KokoroFallbackRenderer"/>
+    /// (gh-#116): <see cref="SpeechEngineClient"/> and <see cref="KokoroFallbackRenderer"/>
     /// append <c>[pause:Ns]</c> markup that kokoro-fastapi v0.6.0 honors as true silence — see
     /// <see cref="KokoroPauseMarkup"/> for the exact insertion contract and why Piper hops must
     /// never see a tag (piper-tts speaks it aloud). 0 disables insertion.
@@ -44,7 +44,7 @@ public sealed class TtsOptions
     ///
     /// Deliberately a SEPARATE key from <see cref="Endpoint"/>, never a re-point of it:
     /// <see cref="Endpoint"/> stays whatever <c>KokoroHealthProbe</c>/<c>KokoroVoiceLister</c>/
-    /// <see cref="KokoroTtsSynthesizer"/> already read it as — on the piper-only topology that is
+    /// <see cref="SpeechEngineClient"/> already read it as — on the piper-only topology that is
     /// deliberately the absent kokoro host (DEPLOYMENT.md's "expected on every piper-only box"
     /// note) — so those Kokoro-shaped probes are never fed a Piper response they would misread as
     /// healthy. That risk is real, not theoretical: <c>piper/server.py</c>'s <c>do_GET</c>

@@ -81,8 +81,6 @@ internal static class HttpClientSeams
     public static readonly IReadOnlyList<string> DesignatedSeams = new[]
     {
         // TTS/LLM (GenWave.Tts) — typed-client injection.
-        "GenWave.Tts.KokoroTtsSynthesizer",
-        "GenWave.Tts.KokoroVoiceLister",
         // PLAN T746 (SPEC F219.4-F219.5) — the one engine-agnostic OpenAI-style speech + voices client.
         "GenWave.Tts.SpeechEngineClient",
         "GenWave.Tts.KokoroFallbackRenderer",
@@ -93,8 +91,7 @@ internal static class HttpClientSeams
         // http.PostAsync call itself now lives in (PiperWireProtocol.RenderAsync takes the
         // already-constructed HttpClient as a plain parameter rather than a typed-client
         // constructor — the real egress point moved here when PiperTtsSynthesizer/
-        // PiperPrimaryTtsSynthesizer were split from one copy of this logic into two callers).
-        "GenWave.Tts.PiperPrimaryTtsSynthesizer",
+        // PiperTtsSynthesizer were split from one copy of this logic into two callers).
         "GenWave.Tts.PiperWireProtocol",
         "GenWave.Tts.PiperHealthProbe",
         "GenWave.Tts.OllamaHealthProbe",

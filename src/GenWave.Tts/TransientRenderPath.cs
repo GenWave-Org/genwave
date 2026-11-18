@@ -4,7 +4,7 @@ namespace GenWave.Tts;
 /// Composes a fresh, per-call-unique path under <see cref="TtsOptions.CacheRoot"/> for an engine
 /// adapter's raw synthesis write (T138 fix, gh-#161 wire smoke, SPEC F98.2-as-amended — see the
 /// class remarks below for the ruling). The ONE seam every engine adapter's transient write shares
-/// — <see cref="KokoroTtsSynthesizer"/>, <see cref="KokoroFallbackRenderer"/>,
+/// — <see cref="SpeechEngineClient"/>, <see cref="KokoroFallbackRenderer"/>,
 /// <see cref="PiperTtsSynthesizer"/> — mirroring <see cref="PronunciationRuleSet.FromContext"/>'s
 /// precedent (T137 review): one conversion/composition seam every caller resolves through, so a
 /// future change to the naming scheme is made once, not N times in step.

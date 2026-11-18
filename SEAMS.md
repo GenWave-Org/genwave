@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **155 seams across 9 projects.**
+> **156 seams across 9 projects.**
 
 ## GenWave.Ads (2 seams)
 
@@ -220,7 +220,7 @@
 | `GenWave.Orchestration.IRandomSource` | `GenWave.Orchestration.SystemRandomSource` | Singleton | — |
 | `GenWave.Orchestration.IRequestFulfillmentSource` | `GenWave.Orchestration.RequestFulfillmentProvider` | Singleton | also registered: `GenWave.Orchestration.NoOpRequestFulfillmentSource` (GenWave.Orchestration) |
 
-## GenWave.Tts (21 seams)
+## GenWave.Tts (22 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -235,6 +235,7 @@
 | `GenWave.Core.Abstractions.ITtsSynthesizer` | `GenWave.Tts.NormalizingTtsSynthesizer` | Singleton | — |
 | `GenWave.Core.Abstractions.ITtsVoiceLister` | `GenWave.Tts.CachedVoiceLister` | Singleton | — |
 | `GenWave.Core.Abstractions.IVerbatimSegmentRenderer` | `GenWave.Tts.TtsSegmentSource` | Singleton | — |
+| `GenWave.Tts.IActiveVoiceEngine` | `GenWave.Tts.ActiveVoiceEngine` | Singleton | — |
 | `GenWave.Tts.ICastSegmentAuthor` | `GenWave.Tts.CastSegmentAuthor` | Singleton | — |
 | `GenWave.Tts.IDegradationModeReader` | `GenWave.Tts.DegradationController` | Singleton | — |
 | `GenWave.Tts.IDependencyHealth` | `GenWave.Tts.DependencyHealthStore` | Singleton | — |

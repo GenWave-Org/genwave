@@ -251,7 +251,7 @@ public static class StationSettingsAllowlist
         // break with no api restart. 0 turns callbacks off; 6 is the ceiling the planner clamps to.
         new("Memory:CallbacksPerHour", SettingApplyMode.Live, SettingKind.Number, "per hour", SettingGroup.Voice, Min: 0, Max: 6),
 
-        // TTS/LLM endpoint liveness (SPEC F36.1–F36.4, T8): KokoroTtsSynthesizer/KokoroVoiceLister
+        // TTS/LLM endpoint liveness (SPEC F36.1–F36.4, T8): SpeechEngineClient/KokoroVoiceLister
         // and LlmCopyWriter read these via IOptionsMonitor per call (no boot-frozen BaseAddress), so
         // a PUT here reroutes the very next render/voices call — no api restart. Llm:Endpoint is
         // legally empty (F34.2 — blurbs stay templated); Tts:Endpoint is not, since there is no

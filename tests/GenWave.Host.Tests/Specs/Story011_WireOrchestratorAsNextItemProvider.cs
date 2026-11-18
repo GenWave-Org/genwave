@@ -56,11 +56,11 @@ public static class FeatureWireOrchestratorAsNextItemProvider
     public sealed class ScenarioITtsSynthesizerAndSegmentSourceAreRegistered
     {
         [Fact]
-        public void KokoroTtsSynthesizerImplementsITtsSynthesizer()
+        public void ActiveEngineSynthesizerImplementsITtsSynthesizer()
         {
             Assert.True(
-                typeof(ITtsSynthesizer).IsAssignableFrom(typeof(KokoroTtsSynthesizer)),
-                "KokoroTtsSynthesizer must implement ITtsSynthesizer.");
+                typeof(ITtsSynthesizer).IsAssignableFrom(typeof(ActiveEngineSynthesizer)),
+                "ActiveEngineSynthesizer must implement ITtsSynthesizer.");
         }
 
         [Fact]

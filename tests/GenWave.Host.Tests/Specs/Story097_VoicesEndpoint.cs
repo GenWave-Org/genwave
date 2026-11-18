@@ -31,6 +31,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Host.Api;
+using GenWave.Host.Tests.Support;
 using GenWave.Tts;
 
 namespace GenWave.Host.Tests.Specs;
@@ -106,7 +107,7 @@ public static class FeatureVoicesEndpoint
     {
         var optionsMonitor = new FakeOptionsMonitor<TtsOptions>(new TtsOptions { Endpoint = endpoint.ToString() });
         var http = new HttpClient();
-        return new CachedVoiceLister(new KokoroVoiceLister(http, optionsMonitor), optionsMonitor, TimeSpan.FromMinutes(5));
+        return new CachedVoiceLister(TestKokoro.Lister(http, optionsMonitor), optionsMonitor, TimeSpan.FromMinutes(5));
     }
 
     // ---------------------------------------------------------------------

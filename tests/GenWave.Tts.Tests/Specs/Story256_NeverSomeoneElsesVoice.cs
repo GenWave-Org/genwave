@@ -266,10 +266,10 @@ public static class FeatureNeverSomeoneElsesVoice
         /// is a separate concern). <paramref name="primaryEngine"/> is parameterized (not hardcoded
         /// to Kokoro) so a mutated reader that always reported "kokoro" regardless of which engine
         /// is actually primary stays caught — the same F3 discipline T148's review already applied
-        /// to the render-time gate (see <see cref="PrimaryVoiceEngine"/>'s own remarks).
+        /// to the render-time gate (see <see cref="IActiveVoiceEngine"/>'s own remarks).
         /// </summary>
         static VoiceHealthReader BuildReader(FakeDependencyHealth health, string primaryEngine = DependencyNames.Kokoro) =>
-            new(new PrimaryVoiceEngine(primaryEngine), health);
+            new(TestActiveEngine.Named(primaryEngine), health);
 
         [Fact]
         public static void The_degraded_voice_state_is_visible_on_the_health_endpoint()

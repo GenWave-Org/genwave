@@ -247,7 +247,7 @@ public static class FeatureCorrectionsLiveWiring
                 .ToList();
 
             Assert.Contains(typeof(ITtsSynthesizer), paramTypes);
-            Assert.DoesNotContain(typeof(KokoroTtsSynthesizer), paramTypes);
+            Assert.DoesNotContain(typeof(ActiveEngineSynthesizer), paramTypes);
         }
 
         static IReadOnlyList<string> FindNormalizeCallSites()

@@ -14,6 +14,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using GenWave.Host.Configuration;
+using GenWave.Tts;
 
 // In-process settings store that drives a real live reload of the app's IConfiguration, so a PUT
 // is visible to the next request (the F19 contract) with no Postgres behind it.
@@ -50,12 +51,28 @@ file sealed class EngineSettingsStore : IStationSettingsStore
         Task.FromResult<IReadOnlyDictionary<string, string>>(new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
 }
 
+/// <summary>Stands in for every engine's endpoint: answers any speech request with a few audio bytes and remembers where it was sent.</summary>
+public sealed class EngineEndpointRecorder : HttpMessageHandler
+{
+    readonly List<Uri> requested = [];
+
+    public IReadOnlyList<Uri> Requested { get { lock (requested) return [.. requested]; } }
+
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        lock (requested)
+            requested.Add(request.RequestUri ?? throw new InvalidOperationException("request without a uri"));
+
+        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3, 4]) });
+    }
+}
+
 /// <summary>
 /// The real host with chatterbox optionally added to the engine registry (kokoro is seeded). No
 /// <c>Tts:PiperPrimaryEndpoint</c> is set either way — a Kokoro + fallback install, where the
 /// registry holds no piper.
 /// </summary>
-file sealed class EngineSettingFactory(bool withChatterbox) : WebApplicationFactory<Program>
+file sealed class EngineSettingFactory(bool withChatterbox, EngineEndpointRecorder recorder) : WebApplicationFactory<Program>
 {
     internal const string Password = "test-password-engine";
 
@@ -73,6 +90,8 @@ file sealed class EngineSettingFactory(bool withChatterbox) : WebApplicationFact
         builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<IHostedService>();
+            // Transport swap on the one speech client only; the render chain above it stays real DI.
+            services.AddHttpClient<SpeechEngineClient>().ConfigurePrimaryHttpMessageHandler(() => recorder);
             services.RemoveAll<IStationSettingsStore>();
             services.AddSingleton<IStationSettingsStore>(sp =>
                 new EngineSettingsStore(sp.GetRequiredService<IConfiguration>()));
@@ -84,16 +103,20 @@ file sealed class EngineSettingFactory(bool withChatterbox) : WebApplicationFact
 public abstract class EngineSettingScenario : IAsyncLifetime
 {
     readonly WebApplicationFactory<Program> factory;
+    readonly EngineEndpointRecorder recorder = new();
 
     protected EngineSettingScenario(bool withChatterbox = true)
     {
-        factory = new EngineSettingFactory(withChatterbox);
+        factory = new EngineSettingFactory(withChatterbox, recorder);
         Client = factory.CreateClient();
     }
 
     protected HttpClient Client { get; }
 
-    public async Task InitializeAsync()
+    /// <summary>Every speech request the engines received, in order.</summary>
+    protected IReadOnlyList<Uri> EngineRequests => recorder.Requested;
+
+    public virtual async Task InitializeAsync()
     {
         var login = await Client.PostAsJsonAsync("/api/auth/login", new { password = EngineSettingFactory.Password });
         Assert.Equal(HttpStatusCode.NoContent, login.StatusCode);
@@ -148,13 +171,25 @@ public static class FeatureOneSettingSwitchesTheEngine
     }
 
     // AC2 — the engine changed, then a preview through the test host, no restart
-    public sealed class ScenarioTheSwitchIsLive
+    public sealed class ScenarioTheSwitchIsLive : EngineSettingScenario
     {
-        [Fact(Skip = "pending: T749")]
-        public void TheNextRenderReachesTheNewEnginesEndpoint() { }
+        public override async Task InitializeAsync()
+        {
+            await base.InitializeAsync();
+            var saved = await PutEngineAsync("chatterbox");
+            Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
 
-        [Fact(Skip = "pending: T749")]
-        public void TheOldEngineGetsNoRequest() { }
+            var preview = await Client.PostAsJsonAsync("/api/tts/preview", new { text = "Hello there.", voice = "af_heart" });
+            Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
+        }
+
+        [Fact]
+        public void TheNextRenderReachesTheNewEnginesEndpoint() =>
+            Assert.Equal("chatterbox", Assert.Single(EngineRequests).Host);
+
+        [Fact]
+        public void TheOldEngineGetsNoRequest() =>
+            Assert.DoesNotContain(EngineRequests, uri => uri.Host == "kokoro");
     }
 
     // Sad path
