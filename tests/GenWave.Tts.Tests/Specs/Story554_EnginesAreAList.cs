@@ -2,6 +2,9 @@
 //
 // BDD specification — xUnit. Pending: each fact is activated by the task its Skip names.
 
+using System.Text.Json;
+using GenWave.Core.Domain;
+using GenWave.Tts.Tests.Fakes;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -48,27 +51,100 @@ public static class FeatureEnginesAreAList
     // AC3, AC4 — one line rendered per profile against a recording handler
     public sealed class ScenarioTheRequestFollowsTheProfile
     {
-        [Fact(Skip = "pending: T746")]
-        public void TheKokoroBodyCarriesSpeed() { }
+        const string Line = "Good evening. This is the station.";
 
-        [Fact(Skip = "pending: T746")]
-        public void TheKokoroBodyCarriesKokoroMarkup() { }
+        readonly JsonDocument kokoroBody;
+        readonly JsonDocument chatterboxBody;
+        readonly Uri chatterboxUri;
+        readonly string kokoroLegacyBody;
+        readonly string clientKokoroBody;
 
-        [Fact(Skip = "pending: T746")]
-        public void TheChatterboxBodyHasNoSpeed() { }
+        public ScenarioTheRequestFollowsTheProfile()
+        {
+            var cacheRoot = Path.Combine(Path.GetTempPath(), "gw-story554-" + Guid.NewGuid().ToString("N"));
+            var options = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" });
 
-        [Fact(Skip = "pending: T746")]
-        public void TheChatterboxBodyHasNoPauseMarkup() { }
+            var sent = new List<(Uri Uri, string Body)>();
+            var handler = new FakeHttpMessageHandler(async (request, ct) =>
+            {
+                var body = request.Content is null ? "" : await request.Content.ReadAsStringAsync(ct);
+                sent.Add((request.RequestUri ?? throw new InvalidOperationException("no uri"), body));
+                return new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3]) };
+            });
+            var client = new SpeechEngineClient(new HttpClient(handler), options);
 
-        [Fact(Skip = "pending: T746")]
-        public void TheRequestGoesToTheEnginesSpeechPath() { }
+            client.RenderAsync(Engine("kokoro", "http://kokoro:8880", VoiceEngineProfiles.Kokoro), Context(), default)
+                .GetAwaiter().GetResult();
+            client.RenderAsync(Engine("chatterbox", "http://chatterbox:8004", VoiceEngineProfiles.Chatterbox), Context(), default)
+                .GetAwaiter().GetResult();
+            new KokoroTtsSynthesizer(new HttpClient(handler), options)
+                .SynthesizeAsync(Context(), default).GetAwaiter().GetResult();
+
+            kokoroBody = JsonDocument.Parse(sent[0].Body);
+            chatterboxBody = JsonDocument.Parse(sent[1].Body);
+            chatterboxUri = sent[1].Uri;
+            clientKokoroBody = sent[0].Body;
+            kokoroLegacyBody = sent[2].Body;
+        }
+
+        [Fact]
+        public void TheKokoroBodyCarriesSpeed() =>
+            Assert.Equal(1.25, kokoroBody.RootElement.GetProperty("speed").GetDouble());
+
+        [Fact]
+        public void TheKokoroBodyCarriesPauseMarkup() =>
+            Assert.Contains("[pause:", kokoroBody.RootElement.GetProperty("input").GetString());
+
+        [Fact]
+        public void TheKokoroBodyCarriesIpaMarkup() =>
+            Assert.Contains("[station](/", kokoroBody.RootElement.GetProperty("input").GetString());
+
+        [Fact]
+        public void TheChatterboxBodyHasNoSpeed() =>
+            Assert.False(chatterboxBody.RootElement.TryGetProperty("speed", out _));
+
+        [Fact]
+        public void TheChatterboxBodyIsThePlainLine() =>
+            Assert.Equal(Line, chatterboxBody.RootElement.GetProperty("input").GetString());
+
+        [Fact]
+        public void TheRequestGoesToTheEnginesSpeechPath() =>
+            Assert.Equal("http://chatterbox:8004/v1/audio/speech", chatterboxUri.ToString());
+
+        [Fact]
+        public void TheKokoroBodyIsByteEqualToTheLegacyKokoroSynthesizers() =>
+            Assert.Equal(kokoroLegacyBody, clientKokoroBody);
+
+        static VoiceEngine Engine(string name, string endpoint, VoiceEngineProfile profile) =>
+            new(name, endpoint, profile, 30);
+
+        static TtsRenderContext Context() => new(Line, "af_heart", null)
+        {
+            Pace = 1.25,
+            Rules = [new GenWave.Core.Domain.PronunciationRule("station", "station", "/ˈsteɪʃən/")],
+        };
     }
 
     // AC5 — the engine lists two voices
     public sealed class ScenarioTheVoicesList
     {
-        [Fact(Skip = "pending: T746")]
-        public void BothVoicesAreReturned() { }
+        readonly IReadOnlyList<string> voices;
+
+        public ScenarioTheVoicesList()
+        {
+            var handler = new FakeHttpMessageHandler((_, _) => Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"voices\":[\"ref-a\",\"ref-b\"]}", System.Text.Encoding.UTF8, "application/json"),
+            }));
+            var client = new SpeechEngineClient(
+                new HttpClient(handler), new TestOptionsMonitor<TtsOptions>(new TtsOptions()));
+            var engine = new VoiceEngine("chatterbox", "http://chatterbox:8004", VoiceEngineProfiles.Chatterbox, 30);
+            voices = client.For(engine).ListVoicesAsync(default).GetAwaiter().GetResult();
+        }
+
+        [Fact]
+        public void BothVoicesAreReturned() =>
+            Assert.Equal(["ref-a", "ref-b"], voices);
     }
 
     // AC6 — a render that takes 60 s (fake clock)

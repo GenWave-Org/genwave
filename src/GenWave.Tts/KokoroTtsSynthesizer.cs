@@ -1,7 +1,6 @@
 namespace GenWave.Tts;
 
 using System.Text;
-using System.Text.Json;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
@@ -62,33 +61,20 @@ public sealed class KokoroTtsSynthesizer(
         // caller that constructed this class directly with no PronunciationRuleHitReporter (test
         // fakes throughout GenWave.Tts.Tests), never in production (TtsServiceCollectionExtensions
         // always wires the real one).
-        var speech = KokoroSpeechMarkup.Render(text, rules, cfg.SentencePauseSeconds, out var matches);
-        // speed (SPEC F98.1-F98.2, PLAN T140): kokoro-fastapi's OpenAI-compatible speaking-rate
-        // field. Always present, even at the engine default — see
+        var json = SpeechRequestBody.Build(
+            VoiceEngineProfiles.Kokoro, text, voice, cfg.Format, rules, cfg.SentencePauseSeconds, pace,
+            out var matches);
+        // speed (SPEC F98.1-F98.2): always present for Kokoro, even at the engine default — see
         // Story255_DjsSpeakAtTheirOwnPace's The_default_pace_is_sent_as_the_engine_default.
-        var body = new { input = speech, voice, response_format = cfg.Format, speed = pace };
-        using var content = new StringContent(
-            JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+        using var content = new StringContent(json, Encoding.UTF8, "application/json");
 
         var requestUri = EndpointUri.Combine(cfg.Endpoint, "/v1/audio/speech");
         var response = await http.PostAsync(requestUri, content, ct);
         response.EnsureSuccessStatusCode();   // throws HttpRequestException on non-2xx
 
         var bytes = await response.Content.ReadAsByteArrayAsync(ct);
-        // See TransientRenderPath's remarks for the full root cause and why this is never
-        // content-addressed.
-        var path = TransientRenderPath.For(cfg);
-
-        // Path.GetDirectoryName always returns a non-null string when the path is produced
-        // by Path.Combine with a non-empty CacheRoot; the guard below satisfies the compiler
-        // without using the null-forgiving operator.
-        var dir = Path.GetDirectoryName(path);
-        if (dir is not null)
-        {
-            Directory.CreateDirectory(dir);
-        }
-
-        await File.WriteAllBytesAsync(path, bytes, ct);
+        // See TransientRenderPath's remarks for why this is never content-addressed.
+        var path = await TransientAudioWriter.WriteAsync(cfg, bytes, ct);
 
         // ONLY now — after the engine accepted this render AND the audio actually landed on disk
         // (review finding, PLAN T142): "fired" means "aired", never merely "the markup composer

@@ -342,6 +342,11 @@ public static class TtsServiceCollectionExtensions
         // every keystroke.
         services.AddHttpClient<KokoroVoiceLister>();
 
+        // The engine-agnostic OpenAI-style speech client (SPEC F219.4-F219.5, PLAN T746): the one
+        // egress type for any VoiceEngine. Registered only; the render chain still composes the
+        // Kokoro/Piper clients above until T749 swaps it in.
+        services.AddHttpClient<SpeechEngineClient>();
+
         // Live LLM-model listing (SPEC F205.7, STORY-479, PLAN T580) — the LLM-side sibling of
         // KokoroVoiceLister immediately above: same Llm:Endpoint the completions call itself uses,
         // no separate config key. The Host's LlmModelChoiceProbe (GenWave.Host, through

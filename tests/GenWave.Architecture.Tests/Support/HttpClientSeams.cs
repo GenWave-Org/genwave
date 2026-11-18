@@ -83,6 +83,8 @@ internal static class HttpClientSeams
         // TTS/LLM (GenWave.Tts) — typed-client injection.
         "GenWave.Tts.KokoroTtsSynthesizer",
         "GenWave.Tts.KokoroVoiceLister",
+        // PLAN T746 (SPEC F219.4-F219.5) — the one engine-agnostic OpenAI-style speech + voices client.
+        "GenWave.Tts.SpeechEngineClient",
         "GenWave.Tts.KokoroFallbackRenderer",
         "GenWave.Tts.KokoroHealthProbe",
         "GenWave.Tts.PiperTtsSynthesizer",
