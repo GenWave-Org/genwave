@@ -141,7 +141,8 @@ public sealed class LlmCopyWriter(
     ILlmContextWindow? contextWindow = null, // T701: absent (or either seam absent) means no memory, exactly the pre-memory behaviour
     IMemoryRecallSource? memoryRecall = null,
     ILifeExtractor? lifeExtractor = null, // T704: absent means no life extraction, exactly the pre-extractor behaviour
-    BreakCallbacks? callbacks = null) // T736: absent means no callback breaks, exactly the pre-callback behaviour
+    BreakCallbacks? callbacks = null, // T736: absent means no callback breaks, exactly the pre-callback behaviour
+    ISoundTagOfferProvider? soundTagOffers = null) // T760: absent means no sound tags in the prompt, exactly the pre-tag behaviour
     : ISegmentCopyWriter, IPersonaPreviewWriter, IAnnouncementCopyWriter
 {
     readonly IStationEventSink events = events ?? NoOpStationEventSink.Instance;
@@ -1211,6 +1212,7 @@ public sealed class LlmCopyWriter(
                 Taglines = taglines,
                 Memory = memory,
                 Callback = callbackAsk,
+                SoundTags = soundTagOffers?.Current,
                 AnnouncementMessage = requiredCore,
                 PatterFact = patterFact?.Fact,
                 ShowFlavor = showFlavorFact,

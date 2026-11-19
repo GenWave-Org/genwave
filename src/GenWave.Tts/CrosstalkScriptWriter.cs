@@ -63,7 +63,8 @@ public sealed class CrosstalkScriptWriter(
     IRepetitionCheck? repetitionCheck = null, // T694: absent means no per-speaker check, as before
     IUtteranceStore? utteranceStore = null, // T694: absent means no stored lines
     IStationEventSink? events = null, // T694: absent means no repeat-caught rows
-    ISentenceTrimmer? sentenceTrimmer = null) // T715: absent means a repeated line always re-asks, then drops
+    ISentenceTrimmer? sentenceTrimmer = null, // T715: absent means a repeated line always re-asks, then drops
+    ISoundTagOfferProvider? soundTagOffers = null) // T760: absent means no sound tags in the prompt
 {
     readonly CrosstalkLineMemory memory = new(
         repetitionCheck, utteranceStore, events ?? NoOpStationEventSink.Instance, logger, sentenceTrimmer);
@@ -141,7 +142,7 @@ public sealed class CrosstalkScriptWriter(
 
         var systemPrompt = CrosstalkPromptBuilder.BuildSystemPrompt(
             request.HostCard, request.NeighborCard, durationTargetSeconds, request.StationLocalNow,
-            hostQuirks, neighborQuirks);
+            hostQuirks, neighborQuirks, soundTagOffers?.Current);
         var userPrompt = CrosstalkPromptBuilder.BuildUserContent(
             request, LlmPromptBuilder.BuildStationClockLine(request.StationLocalNow));
 

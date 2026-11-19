@@ -96,6 +96,7 @@ public static class TtsServiceCollectionExtensions
             .AddOptions<TtsSoundTagsOptions>()
             .Bind(configuration.GetSection(TtsSoundTagsOptions.Section));
         services.AddSingleton<ISoundTagCapProvider, OptionsMonitorSoundTagCapProvider>();
+        services.AddSingleton<ISoundTagOfferProvider, ActiveEngineSoundTagOfferProvider>();
 
         // LLM options — registered unconditionally (SPEC F34.2); an empty Llm:Endpoint just means
         // LlmCopyWriter stays disabled. IOptionsMonitor<LlmOptions> (not IOptions) is what
