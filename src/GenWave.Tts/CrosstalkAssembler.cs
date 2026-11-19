@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.Core.Events;
 using GenWave.Core.Logging;
 using GenWave.Loudness;
 
@@ -81,8 +82,13 @@ public sealed class CrosstalkAssembler(
     IAudioMixer mixer,
     IOptionsMonitor<TtsOptions> ttsOptions,
     IOptionsMonitor<CrosstalkOptions> crosstalkOptions,
-    ILogger<CrosstalkAssembler> logger)
+    IVoiceResolver voiceResolver,
+    ILogger<CrosstalkAssembler> logger,
+    IStationEventSink? events = null)
 {
+    // VoiceMissing publish seam (SPEC F219.9); no-op unless the host binds a real sink.
+    readonly IStationEventSink events = events ?? NoOpStationEventSink.Instance;
+
     /// <summary>How far past <see cref="CrosstalkOptions.DurationTargetSeconds"/> the ASSEMBLED
     /// asset's real, measured duration may run before this class discards it (SPEC F127.6) — the
     /// estimate a script's own generation applies is chars-only and structurally cannot see the
@@ -124,6 +130,11 @@ public sealed class CrosstalkAssembler(
                 nameof(request));
         }
 
+        var hostVoice = voiceResolver.ResolveCard(request.HostCard);
+        var neighborVoice = voiceResolver.ResolveCard(request.NeighborCard);
+        if (DiscardForMissingVoice(request, hostVoice, neighborVoice) is { } noVoice)
+            return noVoice;
+
         var cfg = ttsOptions.CurrentValue;
         var outputDir = ResolveCacheDir(cfg);
         Directory.CreateDirectory(outputDir);
@@ -133,7 +144,7 @@ public sealed class CrosstalkAssembler(
         try
         {
             var renderLines = script.Lines
-                .Select(line => (line.Speaker.ToString(), BuildCardContext(line, request.HostCard, request.NeighborCard)))
+                .Select(line => (line.Speaker.ToString(), BuildCardContext(line, request.HostCard, hostVoice ?? string.Empty, request.NeighborCard, neighborVoice ?? string.Empty)))
                 .ToList();
             var renderFailure = await RenderLinesAsync(renderLines, lineFiles, "Crosstalk exchange", ct);
             if (renderFailure is not null)
@@ -309,6 +320,27 @@ public sealed class CrosstalkAssembler(
     }
 
     /// <summary>
+    /// SPEC F219.9 (PLAN T753): a cast DJ with no voice for the active engine says nothing, and an exchange
+    /// needs both voices ("both voices or nobody", F127.5), so the whole exchange is discarded before any line
+    /// renders. One <see cref="VoiceMissing"/> event per DJ without a voice names them in the booth log.
+    /// </summary>
+    CrosstalkAssemblyResult.Discarded? DiscardForMissingVoice(
+        CrosstalkAssemblyRequest request, string? hostVoice, string? neighborVoice)
+    {
+        var silent = new[] { (request.HostCard.Name, hostVoice), (request.NeighborCard.Name, neighborVoice) }
+            .Where(speaker => speaker.Item2 is null)
+            .Select(speaker => speaker.Name)
+            .ToList();
+        if (silent.Count == 0)
+            return null;
+
+        foreach (var name in silent)
+            events.Publish(new VoiceMissing(name));
+
+        return Discard($"no voice for the active engine: {string.Join(", ", silent)}", [], "Crosstalk exchange");
+    }
+
+    /// <summary>
     /// Renders every entry of <paramref name="lines"/> in order, appending each successful render's
     /// path to <paramref name="lineFiles"/> (T284 review F10 — split out of <see cref="AssembleAsync"/>
     /// so that method's own three concerns — render, ceiling, measure — read as three paragraphs, not
@@ -362,15 +394,18 @@ public sealed class CrosstalkAssembler(
     /// with the cast path (see that method's own remarks); byte-identical behavior, just relocated so
     /// it can be built once, up front, for every line before rendering starts.
     /// </summary>
-    TtsRenderContext BuildCardContext(CrosstalkAiredLine line, PersonaCard hostCard, PersonaCard neighborCard)
+    TtsRenderContext BuildCardContext(
+        CrosstalkAiredLine line, PersonaCard hostCard, string hostVoice, PersonaCard neighborCard, string neighborVoice)
     {
-        var card = line.Speaker == CrosstalkSpeaker.Host ? hostCard : neighborCard;
+        var isHost = line.Speaker == CrosstalkSpeaker.Host;
+        var card = isHost ? hostCard : neighborCard;
+        var voiceId = isHost ? hostVoice : neighborVoice;
 
         // SPEC F127.5: this line's OWN speaker's resolved rules/pace — the resolver seam (see the
         // class remarks for law L8's actual scope), never the ambient active-persona caches (see
         // class remarks).
         var contextRules = PronunciationRuleResolver.ResolveForRender(pronunciations.Current, ToCardRules(card));
-        return new TtsRenderContext(line.Text, card.Voice.VoiceId, SegmentKind.Crosstalk)
+        return new TtsRenderContext(line.Text, voiceId, SegmentKind.Crosstalk)
         {
             Rules = contextRules,
             Pace = TtsPace.Clamp(card.Voice.Pace),

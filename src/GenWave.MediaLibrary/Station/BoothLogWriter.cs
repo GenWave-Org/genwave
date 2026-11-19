@@ -82,6 +82,7 @@ sealed class BoothLogWriter(
                 "patter-aired", Summarize(s), PersonaId: s.PersonaId, ShowId: s.ShowId),
             DegradationModeChanged d => new BoothLogAppendRequest("mode-changed", Summarize(d), PersonaId: null),
             HandoffPieceDropped h => new BoothLogAppendRequest("handoff-dropped", Summarize(h), PersonaId: null),
+            VoiceMissing v => new BoothLogAppendRequest("voice-missing", Summarize(v), PersonaId: v.PersonaId),
             RepeatCaught r => new BoothLogAppendRequest("repeat-caught", Summarize(r), PersonaId: r.PersonaId),
             RequestReceived => new BoothLogAppendRequest("request-received", "Request received", PersonaId: null),
             RequestEvicted => new BoothLogAppendRequest("request-evicted", "Request evicted (pending cap)", PersonaId: null),
@@ -200,6 +201,8 @@ sealed class BoothLogWriter(
             RepeatOutcome.Dropped => " — dropped",
             _ => "",
         };
+
+    static string Summarize(VoiceMissing v) => $"Voice missing: {v.Speaker} has no voice for the active engine — talk dropped";
 
     static string Summarize(HandoffPieceDropped h) => $"Handoff {h.Kind} dropped ({h.Cause})";
 }

@@ -99,6 +99,7 @@ file static class Story313ControllerFactory
                     BedPadSeconds = 1.5,
                 },
             }),
+            KokoroVoiceResolver.Instance,
             new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
             NullLogger<SafeSegmentsController>.Instance)
         {

@@ -44,6 +44,7 @@ public sealed partial class PersonaController(
     IPersonaTasteReader personaTaste,
     IPersonaImportStore personaImportStore,
     ITtsVoiceLister voiceLister,
+    IVoiceResolver voiceResolver,
     IStationClockProvider stationClock,
     ICatalogPersonaAvatarInstaller catalogPersonaAvatarInstaller,
     ILogger<PersonaController> logger) : ControllerBase
@@ -218,8 +219,9 @@ public sealed partial class PersonaController(
         var station = stationMonitor.CurrentValue;
         // gh-#117 — a preview prompt's LocalNow rides the same station clock the on-air
         // Orchestrator stamps, so auditioning a persona shows the DJ's real wall clock.
+        var voice = await ResolvePreviewVoiceAsync(persona, station.Voice, ct);
         var segmentRequest = new SegmentRequest(
-            kind, ResolvePreviewVoice(persona, station.Voice), station.Name, track, stationClock.LocalNow, station.Id);
+            kind, voice, station.Name, track, stationClock.LocalNow, station.Id);
 
         var result = await previewWriter.WritePreviewAsync(segmentRequest, persona, ct);
 
@@ -429,7 +431,7 @@ public sealed partial class PersonaController(
         if (PersonaCardVoicesValidator.FirstProblem(card) is { } voicesProblem)
             return BadRequest(MalformedCardProblem(voicesProblem));
 
-        var (legacyVoice, voiceWarnings) = await ResolveVoiceAsync(card.Voice, ct);
+        var (legacyVoice, voiceWarnings) = await ResolveVoiceAsync(card, ct);
         IReadOnlyList<string> warnings = PaceWarning(card.Voice.Pace) is { } paceWarning
             ? [.. voiceWarnings, paceWarning]
             : voiceWarnings;
@@ -478,13 +480,11 @@ public sealed partial class PersonaController(
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Resolves <paramref name="voice"/> against this station's live TTS voice list (SPEC F79.4).
-    /// <see cref="VoiceSpec.Engine"/> plays no part in the check: this codebase has exactly one
-    /// configurable TTS backend at a time (<see cref="ITtsVoiceLister"/> lists "the voice ids
-    /// installed on the configured backend", singular — there is no per-engine dimension to route on
-    /// yet), so only <see cref="VoiceSpec.VoiceId"/> membership is checked. An empty
-    /// <see cref="VoiceSpec.VoiceId"/> already means "use the station default" and always resolves,
-    /// with no lookup at all.
+    /// Gives the row voice an import stores for <paramref name="card"/>: the card's own voice, install-checked
+    /// against this station's live TTS voice list (SPEC F79.4) only when the active engine is that voice's engine
+    /// (<see cref="ITtsVoiceLister"/> lists the voice ids installed on the configured backend, singular, so another
+    /// engine's voices cannot be checked and stay verbatim). An empty voice id already means "use the station
+    /// default" and always resolves, with no lookup at all.
     ///
     /// ENGINE-DOWN POSTURE (deliberate call, PLAN T67): a fault from <see cref="voiceLister"/> resolves
     /// the card's voice AS GIVEN, with NO warning — never "can't verify, so warn anyway". F79.4 exists
@@ -495,8 +495,19 @@ public sealed partial class PersonaController(
     /// voice that genuinely never resolves gets its warning the next time this route runs with the
     /// engine reachable.
     /// </summary>
-    async Task<(string LegacyVoice, IReadOnlyList<string> Warnings)> ResolveVoiceAsync(VoiceSpec voice, CancellationToken ct)
+    async Task<(string LegacyVoice, IReadOnlyList<string> Warnings)> ResolveVoiceAsync(PersonaCard card, CancellationToken ct)
     {
+        // SPEC F219.7/F219.9/F219.11 (PLAN T753): the row voice is the card's OWN voice, in lockstep with
+        // card.Voice. Only when the active engine is that voice's engine can it be checked against the installed
+        // voices (and blanked, F79.4); another engine's voices cannot be listed, so it stays verbatim. A card
+        // with no voice for the active engine imports, warns, and stays quiet until one is set.
+        IReadOnlyList<string> noVoiceWarning = voiceResolver.ResolveCard(card) is null
+            ? ["This DJ has no voice for the active voice engine, so it will say nothing until one is set."]
+            : [];
+        var voice = card.Voice;
+        if (!voiceResolver.ActiveEngineOwnsCardVoice(card))
+            return (voice.VoiceId, noVoiceWarning);
+
         if (string.IsNullOrEmpty(voice.VoiceId))
             return (string.Empty, []);
 
@@ -642,8 +653,25 @@ public sealed partial class PersonaController(
             Genre: row.Genre,
             Year: row.Year);
 
-    static string ResolvePreviewVoice(Persona? persona, string stationVoice) =>
-        persona is not null && !string.IsNullOrEmpty(persona.Voice) ? persona.Voice : stationVoice;
+    // The voice the text preview's request carries, resolved for the active engine exactly as an
+    // on-air render would (SPEC F219.8): a saved persona's card map, else its flat row voice (a draft
+    // has no card), else the station voice. A speaker with no voice for the engine previews with ""
+    // — the preview is text-only, nothing is synthesized.
+    async Task<string> ResolvePreviewVoiceAsync(Persona? persona, string stationVoiceSetting, CancellationToken ct)
+    {
+        var stationVoice = voiceResolver.ResolveSetting(stationVoiceSetting) ?? string.Empty;
+        if (persona is null)
+            return stationVoice;
+
+        var card = persona.Id > 0 ? await personaStore.GetCardByIdAsync(persona.Id, ct) : null;
+        if (card is not null)
+        {
+            var resolved = voiceResolver.ResolveCardOrRow(card, persona.Voice);
+            return resolved is null ? string.Empty : string.IsNullOrEmpty(resolved) ? stationVoice : resolved;
+        }
+
+        return string.IsNullOrEmpty(persona.Voice) ? stationVoice : persona.Voice;
+    }
 
     static bool TryParseKind(string? raw, out SegmentKind kind)
     {

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.Core.Events;
 using GenWave.Host.Configuration;
 using GenWave.Host.Options;
 using GenWave.Tts;
@@ -32,6 +33,8 @@ public sealed class SafeLoopSeeder(
     ISafeSegmentAuthor author,
     IStationSettingsStore settingsStore,
     IOptionsMonitor<StationOptions> stationMonitor,
+    IVoiceResolver voiceResolver,
+    IStationEventSink events,
     ILogger<SafeLoopSeeder> logger)
 {
     /// <summary>Name of the library the seed creates or reuses (F27.6 step a).</summary>
@@ -155,11 +158,20 @@ public sealed class SafeLoopSeeder(
         var station = stationMonitor.CurrentValue;
         var safe = station.Safe;
 
+        // SPEC F219.8/F219.9: the default voice is Station:Voice resolved for the active engine; a map with
+        // none for it cannot voice the seed, so nothing is rendered (the seed retries on the next boot).
+        if (voiceResolver.ResolveSetting(station.Voice) is not { } defaultVoice)
+        {
+            logger.LogWarning("Boot seed: Station:Voice has no voice for the active engine — not rendering the seed");
+            events.Publish(new VoiceMissing(VoiceMap.StationVoiceSetting));
+            return SafeSegmentAuthorResult.Failure(SafeSegmentFailureReason.NoVoiceForEngine, "Station:Voice has no voice for the active engine");
+        }
+
         var request = new SafeSegmentRequest(
             Text: safe.SeedMessage,
             LibraryId: libraryId,
             StationName: station.Name,
-            DefaultVoice: station.Voice,
+            DefaultVoice: defaultVoice,
             AuthoredRoot: safe.AuthoredRoot,
             BedDuckDb: safe.BedDuckDb,
             BedPadSeconds: safe.BedPadSeconds,

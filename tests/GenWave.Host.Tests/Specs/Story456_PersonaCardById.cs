@@ -98,7 +98,7 @@ public sealed class PersonaCardByIdArc : IAsyncLifetime
             NullLogger<SpeechCorrectionProvider>.Instance);
 
         var source = new SpeakerSnapshotSource(
-            cardSource, identityProvider, pronunciationRuleProvider, speechCorrectionProvider,
+            cardSource, identityProvider, KokoroVoiceResolver.Instance, pronunciationRuleProvider, speechCorrectionProvider,
             NullLogger<SpeakerSnapshotSource>.Instance);
 
         Snapshot = await source.ForPersonaAsync(InsertedPersonaId, CancellationToken.None);

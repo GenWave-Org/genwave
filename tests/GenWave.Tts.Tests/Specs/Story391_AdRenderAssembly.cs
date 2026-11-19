@@ -56,7 +56,7 @@ public static class FeatureAdRenderAssembly
         var crosstalkMonitor = new TestOptionsMonitor<CrosstalkOptions>(new CrosstalkOptions());
         var assembler = new CrosstalkAssembler(
             synth, pronunciations, loudnessAnalyzer, cueAnalyzer, new FfmpegAudioMixer(loudnessAnalyzer),
-            ttsMonitor, crosstalkMonitor, NullLogger<CrosstalkAssembler>.Instance);
+            ttsMonitor, crosstalkMonitor, KokoroVoiceResolver.Instance, NullLogger<CrosstalkAssembler>.Instance);
         return (assembler, synth, loudnessAnalyzer, cueAnalyzer, outputDirectory);
     }
 
@@ -143,7 +143,7 @@ public static class FeatureAdRenderAssembly
             var normalizingAssembler = new CrosstalkAssembler(
                 normalizing, pronunciations, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), new FfmpegAudioMixer(new FakeLoudnessAnalyzer()),
                 new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = outputDirectory, Format = "wav" }),
-                new TestOptionsMonitor<CrosstalkOptions>(new CrosstalkOptions()), NullLogger<CrosstalkAssembler>.Instance);
+                new TestOptionsMonitor<CrosstalkOptions>(new CrosstalkOptions()), KokoroVoiceResolver.Instance, NullLogger<CrosstalkAssembler>.Instance);
 
             // When one line whose text names the corrected word renders...
             var oneLine = new[] { new CastLine("ANNOUNCER", "Come to the sale.") };
@@ -395,7 +395,7 @@ public static class FeatureAdRenderAssembly
             var crosstalkMonitor = new TestOptionsMonitor<CrosstalkOptions>(new CrosstalkOptions());
             assembler = new CrosstalkAssembler(
                 synth, pronunciations, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), mixer,
-                ttsMonitor, crosstalkMonitor, NullLogger<CrosstalkAssembler>.Instance);
+                ttsMonitor, crosstalkMonitor, KokoroVoiceResolver.Instance, NullLogger<CrosstalkAssembler>.Instance);
         }
 
         public void Dispose() => CleanUp(outputDirectory, synth);

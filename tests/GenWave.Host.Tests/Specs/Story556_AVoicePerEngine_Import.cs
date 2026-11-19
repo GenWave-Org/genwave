@@ -126,6 +126,14 @@ public static class FeatureAVoicePerEngineImport
         }
 
         [Fact]
+        public async Task TwoEngineKeysThatDifferOnlyInCaseAre400()
+        {
+            var response = await ImportAsync(CardJson("{\"kokoro\":\"af_heart\",\"Kokoro\":\"af_heart\"}"));
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+
+        [Fact]
         public async Task ABlankEngineKeyIs400()
         {
             var response = await ImportAsync(CardJson("{\"kokoro\":\"af_heart\",\" \":\"ref\"}"));

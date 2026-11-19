@@ -9,6 +9,9 @@ using System.Text.Json;
 /// </summary>
 public sealed class VoiceMap
 {
+    /// <summary>The setting that holds the station's own voice (a bare id or an engine map); what a voice-missing row names.</summary>
+    public const string StationVoiceSetting = "Station:Voice";
+
     readonly Dictionary<string, string> byEngine = new(StringComparer.OrdinalIgnoreCase);
 
     VoiceMap(IEnumerable<KeyValuePair<string, string>> voices)
@@ -42,6 +45,9 @@ public sealed class VoiceMap
     /// <summary>A map over an existing engine-to-voice dictionary, e.g. <c>PersonaCard.VoicesByEngine()</c>.</summary>
     public static VoiceMap FromEngineVoices(IReadOnlyDictionary<string, string> voices) => new(voices);
 
+    /// <summary>True when a voice setting is written as an engine map (a JSON object) rather than a bare id.</summary>
+    public static bool IsMapSetting(string value) => value.TrimStart().StartsWith('{');
+
     /// <summary>
     /// The one parser for a voice setting (F219.8): a bare id (meaning kokoro) or a JSON object of engine name to
     /// non-blank voice id. Null on any malformation, a blank value, an empty object, a blank key, or two keys that
@@ -53,7 +59,7 @@ public sealed class VoiceMap
             return null;
 
         var trimmed = value.Trim();
-        if (trimmed[0] != '{')
+        if (!IsMapSetting(trimmed))
             return new VoiceMap([new(VoiceEngineProfiles.KokoroName, trimmed)]);
 
         try

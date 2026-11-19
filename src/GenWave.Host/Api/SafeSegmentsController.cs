@@ -51,6 +51,7 @@ public sealed class SafeSegmentsController(
     IAdminMediaLookup adminLookup,
     IShowStore showStore,
     IOptionsMonitor<StationOptions> stationMonitor,
+    IVoiceResolver voiceResolver,
     IRenderBudgetProvider renderBudget,
     ILogger<SafeSegmentsController> logger) : ControllerBase
 {
@@ -153,11 +154,24 @@ public sealed class SafeSegmentsController(
         var station = stationMonitor.CurrentValue;
         var safe    = station.Safe;
 
+        // SPEC F219.8/F219.9: Station:Voice may be an engine map; the default is the active engine's id, and
+        // a map without one cannot voice a segment that names no voice of its own.
+        var defaultVoice = voiceResolver.ResolveSetting(station.Voice);
+        if (defaultVoice is null && request.Voice is null)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Title  = "No voice for the active engine.",
+                Detail = "Station:Voice has no voice for the active engine; name a voice in the request or set one.",
+            });
+        }
+
         var authorRequest = new SafeSegmentRequest(
             Text: request.Text,
             LibraryId: libraryId,
             StationName: station.Name,
-            DefaultVoice: station.Voice,
+            DefaultVoice: defaultVoice ?? string.Empty,
             AuthoredRoot: safe.AuthoredRoot,
             BedDuckDb: safe.BedDuckDb,
             BedPadSeconds: safe.BedPadSeconds,

@@ -49,4 +49,25 @@ public static class FeatureAVoicePerEngineCardEdit
         public void TheOtherEnginesEntriesSurvive() =>
             Assert.Equal("flip_ref", merged.Voices?["chatterbox"]);
     }
+
+    // The edit writes the voice of the engine the card's voice belongs to, whichever engine airs
+    public sealed class ScenarioAVoiceChangeOnAChatterboxVoicedCard
+    {
+        private readonly PersonaCard merged = PersonaRepository.MergeCard(
+            new PersonaCard(
+                PersonaCard.CurrentSchemaVersion, "Flip", "", "", [],
+                new VoiceSpec("chatterbox", "flip_ref", 1.0, "en"), 0.4, [], [])
+            {
+                Voices = new Dictionary<string, string> { ["kokoro"] = "af_heart", ["chatterbox"] = "flip_ref" },
+            },
+            new PersonaDraft("Flip", Backstory: "", Style: "", Voice: "flip_ref_2"));
+
+        [Fact]
+        public void TheChatterboxEntryIsTheNewVoice() =>
+            Assert.Equal("flip_ref_2", merged.Voices?["chatterbox"]);
+
+        [Fact]
+        public void TheKokoroEntrySurvives() =>
+            Assert.Equal("af_heart", merged.Voices?["kokoro"]);
+    }
 }

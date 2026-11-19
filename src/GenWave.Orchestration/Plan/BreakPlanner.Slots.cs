@@ -21,8 +21,8 @@ public sealed partial class BreakPlanner
         if (!context.Cadence.BackAnnounceAfterEachTrack || context.Previous is not { } prev)
             return null;
 
-        var (voice, personaName, personaId) = await ResolvePersonaAsync(context.Identity.Voice, ct);
-        var speaker = await ResolveSpeakerAsync(speakers, personaId, context.Identity, voice, ct);
+        var (rowVoice, personaName, personaId) = await ResolvePersonaAsync(context.Identity.Voice, ct);
+        var (speaker, voice) = await ResolvePersonaSpeakerAsync(speakers, personaId, context.Identity, rowVoice, ct);
         var request = StampShift(new SegmentRequest(
             SegmentKind.BackAnnounce, voice, context.Identity.Name, prev, StationLocalNow(), context.Identity.Id, personaName)
         {
@@ -133,7 +133,7 @@ public sealed partial class BreakPlanner
             {
                 SpeechDeferralKind.StationId => await BuildStationIdDrainSlotAsync(context, speakers, ct),
                 SpeechDeferralKind.Ad => await BuildAdDrainSlotAsync(ct),
-                SpeechDeferralKind.SignOff or SpeechDeferralKind.SignOn => BuildHandoffDrainSlot(deferral, context.Identity),
+                SpeechDeferralKind.SignOff or SpeechDeferralKind.SignOn => await BuildHandoffDrainSlotAsync(deferral, context.Identity, speakers, ct),
                 SpeechDeferralKind.TimeDate => await BuildTimeDateDrainSlotAsync(deferral, context, speakers, ct),
                 SpeechDeferralKind.Context => await BuildContextDrainSlotAsync(deferral, context, drainNow, speakers, ct),
                 _ => null,
@@ -200,12 +200,13 @@ public sealed partial class BreakPlanner
         return new PlannedSlot(0, SegmentKind.Ad, new ReadySource(stamped), new Reservation(ReservationKind.AdSpot, stamped.MediaId), DropPolicyFor(SegmentKind.Ad), ObserveDuration: false);
     }
 
-    PlannedSlot? BuildHandoffDrainSlot(SpeechDeferral deferral, StationIdentity identity)
+    async Task<PlannedSlot?> BuildHandoffDrainSlotAsync(
+        SpeechDeferral deferral, StationIdentity identity, SpeakerResolution? speakers, CancellationToken ct)
     {
         if (deferral.Handoff is not { } handoff) return null;
 
         var kind = deferral.Kind == SpeechDeferralKind.SignOff ? SegmentKind.SignOff : SegmentKind.SignOn;
-        var request = BuildHandoffRequest(kind, handoff, identity);
+        var request = await BuildHandoffRequestAsync(kind, handoff, identity, speakers, ct);
         return new PlannedSlot(0, kind, new RenderSource(request), Reservation: null, DropPolicyFor(kind), ObserveDuration: true);
     }
 
@@ -238,8 +239,8 @@ public sealed partial class BreakPlanner
         if (!context.Cadence.LeadInBeforeEachTrack || context.Next is not { } next)
             return null;
 
-        var (voice, personaName, personaId) = await ResolvePersonaAsync(context.Identity.Voice, ct);
-        var speaker = await ResolveSpeakerAsync(speakers, personaId, context.Identity, voice, ct);
+        var (rowVoice, personaName, personaId) = await ResolvePersonaAsync(context.Identity.Voice, ct);
+        var (speaker, voice) = await ResolvePersonaSpeakerAsync(speakers, personaId, context.Identity, rowVoice, ct);
         var request = StampShift(new SegmentRequest(
             SegmentKind.LeadIn, voice, context.Identity.Name, next, StationLocalNow(), context.Identity.Id, personaName)
         {

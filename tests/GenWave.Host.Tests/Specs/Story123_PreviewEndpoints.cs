@@ -229,6 +229,7 @@ file static class PreviewControllerFactory
             new NotUsedPersonaTasteReader(),
             new NotUsedPersonaImportStore(),
             new NotUsedTtsVoiceLister(),
+            KokoroVoiceResolver.Instance,
             new FakeStationClockProvider(DateTimeOffset.UtcNow),
             new NotUsedCatalogPersonaAvatarInstaller(),
             NullLogger<PersonaController>.Instance)
@@ -241,6 +242,7 @@ file static class PreviewControllerFactory
         new(
             synthesizer,
             new FakeOptionsMonitor<StationOptions>(stationOptions ?? DefaultStationOptions()),
+            KokoroVoiceResolver.Instance,
             new FakeRenderBudgetProvider(TimeSpan.FromSeconds((ttsOptions ?? new TtsOptions()).RenderBudgetSeconds)),
             // T274 (SPEC F126.1): the preview now resolves rules/pace through these same three
             // real, cheap-to-construct DI seams TtsSegmentSource uses — no station/card rules

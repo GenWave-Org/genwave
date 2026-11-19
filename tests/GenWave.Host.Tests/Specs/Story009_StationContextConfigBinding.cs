@@ -80,7 +80,7 @@ public static class FeatureStationIdentityConfigBinding
             };
 
             var monitor = BuildMonitor(cfg);
-            identity = new OptionsMonitorStationIdentityProvider(monitor).Current;
+            identity = new OptionsMonitorStationIdentityProvider(monitor, KokoroVoiceResolver.Instance).Current;
         }
 
         [Fact]

@@ -248,6 +248,7 @@ file static class SeederFactory
         var seeder = new SafeLoopSeeder(
             marker, libraries, libraries, author, settings,
             new FakeOptionsMonitor<StationOptions>(stationOptions),
+            KokoroVoiceResolver.Instance, NoOpStationEventSink.Instance,
             NullLogger<SafeLoopSeeder>.Instance);
         return (seeder, marker, libraries, settings);
     }
@@ -280,6 +281,7 @@ file static class EndpointFixture
             new BridgingAdminMediaLookup(writer),
             new FakeShowStore(),
             new FakeOptionsMonitor<StationOptions>(stationOptions),
+            KokoroVoiceResolver.Instance,
             new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
             NullLogger<SafeSegmentsController>.Instance)
         {

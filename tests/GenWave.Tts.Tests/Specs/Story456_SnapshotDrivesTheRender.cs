@@ -279,7 +279,7 @@ public static class FeatureSnapshotDrivesTheRender
                 new TestOptionsMonitor<TtsCorrectionsOptions>(new TtsCorrectionsOptions()),
                 NullLogger<SpeechCorrectionProvider>.Instance);
 
-            var source = new SpeakerSnapshotSource(cards, identityProvider, pronunciations, corrections, logger);
+            var source = new SpeakerSnapshotSource(cards, identityProvider, KokoroVoiceResolver.Instance, pronunciations, corrections, logger);
             snapshot = await source.ForPersonaAsync(UnknownPersonaId, CancellationToken.None);
         }
 

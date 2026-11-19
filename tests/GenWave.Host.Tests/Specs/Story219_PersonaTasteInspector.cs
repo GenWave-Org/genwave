@@ -167,6 +167,7 @@ file static class PersonaTasteControllerFactory
             personaTaste,
             new NotUsedPersonaImportStore(),
             new NotUsedTtsVoiceLister(),
+            KokoroVoiceResolver.Instance,
             new FakeStationClockProvider(DateTimeOffset.UtcNow),
             new NotUsedCatalogPersonaAvatarInstaller(),
             NullLogger<PersonaController>.Instance);

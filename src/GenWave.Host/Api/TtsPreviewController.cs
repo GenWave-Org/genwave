@@ -62,6 +62,7 @@ namespace GenWave.Host.Api;
 public sealed class TtsPreviewController(
     ITtsSynthesizer synthesizer,
     IOptionsMonitor<StationOptions> stationMonitor,
+    IVoiceResolver voiceResolver,
     IRenderBudgetProvider renderBudget,
     PronunciationRuleProvider pronunciations,
     ActivePersonaPronunciationRulesCache personaPronunciations,
@@ -101,7 +102,12 @@ public sealed class TtsPreviewController(
         if (candidateProblem is not null)
             return BadRequest(candidateProblem);
 
-        var voice  = string.IsNullOrWhiteSpace(request.Voice) ? stationMonitor.CurrentValue.Voice : request.Voice;
+        // SPEC F219.8/F219.9: a map resolves to the active engine's voice (the station voice when none is
+        // given); a bare id is passed through as the voice to hear on the active engine, as before.
+        var (voice, voiceProblem) = ResolvePreviewVoice(request.Voice);
+        if (voiceProblem is not null)
+            return BadRequest(voiceProblem);
+
         var budget = renderBudget.Current;
 
         // The AUDITION event itself (SPEC F126.5, T274 review finding F2) — one Information line
@@ -154,6 +160,23 @@ public sealed class TtsPreviewController(
 
         return File(bytes, "audio/wav");
     }
+
+    (string Voice, ProblemDetails? Problem) ResolvePreviewVoice(string? requested)
+    {
+        if (!string.IsNullOrWhiteSpace(requested) && !VoiceMap.IsMapSetting(requested))
+            return (requested, null);
+
+        var setting = string.IsNullOrWhiteSpace(requested) ? stationMonitor.CurrentValue.Voice : requested;
+        if (!string.IsNullOrWhiteSpace(setting) && VoiceMap.TryParseSetting(setting) is null)
+            return (string.Empty, VoiceProblem("The voice is not a voice id or an engine-to-voice map.", "Malformed voice."));
+
+        return voiceResolver.ResolveSetting(setting) is { } voice
+            ? (voice, null)
+            : (string.Empty, VoiceProblem("The voice has no entry for the active engine.", "No voice for the active engine."));
+    }
+
+    static ProblemDetails VoiceProblem(string detail, string title) =>
+        new() { Status = StatusCodes.Status400BadRequest, Title = title, Detail = detail };
 
     /// <summary>
     /// Resolves the SAME station∪persona∪candidate rule set <see cref="PronunciationRuleResolver.ResolveForRender"/>

@@ -55,15 +55,23 @@ file sealed class EngineSettingsStore : IStationSettingsStore
 public sealed class EngineEndpointRecorder : HttpMessageHandler
 {
     readonly List<Uri> requested = [];
+    readonly List<string> bodies = [];
 
     public IReadOnlyList<Uri> Requested { get { lock (requested) return [.. requested]; } }
 
-    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-    {
-        lock (requested)
-            requested.Add(request.RequestUri ?? throw new InvalidOperationException("request without a uri"));
+    /// <summary>The JSON body of each request, in the same order as <see cref="Requested"/>.</summary>
+    public IReadOnlyList<string> Bodies { get { lock (requested) return [.. bodies]; } }
 
-        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3, 4]) });
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        var body = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(cancellationToken);
+        lock (requested)
+        {
+            requested.Add(request.RequestUri ?? throw new InvalidOperationException("request without a uri"));
+            bodies.Add(body);
+        }
+
+        return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3, 4]) };
     }
 }
 
@@ -72,7 +80,7 @@ public sealed class EngineEndpointRecorder : HttpMessageHandler
 /// <c>Tts:PiperPrimaryEndpoint</c> is set either way — a Kokoro + fallback install, where the
 /// registry holds no piper.
 /// </summary>
-file sealed class EngineSettingFactory(bool withChatterbox, EngineEndpointRecorder recorder) : WebApplicationFactory<Program>
+file sealed class EngineSettingFactory(bool withChatterbox, EngineEndpointRecorder recorder, Action<IServiceCollection> configure) : WebApplicationFactory<Program>
 {
     internal const string Password = "test-password-engine";
 
@@ -95,6 +103,7 @@ file sealed class EngineSettingFactory(bool withChatterbox, EngineEndpointRecord
             services.RemoveAll<IStationSettingsStore>();
             services.AddSingleton<IStationSettingsStore>(sp =>
                 new EngineSettingsStore(sp.GetRequiredService<IConfiguration>()));
+            configure(services);
         });
     }
 }
@@ -107,11 +116,14 @@ public abstract class EngineSettingScenario : IAsyncLifetime
 
     protected EngineSettingScenario(bool withChatterbox = true)
     {
-        factory = new EngineSettingFactory(withChatterbox, recorder);
+        factory = new EngineSettingFactory(withChatterbox, recorder, ConfigureServices);
         Client = factory.CreateClient();
     }
 
     protected HttpClient Client { get; }
+
+    /// <summary>A scenario swaps real seams here (a card source, an event sink); the render chain stays real DI.</summary>
+    protected virtual void ConfigureServices(IServiceCollection services) { }
 
     /// <summary>A service from the booted host's real DI container.</summary>
     protected T Service<T>() where T : notnull => factory.Services.GetRequiredService<T>();
@@ -119,13 +131,16 @@ public abstract class EngineSettingScenario : IAsyncLifetime
     /// <summary>Every speech request the engines received, in order.</summary>
     protected IReadOnlyList<Uri> EngineRequests => recorder.Requested;
 
+    /// <summary>The body of every speech request the engines received, in order.</summary>
+    protected IReadOnlyList<string> EngineRequestBodies => recorder.Bodies;
+
     public virtual async Task InitializeAsync()
     {
         var login = await Client.PostAsJsonAsync("/api/auth/login", new { password = EngineSettingFactory.Password });
         Assert.Equal(HttpStatusCode.NoContent, login.StatusCode);
     }
 
-    public async Task DisposeAsync()
+    public virtual async Task DisposeAsync()
     {
         Client.Dispose();
         await factory.DisposeAsync();

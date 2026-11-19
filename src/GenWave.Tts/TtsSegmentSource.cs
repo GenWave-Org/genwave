@@ -78,6 +78,11 @@ public sealed class TtsSegmentSource(
     {
         try
         {
+            // SPEC F219.9: no voice for the active engine = no talk. Checked before the copy is written, so
+            // no LLM time is spent on a line that can never be spoken.
+            if (DropsForMissingVoice(request))
+                return null;
+
             var copy = await copyWriter.WriteAsync(request, ct);
 
             // Design ruling, spec-cited (T123 review finding, extended to ContextSegment at T224,
@@ -182,7 +187,7 @@ public sealed class TtsSegmentSource(
     {
         try
         {
-            if (ShouldDropNonFreshGuardedCopy(request, copy))
+            if (DropsForMissingVoice(request) || ShouldDropNonFreshGuardedCopy(request, copy))
                 return null;
 
             return await RenderCopyAsync(request, copy, ct);
@@ -201,6 +206,24 @@ public sealed class TtsSegmentSource(
             LogRenderOutcome(request, OutcomeFailure, ex.GetType().Name);
             return null;
         }
+    }
+
+    /// <summary>
+    /// SPEC F219.9 (PLAN T753): true, after one <see cref="VoiceMissing"/> event (the <c>voice-missing</c> booth
+    /// row) and a log line, when the planned speaker has no voice for the active engine. The caller returns
+    /// null, which the planner already treats as "this talk does not air" while the music carries on.
+    /// </summary>
+    bool DropsForMissingVoice(SegmentRequest request)
+    {
+        if (request.Speaker is not { VoiceMissing: true } speaker)
+            return false;
+
+        var who = request.PersonaName ?? VoiceMap.StationVoiceSetting;
+        logger.LogWarning(
+            "No voice for the active engine for {Speaker}; dropping the {Kind} talk (SPEC F219.9)",
+            LogSanitize.Strip(who), request.Kind);
+        events.Publish(new VoiceMissing(who, speaker.PersonaId));
+        return true;
     }
 
     /// <summary>

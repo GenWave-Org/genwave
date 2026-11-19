@@ -78,5 +78,13 @@ public static class PendingPublicationSurfaceAllowlist
         "GenWave.Core.Domain.PersonaCard::PROPERTY System.Collections.Generic.IReadOnlyDictionary<System.String,System.String> Voices { public get; public init; }",
         "GenWave.Core.Domain.PersonaCard::METHOD System.Collections.Generic.IReadOnlyDictionary<System.String,System.String> VoicesByEngine()",
         "GenWave.Core.Domain.PersonaCard::METHOD GenWave.Core.Domain.PersonaCard WithVoice(GenWave.Core.Domain.VoiceSpec voice)",
+        // PLAN T753: a speaker with no voice for the active engine (F219.9), and the flag that carries it to the render.
+        "GenWave.Core.Domain.SpeakerSnapshot::PROPERTY System.Boolean VoiceMissing { public get; public init; }",
+        "GenWave.Core.Domain.SpeakerSnapshot::PROPERTY System.Boolean VoiceOverridesRow { public get; public init; }",
+        "GenWave.Core.Domain.StationIdentity::PROPERTY System.Boolean VoiceMissing { public get; public init; }",
+        "GenWave.Core.Events.VoiceMissing::CTOR (System.String Speaker, System.Nullable<System.Int64> PersonaId = null)",
+        "GenWave.Core.Events.VoiceMissing::PROPERTY System.Nullable<System.Int64> PersonaId { public get; public init; }",
+        "GenWave.Core.Events.VoiceMissing::PROPERTY System.String Speaker { public get; public init; }",
+        "GenWave.Core.Events.VoiceMissing::TYPE class : GenWave.Core.Events.StationEvent [System.IEquatable<GenWave.Core.Events.StationEvent>,System.IEquatable<GenWave.Core.Events.VoiceMissing>]",
     ];
 }

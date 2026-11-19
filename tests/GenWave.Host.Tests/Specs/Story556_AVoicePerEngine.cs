@@ -6,8 +6,15 @@ namespace GenWave.Host.Tests.Specs;
 
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
+using GenWave.Core.Abstractions;
+using GenWave.Core.Domain;
+using GenWave.Core.Events;
+using GenWave.Orchestration;
 using GenWave.Tts;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 public static class FeatureAVoicePerEngine
 {
@@ -57,13 +64,93 @@ public static class FeatureAVoicePerEngine
     }
 
     // AC4 — voices for both engines; kokoro → chatterbox → kokoro through the preview endpoint
-    public sealed class ScenarioThereAndBack
+    public sealed class ScenarioThereAndBack : EngineSettingScenario
     {
-        [Fact(Skip = "pending: T753")]
-        public void TheChatterboxRenderUsesTheChatterboxVoice() { }
+        const string BothEngines = "{\"kokoro\":\"af_nova\",\"chatterbox\":\"reader-1\"}";
 
-        [Fact(Skip = "pending: T753")]
-        public void TheLastRenderUsesTheFirstVoice() { }
+        public override async Task InitializeAsync()
+        {
+            await base.InitializeAsync();
+            await PreviewAsync();
+            await SwitchToAsync("chatterbox");
+            await PreviewAsync();
+            await SwitchToAsync("kokoro");
+            await PreviewAsync();
+        }
+
+        async Task SwitchToAsync(string engine) =>
+            Assert.Equal(HttpStatusCode.OK, (await PutEngineAsync(engine)).StatusCode);
+
+        async Task PreviewAsync() =>
+            Assert.Equal(HttpStatusCode.OK,
+                (await Client.PostAsJsonAsync("/api/tts/preview", new { text = "Hello there.", voice = BothEngines })).StatusCode);
+
+        string VoiceSentTo(int request) =>
+            JsonDocument.Parse(EngineRequestBodies[request]).RootElement.GetProperty("voice").GetString() ?? string.Empty;
+
+        [Fact]
+        public void TheChatterboxRenderUsesTheChatterboxVoice() => Assert.Equal("reader-1", VoiceSentTo(1));
+
+        [Fact]
+        public void TheLastRenderUsesTheFirstVoice() => Assert.Equal("af_nova", VoiceSentTo(2));
+    }
+
+    // AC4 / F219.11 — on air, the planner stamps the voice resolved for the active engine, per break
+    public sealed class ScenarioThePlannedVoiceFollowsTheEngine : EngineSettingScenario
+    {
+        const long PersonaId = 7;
+
+        string? onChatterbox;
+        string? backOnKokoro;
+
+        protected override void ConfigureServices(IServiceCollection services)
+        {
+            services.RemoveAll<IActivePersonaAccessor>();
+            services.AddSingleton<IActivePersonaAccessor>(new OnAirDj());
+            services.RemoveAll<IPersonaCardByIdSource>();
+            services.AddSingleton<IPersonaCardByIdSource>(new OnAirDj());
+        }
+
+        public override async Task InitializeAsync()
+        {
+            await base.InitializeAsync();
+            Assert.Equal(HttpStatusCode.OK, (await PutEngineAsync("chatterbox")).StatusCode);
+            onChatterbox = await PlannedLeadInVoiceAsync();
+            Assert.Equal(HttpStatusCode.OK, (await PutEngineAsync("kokoro")).StatusCode);
+            backOnKokoro = await PlannedLeadInVoiceAsync();
+        }
+
+        async Task<string> PlannedLeadInVoiceAsync()
+        {
+            var next = new MediaItem("t1", "/music/t1.mp3", "Song", new Loudness(-14, -1, true));
+            var context = new BreakContext(
+                1, null, next, "DJ", new CadenceConfig { LeadInBeforeEachTrack = true, BackAnnounceAfterEachTrack = false },
+                Service<IStationIdentityProvider>().Current, DateTimeOffset.UtcNow, null, new HashSet<SpeechDeferralKind>(), TimeSpan.Zero);
+            var plan = await Service<BreakPlanner>().PlanAsync(context, CancellationToken.None);
+            var slot = Assert.Single(plan.Slots, s => s.Kind == SegmentKind.LeadIn);
+            var request = ((RenderSource)slot.Source).Request;
+            Assert.Equal(request.Voice, request.Speaker?.Voice);
+            return request.Voice;
+        }
+
+        [Fact]
+        public void TheChatterboxBreakStampsTheChatterboxVoice() => Assert.Equal("reader-1", onChatterbox);
+
+        [Fact]
+        public void TheNextBreakOnKokoroStampsTheKokoroVoice() => Assert.Equal("af_nova", backOnKokoro);
+
+        sealed class OnAirDj : IActivePersonaAccessor, IPersonaCardByIdSource
+        {
+            public Task<Persona?> ResolveAsync(CancellationToken ct) =>
+                Task.FromResult<Persona?>(new Persona(PersonaId, "DJ", string.Empty, string.Empty, "af_nova", DateTime.UtcNow, DateTime.UtcNow));
+
+            public Task<PersonaCard?> GetCardAsync(long personaId, CancellationToken ct) =>
+                Task.FromResult<PersonaCard?>(new PersonaCard(
+                    1, "DJ", "Talks.", "Soul.", [], new VoiceSpec("kokoro", "af_nova", 1.0, "en"), 0.5, [], [])
+                {
+                    Voices = new Dictionary<string, string> { ["kokoro"] = "af_nova", ["chatterbox"] = "reader-1" },
+                });
+        }
     }
 
     // Sad path
@@ -98,15 +185,63 @@ public static class FeatureAVoicePerEngine
 
     // Sad path
     // AC8 — a DJ whose map lacks the active engine
-    public sealed class ScenarioNoVoiceForThisEngine
+    public sealed class ScenarioNoVoiceForThisEngine : EngineSettingScenario
     {
-        [Fact(Skip = "pending: T753")]
-        public void TheTalkIsDropped() { }
+        const string Dj = "Quiet Quentin";
 
-        [Fact(Skip = "pending: T753")]
-        public void AVoiceMissingRowNamesTheDj() { }
+        readonly CapturingEventSink events = new();
+        // Its own cache: a render another test cached under the same key would answer without the engine.
+        readonly string cacheRoot = Path.Combine(Path.GetTempPath(), "genwave-no-voice-" + Guid.NewGuid().ToString("N"));
+        MediaItem? rendered;
 
-        [Fact(Skip = "pending: T753")]
-        public void NoRenderRequestIsSent() { }
+        protected override void ConfigureServices(IServiceCollection services)
+        {
+            services.Configure<TtsOptions>(o => o.CacheRoot = cacheRoot);
+            services.RemoveAll<IStationEventSink>();
+            services.AddSingleton<IStationEventSink>(events);
+            services.RemoveAll<IPersonaCardByIdSource>();
+            services.AddSingleton<IPersonaCardByIdSource>(new KokoroOnlyDj());
+        }
+
+        public override async Task InitializeAsync()
+        {
+            await base.InitializeAsync();
+            Assert.Equal(HttpStatusCode.OK, (await PutEngineAsync("chatterbox")).StatusCode);
+
+            var speaker = await Service<ISpeakerSnapshotSource>().ForPersonaAsync(KokoroOnlyDj.Id, CancellationToken.None);
+            var request = new SegmentRequest(
+                SegmentKind.LeadIn, speaker.Voice, "Test Station", null, DateTimeOffset.UtcNow, "test", Dj)
+            { Speaker = speaker };
+            rendered = await Service<ITtsSegmentSource>().RenderAsync(request, CancellationToken.None);
+        }
+
+        [Fact]
+        public void TheTalkIsDropped() => Assert.Null(rendered);
+
+        [Fact]
+        public void AVoiceMissingRowNamesTheDj() =>
+            Assert.Equal(Dj, Assert.Single(events.Events.OfType<VoiceMissing>()).Speaker);
+
+        [Fact]
+        public void NoRenderRequestIsSent() => Assert.Empty(EngineRequests);
+
+        public override async Task DisposeAsync()
+        {
+            await base.DisposeAsync();
+            if (Directory.Exists(cacheRoot))
+                Directory.Delete(cacheRoot, recursive: true);
+        }
+
+        sealed class KokoroOnlyDj : IPersonaCardByIdSource
+        {
+            public const long Id = 7;
+
+            public Task<PersonaCard?> GetCardAsync(long personaId, CancellationToken ct) =>
+                Task.FromResult<PersonaCard?>(new PersonaCard(
+                    1, Dj, "Says little.", "Soul.", [], new VoiceSpec("kokoro", "af_nova", 1.0, "en"), 0.5, [], [])
+                {
+                    Voices = new Dictionary<string, string> { ["kokoro"] = "af_nova" },
+                });
+        }
     }
 }

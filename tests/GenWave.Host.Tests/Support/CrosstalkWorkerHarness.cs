@@ -264,6 +264,7 @@ internal static class CrosstalkWorkerHarness
             new NeverCalledAudioMixer(),
             ttsOptions,
             new FakeOptionsMonitor<CrosstalkOptions>(new CrosstalkOptions()),
+            KokoroVoiceResolver.Instance,
             NullLogger<CrosstalkAssembler>.Instance);
 
         var identityProvider = new FakeStationIdentityProvider(new StationIdentity("st-1", "GenWave", "af_heart"));
