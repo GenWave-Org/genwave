@@ -229,6 +229,7 @@ public sealed partial class SettingValidator
             // every one of these floors with a ceiling (settings-API-only, F53.2).
             ["Tts:RenderBudgetSeconds"] = v => IsIntInRange(v, Setting("Tts:RenderBudgetSeconds")),
             ["Tts:BlurbRetentionHours"] = v => IsIntInRange(v, Setting("Tts:BlurbRetentionHours")),
+            ["Tts:SoundTags:MaxPerBreak"] = v => IsIntInRange(v, Setting("Tts:SoundTags:MaxPerBreak")),
             ["Llm:MaxCopyChars"] = v => IsIntInRange(v, Setting("Llm:MaxCopyChars")),
             ["Admin:PlayHistoryCapacity"] = v => IsIntInRange(v, Setting("Admin:PlayHistoryCapacity")),
             ["Library:ScanIntervalSeconds"] = v => IsIntInRange(v, Setting("Library:ScanIntervalSeconds")),
@@ -994,6 +995,8 @@ public sealed partial class SettingValidator
             => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (tokens), or empty when unknown.",
         var k when k.Equals("Tts:RenderBudgetSeconds", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (seconds).",
+        var k when k.Equals("Tts:SoundTags:MaxPerBreak", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (tags per break; 0 turns them off).",
         var k when k.Equals("Tts:BlurbRetentionHours", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (hours).",
         var k when k.Equals("Llm:MaxCopyChars", StringComparison.OrdinalIgnoreCase)

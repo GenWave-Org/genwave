@@ -356,7 +356,7 @@ public sealed class LlmCopyWriter(
         {
             var id = await utteranceStore.RecordAsync(
                 new NewUtterance(
-                    personaId, request.ShowId, UtteranceKind.Patter, request.Kind.ToString(), shiftKey, copy.Text, fallbackCopy),
+                    personaId, request.ShowId, UtteranceKind.Patter, request.Kind.ToString(), shiftKey, SoundTags.Strip(copy.Text), fallbackCopy),
                 ct);
             return copy with { UtteranceId = id };
         }
@@ -1010,7 +1010,7 @@ public sealed class LlmCopyWriter(
 
         var recentTexts = recent.Where(e => !e.Fallback).Take(RepetitionWindow).Select(e => e.Text).ToList();
         var result = repetitionCheck.Check(
-            copy,
+            SoundTags.Strip(copy), // SPEC F219.18
             new RepetitionContext(
                 recentTexts, CappedNotSelectedRules(card, quirkSelection), personaName, request.StationName,
                 request.Track?.Title, request.Track?.Artist, request.Track?.Album, request.Track?.Year,
@@ -1513,6 +1513,8 @@ public sealed class LlmCopyWriter(
         string copy, string? factBlock, DateTimeOffset stationLocalNow, string? trackTitle, string? stationName,
         string? requiredCore = null)
     {
+        // SPEC F219.18: the gate reads the copy with sound tags removed.
+        copy = SoundTags.Strip(copy);
         var violations = new List<ClaimViolation>();
         if (factBlock is not null)
             violations.AddRange(CopyClaims.CheckFacts(copy, factBlock, stationName).Violations);

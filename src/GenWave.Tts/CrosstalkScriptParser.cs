@@ -185,7 +185,7 @@ static partial class CrosstalkScriptParser
         // discarded as malformed anyway, keeping the FIRST-rule-wins discipline this method opens
         // with intact for shape failures, with truth checked as the final gate before the duration
         // estimate.
-        var scriptText = string.Join(' ', lines.Select(line => line.Text));
+        var scriptText = SoundTags.Strip(string.Join(' ', lines.Select(line => line.Text))); // SPEC F219.18: the gate reads tag-free copy
 
         // Table-driven (PLAN T333 review advisory A3): four near-identical shape checks, tried in
         // this fixed order, the first match wins. Each pairs a compiled pattern with the honest,

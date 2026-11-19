@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **160 seams across 9 projects.**
+> **161 seams across 9 projects.**
 
 ## GenWave.Ads (2 seams)
 
@@ -221,7 +221,7 @@
 | `GenWave.Orchestration.IRandomSource` | `GenWave.Orchestration.SystemRandomSource` | Singleton | — |
 | `GenWave.Orchestration.IRequestFulfillmentSource` | `GenWave.Orchestration.RequestFulfillmentProvider` | Singleton | also registered: `GenWave.Orchestration.NoOpRequestFulfillmentSource` (GenWave.Orchestration) |
 
-## GenWave.Tts (25 seams)
+## GenWave.Tts (26 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -246,6 +246,7 @@
 | `GenWave.Tts.ILlmContextWindow` | `GenWave.Tts.LlmContextWindow` | Singleton | — |
 | `GenWave.Tts.INamedEngineSynthesizer` | `GenWave.Tts.NamedEngineSynthesizer` | Singleton | — |
 | `GenWave.Tts.ISafeSegmentAuthor` | `GenWave.Tts.SafeSegmentAuthor` | Singleton | — |
+| `GenWave.Tts.ISoundTagCapProvider` | `GenWave.Tts.OptionsMonitorSoundTagCapProvider` | Singleton | — |
 | `GenWave.Tts.ISpeechNormalizationPreview` | `GenWave.Tts.NormalizingTtsSynthesizer` | Singleton | — |
 | `GenWave.Tts.IVoiceEngineRegistry` | `GenWave.Tts.VoiceEngineRegistry` | Singleton | — |
 | `GenWave.Tts.IVoiceListingCache` | `GenWave.Tts.CachedVoiceLister` | Singleton | — |

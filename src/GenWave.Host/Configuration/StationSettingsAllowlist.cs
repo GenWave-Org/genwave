@@ -304,6 +304,9 @@ public static class StationSettingsAllowlist
         // registry engine, each value 1-600. A present entry overrides that engine's own configured limit;
         // GenWave.Tts.EngineRenderBudget reads it per render, so a PUT applies to the next one. Blank = no overrides.
         new("Tts:EngineRenderBudgets", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Voice),
+        // Most sound tags ([laugh], [sigh]...) one break may carry on an engine whose profile lists tags (SPEC F219.16/.17);
+        // 0 = off. GenWave.Tts.OptionsMonitorSoundTagCapProvider reads it per render, so a PUT applies to the next one.
+        new("Tts:SoundTags:MaxPerBreak", SettingApplyMode.Live, SettingKind.Number, "tags", SettingGroup.Voice, Min: 0, Max: 5),
         new("Llm:Endpoint", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Voice),
         // Live model roster (SPEC F205.7, STORY-479, PLAN T580) — Station:Voice's LLM-side sibling
         // immediately above: SettingsController's choice resolver lists the configured Llm:Endpoint's

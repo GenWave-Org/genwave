@@ -91,6 +91,12 @@ public static class TtsServiceCollectionExtensions
             .Bind(configuration.GetSection(TtsEngineByKindOptions.Section));
         services.AddSingleton<TtsEngineByKindProvider>();
 
+        // Live sound-tag cap (SPEC F219.16/.17): Tts:SoundTags:MaxPerBreak, re-read per render.
+        services
+            .AddOptions<TtsSoundTagsOptions>()
+            .Bind(configuration.GetSection(TtsSoundTagsOptions.Section));
+        services.AddSingleton<ISoundTagCapProvider, OptionsMonitorSoundTagCapProvider>();
+
         // LLM options — registered unconditionally (SPEC F34.2); an empty Llm:Endpoint just means
         // LlmCopyWriter stays disabled. IOptionsMonitor<LlmOptions> (not IOptions) is what
         // LlmCopyWriter reads per render, so a live edit to Llm:Endpoint/Model/TimeoutSeconds/

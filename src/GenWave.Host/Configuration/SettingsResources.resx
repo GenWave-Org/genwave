@@ -354,6 +354,12 @@
   <data name="Tts:EngineRenderBudgets.Help" xml:space="preserve">
     <value>How many seconds one line may take to render with each engine, from 1 to 600. Leave a field empty to use that engine's own limit. A change applies to the next line, no restart needed.</value>
   </data>
+  <data name="Tts:SoundTags:MaxPerBreak.Label" xml:space="preserve">
+    <value>Sound effects per break</value>
+  </data>
+  <data name="Tts:SoundTags:MaxPerBreak.Help" xml:space="preserve">
+    <value>The most laughs, sighs and similar sounds one spoken break may carry, from 0 to 5. Only voice engines that can make these sounds use it; 0 turns them off. A change applies to the next line, no restart needed.</value>
+  </data>
   <data name="Tts:EngineByKind.Label" xml:space="preserve">
     <value>Engine by speech kind</value>
   </data>
