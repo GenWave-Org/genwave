@@ -22,6 +22,7 @@ docs/audit/
 # Smoke-test artifacts
 smoke-candidates.json
 *.wav
+!chatterbox/clips/*.wav
 *-smoke.png
 
 # Playwright MCP session artifacts

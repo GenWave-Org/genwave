@@ -2,7 +2,7 @@
 //
 // BDD specification — xUnit. The T756 facts drive the REAL POST/GET/DELETE api/voices/clips routes through
 // WebApplicationFactory<Program> against a REAL ephemeral Postgres and real ffmpeg (the Story401 arc idiom: arrange once,
-// many read-only Scenarios). Test audio is made at run time with ffmpeg's sine source. The T757 facts stay pending.
+// many read-only Scenarios). Test audio is made at run time with ffmpeg's sine source.
 
 using System.Diagnostics;
 using System.Globalization;
@@ -12,6 +12,7 @@ using System.Text;
 using System.Text.Json;
 using Dapper;
 using GenWave.Host.Tests.Fakes;
+using GenWave.Host.Voices;
 using GenWave.Host.Tests.Support;
 using GenWave.Loudness;
 using Microsoft.AspNetCore.Hosting;
@@ -59,17 +60,31 @@ public static class FeatureUploadAClip
         public void TheFileIsGone() => Assert.False(arc.FreeFileSurvivesDelete);
     }
 
-    // AC5, AC11 — a fresh install
-    public sealed class ScenarioTheStarterSet
+    // AC5, AC11 — a fresh install: the real seeder runs against the empty clips folder, then the real GET lists
+    [Collection(UploadAClipCollection.Name)]
+    public sealed class ScenarioTheStarterSet(UploadAClipArc arc)
     {
-        [Fact(Skip = "pending: T757")]
-        public void StarterClipsExist() { }
+        [Fact]
+        public void StarterClipsExist() => Assert.Equal(13, arc.StarterClips.Count);
 
-        [Fact(Skip = "pending: T757")]
-        public void EveryStarterClipHasACredit() { }
+        [Fact]
+        public void EveryStarterClipHasACredit() => Assert.All(arc.StarterClips, c => Assert.False(string.IsNullOrWhiteSpace(c.Credit)));
 
-        [Fact(Skip = "pending: T757")]
-        public void NoCreditNamesANonCommercialLicence() { }
+        // Every credit names CC BY 4.0 and none carries a non-commercial marker (the licence list names only CC BY 4.0).
+        [Fact]
+        public void NoCreditNamesANonCommercialLicence() =>
+            Assert.All(arc.StarterClips, c => Assert.True(
+                c.Credit.Contains("CC BY 4.0", StringComparison.Ordinal)
+                && !c.Credit.Contains("NC", StringComparison.Ordinal)
+                && !c.Credit.Contains("non-commercial", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    // A starter the admin deleted stays deleted across a reboot (SPEC F219.14)
+    [Collection(UploadAClipCollection.Name)]
+    public sealed class ScenarioADeletedStarter(UploadAClipArc arc)
+    {
+        [Fact]
+        public void DoesNotComeBackAfterTheNextSeed() => Assert.DoesNotContain(UploadAClipArc.DeletedStarterSlug, arc.SlugsAfterReseed);
     }
 
     // Sad path
@@ -123,6 +138,9 @@ public sealed class UploadAClipCollection : ICollectionFixture<UploadAClipArc>
     public const string Name = "Story557UploadAClip";
 }
 
+/// <summary>A listed clip with <c>source='starter'</c> and its credit line.</summary>
+public sealed record StarterClipFacts(string Slug, string Credit);
+
 /// <summary>What ffprobe and ebur128 say about a stored clip file.</summary>
 public sealed record StoredClipFacts(int Channels, int SampleRate, double IntegratedLufs);
 
@@ -133,11 +151,14 @@ public sealed record StoredClipFacts(int Channels, int SampleRate, double Integr
 public sealed class UploadAClipArc : IAsyncLifetime
 {
     public const string GoodSlug = "my-reader";
+    public const string DeletedStarterSlug = "reader-121";
     public const string DjName = "DJ Clipper";
 
     public bool GoodRowExists { get; private set; }
     public StoredClipFacts GoodFile { get; private set; } = new(0, 0, 0);
     public IReadOnlyList<string> ListedSlugs { get; private set; } = [];
+    public IReadOnlyList<StarterClipFacts> StarterClips { get; private set; } = [];
+    public IReadOnlyList<string> SlugsAfterReseed { get; private set; } = [];
 
     public bool FreeRowSurvivesDelete { get; private set; } = true;
     public bool FreeFileSurvivesDelete { get; private set; } = true;
@@ -161,6 +182,15 @@ public sealed class UploadAClipArc : IAsyncLifetime
         var clipsRoot = Path.Combine(clipsDir.Path, "voice-clips");
         await using var factory = new UploadAClipWebFactory(database, clipsRoot);
         var admin = await UploadAClipWebFactory.LoggedInClientAsync(factory);
+
+        // AC5, AC11 — the boot seeder (its hosted service is removed in the test host so the run is deterministic) on a fresh install
+        await factory.Services.GetRequiredService<StarterClipSeeder>().SeedAsync(CancellationToken.None);
+        StarterClips = await ListStarterClipsAsync(admin);
+
+        // A starter the admin deletes stays deleted: seed again and it must not return
+        Assert.Equal(HttpStatusCode.NoContent, (await admin.DeleteAsync($"/api/voices/clips/{DeletedStarterSlug}")).StatusCode);
+        await factory.Services.GetRequiredService<StarterClipSeeder>().SeedAsync(CancellationToken.None);
+        SlugsAfterReseed = await ListSlugsAsync(admin);
 
         var tenSeconds = await MakeWavAsync(audioDir.Path, "ten.wav", seconds: 10);
 
@@ -243,6 +273,17 @@ public sealed class UploadAClipArc : IAsyncLifetime
         return [.. body.RootElement.EnumerateArray().Select(c => c.GetProperty("slug").GetString() ?? "")];
     }
 
+    static async Task<IReadOnlyList<StarterClipFacts>> ListStarterClipsAsync(HttpClient client)
+    {
+        using var body = JsonDocument.Parse(await client.GetStringAsync("/api/voices/clips"));
+        return
+        [
+            .. body.RootElement.EnumerateArray()
+                .Where(c => c.GetProperty("source").GetString() == "starter")
+                .Select(c => new StarterClipFacts(c.GetProperty("slug").GetString() ?? "", c.GetProperty("credit").GetString() ?? "")),
+        ];
+    }
+
     static async Task<int> CountRowsAsync(string stationConnectionString, string slug)
     {
         await using var conn = new NpgsqlConnection(stationConnectionString);
@@ -316,6 +357,7 @@ file sealed class UploadAClipWebFactory(UploadAClipDatabase database, string cli
         builder.UseSetting("Station:Voice", "af_heart");
         builder.UseSetting("Station:Scope:LibraryIds:0", "1");
         builder.UseSetting("Tts:ClipsRoot", clipsRoot);
+        builder.UseSetting("Tts:StarterClipsRoot", StarterClipsRoot());
         builder.UseSetting("Tts:Engines:chatterbox:Endpoint", "http://chatterbox:8004");
         builder.UseSetting("Tts:Engines:chatterbox:Profile", "chatterbox");
 
@@ -325,6 +367,16 @@ file sealed class UploadAClipWebFactory(UploadAClipDatabase database, string cli
             services.RemoveAll<IHttpClientFactory>();
             services.AddSingleton<IHttpClientFactory>(new SingleHandlerHttpClientFactory(handler));
         });
+    }
+
+    /// <summary>The shipped starter clips, straight from the repo (the Docker image copies the same folder).</summary>
+    static string StarterClipsRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "GenWave.sln")))
+            dir = dir.Parent;
+
+        return Path.Combine(dir?.FullName ?? throw new InvalidOperationException("repo root (GenWave.sln) not found"), "chatterbox", "clips");
     }
 
     public static async Task<HttpClient> LoggedInClientAsync(WebApplicationFactory<Program> factory)

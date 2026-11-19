@@ -1,0 +1,145 @@
+[
+  {
+    "slug": "reader-4970",
+    "label": "Reader 4970, female",
+    "file": "reader-4970.wav",
+    "durationMs": 9414,
+    "credit": "LibriTTS-R (Koizumi, Zen, Karita, Ding, Yatabe, Morioka, Bacchiani, Zhang, Han and Bapna, 2023), made available by Google LLC under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/), https://www.openslr.org/141/ - reader 4970, utterance 4970_29095_000055_000003; derived from LibriVox public-domain readings. Changes: silence trimmed, 1 s of trailing silence added, mono 24 kHz, loudness-normalised to -20 LUFS.",
+    "reader": "4970",
+    "utterances": [
+      "4970_29095_000055_000003"
+    ]
+  },
+  {
+    "slug": "reader-121",
+    "label": "Reader 121, female",
+    "file": "reader-121.wav",
+    "durationMs": 8640,
+    "credit": "LibriTTS-R (Koizumi, Zen, Karita, Ding, Yatabe, Morioka, Bacchiani, Zhang, Han and Bapna, 2023), made available by Google LLC under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/), https://www.openslr.org/141/ - reader 121, utterance 121_127105_000007_000004; derived from LibriVox public-domain readings. Changes: silence trimmed, 1 s of trailing silence added, mono 24 kHz, loudness-normalised to -20 LUFS.",
+    "reader": "121",
+    "utterances": [
+      "121_127105_000007_000004"
+    ]
+  },
+  {
+    "slug": "reader-1580",
+    "label": "Reader 1580, female",
+    "file": "reader-1580.wav",
+    "durationMs": 9269,
+    "credit": "LibriTTS-R (Koizumi, Zen, Karita, Ding, Yatabe, Morioka, Bacchiani, Zhang, Han and Bapna, 2023), made available by Google LLC under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/), https://www.openslr.org/141/ - reader 1580, utterance 1580_141083_000009_000004; derived from LibriVox public-domain readings. Changes: silence trimmed, 1 s of trailing silence added, mono 24 kHz, loudness-normalised to -20 LUFS.",
+    "reader": "1580",
+    "utterances": [
+      "1580_141083_000009_000004"
+    ]
+  },
+  {
+    "slug": "reader-3729",
+    "label": "Reader 3729, female",
+    "file": "reader-3729.wav",
+    "durationMs": 8720,
+    "credit": "LibriTTS-R (Koizumi, Zen, Karita, Ding, Yatabe, Morioka, Bacchiani, Zhang, Han and Bapna, 2023), made available by Google LLC under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/), https://www.openslr.org/141/ - reader 3729, utterance 3729_6852_000048_000001; derived from LibriVox public-domain readings. Changes: silence trimmed, 1 s of trailing silence added, mono 24 kHz, loudness-normalised to -20 LUFS.",
+    "reader": "3729",
+    "utterances": [
+      "3729_6852_000048_000001"
+    ]
+  },
+  {
+    "slug": "reader-4446",
+    "label": "Reader 4446, female",
+    "file": "reader-4446.wav",
+    "durationMs": 9516,
+    "credit": "LibriTTS-R (Koizumi, Zen, Karita, Ding, Yatabe, Morioka, Bacchiani, Zhang, Han and Bapna, 2023), made available by Google LLC under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/), https://www.openslr.org/141/ - reader 4446, utterance 4446_2271_000008_000003; derived from LibriVox public-domain readings. Changes: silence trimmed, 1 s of trailing silence added, mono 24 kHz, loudness-normalised to -20 LUFS.",
+    "reader": "4446",
+    "utterances": [
+      "4446_2271_000008_000003"
+    ]
+  },
+  {
+    "slug": "reader-8463",
+    "label": "Reader 8463, female",
+    "file": "reader-8463.wav",
+    "durationMs": 10648,
+    "credit": "LibriTTS-R (Koizumi, Zen, Karita, Ding, Yatabe, Morioka, Bacchiani, Zhang, Han and Bapna, 2023), made available by Google LLC under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/), https://www.openslr.org/141/ - reader 8463, utterance 8463_287645_000003_000001; derived from LibriVox public-domain readings. Changes: silence trimmed, 1 s of trailing silence added, mono 24 kHz, loudness-normalised to -20 LUFS.",
+    "reader": "8463",
+    "utterances": [
+      "8463_287645_000003_000001"
+    ]
+  },
+  {
+    "slug": "reader-5683",
+    "label": "Reader 5683, female",
+    "file": "reader-5683.wav",
+    "durationMs": 9120,
+    "credit": "LibriTTS-R (Koizumi, Zen, Karita, Ding, Yatabe, Morioka, Bacchiani, Zhang, Han and Bapna, 2023), made available by Google LLC under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/), https://www.openslr.org/141/ - reader 5683, utterance 5683_32865_000005_000001; derived from LibriVox public-domain readings. Changes: silence trimmed, 1 s of trailing silence added, mono 24 kHz, loudness-normalised to -20 LUFS.",
+    "reader": "5683",
+    "utterances": [
+      "5683_32865_000005_000001"
+    ]
+  },
+  {
+    "slug": "reader-5639",
+    "label": "Reader 5639, male",
+    "file": "reader-5639.wav",
+    "durationMs": 10745,
+    "credit": "LibriTTS-R (Koizumi, Zen, Karita, Ding, Yatabe, Morioka, Bacchiani, Zhang, Han and Bapna, 2023), made available by Google LLC under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/), https://www.openslr.org/141/ - reader 5639, utterance 5639_40744_000012_000003; derived from LibriVox public-domain readings. Changes: silence trimmed, 1 s of trailing silence added, mono 24 kHz, loudness-normalised to -20 LUFS.",
+    "reader": "5639",
+    "utterances": [
+      "5639_40744_000012_000003"
+    ]
+  },
+  {
+    "slug": "reader-7729",
+    "label": "Reader 7729, male",
+    "file": "reader-7729.wav",
+    "durationMs": 11698,
+    "credit": "LibriTTS-R (Koizumi, Zen, Karita, Ding, Yatabe, Morioka, Bacchiani, Zhang, Han and Bapna, 2023), made available by Google LLC under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/), https://www.openslr.org/141/ - reader 7729, utterance 7729_102255_000012_000002; derived from LibriVox public-domain readings. Changes: silence trimmed, 1 s of trailing silence added, mono 24 kHz, loudness-normalised to -20 LUFS.",
+    "reader": "7729",
+    "utterances": [
+      "7729_102255_000012_000002"
+    ]
+  },
+  {
+    "slug": "reader-1089",
+    "label": "Reader 1089, male",
+    "file": "reader-1089.wav",
+    "durationMs": 13265,
+    "credit": "LibriTTS-R (Koizumi, Zen, Karita, Ding, Yatabe, Morioka, Bacchiani, Zhang, Han and Bapna, 2023), made available by Google LLC under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/), https://www.openslr.org/141/ - reader 1089, utterance 1089_134686_000002_000002; derived from LibriVox public-domain readings. Changes: silence trimmed, 1 s of trailing silence added, mono 24 kHz, loudness-normalised to -20 LUFS.",
+    "reader": "1089",
+    "utterances": [
+      "1089_134686_000002_000002"
+    ]
+  },
+  {
+    "slug": "reader-260",
+    "label": "Reader 260, male",
+    "file": "reader-260.wav",
+    "durationMs": 8960,
+    "credit": "LibriTTS-R (Koizumi, Zen, Karita, Ding, Yatabe, Morioka, Bacchiani, Zhang, Han and Bapna, 2023), made available by Google LLC under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/), https://www.openslr.org/141/ - reader 260, utterance 260_123286_000024_000000; derived from LibriVox public-domain readings. Changes: silence trimmed, 1 s of trailing silence added, mono 24 kHz, loudness-normalised to -20 LUFS.",
+    "reader": "260",
+    "utterances": [
+      "260_123286_000024_000000"
+    ]
+  },
+  {
+    "slug": "reader-4077",
+    "label": "Reader 4077, male",
+    "file": "reader-4077.wav",
+    "durationMs": 13390,
+    "credit": "LibriTTS-R (Koizumi, Zen, Karita, Ding, Yatabe, Morioka, Bacchiani, Zhang, Han and Bapna, 2023), made available by Google LLC under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/), https://www.openslr.org/141/ - reader 4077, utterance 4077_13751_000008_000001; derived from LibriVox public-domain readings. Changes: silence trimmed, 1 s of trailing silence added, mono 24 kHz, loudness-normalised to -20 LUFS.",
+    "reader": "4077",
+    "utterances": [
+      "4077_13751_000008_000001"
+    ]
+  },
+  {
+    "slug": "reader-1188",
+    "label": "Reader 1188, male",
+    "file": "reader-1188.wav",
+    "durationMs": 12720,
+    "credit": "LibriTTS-R (Koizumi, Zen, Karita, Ding, Yatabe, Morioka, Bacchiani, Zhang, Han and Bapna, 2023), made available by Google LLC under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/), https://www.openslr.org/141/ - reader 1188, utterance 1188_133604_000012_000002; derived from LibriVox public-domain readings. Changes: silence trimmed, 1 s of trailing silence added, mono 24 kHz, loudness-normalised to -20 LUFS.",
+    "reader": "1188",
+    "utterances": [
+      "1188_133604_000012_000002"
+    ]
+  }
+]

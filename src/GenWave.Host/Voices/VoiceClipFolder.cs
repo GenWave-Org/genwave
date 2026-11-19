@@ -13,6 +13,7 @@ namespace GenWave.Host.Voices;
 public sealed class VoiceClipFolder(IOptionsMonitor<TtsOptions> ttsOptions)
 {
     const string Extension = ".wav";
+    const string StarterMarkerName = ".starter-seeded";
 
     /// <summary>A fresh, unique, not-yet-existing path in the folder to write a clip to before it is published. The name is a GUID, never client text.</summary>
     public string NewStagingPath()
@@ -48,6 +49,43 @@ public sealed class VoiceClipFolder(IOptionsMonitor<TtsOptions> ttsOptions)
         }
     }
 
+    /// <summary>True when <c>&lt;slug&gt;.wav</c> is already in the folder.</summary>
+    public bool Exists(string slug)
+    {
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(ttsOptions.CurrentValue.ClipsRoot));
+        var target = Path.GetFullPath(Path.Combine(root, slug + Extension));
+        if (!IsUnderCanonicalRoot(target, root))
+            throw new UnreachableException("A clip slug resolved outside the clips folder.");
+
+        return File.Exists(target);
+    }
+
+    /// <summary>The slugs recorded in the starter marker (SPEC F219.14); empty when there is no marker.</summary>
+    public IReadOnlyCollection<string> ReadSeededStarterSlugs()
+    {
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(ttsOptions.CurrentValue.ClipsRoot));
+        var marker = Path.GetFullPath(Path.Combine(root, StarterMarkerName));
+        if (!IsUnderCanonicalRoot(marker, root))
+            throw new UnreachableException("The starter marker resolved outside the clips folder.");
+
+        return File.Exists(marker)
+            ? [.. File.ReadAllLines(marker).Select(l => l.Trim()).Where(l => l.Length > 0)]
+            : [];
+    }
+
+    /// <summary>Records <paramref name="slug"/> as seeded so a starter the admin later deletes is not seeded again.</summary>
+    public void MarkStarterSeeded(string slug)
+    {
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(ttsOptions.CurrentValue.ClipsRoot));
+        var marker = Path.GetFullPath(Path.Combine(root, StarterMarkerName));
+        if (!IsUnderCanonicalRoot(marker, root))
+            throw new UnreachableException("The starter marker resolved outside the clips folder.");
+
+        Directory.CreateDirectory(root);
+        // A dotfile: the cloning engine's listing of this folder (T770) must skip names starting with '.', as it does staging files.
+        File.AppendAllLines(marker, [slug]);
+    }
+
     /// <summary>Deletes <c>&lt;slug&gt;.wav</c> from the folder; a file already gone is fine.</summary>
     public void Remove(string slug)
     {
@@ -76,6 +114,6 @@ public sealed class VoiceClipFolder(IOptionsMonitor<TtsOptions> ttsOptions)
     public static string FileNameFor(string slug) => slug + Extension;
 
     /// <summary>Separator-aware canonical-root check (a bare <c>StartsWith(root)</c> would admit a sibling like <c>/clips-evil</c>).</summary>
-    static bool IsUnderCanonicalRoot(string candidate, string canonicalRoot) =>
+    internal static bool IsUnderCanonicalRoot(string candidate, string canonicalRoot) =>
         candidate.StartsWith(canonicalRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal);
 }

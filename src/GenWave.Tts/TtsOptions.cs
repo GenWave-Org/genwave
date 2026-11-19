@@ -36,6 +36,13 @@ public sealed class TtsOptions
     [Required]
     public string ClipsRoot { get; set; } = "/clips";
 
+    /// <summary>
+    /// Where the shipped starter clips and their <c>starter.json</c> manifest live (SPEC F219.14): the api image carries them here,
+    /// read-only. Seeded into <see cref="ClipsRoot"/> on boot.
+    /// </summary>
+    [Required]
+    public string StarterClipsRoot { get; set; } = "/app/starter-clips";
+
     /// <summary>GC horizon for fresh-per-airing blurb audio under <c>blurbs/</c> (SPEC F34.6).</summary>
     [Range(1, int.MaxValue)]
     public int BlurbRetentionHours { get; set; } = 24;
