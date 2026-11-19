@@ -501,6 +501,21 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	                    AND (aired_count <> 0 OR last_aired_at IS NOT NULL))
 	ON CONFLICT (key) DO NOTHING;
 
+	-- begin f219-voice-clip
+	-- F219 (STORY-557; PLAN T755): one row per reference clip a cloning engine can speak in. The audio file lives under the
+	-- voice-clips volume, not in Postgres. Mirrored verbatim between db/06 and db/53 (a spec pins the text equal).
+	CREATE TABLE IF NOT EXISTS station.voice_clip (
+	  id          serial PRIMARY KEY,
+	  slug        text NOT NULL UNIQUE CHECK (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'),
+	  label       text NOT NULL,
+	  file_name   text NOT NULL,            -- under the voice-clips volume
+	  duration_ms integer NOT NULL CHECK (duration_ms BETWEEN 5000 AND 20000),
+	  source      text NOT NULL,            -- 'starter' | 'upload'
+	  credit      text,                     -- attribution line, required for 'starter'
+	  created_at  timestamptz NOT NULL DEFAULT now()
+	);
+	-- end f219-voice-clip
+
 	-- The weekly format-clock grid (SPEC F91.1, F91.2; STORY-240, STORY-242; PLAN T118) that replaces
 	-- the single owner-toggled Station:Persona:ActiveId. day_of_week is System.DayOfWeek's own 0-6
 	-- numbering (0 = Sunday) — no translation ever happens between this column and the C# side.
@@ -987,7 +1002,7 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	CREATE TABLE IF NOT EXISTS station.voice_pack (
 	  id            bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
 	  slug          text        NOT NULL UNIQUE CHECK (slug ~ '^[a-z0-9][a-z0-9-]*$'),
-	  engine        text        NOT NULL CHECK (engine IN ('kokoro')), -- widens additively at gh-#614
+	  engine        text        NOT NULL, -- checked by VoicePackController against SupportedEngines and the active engine (F219; db/53 dropped the closed-set CHECK)
 	  definition    jsonb       NOT NULL,
 	  imported_from text        NOT NULL,
 	  imported_at   timestamptz NOT NULL DEFAULT now(),

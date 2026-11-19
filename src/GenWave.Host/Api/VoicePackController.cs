@@ -35,10 +35,10 @@ namespace GenWave.Host.Api;
 /// the entry (<see cref="CatalogInstallShell.ResolveEntryAsync"/>) → parse the manifest
 /// (<see cref="CatalogVoicePackManifestSerializer.Deserialize"/>: reject ⇒ 400 malformed, engine is
 /// only shape-checked there) → ENGINE CHECK, entirely HERE (T413 review round 2 finding B2 — the
-/// closed-set membership check moved out of the serializer): the manifest's declared engine must both
-/// be in <see cref="SupportedEngines"/> (mirrors db/45's own <c>check (engine in ('kokoro'))</c> on
-/// <c>station.voice_pack</c> — the single seam gh-#614's future engine widening edits) AND equal
-/// the active engine (<see cref="IActiveVoiceEngine"/>); either failing ⇒ 400, <c>Type = "not_supported_engine"</c>, SPEC
+/// supported-set check moved out of the serializer): the manifest's declared engine must both
+/// be in <see cref="SupportedEngines"/> (a pack ships Kokoro <c>.pt</c> files; SPEC F164.2) AND equal
+/// the active engine's profile name (<see cref="IActiveVoiceEngine.DependencyName"/>, from the engine the
+/// station's registry resolved, <c>Current</c> non-null); either failing ⇒ 400, <c>Type = "not_supported_engine"</c>, SPEC
 /// F164.2 → VOICE-ID COLLISION CHECK (stock via <see cref="ITtsVoiceLister"/>, installed via
 /// <see cref="IVoicePackStore.FindInstalledVoiceIdsAsync"/>: any collision ⇒ 409, SPEC F166.4) → fetch
 /// every declared asset (<see cref="CatalogInstallShell.FetchAllAssetsAsync"/>) → cross-check the
@@ -107,13 +107,8 @@ public sealed class VoicePackController(
     /// its own status code).</summary>
     const string NotSupportedEngineType = "not_supported_engine";
 
-    /// <summary>The closed set of engines this database will even hold (T413 review round 2 finding
-    /// B2) — mirrors db/45's own <c>check (engine in ('kokoro'))</c> on <c>station.voice_pack</c>
-    /// EXACTLY: the single seam gh-#614's future engine widening edits, and the only place this list
-    /// lives (<see cref="CatalogVoicePackManifestSerializer"/> only shape-checks the token now — see
-    /// that type's own remarks). A manifest naming an engine outside this set is refused with the SAME
-    /// <c>not_supported_engine</c> 400 an engine MISMATCH gets — "this database can't hold it" and
-    /// "this station doesn't run it" are both instances of "this station cannot install this pack".</summary>
+    /// <summary>Engines whose voice files a pack install can write: a pack ships Kokoro <c>.pt</c> files, so
+    /// only a Kokoro station can use one (SPEC F164.2). App policy only: db/53 dropped the database CHECK.</summary>
     static readonly string[] SupportedEngines = [DependencyNames.Kokoro];
 
     // 0644 — kokoro reads the shared volume as uid 1000 while this api container runs as root; .NET's
@@ -232,8 +227,8 @@ public sealed class VoicePackController(
             // can fire at any point across the whole DB round-trip a disconnect spans, and Npgsql
             // surfaces command cancellation as this same exception type — an unwind that only ran for
             // "everything except a cancel" left exactly the orphaned-.pt-with-no-DB-row state this
-            // whole method exists to prevent. db/45's own `check (engine in ('kokoro'))` is one
-            // reachable source of a non-cancellation failure here too, and F164.5's all-or-nothing
+            // whole method exists to prevent. Any store failure (a DB outage, a constraint) is a
+            // reachable non-cancellation failure here too, and F164.5's all-or-nothing
             // posture applies just as much to an unexpected store exception as it does to the
             // collision race below — including a RE-install, whose previous install's own file must
             // come back exactly as it was, never merely vanish while its own DB row survives.
@@ -290,19 +285,16 @@ public sealed class VoicePackController(
     /// (<see cref="CatalogInstallShell.ResolveEntryAsync"/>) → parse the manifest
     /// (<see cref="CatalogVoicePackManifestSerializer.Deserialize"/>: reject ⇒ 400 malformed, engine is
     /// only shape-checked there) → ENGINE CHECK (SPEC F164.2, T413 review round 2 finding B2): the
-    /// manifest's declared engine must both be in <see cref="SupportedEngines"/> (mirrors db/45's own
-    /// <c>check (engine in ('kokoro'))</c> — the single seam gh-#614's future engine widening edits)
-    /// AND equal the active engine (<see cref="IActiveVoiceEngine"/>); either failing ⇒ 400, <c>Type =
-    /// "not_supported_engine"</c>.
+    /// manifest's declared engine must both be in <see cref="SupportedEngines"/> (SPEC F164.2) AND equal
+    /// the active engine's profile name (<see cref="IActiveVoiceEngine.DependencyName"/>; the registered engine
+    /// must exist, <c>Current</c> non-null); either failing ⇒ 400, <c>Type = "not_supported_engine"</c>.
     ///
     /// <para>
     /// Each arm of the engine check is independently load-bearing (T413 review round 3 finding F2) —
-    /// a station whose OWN primary engine also sits outside <see cref="SupportedEngines"/> (there is
-    /// exactly one other engine token this codebase knows today, <c>"piper"</c>) would pass the
+    /// a station whose OWN primary engine sits outside <see cref="SupportedEngines"/> would pass the
     /// primary-engine-equality arm trivially against a pack declaring that SAME engine; only the
-    /// closed-set arm refuses that install (see Story396's own
-    /// <c>ScenarioEngineOutsideTheClosedSetRefuses</c>, the fact proving a piper-primary station still
-    /// refuses a piper-declared pack).
+    /// supported-set arm refuses that install (see Story396's own
+    /// <c>ScenarioEngineOutsideTheClosedSetRefuses</c>).
     /// </para>
     ///
     /// <para>
@@ -658,11 +650,11 @@ public sealed class VoicePackController(
         candidate == canonicalRoot || candidate.StartsWith(canonicalRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal);
 
     /// <summary>Names both the pack's own declared engine and the station's actual primary engine,
-    /// AND the closed set of engines this database can even hold (T413 review round 3 finding F2) —
+    /// AND the engines a pack install supports (T413 review round 3 finding F2) —
     /// when the pack and station engine happen to be the SAME token (a station whose own primary
     /// engine sits outside <see cref="SupportedEngines"/> installing a pack declaring that same
     /// engine), naming only those two would read as a non-sequitur ("built for X, station runs X"),
-    /// so the closed set is always spelled out too.</summary>
+    /// so the supported set is always spelled out too.</summary>
     static ProblemDetails NotSupportedEngineProblem(string slug, string packEngine, string stationEngine) => new()
     {
         Status = StatusCodes.Status400BadRequest,
