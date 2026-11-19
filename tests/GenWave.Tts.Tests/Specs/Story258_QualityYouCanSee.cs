@@ -106,7 +106,8 @@ public static class FeatureQualityYouCanSee
                     NullLogger<SpeechCorrectionProvider>.Instance);
                 var normalizingLogger = new CapturingLogger<NormalizingTtsSynthesizer>();
                 var normalizingSynth = new NormalizingTtsSynthesizer(
-                    kokoro, corrections, NoCorrections.PersonaCache(), new CorrectionsFiredStats(), normalizingLogger);
+                    kokoro, corrections, NoCorrections.PersonaCache(), new CorrectionsFiredStats(), normalizingLogger,
+                TestSoundTagGate.Kokoro);
                 var pronunciations = new PronunciationRuleProvider(
                     new TestOptionsMonitor<TtsPronunciationsOptions>(
                         new TtsPronunciationsOptions { Pronunciations = """[{"pattern":"Reykjavik","word":"Reykjavik","ipa":"/reykjavikIpa/"}]""" }),

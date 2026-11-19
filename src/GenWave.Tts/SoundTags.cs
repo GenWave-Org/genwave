@@ -26,19 +26,38 @@ public static partial class SoundTags
         ArgumentNullException.ThrowIfNull(text);
         ArgumentNullException.ThrowIfNull(profile);
 
-        if (cap <= 0 || profile.SoundTags.Count == 0)
-            return Strip(text);
+        return ApplyAcross([text], profile.SoundTags, cap)[0];
+    }
+
+    /// <summary>
+    /// <see cref="Apply"/> over several texts in order with ONE running count, so the first <paramref name="cap"/> listed tags win
+    /// across all of them (a whole crosstalk exchange, SPEC F219.17). Every other tag is removed.
+    /// </summary>
+    public static IReadOnlyList<string> ApplyAcross(IReadOnlyList<string> texts, IReadOnlyList<string> tags, int cap)
+    {
+        ArgumentNullException.ThrowIfNull(texts);
+        ArgumentNullException.ThrowIfNull(tags);
+
+        if (cap <= 0 || tags.Count == 0)
+            return [.. texts.Select(Strip)];
 
         var kept = 0;
-        return Rewrite(text, tag =>
+        return [.. texts.Select(text => Rewrite(text, tag =>
         {
             if (kept >= cap)
                 return null;
-            var spelling = profile.SoundTags.FirstOrDefault(t => string.Equals(t, tag, StringComparison.OrdinalIgnoreCase));
+            var spelling = tags.FirstOrDefault(t => string.Equals(t, tag, StringComparison.OrdinalIgnoreCase));
             if (spelling is not null)
                 kept++;
             return spelling;
-        });
+        }))];
+    }
+
+    /// <summary>True when <paramref name="bracket"/> (a whole <c>[tag]</c>) names one of <paramref name="tags"/>, ignoring case. A null or empty list lists nothing.</summary>
+    public static bool IsListed(string bracket, IReadOnlyList<string>? tags)
+    {
+        ArgumentNullException.ThrowIfNull(bracket);
+        return tags is { Count: > 0 } && tags.Any(t => string.Equals(t, bracket, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>Removes every sound tag, tidying whitespace at each removal.</summary>

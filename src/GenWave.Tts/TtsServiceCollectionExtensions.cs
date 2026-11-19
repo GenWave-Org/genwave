@@ -96,6 +96,7 @@ public static class TtsServiceCollectionExtensions
             .AddOptions<TtsSoundTagsOptions>()
             .Bind(configuration.GetSection(TtsSoundTagsOptions.Section));
         services.AddSingleton<ISoundTagCapProvider, OptionsMonitorSoundTagCapProvider>();
+        services.AddSingleton<SoundTagRenderGate>();
         services.AddSingleton<ISoundTagOfferProvider, ActiveEngineSoundTagOfferProvider>();
 
         // LLM options — registered unconditionally (SPEC F34.2); an empty Llm:Endpoint just means
@@ -439,7 +440,8 @@ public static class TtsServiceCollectionExtensions
                     sp.GetRequiredService<SpeechCorrectionProvider>(),
                     sp.GetRequiredService<ActivePersonaCorrectionsCache>(),
                     sp.GetRequiredService<CorrectionsFiredStats>(),
-                    sp.GetRequiredService<ILogger<NormalizingTtsSynthesizer>>()))
+                    sp.GetRequiredService<ILogger<NormalizingTtsSynthesizer>>(),
+                    sp.GetRequiredService<SoundTagRenderGate>()))
             .AddSingleton<ITtsSynthesizer>(sp => sp.GetRequiredService<NormalizingTtsSynthesizer>())
             .AddSingleton<ISpeechNormalizationPreview>(sp => sp.GetRequiredService<NormalizingTtsSynthesizer>())
             // SPEC F219.10: the admin "Hear it" on a chosen engine renders through the same normalizing body.

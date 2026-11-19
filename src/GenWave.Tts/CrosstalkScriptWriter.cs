@@ -202,7 +202,10 @@ public sealed class CrosstalkScriptWriter(
 
             switch (result)
             {
-                case CrosstalkWriteResult.Accepted accepted:
+                case CrosstalkWriteResult.Accepted uncapped:
+                    // SPEC F219.17: the prompt promises the cap for the WHOLE exchange, but lines render one by one, so the
+                    // stored script is capped here in one ordered pass (first tags win); the per-line render gate stays the engine filter.
+                    var accepted = CapSoundTags(uncapped);
                     await memory.StoreAsync(request, accepted.Script, ct);
                     return Accept(accepted, personaName, systemPrompt, userPrompt, raw, startedAt, mode, cfg.Model);
                 // discarded.Cause was decided once, at the source (SPEC F139.1) — never re-derived from its text.
@@ -242,6 +245,17 @@ public sealed class CrosstalkScriptWriter(
         }
     }
 
+    CrosstalkWriteResult.Accepted CapSoundTags(CrosstalkWriteResult.Accepted accepted)
+    {
+        if (soundTagOffers?.Current is not { } offer)
+            return accepted;
+
+        var lines = accepted.Script.Lines;
+        var texts = SoundTags.ApplyAcross([.. lines.Select(line => line.Text)], offer.Tags, offer.Cap);
+        return new CrosstalkWriteResult.Accepted(new CrosstalkAiredScript(
+            [.. lines.Select((line, i) => line with { Text = texts[i] })]));
+    }
+
     /// <summary>
     /// One completion: post, refuse a length-truncated reply (SPEC F127.4, F127.11, gh-#424 class — checked
     /// BEFORE Parse, since a chopped last line can still parse), then parse. The raw reply rides along for the ring.
@@ -261,7 +275,8 @@ public sealed class CrosstalkScriptWriter(
         }
 
         return (raw, CrosstalkScriptParser.Parse(
-            raw, cfg.MaxCopyChars, durationTargetSeconds, request.StationLocalNow, request.StationName));
+            raw, cfg.MaxCopyChars, durationTargetSeconds, request.StationLocalNow, request.StationName,
+            soundTagOffers?.Current?.Tags));
     }
 
     /// <summary>

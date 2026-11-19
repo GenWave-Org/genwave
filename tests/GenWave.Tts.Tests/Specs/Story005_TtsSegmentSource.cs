@@ -280,7 +280,8 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
             var personaCache = NoCorrections.PersonaCache();
             var normalizingSynth = new NormalizingTtsSynthesizer(
                 innerSynth, corrections, personaCache,
-                new CorrectionsFiredStats(), NullLogger<NormalizingTtsSynthesizer>.Instance);
+                new CorrectionsFiredStats(), NullLogger<NormalizingTtsSynthesizer>.Instance,
+                TestSoundTagGate.Kokoro);
             var opts = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" });
             var source = new TtsSegmentSource(
                 new FakeSegmentCopyWriter("Coming up, a deep cut from MacLeod."),
@@ -356,7 +357,8 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
             var personaCache = NoCorrections.PersonaCache();
             var normalizingSynth = new NormalizingTtsSynthesizer(
                 innerSynth, provider, personaCache,
-                new CorrectionsFiredStats(), NullLogger<NormalizingTtsSynthesizer>.Instance);
+                new CorrectionsFiredStats(), NullLogger<NormalizingTtsSynthesizer>.Instance,
+                TestSoundTagGate.Kokoro);
             var opts = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" });
             var source = new TtsSegmentSource(
                 new FakeSegmentCopyWriter(CorrectedText),
@@ -500,7 +502,8 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
             var personaCache = new ActivePersonaCorrectionsCache(personaAccessor, clock);
             var normalizingSynth = new NormalizingTtsSynthesizer(
                 innerSynth, NoCorrections.Provider(), personaCache,
-                new CorrectionsFiredStats(), NullLogger<NormalizingTtsSynthesizer>.Instance);
+                new CorrectionsFiredStats(), NullLogger<NormalizingTtsSynthesizer>.Instance,
+                TestSoundTagGate.Kokoro);
             var opts = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" });
             var source = new TtsSegmentSource(
                 new FakeSegmentCopyWriter("Coming up, a deep cut from MacLeod."),
@@ -555,7 +558,8 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
             var personaCache = new ActivePersonaCorrectionsCache(personaAccessor, clock);
             var normalizingSynth = new NormalizingTtsSynthesizer(
                 innerSynth, NoCorrections.Provider(), personaCache,
-                new CorrectionsFiredStats(), NullLogger<NormalizingTtsSynthesizer>.Instance);
+                new CorrectionsFiredStats(), NullLogger<NormalizingTtsSynthesizer>.Instance,
+                TestSoundTagGate.Kokoro);
             var opts = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" });
             var source = new TtsSegmentSource(
                 new FakeSegmentCopyWriter("Coming up, a deep cut from MacLeod."),

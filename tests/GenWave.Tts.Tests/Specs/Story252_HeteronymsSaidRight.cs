@@ -815,7 +815,8 @@ public static class FeatureHeteronymsSaidRight
                     kokoro, [piper], health, fallbackOptions, NullLogger<FallbackTtsSynthesizer>.Instance);
                 var normalizing = new NormalizingTtsSynthesizer(
                     fallback, NoCorrections.Provider(), NoCorrections.PersonaCache(), new CorrectionsFiredStats(),
-                    NullLogger<NormalizingTtsSynthesizer>.Instance);
+                    NullLogger<NormalizingTtsSynthesizer>.Instance,
+                TestSoundTagGate.Kokoro);
                 var source = new TtsSegmentSource(
                     new FakeSegmentCopyWriter(Copy),
                     normalizing,

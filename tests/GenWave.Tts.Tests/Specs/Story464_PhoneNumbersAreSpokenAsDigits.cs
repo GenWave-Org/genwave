@@ -102,7 +102,8 @@ public static class FeaturePhonenumbersarespokenasdigits
         {
             var normalizingSynth = new NormalizingTtsSynthesizer(
                 innerSynth, NoCorrections.Provider(), NoCorrections.PersonaCache(),
-                new CorrectionsFiredStats(), NullLogger<NormalizingTtsSynthesizer>.Instance);
+                new CorrectionsFiredStats(), NullLogger<NormalizingTtsSynthesizer>.Instance,
+                TestSoundTagGate.Kokoro);
             var opts = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" });
             var source = new TtsSegmentSource(
                 new FakeSegmentCopyWriter("Call 555-0142 today."),

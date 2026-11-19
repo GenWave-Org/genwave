@@ -61,7 +61,8 @@ public sealed class NormalizingTtsSynthesizer(
     SpeechCorrectionProvider corrections,
     ActivePersonaCorrectionsCache personaCorrections,
     CorrectionsFiredStats firedStats,
-    ILogger<NormalizingTtsSynthesizer> logger) : ITtsSynthesizer, ISpeechNormalizationPreview
+    ILogger<NormalizingTtsSynthesizer> logger,
+    SoundTagRenderGate soundTagGate) : ITtsSynthesizer, ISpeechNormalizationPreview
 {
     public Task<string> SynthesizeAsync(string text, string voice, CancellationToken ct) =>
         SynthesizeAsync(new TtsRenderContext(text, voice, Kind: null), ct);
@@ -83,8 +84,13 @@ public sealed class NormalizingTtsSynthesizer(
     /// "Hear it" on that engine is normalized exactly as air is, without a second copy of this body.
     /// </summary>
     public async Task<string> SynthesizeViaAsync(
-        TtsRenderContext context, Func<TtsRenderContext, CancellationToken, Task<string>> render, CancellationToken ct)
+        TtsRenderContext context, Func<TtsRenderContext, CancellationToken, Task<string>> render, CancellationToken ct,
+        VoiceEngine? engine = null)
     {
+        // SPEC F219.17/.19: sound tags are gated for the engine that renders, before normalisation, which leaves the tags
+        // that remain byte-intact. The gate is required: a render path with no gate would fail open and let tags through.
+        context = context with { Text = soundTagGate.Apply(context.Text, context.Kind, engine) };
+
         // SPEC F189.3 (STORY-456, PLAN T526): a planned speaker (TtsSegmentSource's snapshot arm)
         // already resolved its OWN card corrections once, at plan time — carried here on
         // context.Corrections — so this render merges the station's corrections with THAT list and

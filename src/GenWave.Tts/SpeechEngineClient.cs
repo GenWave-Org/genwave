@@ -31,8 +31,11 @@ public sealed class SpeechEngineClient(
     public async Task<string> RenderAsync(VoiceEngine engine, TtsRenderContext context, CancellationToken ct)
     {
         var cfg = optionsMonitor.CurrentValue;
+        // SPEC F219.17: the engine that actually renders (a fallback may differ from the one the text was gated for) only ever
+        // receives tags its own profile lists; an engine with none receives no bracket tag at all.
+        var text = SoundTags.Apply(context.Text, engine.Profile, int.MaxValue);
         var body = SpeechRequestBody.Build(
-            engine.Profile, context.Text, context.Voice, cfg.Format,
+            engine.Profile, text, context.Voice, cfg.Format,
             PronunciationRuleSet.FromContext(context.Rules), cfg.SentencePauseSeconds, context.Pace,
             out var matches);
         using var content = new StringContent(body, Encoding.UTF8, "application/json");

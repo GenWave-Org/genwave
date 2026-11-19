@@ -104,7 +104,7 @@ static partial class CrosstalkScriptParser
     /// </summary>
     public static CrosstalkWriteResult Parse(
         string rawResponse, int maxLineChars, int durationTargetSeconds, DateTimeOffset stationLocalNow,
-        string? stationName = null)
+        string? stationName = null, IReadOnlyList<string>? keepTags = null)
     {
         var rawLines = rawResponse
             .Split('\n')
@@ -133,7 +133,7 @@ static partial class CrosstalkScriptParser
                     $"\"{TruncateForEcho(rawLine)}\"", LlmCallCause.MalformedResponse);
             }
 
-            var cleaned = LlmCopyWriter.ApplyCopyHygiene(rawText);
+            var cleaned = LlmCopyWriter.ApplyCopyHygiene(rawText, keepTags);
             if (cleaned.Length == 0)
             {
                 // SPEC F139.1 (T330 review round 1 amendment): the ONE parser reject that STAYS

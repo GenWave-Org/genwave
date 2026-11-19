@@ -12,5 +12,5 @@ public sealed class NamedEngineSynthesizer(NormalizingTtsSynthesizer normalizer,
     : INamedEngineSynthesizer
 {
     public Task<string> SynthesizeOnAsync(VoiceEngine engine, TtsRenderContext context, CancellationToken ct) =>
-        normalizer.SynthesizeViaAsync(context, (c, token) => client.RenderOnAsync(engine, c, token), ct);
+        normalizer.SynthesizeViaAsync(context, (c, token) => client.RenderOnAsync(engine, c, token), ct, engine);
 }

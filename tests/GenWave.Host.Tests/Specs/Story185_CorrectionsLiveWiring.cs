@@ -160,7 +160,8 @@ file sealed class CorrectionsLiveWiringWebFactory(RecordingEngineSynthesizer eng
                     sp.GetRequiredService<SpeechCorrectionProvider>(),
                     sp.GetRequiredService<ActivePersonaCorrectionsCache>(),
                     sp.GetRequiredService<CorrectionsFiredStats>(),
-                    sp.GetRequiredService<ILogger<NormalizingTtsSynthesizer>>()));
+                    sp.GetRequiredService<ILogger<NormalizingTtsSynthesizer>>(),
+                    sp.GetRequiredService<SoundTagRenderGate>()));
         });
     }
 }

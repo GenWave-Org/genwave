@@ -65,7 +65,7 @@ public sealed class KokoroFallbackRenderer(
         // each reports its OWN successful render, and only the one that actually airs ever does
         // (see the ordering note beside the call below).
         var speech = KokoroSpeechMarkup.Render(
-            context.Text, PronunciationRuleSet.FromContext(context.Rules), cfg.SentencePauseSeconds, out var matches);
+            SoundTags.Strip(context.Text), PronunciationRuleSet.FromContext(context.Rules), cfg.SentencePauseSeconds, out var matches);
         // speed (SPEC F98.1-F98.2, PLAN T140): same field, same already-validated value the primary
         // sends — see this class's own remarks on why no clamping happens here either.
         var body = new { input = speech, voice, response_format = cfg.Format, speed = context.Pace };

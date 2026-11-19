@@ -138,7 +138,8 @@ public static class FeatureAdRenderAssembly
             var innerSynth = new FakeCrosstalkVoiceSynthesizer();
             var normalizing = new NormalizingTtsSynthesizer(
                 innerSynth, corrections, NoCorrections.PersonaCache(), new CorrectionsFiredStats(),
-                NullLogger<NormalizingTtsSynthesizer>.Instance);
+                NullLogger<NormalizingTtsSynthesizer>.Instance,
+                TestSoundTagGate.Kokoro);
             var pronunciations = NoCorrections.PronunciationProvider();
             var normalizingAssembler = new CrosstalkAssembler(
                 normalizing, pronunciations, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), new FfmpegAudioMixer(new FakeLoudnessAnalyzer()),

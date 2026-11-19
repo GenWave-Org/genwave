@@ -133,7 +133,8 @@ public static class FeatureSnapshotDrivesTheRender
             var personaCorrections = new ActivePersonaCorrectionsCache(throwingAccessor, TimeProvider.System);
             var normalizer = new NormalizingTtsSynthesizer(
                 inner, NoCorrections.Provider(), personaCorrections, new CorrectionsFiredStats(),
-                NullLogger<NormalizingTtsSynthesizer>.Instance);
+                NullLogger<NormalizingTtsSynthesizer>.Instance,
+                TestSoundTagGate.Kokoro);
             var context = new TtsRenderContext("Now playing: MacLeod.", "af_heart", Kind: null)
             {
                 Corrections = [new SpeechCorrection("MacLeod", "Maa-cloud")],
