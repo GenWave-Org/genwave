@@ -408,7 +408,7 @@ public static class TtsServiceCollectionExtensions
                     // T148 review finding F3: the active engine's dependency name, read per render —
                     // a piper-only station's cached-health lookup and log {Engine} slot must read
                     // Piper's verdict, never absent-Kokoro's (FallbackTtsSynthesizer's own remarks).
-                    () => active.Current?.DependencyName ?? active.Name);
+                    () => active.DependencyName);
             })
             // Voice health read model (SPEC F99.5, F100.3, PLAN T149) — GET /api/status
             // (GenWave.Host) resolves this. Depends on the SAME IActiveVoiceEngine

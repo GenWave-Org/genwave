@@ -1,7 +1,7 @@
 namespace GenWave.Tts;
 
 /// <summary>Seeds <c>kokoro</c>/<c>piper</c> from the legacy Tts keys when <c>Tts:Engines</c> has no entry of that name (SPEC F219.1).</summary>
-static class VoiceEngineSeeding
+public static class VoiceEngineSeeding
 {
     public static void Seed(VoiceEnginesOptions options, TtsOptions tts)
     {

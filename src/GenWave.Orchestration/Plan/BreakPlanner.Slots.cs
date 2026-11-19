@@ -69,7 +69,7 @@ public sealed partial class BreakPlanner
         foreach (var announcement in deliverable)
         {
             var voice = await ResolveAnnouncementVoiceAsync(announcement.RequestedVoice, context.Identity.Voice, ct);
-            var speaker = await ResolveSpeakerAsync(speakers, personaId: null, context.Identity, voice, ct);
+            var speaker = await ResolveSpeakerAsync(speakers, context.Identity, voice, ct);
 
             var request = new SegmentRequest(SegmentKind.Announcement, voice, context.Identity.Name, null, StationLocalNow(), context.Identity.Id)
             {
@@ -163,7 +163,7 @@ public sealed partial class BreakPlanner
         // doesn't itself set. BuildStationIdRequest already stamps Voice = identity.Voice, and (per
         // round-2 review finding F1) the resolved snapshot is aligned to that same voice, so no
         // separate Voice override is needed here.
-        var speaker = await ResolveSpeakerAsync(speakers, personaId: null, context.Identity, context.Identity.Voice, ct);
+        var speaker = await ResolveSpeakerAsync(speakers, context.Identity, context.Identity.Voice, ct);
         var stamped = BuildStationIdRequest(context.Identity) with { Speaker = speaker };
         var templatedRequest = ShowIdentRequest.For(stamped, currentShow);
         var templatedReservation = new Reservation(ReservationKind.Deferral, nameof(SpeechDeferralKind.StationId));
@@ -215,7 +215,7 @@ public sealed partial class BreakPlanner
     {
         var lateness = SpeechDeferralQueue.AirTimeLateness(context.Now, context.QueuedAhead, deferral.Due);
         var freshness = lateness > TimeDateHonestyThreshold ? TimeAnnouncementFreshness.Late : TimeAnnouncementFreshness.OnTime;
-        var speaker = await ResolveSpeakerAsync(speakers, personaId: null, context.Identity, context.Identity.Voice, ct);
+        var speaker = await ResolveSpeakerAsync(speakers, context.Identity, context.Identity.Voice, ct);
         var request = BuildTimeDateRequest(deferral, context.Identity, freshness, speaker);
 
         return new PlannedSlot(0, SegmentKind.TimeDate, new RenderSource(request), Reservation: null, DropPolicyFor(SegmentKind.TimeDate), ObserveDuration: true);

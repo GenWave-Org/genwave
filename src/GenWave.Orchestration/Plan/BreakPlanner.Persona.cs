@@ -76,13 +76,11 @@ public sealed partial class BreakPlanner
     //
     // The persona-bearing slots use ResolvePersonaSpeakerAsync below instead.
     static async Task<SpeakerSnapshot?> ResolveSpeakerAsync(
-        SpeakerResolution? speakers, long? personaId, StationIdentity identity, string voice, CancellationToken ct)
+        SpeakerResolution? speakers, StationIdentity identity, string voice, CancellationToken ct)
     {
         if (speakers is null) return null;
 
-        var snapshot = personaId is { } id
-            ? await speakers.PersonaAsync(id, ct)
-            : await speakers.StationAsync(identity, ct);
+        var snapshot = await speakers.StationAsync(identity, ct);
 
         var aligned = string.Equals(snapshot.Voice, voice, StringComparison.Ordinal) ? snapshot : snapshot with { Voice = voice };
 
@@ -112,7 +110,7 @@ public sealed partial class BreakPlanner
         SpeakerResolution? speakers, long? personaId, StationIdentity identity, string rowVoice, CancellationToken ct)
     {
         if (speakers is null || personaId is not { } id)
-            return (await ResolveSpeakerAsync(speakers, personaId, identity, rowVoice, ct), rowVoice);
+            return (await ResolveSpeakerAsync(speakers, identity, rowVoice, ct), rowVoice);
 
         var snapshot = await speakers.PersonaAsync(id, ct);
         var voice = snapshot is { VoiceMissing: false, VoiceOverridesRow: true } && snapshot.PersonaId == id ? snapshot.Voice : rowVoice;

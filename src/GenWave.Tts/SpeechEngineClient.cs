@@ -18,9 +18,6 @@ public sealed class SpeechEngineClient(
     IOptionsMonitor<TtsOptions> optionsMonitor,
     PronunciationRuleHitReporter? ruleHits = null)
 {
-    /// <summary>The synthesizer + voice lister for one engine, sharing this client's HttpClient.</summary>
-    public BoundSpeechEngine For(VoiceEngine engine) => new(this, engine);
-
     public async Task<string> RenderAsync(VoiceEngine engine, TtsRenderContext context, CancellationToken ct)
     {
         var cfg = optionsMonitor.CurrentValue;

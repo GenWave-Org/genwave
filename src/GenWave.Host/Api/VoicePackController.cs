@@ -334,7 +334,7 @@ public sealed class VoicePackController(
         if (manifest is null)
             return (BadRequest(CatalogInstallShell.MalformedManifestProblem(CatalogEntryKind.VoicePack, slug)), null, null);
 
-        var stationEngine = activeVoiceEngine.Current?.DependencyName ?? activeVoiceEngine.Name;
+        var stationEngine = activeVoiceEngine.DependencyName;
         if (activeVoiceEngine.Current is null || Array.IndexOf(SupportedEngines, manifest.Engine) < 0 ||
             !string.Equals(manifest.Engine, stationEngine, StringComparison.Ordinal))
             return (BadRequest(NotSupportedEngineProblem(slug, manifest.Engine, stationEngine)), null, null);

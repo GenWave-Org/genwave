@@ -143,7 +143,7 @@ public static class FeatureEnginesAreAList
             var client = new SpeechEngineClient(
                 new HttpClient(handler), new TestOptionsMonitor<TtsOptions>(new TtsOptions()));
             var engine = new VoiceEngine("chatterbox", "http://chatterbox:8004", VoiceEngineProfiles.Chatterbox, 30);
-            voices = client.For(engine).ListVoicesAsync(default).GetAwaiter().GetResult();
+            voices = client.ListVoicesAsync(engine, default).GetAwaiter().GetResult();
         }
 
         [Fact]

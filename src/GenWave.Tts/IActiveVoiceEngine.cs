@@ -13,4 +13,7 @@ public interface IActiveVoiceEngine
 
     /// <summary>The registered engine named <see cref="Name"/>, or null when it is not configured.</summary>
     VoiceEngine? Current { get; }
+
+    /// <summary>The health-probe / dependency key of the active engine: its profile name when registered, else <see cref="Name"/>.</summary>
+    string DependencyName => Current?.DependencyName ?? Name;
 }

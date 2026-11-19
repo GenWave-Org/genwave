@@ -167,10 +167,13 @@ public sealed class TtsPreviewController(
             return (requested, null);
 
         var setting = string.IsNullOrWhiteSpace(requested) ? stationMonitor.CurrentValue.Voice : requested;
-        if (!string.IsNullOrWhiteSpace(setting) && VoiceMap.TryParseSetting(setting) is null)
+        if (string.IsNullOrWhiteSpace(setting))
+            return (string.Empty, null);
+
+        if (VoiceMap.TryParseSetting(setting) is not { } map)
             return (string.Empty, VoiceProblem("The voice is not a voice id or an engine-to-voice map.", "Malformed voice."));
 
-        return voiceResolver.ResolveSetting(setting) is { } voice
+        return voiceResolver.Resolve(map) is { } voice
             ? (voice, null)
             : (string.Empty, VoiceProblem("The voice has no entry for the active engine.", "No voice for the active engine."));
     }
