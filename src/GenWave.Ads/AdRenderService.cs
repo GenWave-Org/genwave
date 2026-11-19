@@ -53,6 +53,7 @@ public sealed class AdRenderService(
     IAdminMediaLookup adminLookup,
     ILibraryRepository libraryRepository,
     IStationIdentityProvider stationIdentity,
+    AdSpeakerVoices speakerVoices,
     IOptionsMonitor<AdsOptions> adsOptions,
     AdSpotLocatorRoots locatorRoots,
     ILogger<AdRenderService> logger)
@@ -417,7 +418,15 @@ public sealed class AdRenderService(
         if (bedFailure is not null)
             return (null, bedFailure);
 
-        var cast = ResolveCast(spot, script);
+        var resolution = ResolveCast(spot, script, liveSettings);
+        if (resolution.MissingSettings.Count > 0)
+        {
+            // SPEC F219.9: a speaker with no voice for the active engine says nothing, so the spot does not render.
+            speakerVoices.ReportMissing(spot, resolution.MissingSettings);
+            return (null, $"render: voice-missing — no voice for the active engine in {string.Join(", ", resolution.MissingSettings)}");
+        }
+
+        var cast = resolution.Cast;
         var lines = script.Lines.Select(line => new CastLine(line.Tag, line.Text)).ToList();
         var tags = new AudioTags(stationIdentity.Current.Name, spot.Title);
         var ceilingSeconds = spot.SpotSeconds * (1 + adsOptions.CurrentValue.DurationToleranceRatio);
@@ -448,26 +457,14 @@ public sealed class AdRenderService(
     /// voice, rather than no spot at all). T403's owner editor is where an operator sets a real,
     /// per-tag plan.
     /// </summary>
-    IReadOnlyList<CastMember> ResolveCast(AdSpot spot, AdScript script)
+    AdCastResolution ResolveCast(AdSpot spot, AdScript script, AdLiveSettings liveSettings)
     {
         var scriptTags = script.Lines.Select(line => line.Tag).Distinct(StringComparer.Ordinal).ToList();
-        var stationVoice = new VoiceSpec(Engine: "", stationIdentity.Current.Voice, Pace: 1.0, Language: "en");
-
-        var plan = ParseVoicePlan(spot.VoicePlan);
-        if (plan is null)
-            return scriptTags.Select(tag => new CastMember(tag, stationVoice)).ToList();
-
-        var byTag = plan
+        var byTag = (ParseVoicePlan(spot.VoicePlan) ?? [])
             .GroupBy(entry => entry.Tag, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
 
-        return scriptTags
-            .Select(tag => new CastMember(
-                tag,
-                byTag.TryGetValue(tag, out var entry)
-                    ? new VoiceSpec(Engine: "", entry.VoiceId, entry.Pace, Language: "en")
-                    : stationVoice))
-            .ToList();
+        return speakerVoices.Resolve(spot, scriptTags, byTag, liveSettings);
     }
 
     /// <summary>

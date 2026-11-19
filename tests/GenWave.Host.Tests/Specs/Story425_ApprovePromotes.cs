@@ -21,6 +21,7 @@
 // happy-path arrangement above it so AC5's own arrangement can never wedge every other Scenario sharing
 // the same "ads" directory.
 
+using GenWave.Tts;
 using System.Linq;
 using System.Net;
 using System.Net.Http.Json;
@@ -301,7 +302,8 @@ public sealed class Story425Arc : IAsyncLifetime
         // a non-empty Station:Ads:CastVoices default (neither WebFactory below overrides it), so only
         // reading the SAME configuration instance AdsController itself resolves reproduces the exact
         // AdLiveSettings a real approve call would compute.
-        var liveSettings = AdLiveSettingsReader.Read(factory.Services.GetRequiredService<IConfiguration>());
+        var liveSettings = AdLiveSettingsReader.Read(
+            factory.Services.GetRequiredService<IConfiguration>(), factory.Services.GetRequiredService<IActiveVoiceEngine>());
 
         const string script =
             "ANNOUNCER: Larkspur & Loom Mercantile has a deal so good it's almost illegal.\n" +

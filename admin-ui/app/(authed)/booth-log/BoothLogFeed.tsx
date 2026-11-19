@@ -4,7 +4,13 @@ import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
-import { REPEAT_CAUGHT_KIND, repeatCaughtSummary } from "@/lib/booth-log-copy";
+import {
+  HANDOFF_DROPPED_KIND,
+  REPEAT_CAUGHT_KIND,
+  VOICE_MISSING_KIND,
+  boothLogKindLabel,
+  repeatCaughtSummary,
+} from "@/lib/booth-log-copy";
 import { PERSONA_NAME_FALLBACK } from "@/lib/use-persona-directory";
 import { formatUpSince } from "@/lib/format-clock";
 import type { BoothLogEntry } from "@/lib/booth-log-api";
@@ -46,15 +52,6 @@ function isThumbable(entry: BoothLogEntry): entry is BoothLogEntry & { personaId
   return entry.kind === "track-started" && typeof entry.personaId === "number" && entry.tasteExcluded !== true;
 }
 
-/** Human copy for the three narrative kinds this feed's writer produces (SPEC F72.1,
- * BoothLogWriter.cs) — the raw kind itself, still rendered as-is, covers anything future. */
-const KIND_LABELS: Record<string, string> = {
-  "track-started": "Track started",
-  "patter-aired": "Patter aired",
-  "mode-changed": "Mode changed",
-  [REPEAT_CAUGHT_KIND]: "Repeat caught",
-};
-
 /** 3px-radius bordered chip per design-aesthetic's source-tag convention (SourceChip,
  * NeverPlayBadge): patter-aired takes the `--accent` treatment the skill reserves for TTS/patter
  * content, mode-changed gets the quiet brass (`--accent-2`) "system note" treatment, and
@@ -66,6 +63,8 @@ function BoothLogKindBadge({ kind }: { kind: string }): ReactNode {
     "patter-aired": "border-accent text-accent",
     "mode-changed": "border-accent-2 text-accent-2",
     [REPEAT_CAUGHT_KIND]: "border-accent-2 text-accent-2",
+    [VOICE_MISSING_KIND]: "border-accent-2 text-accent-2",
+    [HANDOFF_DROPPED_KIND]: "border-accent-2 text-accent-2",
   };
   return (
     <span
@@ -74,7 +73,7 @@ function BoothLogKindBadge({ kind }: { kind: string }): ReactNode {
         styles[kind] ?? "border-line text-mute"
       )}
     >
-      {KIND_LABELS[kind] ?? kind}
+      {boothLogKindLabel(kind)}
     </span>
   );
 }

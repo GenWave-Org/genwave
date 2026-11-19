@@ -26,7 +26,8 @@ public static class Gh854FeatureAdRenderServiceStaleReRender
     static AdLiveSettings LiveSettings() =>
         new(
             AnnouncerVoice: "", CastVoices: [], BedFadeMs: AdLiveSettingsReader.DefaultBedFadeMs,
-            BedDuckDb: AdLiveSettingsReader.DefaultBedDuckDb, TargetLufs: AdLiveSettingsReader.DefaultTargetLufs);
+            BedDuckDb: AdLiveSettingsReader.DefaultBedDuckDb, TargetLufs: AdLiveSettingsReader.DefaultTargetLufs,
+            StationVoice: "", ActiveEngine: "kokoro");
 
     /// <summary>Wires a REAL <see cref="AdRenderService"/> against fakes at every I/O seam — the
     /// Story391_AdRenderService.cs precedent, copied for this file's own facts.</summary>
@@ -42,7 +43,7 @@ public static class Gh854FeatureAdRenderServiceStaleReRender
         var locatorRoots = new AdSpotLocatorRoots("/media", "/authored");
 
         var service = new AdRenderService(
-            author, store, adminLookup, libraries, stationIdentity, adsOptions, locatorRoots,
+            author, store, adminLookup, libraries, stationIdentity, AdTestVoices.SpeakersFor(stationIdentity), adsOptions, locatorRoots,
             new NoOpLogger<AdRenderService>());
 
         return (service, author, store, adminLookup);

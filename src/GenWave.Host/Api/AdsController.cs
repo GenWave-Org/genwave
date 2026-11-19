@@ -8,6 +8,7 @@ using GenWave.Ads;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Core.Logging;
+using GenWave.Tts;
 
 namespace GenWave.Host.Api;
 
@@ -150,6 +151,7 @@ public sealed class AdsController(
     AdRenderService renderService,
     AdSpotLocatorRoots locatorRoots,
     IConfiguration configuration,
+    IActiveVoiceEngine activeEngine,
     ILogger<AdsController> logger) : ControllerBase
 {
     const int DefaultLimit = 50;
@@ -232,7 +234,7 @@ public sealed class AdsController(
         // no stored flag, so that part of the cost is intentional), but the Live settings themselves
         // never change mid-request, so re-reading IConfiguration N times for the SAME values was pure
         // waste this hoist removes.
-        var liveSettings = AdLiveSettingsReader.Read(configuration);
+        var liveSettings = AdLiveSettingsReader.Read(configuration, activeEngine);
 
         return Ok(new
         {
@@ -262,7 +264,7 @@ public sealed class AdsController(
 
         var sponsor = await sponsorStore.GetAsync(spot.SponsorId, ct);
         Response.Headers.ETag = WeakETag.Format(spot.Version);
-        return Ok(ToDto(spot, sponsor, AdLiveSettingsReader.Read(configuration)));
+        return Ok(ToDto(spot, sponsor, AdLiveSettingsReader.Read(configuration, activeEngine)));
     }
 
     // -----------------------------------------------------------------------
@@ -340,7 +342,7 @@ public sealed class AdsController(
             spot.Id, spot.SponsorId, LogSanitize.Strip(spot.SponsorName));
 
         Response.Headers.ETag = WeakETag.Format(spot.Version);
-        return Created($"/api/ads/{spot.Id}", ToDto(spot, sponsor, AdLiveSettingsReader.Read(configuration)));
+        return Created($"/api/ads/{spot.Id}", ToDto(spot, sponsor, AdLiveSettingsReader.Read(configuration, activeEngine)));
     }
 
     // -----------------------------------------------------------------------
@@ -746,7 +748,7 @@ public sealed class AdsController(
         if (sponsor is null)
             return NotFound();
 
-        if (PreviewKeyIsStale(spot, storedKey, sponsor, AdLiveSettingsReader.Read(configuration)))
+        if (PreviewKeyIsStale(spot, storedKey, sponsor, AdLiveSettingsReader.Read(configuration, activeEngine)))
             return NotFound();
 
         var previewRoot = AdPreviewRoot.Resolve(locatorRoots);
@@ -792,7 +794,7 @@ public sealed class AdsController(
 
                 var sponsor = await sponsorStore.GetAsync(fresh.SponsorId, ct);
                 Response.Headers.ETag = WeakETag.Format(fresh.Version);
-                return Accepted(ToDto(fresh, sponsor, AdLiveSettingsReader.Read(configuration)));
+                return Accepted(ToDto(fresh, sponsor, AdLiveSettingsReader.Read(configuration, activeEngine)));
             default:
                 return StatusCode(StatusCodes.Status500InternalServerError);
         }
@@ -823,7 +825,7 @@ public sealed class AdsController(
     {
         var sponsor = await sponsorStore.GetAsync(spot.SponsorId, ct);
         Response.Headers.ETag = WeakETag.Format(spot.Version);
-        return Ok(ToDto(spot, sponsor, AdLiveSettingsReader.Read(configuration)));
+        return Ok(ToDto(spot, sponsor, AdLiveSettingsReader.Read(configuration, activeEngine)));
     }
 
     /// <summary>
@@ -888,7 +890,7 @@ public sealed class AdsController(
             return true;
 
         var sponsor = await sponsorStore.GetAsync(spot.SponsorId, ct);
-        var liveSettings = AdLiveSettingsReader.Read(configuration);
+        var liveSettings = AdLiveSettingsReader.Read(configuration, activeEngine);
         if (PreviewKeyIsStale(spot, previewKey, sponsor, liveSettings))
             return true;
 

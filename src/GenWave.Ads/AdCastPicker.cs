@@ -1,6 +1,7 @@
 namespace GenWave.Ads;
 
 using GenWave.Core.Domain;
+using GenWave.Tts;
 
 /// <summary>
 /// Casts the three voice roles a rendered ad spot needs — ANNOUNCER, VOICE1, VOICE2 — from the live
@@ -35,11 +36,8 @@ internal static class AdCastPicker
 
     public static AdCastPick Pick(AdSpot spot, AdLiveSettings settings, string stationVoice)
     {
-        var effectiveAnnouncer = settings.AnnouncerVoice.Length > 0 ? settings.AnnouncerVoice : stationVoice;
-
-        var candidates = settings.CastVoices
-            .Where(voice => !string.Equals(voice, effectiveAnnouncer, StringComparison.Ordinal))
-            .ToList();
+        var effectiveAnnouncer = EffectiveAnnouncer(settings, stationVoice);
+        var candidates = CastCandidates(settings, effectiveAnnouncer);
 
         if (candidates.Count == 0)
         {
@@ -83,4 +81,37 @@ internal static class AdCastPicker
             ],
             AdCastOutcome.Cast);
     }
+
+    /// <summary>
+    /// The voice setting values <see cref="Pick"/> could stamp into a spot, each with the setting it came from
+    /// (SPEC F219.9: the worker checks exactly these on the active engine). An empty candidate pool stamps the
+    /// station voice on every tag; otherwise the announcer (its own setting, else the station voice) and the
+    /// remaining cast candidates. With two or more candidates every one is checked, so a single unmapped entry
+    /// stops new spots even though a cast might avoid it — deliberate: the booth row names the cast voices
+    /// setting and the operator fixes it, rather than spots quietly favouring the mapped voices.
+    /// </summary>
+    public static IReadOnlyList<(string Setting, string Value)> StampableVoices(AdLiveSettings settings, string stationVoice)
+    {
+        var effectiveAnnouncer = EffectiveAnnouncer(settings, stationVoice);
+        var candidates = CastCandidates(settings, effectiveAnnouncer);
+        if (candidates.Count == 0)
+            return [(VoiceMap.StationVoiceSetting, stationVoice)];
+
+        var announcerSetting = settings.AnnouncerVoice.Length > 0 ? VoiceMap.AnnouncerVoiceSetting : VoiceMap.StationVoiceSetting;
+        return [(announcerSetting, effectiveAnnouncer), .. candidates.Select(voice => (VoiceMap.CastVoicesSetting, voice))];
+    }
+
+    static string EffectiveAnnouncer(AdLiveSettings settings, string stationVoice) =>
+        settings.AnnouncerVoice.Length > 0 ? settings.AnnouncerVoice : stationVoice;
+
+    static List<string> CastCandidates(AdLiveSettings settings, string effectiveAnnouncer) =>
+        settings.CastVoices.Where(voice => !SameSpeaker(voice, effectiveAnnouncer)).ToList();
+
+    /// <summary>
+    /// Two voice setting values are the same speaker when they are the same text, or are maps that give one
+    /// voice id on a shared engine (a bare id reads as kokoro), SPEC F219.8.
+    /// </summary>
+    static bool SameSpeaker(string a, string b) =>
+        string.Equals(a, b, StringComparison.Ordinal)
+        || (VoiceMap.TryParseSetting(a) is { } first && VoiceMap.TryParseSetting(b) is { } second && first.SharesVoiceWith(second));
 }

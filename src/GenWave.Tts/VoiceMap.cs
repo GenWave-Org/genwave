@@ -12,6 +12,12 @@ public sealed class VoiceMap
     /// <summary>The setting that holds the station's own voice (a bare id or an engine map); what a voice-missing row names.</summary>
     public const string StationVoiceSetting = "Station:Voice";
 
+    /// <summary>The setting key holding the ads announcer's voice (a bare id or an engine map).</summary>
+    public const string AnnouncerVoiceSetting = "Station:Ads:AnnouncerVoice";
+
+    /// <summary>The setting key holding the ads cast voice pool.</summary>
+    public const string CastVoicesSetting = "Station:Ads:CastVoices";
+
     readonly Dictionary<string, string> byEngine = new(StringComparer.OrdinalIgnoreCase);
 
     VoiceMap(IEnumerable<KeyValuePair<string, string>> voices)
@@ -41,6 +47,20 @@ public sealed class VoiceMap
 
     /// <summary>Every voice id in the map, whatever its engine.</summary>
     public IReadOnlyCollection<string> VoiceIds => byEngine.Values;
+
+    /// <summary>
+    /// The map written back as a voice setting value: the bare id when kokoro is its only engine, else a compact
+    /// JSON object (engines in name order). <see cref="TryParseSetting"/> reads either form back to an equal map.
+    /// </summary>
+    public string ToSettingValue() =>
+        byEngine is { Count: 1 } && byEngine.TryGetValue(VoiceEngineProfiles.KokoroName, out var only)
+            ? only
+            : JsonSerializer.Serialize(byEngine.OrderBy(e => e.Key, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(e => e.Key, e => e.Value));
+
+    /// <summary>True when both maps give the same voice id on any one engine (ids exact, engines ignoring case).</summary>
+    public bool SharesVoiceWith(VoiceMap other) =>
+        byEngine.Any(e => other.byEngine.TryGetValue(e.Key, out var theirs) && string.Equals(e.Value, theirs, StringComparison.Ordinal));
 
     /// <summary>A map over an existing engine-to-voice dictionary, e.g. <c>PersonaCard.VoicesByEngine()</c>.</summary>
     public static VoiceMap FromEngineVoices(IReadOnlyDictionary<string, string> voices) => new(voices);

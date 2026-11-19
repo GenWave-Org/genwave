@@ -5,13 +5,18 @@ namespace GenWave.Ads;
 /// STORY-402, STORY-403; PLAN T415, T416) — <see cref="AdLiveSettingsReader.Read"/>'s own return
 /// shape, the <see cref="AdStockSettings"/> precedent applied to this cast-pool/bed-fade trio.
 /// </summary>
-/// <param name="AnnouncerVoice">SPEC F167.1's <c>Station:Ads:AnnouncerVoice</c> — a Kokoro voice id, or
-/// <c>""</c> (the default) meaning "use the station's own voice"
-/// (<see cref="Core.Abstractions.IStationIdentityProvider.Current"/>).</param>
-/// <param name="CastVoices">SPEC F167.1's <c>Station:Ads:CastVoices</c> — the comma-separated pool
-/// <see cref="AdCastPicker"/> casts <c>VOICE1</c>/<c>VOICE2</c> from, already split/trimmed/de-duped by
+/// <param name="AnnouncerVoice">SPEC F167.1's <c>Station:Ads:AnnouncerVoice</c> as a voice setting value (a
+/// bare Kokoro id, or an engine map, SPEC F219.8), or <c>""</c> (the default) meaning "use the station's own
+/// voice" (<see cref="StationVoice"/>).</param>
+/// <param name="CastVoices">SPEC F167.1's <c>Station:Ads:CastVoices</c> — the pool
+/// <see cref="AdCastPicker"/> casts <c>VOICE1</c>/<c>VOICE2</c> from, one voice setting value per speaker (a
+/// bare id or an engine map, SPEC F219.8), already split/trimmed/de-duped by
 /// <see cref="AdLiveSettingsReader"/>, order preserved. Empty means the pool is genuinely empty
 /// (SPEC F167.4).</param>
+/// <param name="StationVoice"><c>Station:Voice</c> as written (a bare id or an engine map): what the announcer
+/// and an empty pool fall back to. Kept unresolved so a spot's stored plan survives an engine switch.</param>
+/// <param name="ActiveEngine">The engine speaking right now. A render input (the same settings sound different on
+/// another engine), so <see cref="AdPreviewKey.Compute"/> hashes it: an engine switch makes a preview stale.</param>
 /// <param name="BedFadeMs">SPEC F168.4's <c>Station:Ads:BedFadeMs</c> — how long, in milliseconds, the
 /// background music fades to silence across the render's trailing tail. No default (PLAN T416 review
 /// F3+O3): <see cref="AdLiveSettingsReader.Read"/> is the ONE construction site this record has —
@@ -33,4 +38,5 @@ namespace GenWave.Ads;
 /// because it has no caller outside this assembly; this record does now.
 /// </remarks>
 public sealed record AdLiveSettings(
-    string AnnouncerVoice, IReadOnlyList<string> CastVoices, int BedFadeMs, double BedDuckDb, double TargetLufs);
+    string AnnouncerVoice, IReadOnlyList<string> CastVoices, int BedFadeMs, double BedDuckDb, double TargetLufs,
+    string StationVoice, string ActiveEngine);

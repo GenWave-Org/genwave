@@ -27,7 +27,6 @@ public sealed class AdSpotStamper(
     IAdSpotStore spotStore,
     IAdBedPool bedPool,
     ILibraryRepository libraryRepository,
-    IStationIdentityProvider stationIdentity,
     IOptionsMonitor<AdsOptions> adsOptions,
     ILogger<AdSpotStamper> logger)
 {
@@ -48,7 +47,7 @@ public sealed class AdSpotStamper(
         if (spot.VoicePlan is not null)
             return spot;
 
-        var pick = AdCastPicker.Pick(spot, liveSettings, stationIdentity.Current.Voice);
+        var pick = AdCastPicker.Pick(spot, liveSettings, liveSettings.StationVoice);
         LogCastOutcome(spot, pick.Outcome);
 
         var stamped = await spotStore.StampVoicePlanIfNullAsync(spot.Id, AdVoicePlanJson.Serialize(pick.Entries), ct);

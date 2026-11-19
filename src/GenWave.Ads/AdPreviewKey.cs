@@ -22,7 +22,7 @@ public static class AdPreviewKey
     /// Hashes every input a preview render reads, newline-joined in order: the spot's own script,
     /// voice plan (raw json, or empty), bed media id (or empty), spot length in seconds; the
     /// sponsor's Name, Tagline, About, Phone, Address, Website, Tone (each, or empty); then the LIVE
-    /// render knobs — <paramref name="live"/>'s own AnnouncerVoice, CastVoices (comma-joined),
+    /// render knobs — <paramref name="live"/>'s own AnnouncerVoice, CastVoices (newline-joined: a map value holds commas), StationVoice, ActiveEngine (an engine switch re-voices the spot, SPEC F219.8),
     /// BedFadeMs, BedDuckDb, and TargetLufs (SPEC F196.1; PLAN T542 — the station target is the
     /// bed's reference level only when the voice is unmeasurable, gh-#746 — a change still has to
     /// re-render, exactly like a changed <c>BedDuckDb</c> does).
@@ -44,7 +44,9 @@ public static class AdPreviewKey
             sponsor.Website ?? "",
             sponsor.Tone ?? "",
             live.AnnouncerVoice,
-            string.Join(',', live.CastVoices),
+            string.Join('\n', live.CastVoices),
+            live.StationVoice,
+            live.ActiveEngine,
             live.BedFadeMs.ToString(CultureInfo.InvariantCulture),
             live.BedDuckDb.ToString(CultureInfo.InvariantCulture),
             live.TargetLufs.ToString(CultureInfo.InvariantCulture));

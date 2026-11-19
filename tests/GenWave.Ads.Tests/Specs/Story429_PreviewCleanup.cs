@@ -70,7 +70,7 @@ public static class FeaturePreviewFilesCleanUpAutomatically
         var previewPath = SeedPreviewFile(authoredRoot, $"{spotId}-deadbeef.wav");
 
         var service = new AdRenderService(
-            author, store, adminLookup, libraries, stationIdentity, adsOptions, locatorRoots,
+            author, store, adminLookup, libraries, stationIdentity, AdTestVoices.SpeakersFor(stationIdentity), adsOptions, locatorRoots,
             new NoOpLogger<AdRenderService>());
 
         return (service, author, Path.Combine(authoredRoot, "ads"), previewPath);

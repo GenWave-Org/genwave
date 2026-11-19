@@ -7,6 +7,23 @@
 import { CUT_SHORT_WORDS, STOCK_LINE_SWAP_WORDS } from "@/lib/repeats-copy";
 
 export const REPEAT_CAUGHT_KIND = "repeat-caught";
+export const VOICE_MISSING_KIND = "voice-missing";
+export const HANDOFF_DROPPED_KIND = "handoff-dropped";
+
+/** Plain-words badge text for the kinds the feed names; any other kind renders its raw text. */
+export const BOOTH_LOG_KIND_LABELS: Readonly<Record<string, string>> = {
+  "track-started": "Track started",
+  "patter-aired": "Patter aired",
+  "mode-changed": "Mode changed",
+  [REPEAT_CAUGHT_KIND]: "Repeat caught",
+  [VOICE_MISSING_KIND]: "Voice missing",
+  [HANDOFF_DROPPED_KIND]: "Handoff dropped",
+};
+
+/** The badge text for a row kind: its plain label, or the raw kind when this UI has none. */
+export function boothLogKindLabel(kind: string): string {
+  return BOOTH_LOG_KIND_LABELS[kind] ?? kind;
+}
 
 /** Stored outcome word -> plain words, matching the dashboard Repeats tile (lib/repeats-copy.ts). */
 const OUTCOME_LABELS: Readonly<Record<string, string>> = {

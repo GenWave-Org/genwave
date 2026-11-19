@@ -380,6 +380,25 @@ describe("Feature: The Ads page", () => {
       expect(chipTexts).toEqual(["ANNOUNCER · af_heart", "VOICE1 · am_michael", "VOICE2 · af_bella"]);
     });
 
+    it("shows a per-engine voice map in plain words, never raw JSON", () => {
+      const spot = adSpot({
+        id: 9,
+        state: "ready",
+        mediaId: 999,
+        voicePlan: [{ tag: "ANNOUNCER", voiceId: '{"kokoro":"af_nova","chatterbox":"nova"}', pace: 1 }],
+      });
+
+      render(
+        <ConfirmDialogProvider>
+          <AdsSection tab="ready" items={[spot]} total={1} sponsorId={null} sponsors={SPONSOR_REFS} />
+        </ConfirmDialogProvider>
+      );
+
+      const row = screen.getByText(spot.title).closest("div.py-3") as HTMLElement;
+      const group = within(row).getByRole("group", { name: "Voice cast" });
+      expect(group.textContent).toBe("ANNOUNCER · One voice per engine (chatterbox: nova, kokoro: af_nova)");
+    });
+
     it("still renders the source chip beside the cast (regression pin)", () => {
       const spot = adSpot({ id: 9, state: "ready", source: "pack", voicePlan: CAST_PLAN, mediaId: 999 });
 

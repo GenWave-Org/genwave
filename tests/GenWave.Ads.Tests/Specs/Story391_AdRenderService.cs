@@ -38,7 +38,7 @@ public static class FeatureAdRenderService
     static AdLiveSettings LiveSettings(int bedFadeMs = AdLiveSettingsReader.DefaultBedFadeMs) =>
         new(
             AnnouncerVoice: "", CastVoices: [], BedFadeMs: bedFadeMs, BedDuckDb: AdLiveSettingsReader.DefaultBedDuckDb,
-            TargetLufs: AdLiveSettingsReader.DefaultTargetLufs);
+            TargetLufs: AdLiveSettingsReader.DefaultTargetLufs, StationVoice: "", ActiveEngine: "kokoro");
 
     /// <summary>Wires a REAL <see cref="AdRenderService"/> against fakes at every I/O seam — the
     /// SAME "real subject, faked edges" posture every other spec in this suite uses. Seeds the ads
@@ -59,7 +59,7 @@ public static class FeatureAdRenderService
         var locatorRoots = new AdSpotLocatorRoots("/media", "/authored");
 
         var service = new AdRenderService(
-            author, store, adminLookup, libraries, stationIdentity, adsOptions, locatorRoots,
+            author, store, adminLookup, libraries, stationIdentity, AdTestVoices.SpeakersFor(stationIdentity), adsOptions, locatorRoots,
             new NoOpLogger<AdRenderService>());
 
         return (service, author, store, adminLookup, libraries, adsLibraryId);
