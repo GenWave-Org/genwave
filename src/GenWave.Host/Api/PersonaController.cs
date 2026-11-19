@@ -45,6 +45,7 @@ public sealed partial class PersonaController(
     IPersonaImportStore personaImportStore,
     ITtsVoiceLister voiceLister,
     IVoiceResolver voiceResolver,
+    IVoiceEngineRegistry voiceEngines,
     IStationClockProvider stationClock,
     ICatalogPersonaAvatarInstaller catalogPersonaAvatarInstaller,
     ILogger<PersonaController> logger) : ControllerBase
@@ -70,6 +71,8 @@ public sealed partial class PersonaController(
     {
         if (string.IsNullOrWhiteSpace(request.Name))
             return BadRequest(BlankNameProblem());
+        if (VoicesProblem(request.Voices) is { } voicesProblem)
+            return BadRequest(voicesProblem);
 
         var draft = ToDraft(request);
         var result = await personaStore.CreateAsync(draft, ct);
@@ -99,6 +102,8 @@ public sealed partial class PersonaController(
     {
         if (string.IsNullOrWhiteSpace(request.Name))
             return BadRequest(BlankNameProblem());
+        if (VoicesProblem(request.Voices) is { } voicesProblem)
+            return BadRequest(voicesProblem);
 
         var draft = ToDraft(request);
         var result = await personaStore.UpdateAsync(id, draft, ct);
@@ -705,7 +710,18 @@ public sealed partial class PersonaController(
         new(
             persona.Id, persona.Name, persona.Backstory, persona.Style, persona.Voice, persona.Slug,
             persona.ImportedFrom, persona.ImportedAt,
-            card?.Soul ?? "", card?.Quirks ?? [], card?.Lore ?? []);
+            card?.Soul ?? "", card?.Quirks ?? [], card?.Lore ?? [],
+            VoicesOf(card));
+
+    // The card's voice per engine as the wire reads it; VoiceMap folds the legacy "" engine into kokoro.
+    static Dictionary<string, string> VoicesOf(PersonaCard? card)
+    {
+        if (card is null)
+            return [];
+
+        var map = VoiceMap.FromEngineVoices(card.VoicesByEngine());
+        return map.Engines.ToDictionary(engine => engine, engine => map.VoiceFor(engine) ?? string.Empty);
+    }
 
     static IReadOnlyList<PersonaTasteRuleDto> RulesBySource(
         IReadOnlyList<PersonaTasteEntry> rules, PersonaTasteSource source) =>
@@ -742,7 +758,23 @@ public sealed partial class PersonaController(
             request.Backstory ?? string.Empty,
             request.Style ?? string.Empty,
             request.Voice ?? string.Empty,
-            string.IsNullOrWhiteSpace(request.Soul) ? null : request.Soul);
+            string.IsNullOrWhiteSpace(request.Soul) ? null : request.Soul,
+            request.Voices);
+
+    // SPEC F219.10: a map the request gives must be well formed and name only registry engines.
+    ProblemDetails? VoicesProblem(IReadOnlyDictionary<string, string>? voices)
+    {
+        if (voices is null)
+            return null;
+
+        var problem = PersonaCardVoicesValidator.FirstEntryProblem(voices)
+            ?? (voices.Keys.Any(engine => voiceEngines.Get(engine) is null)
+                ? "Voices names an engine that is not a configured voice engine."
+                : null);
+        return problem is null
+            ? null
+            : new ProblemDetails { Status = StatusCodes.Status400BadRequest, Title = "Validation error.", Detail = problem };
+    }
 
     static ProblemDetails BlankNameProblem() => new()
     {

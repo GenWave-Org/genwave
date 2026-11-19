@@ -73,7 +73,17 @@ public sealed class NormalizingTtsSynthesizer(
     /// see which speech kind is rendering. This decorator never inspects <c>Kind</c> itself —
     /// normalization and correction firing are kind-agnostic — it only relays it downstream.
     /// </summary>
-    public async Task<string> SynthesizeAsync(TtsRenderContext context, CancellationToken ct)
+    public Task<string> SynthesizeAsync(TtsRenderContext context, CancellationToken ct) =>
+        SynthesizeViaAsync(context, inner.SynthesizeAsync, ct);
+
+    /// <summary>
+    /// The one render body: resolves the merged corrections, applies rule-over-correction precedence, normalizes,
+    /// reports fired corrections, then hands the normalized text to <paramref name="render"/>. The on-air path passes
+    /// <c>inner</c> (the fallback chain); <see cref="NamedEngineSynthesizer"/> passes one chosen engine, so a
+    /// "Hear it" on that engine is normalized exactly as air is, without a second copy of this body.
+    /// </summary>
+    public async Task<string> SynthesizeViaAsync(
+        TtsRenderContext context, Func<TtsRenderContext, CancellationToken, Task<string>> render, CancellationToken ct)
     {
         // SPEC F189.3 (STORY-456, PLAN T526): a planned speaker (TtsSegmentSource's snapshot arm)
         // already resolved its OWN card corrections once, at plan time — carried here on
@@ -111,7 +121,7 @@ public sealed class NormalizingTtsSynthesizer(
 
         var normalized = RunNormalize(context.Text, snapshot);
         ReportFiredCorrections(context.Text, context.Voice, snapshot);
-        return await inner.SynthesizeAsync(context with { Text = normalized }, ct);
+        return await render(context with { Text = normalized }, ct);
     }
 
     /// <summary>

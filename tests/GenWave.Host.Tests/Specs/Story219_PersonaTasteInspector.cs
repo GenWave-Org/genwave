@@ -168,6 +168,7 @@ file static class PersonaTasteControllerFactory
             new NotUsedPersonaImportStore(),
             new NotUsedTtsVoiceLister(),
             KokoroVoiceResolver.Instance,
+            new GenWave.Tts.VoiceEngineRegistry(Microsoft.Extensions.Options.Options.Create(new GenWave.Tts.VoiceEnginesOptions())),
             new FakeStationClockProvider(DateTimeOffset.UtcNow),
             new NotUsedCatalogPersonaAvatarInstaller(),
             NullLogger<PersonaController>.Instance);

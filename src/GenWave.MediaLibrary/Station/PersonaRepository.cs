@@ -82,6 +82,7 @@ sealed class PersonaRepository(Lazy<NpgsqlDataSource> dataSource) : IPersonaStor
         var card = LegacyPersonaCardMapper.BuildCard(draft.Name, draft.Backstory, draft.Style, draft.Voice);
         if (draft.Soul is not null)
             card = card with { Soul = draft.Soul };
+        card = PersonaVoiceLockstep.Apply(card, draft);
         var definition = PersonaCardSerializer.Serialize(card);
 
         try
@@ -181,14 +182,15 @@ sealed class PersonaRepository(Lazy<NpgsqlDataSource> dataSource) : IPersonaStor
         if (existing is null)
         {
             var built = LegacyPersonaCardMapper.BuildCard(draft.Name, draft.Backstory, draft.Style, draft.Voice);
-            return draft.Soul is null ? built : built with { Soul = draft.Soul };
+            return PersonaVoiceLockstep.Apply(draft.Soul is null ? built : built with { Soul = draft.Soul }, draft);
         }
 
         var rebuiltSoul = LegacyPersonaCardMapper.BuildSoul(draft.Backstory, draft.Style);
         var soul = draft.Soul ?? (rebuiltSoul.Length > 0 ? rebuiltSoul : existing.Soul);
 
-        return (existing with { Name = draft.Name, Soul = soul })
+        var edited = (existing with { Name = draft.Name, Soul = soul })
             .WithVoice(existing.Voice with { VoiceId = draft.Voice });
+        return PersonaVoiceLockstep.Apply(edited, draft);
     }
 
     /// <summary>

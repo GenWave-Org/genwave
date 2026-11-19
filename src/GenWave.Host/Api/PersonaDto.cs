@@ -30,8 +30,14 @@ namespace GenWave.Host.Api;
 /// lists for a persona whose card carries none (or whose row still holds the migration sentinel),
 /// never an absent key.
 /// </para>
+///
+/// <para>
+/// <c>Voices</c> (SPEC F219.10) is the card's voice on each engine, <c>{engine: voiceId}</c>, always present: a card
+/// with no map reads as one entry for its own engine, and the legacy empty engine name reads as <c>kokoro</c>.
+/// </para>
 /// </summary>
 public sealed record PersonaDto(
     long Id, string Name, string Backstory, string Style, string Voice, string Slug,
     string? ImportedFrom, DateTime? ImportedAt,
-    string Soul, IReadOnlyList<string> Quirks, IReadOnlyList<string> Lore);
+    string Soul, IReadOnlyList<string> Quirks, IReadOnlyList<string> Lore,
+    IReadOnlyDictionary<string, string> Voices);

@@ -1,4 +1,5 @@
 using GenWave.Core.Domain;
+using GenWave.Tts;
 
 namespace GenWave.Host.Api;
 
@@ -9,14 +10,14 @@ namespace GenWave.Host.Api;
 /// </summary>
 internal static class PersonaCardVoicesValidator
 {
-    /// <summary>The first problem found in <paramref name="card"/>'s voice map, or <see langword="null"/> when it is valid or absent.</summary>
-    internal static string? FirstProblem(PersonaCard card)
+    /// <summary>
+    /// The first problem in a voice map's entries alone (no card to agree with): a blank engine name, a blank voice id,
+    /// or one engine named twice. One rule for engine names (T751 review 2): lookups ignore case, so a map that names
+    /// one engine twice by case alone is refused, and the lockstep check ignores case too. Shared by the import check
+    /// and the persona write (<c>PersonaRequest.Voices</c>).
+    /// </summary>
+    internal static string? FirstEntryProblem(IReadOnlyDictionary<string, string> voices)
     {
-        if (card.Voices is not { } voices)
-            return null;
-
-        // One rule for engine names (T751 review 2): lookups ignore case, so a map that names one engine twice
-        // by case alone is refused here, and the lockstep check below ignores case too.
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (engine, voiceId) in voices)
         {
@@ -28,7 +29,25 @@ internal static class PersonaCardVoicesValidator
                 return "Voices names an engine twice (engine names ignore case).";
         }
 
-        var voiceIdForEngine = voices.FirstOrDefault(v => string.Equals(v.Key, card.Voice.Engine, StringComparison.OrdinalIgnoreCase)).Value;
+        return null;
+    }
+
+    /// <summary>The first problem found in <paramref name="card"/>'s voice map, or <see langword="null"/> when it is valid or absent.</summary>
+    internal static string? FirstProblem(PersonaCard card)
+    {
+        if (card.Voices is not { } voices)
+            return null;
+
+        if (FirstEntryProblem(voices) is { } entryProblem)
+            return entryProblem;
+
+        // Nothing to agree with when the card has no voice of its own; the legacy empty engine name means kokoro,
+        // the same fold VoiceMap and the write path (PersonaCard.WithVoice) use.
+        if (string.IsNullOrWhiteSpace(card.Voice.VoiceId))
+            return null;
+
+        var ownEngine = card.Voice.Engine.Length == 0 ? VoiceEngineProfiles.KokoroName : card.Voice.Engine;
+        var voiceIdForEngine = VoiceMap.FromEngineVoices(voices).VoiceFor(ownEngine);
         if (voiceIdForEngine is null)
             return "Voices must include the engine of the card's voice.";
         if (!string.Equals(voiceIdForEngine, card.Voice.VoiceId, StringComparison.Ordinal))

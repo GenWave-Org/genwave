@@ -18,8 +18,6 @@ public sealed class ActiveEngineSynthesizer(IActiveVoiceEngine active, SpeechEng
     {
         var engine = active.Current
             ?? throw new InvalidOperationException($"Tts:Engine '{active.Name}' is not a configured voice engine.");
-        return engine.Profile == VoiceEngineProfiles.Piper
-            ? client.RenderPiperAsync(engine, context, ct)
-            : client.RenderAsync(engine, context, ct);
+        return client.RenderOnAsync(engine, context, ct);
     }
 }

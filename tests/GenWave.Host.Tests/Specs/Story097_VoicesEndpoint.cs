@@ -90,6 +90,7 @@ public static class FeatureVoicesEndpoint
         new(
             voiceLister,
             new VoiceEngineRegistry(Microsoft.Extensions.Options.Options.Create(new VoiceEnginesOptions())),
+            new SpeechEngineClient(new HttpClient(), new FakeOptionsMonitor<TtsOptions>(new TtsOptions())),
             new FakeOptionsMonitor<TtsOptions>(new TtsOptions()),
             NullLogger<VoicesController>.Instance)
         {
@@ -123,7 +124,7 @@ public static class FeatureVoicesEndpoint
             var lister = BuildLister(stub.BaseUri);
             var controller = BuildController(lister);
 
-            var result = await controller.Get(CancellationToken.None);
+            var result = await controller.Get(null, CancellationToken.None);
 
             var ok = Assert.IsType<OkObjectResult>(result);
             var voices = Assert.IsAssignableFrom<IReadOnlyList<string>>(ok.Value);
@@ -161,8 +162,8 @@ public static class FeatureVoicesEndpoint
             var lister = BuildLister(stub.BaseUri);
             var controller = BuildController(lister);
 
-            await controller.Get(CancellationToken.None);
-            await controller.Get(CancellationToken.None);
+            await controller.Get(null, CancellationToken.None);
+            await controller.Get(null, CancellationToken.None);
 
             Assert.Equal(1, stub.CallCount);
         }
@@ -186,7 +187,7 @@ public static class FeatureVoicesEndpoint
             var lister = BuildLister(baseUri);
             var controller = BuildController(lister);
 
-            var result = await controller.Get(CancellationToken.None);
+            var result = await controller.Get(null, CancellationToken.None);
 
             var problem = Assert.IsType<ObjectResult>(result);
             Assert.Equal(StatusCodes.Status502BadGateway, problem.StatusCode);

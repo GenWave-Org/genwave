@@ -62,6 +62,9 @@ public sealed class EngineEndpointRecorder : HttpMessageHandler
     /// <summary>The JSON body of each request, in the same order as <see cref="Requested"/>.</summary>
     public IReadOnlyList<string> Bodies { get { lock (requested) return [.. bodies]; } }
 
+    /// <summary>When set, every request to an engine fails as if the engine were down.</summary>
+    public bool Unreachable { get; set; }
+
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         var body = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(cancellationToken);
@@ -71,7 +74,13 @@ public sealed class EngineEndpointRecorder : HttpMessageHandler
             bodies.Add(body);
         }
 
-        return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3, 4]) };
+        if (Unreachable)
+            throw new HttpRequestException("engine is down");
+
+        // A voices listing answers the engines' { "voices": [...] } shape; every other request gets audio bytes.
+        return request.RequestUri?.AbsolutePath.EndsWith("/v1/audio/voices", StringComparison.Ordinal) == true
+            ? new HttpResponseMessage(HttpStatusCode.OK) { Content = JsonContent.Create(new { voices = new[] { "reader-1", "reader-2" } }) }
+            : new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3, 4]) };
     }
 }
 
@@ -127,6 +136,9 @@ public abstract class EngineSettingScenario : IAsyncLifetime
 
     /// <summary>A service from the booted host's real DI container.</summary>
     protected T Service<T>() where T : notnull => factory.Services.GetRequiredService<T>();
+
+    /// <summary>Takes every engine down (or brings them back).</summary>
+    protected bool EnginesUnreachable { set => recorder.Unreachable = value; }
 
     /// <summary>Every speech request the engines received, in order.</summary>
     protected IReadOnlyList<Uri> EngineRequests => recorder.Requested;

@@ -230,6 +230,7 @@ file static class PreviewControllerFactory
             new NotUsedPersonaImportStore(),
             new NotUsedTtsVoiceLister(),
             KokoroVoiceResolver.Instance,
+            new GenWave.Tts.VoiceEngineRegistry(Microsoft.Extensions.Options.Options.Create(new GenWave.Tts.VoiceEnginesOptions())),
             new FakeStationClockProvider(DateTimeOffset.UtcNow),
             new NotUsedCatalogPersonaAvatarInstaller(),
             NullLogger<PersonaController>.Instance)
@@ -244,6 +245,9 @@ file static class PreviewControllerFactory
             new FakeOptionsMonitor<StationOptions>(stationOptions ?? DefaultStationOptions()),
             KokoroVoiceResolver.Instance,
             new FakeRenderBudgetProvider(TimeSpan.FromSeconds((ttsOptions ?? new TtsOptions()).RenderBudgetSeconds)),
+            new GenWave.Tts.VoiceEngineRegistry(Microsoft.Extensions.Options.Options.Create(new GenWave.Tts.VoiceEnginesOptions())),
+            new GenWave.Host.Tests.Fakes.NotUsedNamedEngineSynthesizer(),
+            new FakeOptionsMonitor<TtsOptions>(ttsOptions ?? new TtsOptions()),
             // T274 (SPEC F126.1): the preview now resolves rules/pace through these same three
             // real, cheap-to-construct DI seams TtsSegmentSource uses — no station/card rules
             // configured here reproduces this suite's pre-T274 "empty rules" shape exactly (an

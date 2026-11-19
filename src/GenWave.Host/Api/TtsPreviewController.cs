@@ -64,6 +64,9 @@ public sealed class TtsPreviewController(
     IOptionsMonitor<StationOptions> stationMonitor,
     IVoiceResolver voiceResolver,
     IRenderBudgetProvider renderBudget,
+    IVoiceEngineRegistry engines,
+    INamedEngineSynthesizer namedEngine,
+    IOptionsMonitor<TtsOptions> ttsOptions,
     PronunciationRuleProvider pronunciations,
     ActivePersonaPronunciationRulesCache personaPronunciations,
     ActivePersonaPaceCache personaPace,
@@ -104,11 +107,15 @@ public sealed class TtsPreviewController(
 
         // SPEC F219.8/F219.9: a map resolves to the active engine's voice (the station voice when none is
         // given); a bare id is passed through as the voice to hear on the active engine, as before.
-        var (voice, voiceProblem) = ResolvePreviewVoice(request.Voice);
+        // SPEC F219.10: a named engine renders that engine's own bare voice under its own budget, through the air's normalization body
+        // (INamedEngineSynthesizer), so "Hear it" is normalized exactly as air is.
+        var (named, voice, voiceProblem) = ResolveTarget(request);
         if (voiceProblem is not null)
             return BadRequest(voiceProblem);
 
-        var budget = renderBudget.Current;
+        var budget = named is null
+            ? renderBudget.Current
+            : TimeSpan.FromSeconds(EngineRenderBudget.For(named, ttsOptions.CurrentValue));
 
         // The AUDITION event itself (SPEC F126.5, T274 review finding F2) — one Information line
         // per accepted request, logged unconditionally here (before the render can fail), naming
@@ -133,13 +140,16 @@ public sealed class TtsPreviewController(
         try
         {
             var context = await BuildAuditionContextAsync(request.Text, voice, candidates, boundedCts.Token);
-            path = await synthesizer.SynthesizeAsync(context, boundedCts.Token);
+            path = named is null
+                ? await synthesizer.SynthesizeAsync(context, boundedCts.Token)
+                : await namedEngine.SynthesizeOnAsync(named, context, boundedCts.Token);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             // boundedCts fired on the render budget, not the caller disconnecting.
             logger.LogWarning(
-                "TTS preview synthesis exceeded the active engine's render budget of {BudgetSeconds}s", budget.TotalSeconds);
+                "TTS preview synthesis on engine {Engine} exceeded its render budget of {BudgetSeconds}s",
+                LogSanitize.Strip(named?.Name ?? "active"), budget.TotalSeconds);
             return BadGateway();
         }
         catch (Exception ex)
@@ -159,6 +169,30 @@ public sealed class TtsPreviewController(
         }
 
         return File(bytes, "audio/wav");
+    }
+
+    /// <summary>
+    /// Decides who speaks. No <see cref="TtsPreviewRequest.Engine"/> is the active-engine path
+    /// (<see cref="ResolvePreviewVoice"/>, unchanged). A named engine must be in the registry (400 otherwise) and takes
+    /// the voice as a bare id for THAT engine; an engine-to-voice map is a 400 (the caller picks the entry), and a
+    /// blank voice is the engine's own default voice.
+    /// </summary>
+    (VoiceEngine? Engine, string Voice, ProblemDetails? Problem) ResolveTarget(TtsPreviewRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Engine))
+        {
+            var (activeVoice, problem) = ResolvePreviewVoice(request.Voice);
+            return (null, activeVoice, problem);
+        }
+
+        if (engines.Get(request.Engine) is not { } engine)
+            return (null, string.Empty, VoiceEngineProblems.Unknown());
+
+        if (!string.IsNullOrWhiteSpace(request.Voice) && VoiceMap.IsMapSetting(request.Voice))
+            return (null, string.Empty, VoiceProblem(
+                "voice must be a single voice id when an engine is named.", "Malformed voice."));
+
+        return (engine, request.Voice ?? string.Empty, null);
     }
 
     (string Voice, ProblemDetails? Problem) ResolvePreviewVoice(string? requested)

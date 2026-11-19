@@ -18,6 +18,16 @@ public sealed class SpeechEngineClient(
     IOptionsMonitor<TtsOptions> optionsMonitor,
     PronunciationRuleHitReporter? ruleHits = null)
 {
+    /// <summary>
+    /// Renders on one NAMED registry engine over its own wire: Piper's bare text/plain for the piper profile, the
+    /// OpenAI-style speech contract for every other. The one place that picks the wire for an engine, shared by the
+    /// active-engine primary (<see cref="ActiveEngineSynthesizer"/>) and the admin preview of a chosen engine.
+    /// </summary>
+    public Task<string> RenderOnAsync(VoiceEngine engine, TtsRenderContext context, CancellationToken ct) =>
+        engine.Profile == VoiceEngineProfiles.Piper
+            ? RenderPiperAsync(engine, context, ct)
+            : RenderAsync(engine, context, ct);
+
     public async Task<string> RenderAsync(VoiceEngine engine, TtsRenderContext context, CancellationToken ct)
     {
         var cfg = optionsMonitor.CurrentValue;

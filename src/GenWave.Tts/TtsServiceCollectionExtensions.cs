@@ -434,7 +434,9 @@ public static class TtsServiceCollectionExtensions
                     sp.GetRequiredService<CorrectionsFiredStats>(),
                     sp.GetRequiredService<ILogger<NormalizingTtsSynthesizer>>()))
             .AddSingleton<ITtsSynthesizer>(sp => sp.GetRequiredService<NormalizingTtsSynthesizer>())
-            .AddSingleton<ISpeechNormalizationPreview>(sp => sp.GetRequiredService<NormalizingTtsSynthesizer>());
+            .AddSingleton<ISpeechNormalizationPreview>(sp => sp.GetRequiredService<NormalizingTtsSynthesizer>())
+            // SPEC F219.10: the admin "Hear it" on a chosen engine renders through the same normalizing body.
+            .AddSingleton<INamedEngineSynthesizer, NamedEngineSynthesizer>();
 
         return services;
     }

@@ -95,21 +95,49 @@ public sealed record PersonaCard(
         Voices ?? new Dictionary<string, string> { [Voice.Engine] = Voice.VoiceId };
 
     /// <summary>
-    /// THE lockstep rule for writers that set <see cref="Voice"/> (F219.7): returns a card whose
-    /// <see cref="Voice"/> is <paramref name="voice"/> and whose map agrees with it. When
-    /// <see cref="Voices"/> is absent it stays absent (the one-entry read-through already agrees, and an
-    /// old card stays byte-stable); when present, only the entry for <c>voice.Engine</c> is replaced or
-    /// added, so the other engines' voices survive.
+    /// THE lockstep rule for writers that set <see cref="Voice"/> (F219.7, F219.10) — the one owner; every
+    /// writer (persona edit, create with a map) goes through here. Returns a card whose <see cref="Voice"/> is
+    /// <paramref name="voice"/> and whose map agrees with it.
+    ///
+    /// <para>
+    /// When <see cref="Voices"/> is absent it stays absent (the one-entry read-through already agrees, and an old
+    /// card stays byte-stable). When present: the card's own engine is <c>voice.Engine</c>, where the legacy empty
+    /// name means <c>kokoro</c> (the canonical key — an empty key is never stored, and an explicit <c>kokoro</c>
+    /// entry beats an empty-named one, as <c>VoiceMap</c> reads them); engine names compare ignoring case; entries
+    /// with a blank voice id are never stored; the own-engine entry is set to <c>voice.VoiceId</c> (so
+    /// <see cref="Voice"/> wins over a disagreeing entry), or removed when that id is blank (no voice to agree
+    /// with); every other engine's voice survives.
+    /// </para>
     /// </summary>
     public PersonaCard WithVoice(VoiceSpec voice) =>
         Voices is null
             ? this with { Voice = voice }
-            : this with { Voice = voice, Voices = Merge(Voices, voice.Engine, voice.VoiceId) };
+            : this with { Voice = voice, Voices = Merge(Voices, voice) };
 
-    private static Dictionary<string, string> Merge(IReadOnlyDictionary<string, string> map, string engine, string voiceId)
+    // The canonical name of the legacy empty engine. A published card may not reference GenWave.Tts, so this
+    // mirrors VoiceEngineProfiles.KokoroName; a Tts spec (Story556_LegacyEngineNamesKokoro) pins the two equal.
+    private const string LegacyEngineCanonicalName = "kokoro";
+
+    private static Dictionary<string, string> Merge(IReadOnlyDictionary<string, string> map, VoiceSpec voice)
     {
-        return new Dictionary<string, string>(map) { [engine] = voiceId };
+        var merged = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        // Legacy-named entries first, so an explicit kokoro entry wins over an empty-named one.
+        foreach (var (engine, voiceId) in map.OrderBy(e => e.Key.Length == 0 ? 0 : 1))
+        {
+            if (!string.IsNullOrWhiteSpace(voiceId))
+                merged[Canonical(engine)] = voiceId;
+        }
+
+        if (string.IsNullOrWhiteSpace(voice.VoiceId))
+            merged.Remove(Canonical(voice.Engine));
+        else
+            merged[Canonical(voice.Engine)] = voice.VoiceId;
+
+        return merged;
     }
+
+    private static string Canonical(string engine) => engine.Length == 0 ? LegacyEngineCanonicalName : engine;
 
     /// <summary>
     /// The only <see cref="SchemaVersion"/> major this codebase writes or, on import, accepts (SPEC
