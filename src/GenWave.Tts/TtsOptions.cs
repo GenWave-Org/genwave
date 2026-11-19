@@ -28,6 +28,14 @@ public sealed class TtsOptions
     [Required]
     public string CacheRoot { get; set; } = "/tts";
 
+    /// <summary>
+    /// The folder of voice-clone reference clips (SPEC F219.12/F219.28): one <c>&lt;slug&gt;.wav</c> per
+    /// <c>station.voice_clip</c> row. Deploy-time only (compose mounts the <c>voice-clips</c> volume here), the same class of
+    /// setting as <see cref="CacheRoot"/>.
+    /// </summary>
+    [Required]
+    public string ClipsRoot { get; set; } = "/clips";
+
     /// <summary>GC horizon for fresh-per-airing blurb audio under <c>blurbs/</c> (SPEC F34.6).</summary>
     [Range(1, int.MaxValue)]
     public int BlurbRetentionHours { get; set; } = 24;

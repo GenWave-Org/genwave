@@ -19,6 +19,7 @@ using GenWave.Host.Requests;
 using GenWave.Host.Seeding;
 using GenWave.Host.Stats;
 using GenWave.Host.Theming;
+using GenWave.Host.Voices;
 using GenWave.MediaLibrary;
 using GenWave.MediaLibrary.Options;
 using GenWave.Orchestration;
@@ -303,6 +304,10 @@ builder.Services.AddSingleton<ImageNormalizeService>();
 // AddGenWaveOrchestration/AddGenWavePlayout's own render-path graph above — see
 // Story324_RespellOracle's DI-closure fact for the structural pin.
 builder.Services.AddSingleton<IRespellOracle, EspeakRespellOracle>();
+
+// Voice clips (SPEC F219.12/F219.13/F219.15, PLAN T756): upload, list and delete the reference clips a cloning engine speaks in;
+// VoiceClipController is the only entry, the store is AddVoiceClipStore (station connection string, above).
+builder.Services.AddVoiceClips();
 
 // Listener-request throttle knobs (SPEC F87, STORY-224, PLAN T86): env/compose-only, deliberately
 // absent from StationSettingsAllowlist — an operator-tuned deployment setting, not a live PUT (the

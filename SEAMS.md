@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **158 seams across 9 projects.**
+> **160 seams across 9 projects.**
 
 ## GenWave.Ads (2 seams)
 
@@ -66,7 +66,7 @@
 |---|---|---|---|
 | `GenWave.Core.Abstractions.IAppVersion` | `GenWave.Core.AppVersion` | Singleton | — |
 
-## GenWave.Host (37 seams)
+## GenWave.Host (38 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -107,6 +107,7 @@
 | `GenWave.Host.Playout.IAiringTokenResolver` | `GenWave.Host.Playout.AiringTokenRing` | Singleton | — |
 | `GenWave.Host.Pronunciations.IRespellOracle` | `GenWave.Host.Pronunciations.EspeakRespellOracle` | Singleton | — |
 | `GenWave.Host.Seeding.ISafeLoopSeedMarkerStore` | `GenWave.Host.Seeding.SafeLoopSeedMarkerStore` | Singleton | — |
+| `GenWave.Host.Voices.IVoiceClipUsageReader` | `GenWave.Host.Voices.VoiceClipUsageReader` | Singleton | — |
 
 ## GenWave.Loudness (5 seams)
 
@@ -118,7 +119,7 @@
 | `GenWave.Core.Abstractions.IEnergyAnalyzer` | `GenWave.Loudness.FfmpegEnergyAnalyzer` | Singleton | — |
 | `GenWave.Core.Abstractions.ILoudnessAnalyzer` | `GenWave.Loudness.FfmpegLoudnessAnalyzer` | Singleton | — |
 
-## GenWave.MediaLibrary (69 seams)
+## GenWave.MediaLibrary (70 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -189,6 +190,7 @@
 | `GenWave.Core.Abstractions.IThemeStore` | `GenWave.MediaLibrary.Station.ThemeRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IThumbStore` | `GenWave.MediaLibrary.Garden.MediaThumbRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IUtteranceStore` | `GenWave.MediaLibrary.Station.UtteranceRepository` | Singleton | — |
+| `GenWave.Core.Abstractions.IVoiceClipStore` | `GenWave.MediaLibrary.Station.VoiceClipRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IVoicePackStore` | `GenWave.MediaLibrary.Station.VoicePackRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IYearLookup` | `GenWave.MediaLibrary.YearLookup.MusicBrainzYearLookup` | Singleton | — |
 
