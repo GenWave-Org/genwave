@@ -8,11 +8,11 @@ public static class VoiceEngineProfiles
     public const string PiperName = "piper";
 
     public static readonly VoiceEngineProfile Kokoro = new(
-        KokoroName, Speed: true, Ipa: true, PauseTag: true, Clones: false, SoundTags: [], MaxChars: null);
+        KokoroName, Speed: true, Ipa: true, PauseTag: true, Clones: false, PicksVoice: true, SoundTags: [], MaxChars: null);
 
     // Turbo ignores speed; the 9 starting event tags are SPEC F219.20.
     public static readonly VoiceEngineProfile Chatterbox = new(
-        ChatterboxName, Speed: false, Ipa: false, PauseTag: false, Clones: true,
+        ChatterboxName, Speed: false, Ipa: false, PauseTag: false, Clones: true, PicksVoice: true,
         SoundTags:
         [
             "[clear throat]", "[sigh]", "[shush]", "[cough]", "[groan]",
@@ -22,7 +22,7 @@ public static class VoiceEngineProfiles
 
     // PiperWireProtocol posts bare text/plain: no pace, markup or IPA reaches the engine today.
     public static readonly VoiceEngineProfile Piper = new(
-        PiperName, Speed: false, Ipa: false, PauseTag: false, Clones: false, SoundTags: [], MaxChars: null);
+        PiperName, Speed: false, Ipa: false, PauseTag: false, Clones: false, PicksVoice: false, SoundTags: [], MaxChars: null);
 
     public static IReadOnlyList<VoiceEngineProfile> All { get; } = [Kokoro, Chatterbox, Piper];
 

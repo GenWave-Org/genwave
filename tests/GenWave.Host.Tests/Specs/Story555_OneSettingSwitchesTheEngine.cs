@@ -113,6 +113,9 @@ public abstract class EngineSettingScenario : IAsyncLifetime
 
     protected HttpClient Client { get; }
 
+    /// <summary>A service from the booted host's real DI container.</summary>
+    protected T Service<T>() where T : notnull => factory.Services.GetRequiredService<T>();
+
     /// <summary>Every speech request the engines received, in order.</summary>
     protected IReadOnlyList<Uri> EngineRequests => recorder.Requested;
 

@@ -79,6 +79,8 @@ public static class TtsServiceCollectionExtensions
             new VoiceEngineRegistry(sp.GetRequiredService<IOptionsMonitor<VoiceEnginesOptions>>()));
         // The engine every render uses, resolved per read from the live Tts:Engine (SPEC F219.3).
         services.AddSingleton<IActiveVoiceEngine, ActiveVoiceEngine>();
+        // Per-engine voice maps resolve against that engine (SPEC F219.8).
+        services.AddSingleton<IVoiceResolver, ActiveEngineVoiceResolver>();
 
         // Per-kind engine override map (SPEC F70.3, STORY-191) — a raw JSON leaf, not
         // DataAnnotations-validated: malformed JSON (or an unknown kind/engine entry) degrades to
