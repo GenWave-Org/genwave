@@ -14,16 +14,17 @@ internal static class PersonaCardVoicesValidator
     /// The first problem in a voice map's entries alone (no card to agree with): a blank engine name, a blank voice id,
     /// or one engine named twice. One rule for engine names (T751 review 2): lookups ignore case, so a map that names
     /// one engine twice by case alone is refused, and the lockstep check ignores case too. Shared by the import check
-    /// and the persona write (<c>PersonaRequest.Voices</c>).
+    /// and the persona write (<c>PersonaRequest.Voices</c>). A persona write passes <paramref name="allowBlankIds"/>: there
+    /// a blank id means "clear this engine's voice" (SPEC F219.10); a card on disk never holds one.
     /// </summary>
-    internal static string? FirstEntryProblem(IReadOnlyDictionary<string, string> voices)
+    internal static string? FirstEntryProblem(IReadOnlyDictionary<string, string> voices, bool allowBlankIds = false)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (engine, voiceId) in voices)
         {
             if (string.IsNullOrWhiteSpace(engine))
                 return "Every voices entry needs an engine name.";
-            if (string.IsNullOrWhiteSpace(voiceId))
+            if (!allowBlankIds && string.IsNullOrWhiteSpace(voiceId))
                 return "Every voices entry needs a voice id.";
             if (!seen.Add(engine))
                 return "Voices names an engine twice (engine names ignore case).";
@@ -46,7 +47,7 @@ internal static class PersonaCardVoicesValidator
         if (string.IsNullOrWhiteSpace(card.Voice.VoiceId))
             return null;
 
-        var ownEngine = card.Voice.Engine.Length == 0 ? VoiceEngineProfiles.KokoroName : card.Voice.Engine;
+        var ownEngine = PersonaCardEngine.Of(card);
         var voiceIdForEngine = VoiceMap.FromEngineVoices(voices).VoiceFor(ownEngine);
         if (voiceIdForEngine is null)
             return "Voices must include the engine of the card's voice.";

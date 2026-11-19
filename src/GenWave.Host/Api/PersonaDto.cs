@@ -35,9 +35,14 @@ namespace GenWave.Host.Api;
 /// <c>Voices</c> (SPEC F219.10) is the card's voice on each engine, <c>{engine: voiceId}</c>, always present: a card
 /// with no map reads as one entry for its own engine, and the legacy empty engine name reads as <c>kokoro</c>.
 /// </para>
+///
+/// <para>
+/// <c>VoiceEngine</c> is the engine <c>Voice</c> belongs to (the card's own engine, the legacy empty name read as
+/// <c>kokoro</c>), so a client knows which entry of <c>Voices</c> follows <c>Voice</c> when it saves.
+/// </para>
 /// </summary>
 public sealed record PersonaDto(
     long Id, string Name, string Backstory, string Style, string Voice, string Slug,
     string? ImportedFrom, DateTime? ImportedAt,
     string Soul, IReadOnlyList<string> Quirks, IReadOnlyList<string> Lore,
-    IReadOnlyDictionary<string, string> Voices);
+    IReadOnlyDictionary<string, string> Voices, string VoiceEngine);

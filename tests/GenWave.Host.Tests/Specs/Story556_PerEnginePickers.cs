@@ -276,6 +276,48 @@ public static class FeatureAVoicePickerPerEngine
         }
     }
 
+    // A blank id clears that engine's voice; the DTO names the engine the flat voice follows
+    public sealed class ScenarioClearingAnEnginesVoice : EngineSettingScenario
+    {
+        JsonElement listed;
+        HttpStatusCode cleared;
+
+        protected override void ConfigureServices(IServiceCollection services)
+        {
+            services.RemoveAll<IPersonaStore>();
+            services.AddSingleton<IPersonaStore>(new OneDjStore());
+        }
+
+        public override async Task InitializeAsync()
+        {
+            await base.InitializeAsync();
+            await Client.PatchAsJsonAsync($"/api/personas/{OneDjStore.Id}", new
+            {
+                name = "DJ Nova", voice = "af_nova", voices = new Dictionary<string, string> { ["chatterbox"] = "reader-1" },
+            });
+            cleared = (await Client.PatchAsJsonAsync($"/api/personas/{OneDjStore.Id}", new
+            {
+                name = "DJ Nova", voice = "af_nova", voices = new Dictionary<string, string> { ["chatterbox"] = "" },
+            })).StatusCode;
+            listed = await JsonBodyAsync(await Client.GetAsync("/api/personas"));
+        }
+
+        [Fact]
+        public void TheClearIs200() => Assert.Equal(HttpStatusCode.OK, cleared);
+
+        [Fact]
+        public void TheReadBackHasNoChatterboxVoice() =>
+            Assert.False(listed[0].GetProperty("voices").TryGetProperty("chatterbox", out _));
+
+        [Fact]
+        public void TheKokoroVoiceStays() =>
+            Assert.Equal("af_nova", listed[0].GetProperty("voices").GetProperty("kokoro").GetString());
+
+        [Fact]
+        public void TheDtoNamesTheEngineTheVoiceFollows() =>
+            Assert.Equal("kokoro", listed[0].GetProperty("voiceEngine").GetString());
+    }
+
     // A voice-only edit after a map save moves the kokoro entry with it; other engines survive
     public sealed class ScenarioAVoiceOnlyEditAfterAMapSave : EngineSettingScenario
     {
@@ -324,10 +366,6 @@ public static class FeatureAVoicePickerPerEngine
         [Fact]
         public async Task AnEngineThatIsNotInTheRegistryIs400() =>
             Assert.Equal(HttpStatusCode.BadRequest, await PatchAsync(new() { ["nope"] = "reader-1" }));
-
-        [Fact]
-        public async Task ABlankVoiceIdIs400() =>
-            Assert.Equal(HttpStatusCode.BadRequest, await PatchAsync(new() { ["chatterbox"] = " " }));
 
         [Fact]
         public async Task AnEngineNamedTwiceByCaseIs400() =>

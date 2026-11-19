@@ -65,7 +65,8 @@ export default async function SettingsPage({}: Record<string, never>): Promise<R
         <SettingsForm
           settings={settings}
           libraries={libraries}
-          trailingContent={<PronunciationRulesControl />}
+          // The element crosses from this server page into SettingsForm; React's dev check wants it keyed.
+          trailingContent={<PronunciationRulesControl key="pronunciation-rules" />}
         />
       </div>
     </main>

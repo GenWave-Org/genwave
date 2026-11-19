@@ -23,7 +23,7 @@ export type VoiceEnginesState =
   | { kind: "loaded"; data: VoiceEngines }
   | { kind: "error" };
 
-function isVoiceEngines(raw: unknown): raw is VoiceEngines {
+export function isVoiceEngines(raw: unknown): raw is VoiceEngines {
   if (typeof raw !== "object" || raw === null) return false;
   const obj = raw as Record<string, unknown>;
   return (

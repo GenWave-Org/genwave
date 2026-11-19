@@ -97,4 +97,30 @@ public static class FeaturePersonaVoiceLockstep
             Assert.DoesNotContain(saved.Voices ?? new Dictionary<string, string>(), e => string.IsNullOrWhiteSpace(e.Value));
         }
     }
+
+    public sealed class ScenarioABlankIdClearsAnEngine
+    {
+        readonly PersonaCard saved = PersonaVoiceLockstep.Apply(
+            CardOn("", "af_nova") with
+            {
+                Voices = new Dictionary<string, string> { ["kokoro"] = "af_nova", ["chatterbox"] = "reader-1" },
+            },
+            Edit("af_nova", new Dictionary<string, string> { ["chatterbox"] = "" }));
+
+        [Fact]
+        public void TheEngineHasNoVoice() => Assert.DoesNotContain("chatterbox", saved.Voices?.Keys ?? []);
+
+        [Fact]
+        public void NoBlankIdIsStored() =>
+            Assert.DoesNotContain(saved.Voices ?? new Dictionary<string, string>(), e => string.IsNullOrWhiteSpace(e.Value));
+
+        [Fact]
+        public void TheOwnEnginesVoiceStillWins()
+        {
+            var again = PersonaVoiceLockstep.Apply(
+                CardOn("", "af_nova"), Edit("af_nova", new Dictionary<string, string> { ["kokoro"] = "" }));
+
+            Assert.Equal("af_nova", again.Voices?["kokoro"]);
+        }
+    }
 }

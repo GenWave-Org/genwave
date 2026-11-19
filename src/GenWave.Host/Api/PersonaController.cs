@@ -711,7 +711,8 @@ public sealed partial class PersonaController(
             persona.Id, persona.Name, persona.Backstory, persona.Style, persona.Voice, persona.Slug,
             persona.ImportedFrom, persona.ImportedAt,
             card?.Soul ?? "", card?.Quirks ?? [], card?.Lore ?? [],
-            VoicesOf(card));
+            VoicesOf(card),
+            card is null ? VoiceEngineProfiles.KokoroName : PersonaCardEngine.Of(card));
 
     // The card's voice per engine as the wire reads it; VoiceMap folds the legacy "" engine into kokoro.
     static Dictionary<string, string> VoicesOf(PersonaCard? card)
@@ -767,7 +768,7 @@ public sealed partial class PersonaController(
         if (voices is null)
             return null;
 
-        var problem = PersonaCardVoicesValidator.FirstEntryProblem(voices)
+        var problem = PersonaCardVoicesValidator.FirstEntryProblem(voices, allowBlankIds: true)
             ?? (voices.Keys.Any(engine => voiceEngines.Get(engine) is null)
                 ? "Voices names an engine that is not a configured voice engine."
                 : null);
