@@ -132,7 +132,7 @@ describe("Feature: Grouped navigation", () => {
       }));
 
       expect(shape).toEqual([
-        { label: "Station", items: ["Station sounds", "Ads", "Personas", "Schedule", "Shows"] },
+        { label: "Station", items: ["Station sounds", "Ads", "Personas", "Voices", "Schedule", "Shows"] },
         { label: "Media", items: ["Catalog", "Announcements", "Community Catalog"] },
         { label: "Tools", items: ["Gardener", "Theme Editor"] },
         { label: "Status", items: ["Booth log", "Health"] },
