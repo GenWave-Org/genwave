@@ -1,5 +1,6 @@
 namespace GenWave.Ads;
 
+using GenWave.Core.Domain;
 using GenWave.Tts;
 using Microsoft.Extensions.Configuration;
 
@@ -81,7 +82,8 @@ public static class AdLiveSettingsReader
             AdSettingsRead.OrDefault(configuration, "Loudness:TargetLufs", DefaultTargetLufs), MinTargetLufs,
             MaxTargetLufs),
         StationVoice: ReadString(configuration, VoiceMap.StationVoiceSetting, "").Trim(),
-        ActiveEngine: activeEngine.Name);
+        // Always the active engine today: TtsEngineByKindProvider drops every Ad pin, so no Ad pin can change the marker yet.
+        ActiveEngine: activeEngine.EngineFor(SegmentKind.Ad));
 
     static string ReadString(IConfiguration configuration, string key, string fallback)
     {

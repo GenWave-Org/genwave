@@ -64,7 +64,7 @@ public static class Gh854FeatureAdRenderServiceStaleReRender
 
         [Fact]
         public void MarkReadyCarriesTheCurrentRenderVersion()
-            => Assert.Equal(AdRenderVersion.Current, built.Store.LastMarkReadyRenderVersion);
+            => Assert.Equal(AdRenderMarker.For(LiveSettings()), built.Store.LastMarkReadyRenderVersion);
     }
 
     // ---------------------------------------------------------------------
@@ -85,7 +85,7 @@ public static class Gh854FeatureAdRenderServiceStaleReRender
 
         [Fact]
         public void SwapsTheSpotsOldMediaForTheNewOneAtTheCurrentVersion()
-            => Assert.Equal((20L, 500L, 999L, AdRenderVersion.Current), (
+            => Assert.Equal((20L, 500L, 999L, AdRenderMarker.For(LiveSettings())), (
                 built.Store.LastSwapSpotId, built.Store.LastSwapOldMediaId, built.Store.LastSwapNewMediaId, built.Store.LastSwapRenderVersion));
 
         [Fact]

@@ -110,7 +110,7 @@ public static class FeaturePhonenumbersarespokenasdigits
                 normalizingSynth, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), NoCorrections.Provider(),
                 NoCorrections.PersonaCache(), NoCorrections.PronunciationProvider(),
                 NoCorrections.PersonaPronunciationCache(), NoCorrections.PersonaPaceCache(), opts,
-                NullLogger<TtsSegmentSource>.Instance);
+                NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
 
             await source.RenderAsync(StationIdRequest(), CancellationToken.None);
 

@@ -54,7 +54,8 @@ internal static class AdSpotWorkerHarness
         FakeHttpMessageHandler LlmHandler,
         long AdsLibraryId,
         FakeBoothLogAppender BoothLog,
-        RecordingStationEventSink Events);
+        RecordingStationEventSink Events,
+        int CurrentMarker);
 
     /// <summary>A minimal, well-formed <c>library.media</c> row for the repair sweep's own recency/
     /// eligibility facts (PLAN T402 review F2) — every field this project's own reads actually
@@ -194,8 +195,12 @@ internal static class AdSpotWorkerHarness
         var guardian = new AdSpotLifecycleGuardianService(
             store, adsOptions, locatorRoots, timeProvider, new NoOpLogger<AdSpotLifecycleGuardianService>());
 
+        var currentMarker = AdRenderMarker.For(AdLiveSettingsReader.Read(configuration, new FixedActiveVoiceEngine(engine)));
+        store.DefaultRenderVersion = currentMarker;
+
         return new Harness(
             worker, guardian, store, briefs, sponsors, gate, author, timeProvider, adsOptions, catalogWriter,
-            adminLookup, bedPool, handler, adsLibraryId, boothLog, events);
+            adminLookup, bedPool, handler, adsLibraryId, boothLog, events,
+            currentMarker);
     }
 }

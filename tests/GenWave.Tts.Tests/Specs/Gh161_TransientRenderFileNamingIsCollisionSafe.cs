@@ -193,7 +193,7 @@ public static class FeatureTransientRenderFileNamingIsCollisionSafe
                     new TemplateCopyWriter(new PatterTemplateRenderer()), synth, new FakeLoudnessAnalyzer(),
                     new FakeCueAnalyzer(), NoCorrections.Provider(), NoCorrections.PersonaCache(),
                     NoCorrections.PronunciationProvider(), NoCorrections.PersonaPronunciationCache(),
-                    NoCorrections.PersonaPaceCache(), opts, NullLogger<TtsSegmentSource>.Instance);
+                    NoCorrections.PersonaPaceCache(), opts, NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
                 var request = StationIdRequest();
 
                 // A first render discovers the deterministic destination path for this exact

@@ -91,18 +91,12 @@ public sealed class FallbackTtsSynthesizer(
             return await primary.SynthesizeAsync(context, ct);
         }
 
-        var mappedEngine = context.Kind is { } kind
-            ? (engineOverrides?.Current ?? TtsEngineOverrideMap.Empty).Resolve(kind)
-            : null;
-
         // A "kokoro" pin is legal but not a distinct path (F70.3): the primary is already tried
         // first on the health-based path below. Any other pinned engine targets the first chain
         // hop of that kind; no such hop (an operator pinned an engine their chain doesn't run)
-        // falls through to the same default path.
-        var pinnedIndex = mappedEngine is not null
-            && !string.Equals(mappedEngine, DependencyNames.Kokoro, StringComparison.OrdinalIgnoreCase)
-                ? chain.IndexOfFirstEngine(mappedEngine)
-                : -1;
+        // falls through to the same default path. The cache-key lookup shares this rule.
+        var pinnedIndex = TtsEngineRouting.PinnedHopIndex(
+            chain, engineOverrides?.Current ?? TtsEngineOverrideMap.Empty, context.Kind);
 
         if (pinnedIndex < 0)
             return await ExecuteChainAsync(chain, context, skipHopIndex: -1, consultPrimaryHealth: true, ct);

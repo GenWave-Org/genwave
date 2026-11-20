@@ -870,7 +870,8 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	  -- longer say which step blew up — job_failed_kind is the one column that still can.
 	  job_failed_kind  text        CHECK (job_failed_kind IS NULL OR job_failed_kind IN ('write', 'preview')),
 	  -- render_version (gh-#854): db/48's own ADD COLUMN mirror. Stamped on every MarkReady; the worker
-	  -- re-renders any 'ready' spot whose version is behind AdRenderVersion.Current, in the background.
+	  -- re-renders any 'ready' spot whose value differs from the current ad render marker (AdRenderMarker.For,
+	  -- a hashed engine+voice digest; legacy rows hold 0/1), in the background.
 	  -- Column-definition text below is pinned byte-identical against db/48 (gh-#618 lesson).
 	  render_version int not null default 0,
 	  -- pending_retire_media_id (gh-#854): db/48's own second ADD COLUMN mirror. Stamped in the SAME

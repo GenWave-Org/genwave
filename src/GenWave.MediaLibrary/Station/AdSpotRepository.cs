@@ -385,12 +385,12 @@ sealed class AdSpotRepository(
     }
 
     /// <summary><see cref="IAdSpotStore.FindStaleReadyAsync"/> (gh-#854) — the oldest
-    /// <see cref="AdState.Ready"/> spot behind <paramref name="currentVersion"/>, excluding
+    /// <see cref="AdState.Ready"/> spot whose stamped marker differs from <paramref name="currentMarker"/> (SPEC F219.21), excluding
     /// <paramref name="excludeIds"/> (the <see cref="ListAiringExclusionsAsync"/> array-parameter
     /// precedent). Never touches Rendering/Draft/etc — only a Ready spot is ever a re-render
     /// candidate.</summary>
     public async Task<AdSpot?> FindStaleReadyAsync(
-        int currentVersion, IReadOnlyCollection<long> excludeIds, CancellationToken ct)
+        int currentMarker, IReadOnlyCollection<long> excludeIds, CancellationToken ct)
     {
         var excluded = excludeIds.ToArray();
 
@@ -399,14 +399,14 @@ sealed class AdSpotRepository(
             $"""
             {SelectColumns}
             where state = 'ready'::station.ad_state
-              and render_version < @currentVersion
+              and render_version <> @currentMarker
               and not (id = any(@excluded))
               and pending_retire_media_id is null
               and pending_confirm_media_id is null
             order by state_changed_at asc, id asc
             limit 1
             """,
-            new { currentVersion, excluded }, cancellationToken: ct));
+            new { currentMarker, excluded }, cancellationToken: ct));
         return row is null ? null : ToAdSpot(row);
     }
 

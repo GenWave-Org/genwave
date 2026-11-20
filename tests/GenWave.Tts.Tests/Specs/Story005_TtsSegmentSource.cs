@@ -44,7 +44,7 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
             NoCorrections.PersonaPronunciationCache(),
             NoCorrections.PersonaPaceCache(),
             opts,
-            NullLogger<TtsSegmentSource>.Instance);
+            NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
     }
 
     static SegmentRequest StationIdRequest() =>
@@ -287,7 +287,7 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
                 new FakeSegmentCopyWriter("Coming up, a deep cut from MacLeod."),
                 normalizingSynth, analyzer, new FakeCueAnalyzer(), corrections, personaCache,
                 NoCorrections.PronunciationProvider(), NoCorrections.PersonaPronunciationCache(),
-                NoCorrections.PersonaPaceCache(), opts, NullLogger<TtsSegmentSource>.Instance);
+                NoCorrections.PersonaPaceCache(), opts, NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
             var request = StationIdRequest();
 
             var first = await source.RenderAsync(request, CancellationToken.None);
@@ -364,7 +364,7 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
                 new FakeSegmentCopyWriter(CorrectedText),
                 normalizingSynth, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), provider, personaCache,
                 NoCorrections.PronunciationProvider(), NoCorrections.PersonaPronunciationCache(),
-                NoCorrections.PersonaPaceCache(), opts, NullLogger<TtsSegmentSource>.Instance);
+                NoCorrections.PersonaPaceCache(), opts, NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
 
             return (source, innerSynth);
         }
@@ -457,14 +457,14 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
             var source = new TtsSegmentSource(
                 new FakeSegmentCopyWriter(text), synth, analyzer, new FakeCueAnalyzer(),
                 corrections, personaCache, pronunciations, personaPronunciationCache, personaPaceCache, opts,
-                NullLogger<TtsSegmentSource>.Instance);
+                NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
             var request = StationIdRequest();
 
             var item = await source.RenderAsync(request, CancellationToken.None);
 
             await personaPaceCache.RefreshIfStaleAsync(CancellationToken.None);
             var expectedHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
-                text + "|" + request.Voice + "|" + request.StationId + "|" + corrections.ContentHash + "|" +
+                text + "|" + request.Voice + "|kokoro|" + request.StationId + "|" + corrections.ContentHash + "|" +
                 personaCache.ContentHash + "|" + pronunciations.ContentHash + "|" +
                 personaPronunciationCache.ContentHash + "|" + TtsSegmentSource.MergePolicyVersion + "|" +
                 personaPaceCache.Current.ToString("0.####", CultureInfo.InvariantCulture))));
@@ -509,7 +509,7 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
                 new FakeSegmentCopyWriter("Coming up, a deep cut from MacLeod."),
                 normalizingSynth, analyzer, new FakeCueAnalyzer(), NoCorrections.Provider(), personaCache,
                 NoCorrections.PronunciationProvider(), NoCorrections.PersonaPronunciationCache(),
-                NoCorrections.PersonaPaceCache(), opts, NullLogger<TtsSegmentSource>.Instance);
+                NoCorrections.PersonaPaceCache(), opts, NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
             var request = StationIdRequest();
 
             var first = await source.RenderAsync(request, CancellationToken.None);
@@ -565,7 +565,7 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
                 new FakeSegmentCopyWriter("Coming up, a deep cut from MacLeod."),
                 normalizingSynth, analyzer, new FakeCueAnalyzer(), NoCorrections.Provider(), personaCache,
                 NoCorrections.PronunciationProvider(), NoCorrections.PersonaPronunciationCache(),
-                NoCorrections.PersonaPaceCache(), opts, NullLogger<TtsSegmentSource>.Instance);
+                NoCorrections.PersonaPaceCache(), opts, NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
             var request = StationIdRequest();
 
             var first = await source.RenderAsync(request, CancellationToken.None);
@@ -634,7 +634,7 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
                 new FakeSegmentCopyWriter("Say MacLeod now."),
                 synth, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), NoCorrections.Provider(), NoCorrections.PersonaCache(),
                 pronunciations, NoCorrections.PersonaPronunciationCache(), NoCorrections.PersonaPaceCache(), opts,
-                NullLogger<TtsSegmentSource>.Instance);
+                NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
             var request = StationIdRequest();
 
             var first = await source.RenderAsync(request, CancellationToken.None);
@@ -694,7 +694,7 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
                 new FakeSegmentCopyWriter("Say MacLeod now."),
                 synth, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), NoCorrections.Provider(), NoCorrections.PersonaCache(),
                 NoCorrections.PronunciationProvider(), personaPronunciationCache, NoCorrections.PersonaPaceCache(), opts,
-                NullLogger<TtsSegmentSource>.Instance);
+                NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
             var request = StationIdRequest();
 
             var first = await source.RenderAsync(request, CancellationToken.None);
@@ -750,7 +750,7 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
                 new FakeSegmentCopyWriter("Say MacLeod now."),
                 synth, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), NoCorrections.Provider(), NoCorrections.PersonaCache(),
                 NoCorrections.PronunciationProvider(), personaPronunciationCache, NoCorrections.PersonaPaceCache(), opts,
-                NullLogger<TtsSegmentSource>.Instance);
+                NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
             var request = StationIdRequest();
 
             var first = await source.RenderAsync(request, CancellationToken.None);

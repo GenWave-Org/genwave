@@ -169,7 +169,7 @@ public static class FeatureAcceptanceGate01RenderAheadGracefulSkipToMusic
             personaPronunciationCache,
             personaPaceCache,
             ttsOptsMonitor,
-            NullLogger<TtsSegmentSource>.Instance);
+            NullLogger<TtsSegmentSource>.Instance, new ActiveVoiceEngine(TestVoiceEngines.With("kokoro"), ttsOptsMonitor));
 
         var identityProvider = new FakeStationIdentityProvider(new StationIdentity(
             Id:    "test-station",

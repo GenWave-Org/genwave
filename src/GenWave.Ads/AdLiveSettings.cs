@@ -15,7 +15,7 @@ namespace GenWave.Ads;
 /// (SPEC F167.4).</param>
 /// <param name="StationVoice"><c>Station:Voice</c> as written (a bare id or an engine map): what the announcer
 /// and an empty pool fall back to. Kept unresolved so a spot's stored plan survives an engine switch.</param>
-/// <param name="ActiveEngine">The engine speaking right now. A render input (the same settings sound different on
+/// <param name="ActiveEngine">The engine that renders ads (<c>EngineFor(SegmentKind.Ad)</c>; today always the active one). A render input (the same settings sound different on
 /// another engine), so <see cref="AdPreviewKey.Compute"/> hashes it: an engine switch makes a preview stale.</param>
 /// <param name="BedFadeMs">SPEC F168.4's <c>Station:Ads:BedFadeMs</c> — how long, in milliseconds, the
 /// background music fades to silence across the render's trailing tail. No default (PLAN T416 review

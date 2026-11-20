@@ -400,7 +400,7 @@ public static class FeatureRulesTheOperatorCanTrust
                     NoCorrections.PronunciationProvider(), new ActivePersonaPronunciationRulesCache(accessor, TimeProvider.System),
                     NoCorrections.PersonaPaceCache(),
                     new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
-                    NullLogger<TtsSegmentSource>.Instance);
+                    NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
                 var request = new SegmentRequest(
                     SegmentKind.StationId, "af_heart", "GenWave", null, DateTimeOffset.UtcNow, "test-station");
 

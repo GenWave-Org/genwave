@@ -45,7 +45,7 @@ public static class FeatureQualityYouCanSee
             NoCorrections.PersonaPronunciationCache(),
             NoCorrections.PersonaPaceCache(),
             new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
-            logger);
+            logger, TestActiveEngine.Named("kokoro"));
 
     public static class ScenarioEveryEpicFactIsAtInformation
     {
@@ -119,7 +119,7 @@ public static class FeatureQualityYouCanSee
                     corrections, NoCorrections.PersonaCache(), pronunciations, NoCorrections.PersonaPronunciationCache(),
                     NoCorrections.PersonaPaceCache(),
                     new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
-                    sourceLogger);
+                    sourceLogger, TestActiveEngine.Named("kokoro"));
 
                 await source.RenderAsync(Request("Rusty Strings"), CancellationToken.None);
 

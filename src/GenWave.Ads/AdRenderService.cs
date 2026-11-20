@@ -74,7 +74,7 @@ public sealed class AdRenderService(
         {
             var (outcome, _) = await RenderCoreAsync(
                 spot, liveSettings,
-                confirmAsync: (mediaId, confirmCt) => spotStore.MarkReadyAsync(spot.Id, mediaId, AdRenderVersion.Current, confirmCt),
+                confirmAsync: (mediaId, confirmCt) => spotStore.MarkReadyAsync(spot.Id, mediaId, AdRenderMarker.For(liveSettings), confirmCt),
                 failAsync: (reason, failCt) => FailAsync(spot.Id, reason, failCt),
                 ct);
             return outcome;
@@ -109,7 +109,7 @@ public sealed class AdRenderService(
                 spot, liveSettings,
                 confirmAsync: (renderedMediaId, confirmCt) =>
                     spotStore.SwapRenderedMediaAsync(
-                        spot.Id, oldMediaId, renderedMediaId, AdRenderVersion.Current, appVersion, confirmCt),
+                        spot.Id, oldMediaId, renderedMediaId, AdRenderMarker.For(liveSettings), appVersion, confirmCt),
                 failAsync: (reason, failCt) => FailStaleAsync(spot.Id, reason, failCt),
                 ct,
                 // gh-#854 — SwapRenderedMediaAsync itself stamps both durable pending markers inside its
@@ -225,7 +225,7 @@ public sealed class AdRenderService(
     /// already-claimed row, never a background tick.
     /// </para>
     /// </summary>
-    public async Task<AdPromotionOutcome> PromotePreviewAsync(AdSpot spot, CancellationToken ct)
+    public async Task<AdPromotionOutcome> PromotePreviewAsync(AdSpot spot, AdLiveSettings live, CancellationToken ct)
     {
         if (spot.PreviewPath is not { } previewPath)
             return new AdPromotionOutcome.Failed("promote: spot carries no preview to promote", FileMoved: false);
@@ -275,7 +275,7 @@ public sealed class AdRenderService(
             var result = await author.LandAsync(
                 assembled,
                 buildInsert: a => BuildInsert(libraryId.Value, tags, a),
-                confirmAsync: (mediaId, confirmCt) => spotStore.MarkReadyAsync(spot.Id, mediaId, AdRenderVersion.Current, confirmCt),
+                confirmAsync: (mediaId, confirmCt) => spotStore.MarkReadyAsync(spot.Id, mediaId, AdRenderMarker.For(live), confirmCt),
                 ct);
 
             return result.Succeeded

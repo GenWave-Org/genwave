@@ -507,7 +507,10 @@ public sealed class AdsController(
         if (current.PreviewPath is null)
             return await ValidateCurrentScriptThenAsync(id, expectedVersion, spotStore.ApproveAsync, ct);
 
-        if (await PreviewIsStaleAsync(current, ct))
+        // One read feeds both the staleness check and the promotion stamp, so a settings change between
+        // the two can't stamp a marker the check never saw.
+        var liveSettings = AdLiveSettingsReader.Read(configuration, activeEngine);
+        if (await PreviewIsStaleAsync(current, liveSettings, ct))
             return Conflict(PreviewStaleProblem());
 
         var scriptResult = await ValidateCurrentScriptThenAsync(id, expectedVersion, spotStore.ApproveAsync, ct);
@@ -531,7 +534,7 @@ public sealed class AdsController(
             return await Success(approved, ct);
         }
 
-        var outcome = await renderService.PromotePreviewAsync(claimed, ct);
+        var outcome = await renderService.PromotePreviewAsync(claimed, liveSettings, ct);
         return outcome switch
         {
             AdPromotionOutcome.Landed => await AfterLandedAsync(id, ct),
@@ -884,13 +887,12 @@ public sealed class AdsController(
     /// boundary, regardless of how many other call sites already trust it.
     /// </para>
     /// </summary>
-    async Task<bool> PreviewIsStaleAsync(AdSpot spot, CancellationToken ct)
+    async Task<bool> PreviewIsStaleAsync(AdSpot spot, AdLiveSettings liveSettings, CancellationToken ct)
     {
         if (spot is not { PreviewPath: { } previewPath, PreviewKey: { } previewKey })
             return true;
 
         var sponsor = await sponsorStore.GetAsync(spot.SponsorId, ct);
-        var liveSettings = AdLiveSettingsReader.Read(configuration, activeEngine);
         if (PreviewKeyIsStale(spot, previewKey, sponsor, liveSettings))
             return true;
 

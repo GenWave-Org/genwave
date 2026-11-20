@@ -27,6 +27,7 @@ public sealed class TtsSegmentSource(
     ActivePersonaPaceCache personaPace,
     IOptionsMonitor<TtsOptions> options,
     ILogger<TtsSegmentSource> logger,
+    IActiveVoiceEngine activeEngine,
     IStationEventSink? events = null) : ITtsSegmentSource, IVerbatimSegmentRenderer
 {
     // SegmentGenerated publish seam (gitea-#246); no-op unless the host binds a real sink.
@@ -417,7 +418,7 @@ public sealed class TtsSegmentSource(
                 LogSanitize.Strip(speaker.Voice), LogSanitize.Strip(request.Voice), request.Kind);
         }
 
-        var hash = TtsRenderKey.ComputeSnapshotHash(copy.Text, request.Voice, request.StationId, speaker.ContentHash);
+        var hash = TtsRenderKey.ComputeSnapshotHash(copy.Text, request.Voice, activeEngine.EngineFor(request.Kind), request.StationId, speaker.ContentHash);
         return (speaker.Rules, speaker.Pace, hash);
     }
 
@@ -510,7 +511,7 @@ public sealed class TtsSegmentSource(
         var pace = personaPace.Current;
 
         var hash = ComputeHash(
-            copy.Text, request.Voice, request.StationId, corrections.ContentHash, personaCorrections.ContentHash,
+            copy.Text, request.Voice, activeEngine.EngineFor(request.Kind), request.StationId, corrections.ContentHash, personaCorrections.ContentHash,
             pronunciations.ContentHash, personaPronunciations.ContentHash, MergePolicyVersion, pace);
         return (contextRules, pace, hash);
     }
@@ -624,11 +625,11 @@ public sealed class TtsSegmentSource(
     // edited rate would keep serving its old cached clip forever, exactly the class of bug the four
     // rule-content hashes above already guard against for corrections/pronunciations.
     static string ComputeHash(
-        string text, string voice, string stationId, string correctionsContentHash, string personaCorrectionsContentHash,
+        string text, string voice, string engine, string stationId, string correctionsContentHash, string personaCorrectionsContentHash,
         string pronunciationsContentHash, string personaPronunciationsContentHash, string mergePolicyVersion, double pace) =>
         Convert.ToHexString(SHA256.HashData(
             Encoding.UTF8.GetBytes(
-                text + "|" + voice + "|" + stationId + "|" + correctionsContentHash + "|" + personaCorrectionsContentHash +
+                text + "|" + voice + "|" + engine + "|" + stationId + "|" + correctionsContentHash + "|" + personaCorrectionsContentHash +
                 "|" + pronunciationsContentHash + "|" + personaPronunciationsContentHash + "|" + mergePolicyVersion +
                 "|" + pace.ToString("0.####", CultureInfo.InvariantCulture))));
 

@@ -583,7 +583,7 @@ public sealed class AdSpotWorker(
         if (onAirRenderSignal.InFlight)
             return;
 
-        if (await spotStore.FindStaleReadyAsync(AdRenderVersion.Current, staleReRenderSkip, stoppingToken) is not { } spot)
+        if (await spotStore.FindStaleReadyAsync(AdRenderMarker.For(liveSettings), staleReRenderSkip, stoppingToken) is not { } spot)
         {
             if (!staleBacklogAnnouncedEmpty)
             {
@@ -636,7 +636,7 @@ public sealed class AdSpotWorker(
             {
                 logger.LogInformation(
                     "Ad spot {Id} stale re-render swapped off media {OldMediaId} (render_version {Version})",
-                    spot.Id, oldMediaId, AdRenderVersion.Current);
+                    spot.Id, oldMediaId, AdRenderMarker.For(liveSettings));
                 await NarrateAutoRerenderAsync(spot, stoppingToken);
             }
             else

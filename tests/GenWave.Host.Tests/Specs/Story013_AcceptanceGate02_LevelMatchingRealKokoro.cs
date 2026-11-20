@@ -111,7 +111,7 @@ public static class FeatureAcceptanceGate02LevelMatchingRealKokoro
             personaPronunciationCache,
             personaPaceCache,
             ttsOptsMonitor,
-            NullLogger<TtsSegmentSource>.Instance);
+            NullLogger<TtsSegmentSource>.Instance, new ActiveVoiceEngine(TestVoiceEngines.With("kokoro"), ttsOptsMonitor));
 
         var request = new SegmentRequest(
             Kind:        SegmentKind.StationId,

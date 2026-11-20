@@ -390,7 +390,7 @@ public static class FeatureKokoroSentencePauses
                     NoCorrections.PersonaPronunciationCache(),
                     NoCorrections.PersonaPaceCache(),
                     Options(cacheRoot),
-                    NullLogger<TtsSegmentSource>.Instance);
+                    NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
                 var request = new SegmentRequest(
                     SegmentKind.StationId, "af_heart", "GenWave", null,
                     new DateTimeOffset(2026, 7, 30, 12, 0, 0, TimeSpan.Zero), "test-station");

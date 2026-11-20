@@ -77,7 +77,7 @@ public static class FeatureNeverSomeoneElsesVoice
             NoCorrections.PersonaPronunciationCache(),
             NoCorrections.PersonaPaceCache(),
             new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
-            logger ?? NullLogger<TtsSegmentSource>.Instance);
+            logger ?? NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
 
     // LeadIn (a DJ-spoken kind, ARCHITECTURE.md "while a persona is on air it is that persona's
     // voice reading the DJ-spoken kinds") with no Track — PatterTemplateRenderer's documented

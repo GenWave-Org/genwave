@@ -31,11 +31,13 @@ using System.Text;
 static class TtsRenderKey
 {
     /// <summary>
-    /// Term order: text, voice, stationId, the snapshot's own content hash — the same first three
-    /// terms <see cref="TtsSegmentSource"/>'s ambient <c>ComputeHash</c> uses, with every ambient
-    /// fingerprint collapsed into the one term the snapshot already carries.
+    /// Term order: text, voice, engine, stationId, the snapshot's own content hash — the same first
+    /// four terms <see cref="TtsSegmentSource"/>'s ambient <c>ComputeHash</c> uses, with every ambient
+    /// fingerprint collapsed into the one term the snapshot already carries. <paramref name="engine"/> is
+    /// the stable engine name that will render (SPEC F219.21): a clip made on another engine is a new key.
     /// </summary>
-    public static string ComputeSnapshotHash(string text, string voice, string stationId, string speakerContentHash) =>
+    public static string ComputeSnapshotHash(
+        string text, string voice, string engine, string stationId, string speakerContentHash) =>
         Convert.ToHexString(SHA256.HashData(
-            Encoding.UTF8.GetBytes(text + "|" + voice + "|" + stationId + "|" + speakerContentHash)));
+            Encoding.UTF8.GetBytes(text + "|" + voice + "|" + engine + "|" + stationId + "|" + speakerContentHash)));
 }

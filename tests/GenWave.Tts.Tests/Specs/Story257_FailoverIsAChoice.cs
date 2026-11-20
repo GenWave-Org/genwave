@@ -73,7 +73,7 @@ public static class FeatureFailoverIsAChoice
             NoCorrections.PersonaPronunciationCache(),
             NoCorrections.PersonaPaceCache(),
             new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
-            NullLogger<TtsSegmentSource>.Instance);
+            NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
 
     // LeadIn with no Track — PatterTemplateRenderer's documented safe fallback ("Coming up
     // next."), the same fixture shape Story256_NeverSomeoneElsesVoice's own DjBreakRequest uses.

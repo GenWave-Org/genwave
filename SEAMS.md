@@ -237,7 +237,7 @@
 | `GenWave.Core.Abstractions.ITtsSynthesizer` | `GenWave.Tts.NormalizingTtsSynthesizer` | Singleton | — |
 | `GenWave.Core.Abstractions.ITtsVoiceLister` | `GenWave.Tts.CachedVoiceLister` | Singleton | — |
 | `GenWave.Core.Abstractions.IVerbatimSegmentRenderer` | `GenWave.Tts.TtsSegmentSource` | Singleton | — |
-| `GenWave.Tts.IActiveVoiceEngine` | `GenWave.Tts.ActiveVoiceEngine` | Singleton | — |
+| `GenWave.Tts.IActiveVoiceEngine` | `GenWave.Tts.RoutedActiveVoiceEngine` | Singleton | wraps: `GenWave.Tts.ActiveVoiceEngine` (GenWave.Tts) |
 | `GenWave.Tts.ICastSegmentAuthor` | `GenWave.Tts.CastSegmentAuthor` | Singleton | — |
 | `GenWave.Tts.IDegradationModeReader` | `GenWave.Tts.DegradationController` | Singleton | — |
 | `GenWave.Tts.IDependencyHealth` | `GenWave.Tts.DependencyHealthStore` | Singleton | — |

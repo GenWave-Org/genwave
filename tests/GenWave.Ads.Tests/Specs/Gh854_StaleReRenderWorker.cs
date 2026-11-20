@@ -57,7 +57,7 @@ public static class Gh854FeatureTheWorkerReRendersStaleReadySpotsInTheBackground
 
         [Fact]
         public void TheVersionIsStampedToCurrent()
-            => Assert.Equal(AdRenderVersion.Current, harness.Store.Spots.Single(s => s.Id == 1).RenderVersion);
+            => Assert.Equal(harness.CurrentMarker, harness.Store.Spots.Single(s => s.Id == 1).RenderVersion);
 
         [Fact]
         public void TheSpotStaysReady()
@@ -164,7 +164,7 @@ public static class Gh854FeatureTheWorkerReRendersStaleReadySpotsInTheBackground
 
         public async Task InitializeAsync()
         {
-            harness.Store.AddSpot(1, AdState.Ready, mediaId: 500, stateChangedAt: Now.UtcDateTime.AddHours(-1), renderVersion: AdRenderVersion.Current);
+            harness.Store.AddSpot(1, AdState.Ready, mediaId: 500, stateChangedAt: Now.UtcDateTime.AddHours(-1), renderVersion: harness.CurrentMarker);
             await Tick(harness);
         }
 

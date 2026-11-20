@@ -140,7 +140,7 @@ public static class FeatureDjsSpeakAtTheirOwnPace
                 var source = new TtsSegmentSource(
                     new FakeSegmentCopyWriter("Coming up next."), synth, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(),
                     NoCorrections.Provider(), NoCorrections.PersonaCache(), NoCorrections.PronunciationProvider(),
-                    NoCorrections.PersonaPronunciationCache(), personaPace, opts, NullLogger<TtsSegmentSource>.Instance);
+                    NoCorrections.PersonaPronunciationCache(), personaPace, opts, NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
                 var request = StationIdRequest();
 
                 var slow = await source.RenderAsync(request, CancellationToken.None);
@@ -181,7 +181,7 @@ public static class FeatureDjsSpeakAtTheirOwnPace
                 var source = new TtsSegmentSource(
                     new FakeSegmentCopyWriter("Coming up next."), synth, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(),
                     NoCorrections.Provider(), NoCorrections.PersonaCache(), NoCorrections.PronunciationProvider(),
-                    NoCorrections.PersonaPronunciationCache(), personaPace, opts, NullLogger<TtsSegmentSource>.Instance);
+                    NoCorrections.PersonaPronunciationCache(), personaPace, opts, NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
                 var request = StationIdRequest();
 
                 var first = await source.RenderAsync(request, CancellationToken.None);

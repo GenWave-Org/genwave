@@ -78,7 +78,10 @@ public static class TtsServiceCollectionExtensions
         services.AddSingleton<IVoiceEngineRegistry>(sp =>
             new VoiceEngineRegistry(sp.GetRequiredService<IOptionsMonitor<VoiceEnginesOptions>>()));
         // The engine every render uses, resolved per read from the live Tts:Engine (SPEC F219.3).
-        services.AddSingleton<IActiveVoiceEngine, ActiveVoiceEngine>();
+        // The per-kind answer (SPEC F219.21) needs the by-kind map and the chain, so the routed wrapper is the one
+        // IActiveVoiceEngine; ActiveVoiceEngine stays the plain Tts:Engine lookup it wraps.
+        services.AddSingleton<ActiveVoiceEngine>();
+        services.AddSingleton<IActiveVoiceEngine, RoutedActiveVoiceEngine>();
         // Per-engine voice maps resolve against that engine (SPEC F219.8).
         services.AddSingleton<IVoiceResolver, ActiveEngineVoiceResolver>();
 

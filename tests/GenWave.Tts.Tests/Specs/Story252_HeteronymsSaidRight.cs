@@ -726,7 +726,7 @@ public static class FeatureHeteronymsSaidRight
                     NoCorrections.PersonaPronunciationCache(),
                     NoCorrections.PersonaPaceCache(),
                     opts,
-                    NullLogger<TtsSegmentSource>.Instance);
+                    NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
                 var request = new SegmentRequest(
                     SegmentKind.LeadIn, "af_nova", "GenWave", null, DateTimeOffset.UtcNow, "test-station");
 
@@ -831,7 +831,7 @@ public static class FeatureHeteronymsSaidRight
                     NoCorrections.PersonaPronunciationCache(),
                     NoCorrections.PersonaPaceCache(),
                     opts,
-                    NullLogger<TtsSegmentSource>.Instance);
+                    NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
                 var request = new SegmentRequest(
                     SegmentKind.LeadIn, "af_nova", "GenWave", null, DateTimeOffset.UtcNow, "test-station");
 
