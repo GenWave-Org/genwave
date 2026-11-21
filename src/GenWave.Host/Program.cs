@@ -195,6 +195,7 @@ builder.Services
     // a future render-time fallback decision (T34) reads synchronously — no health check ever
     // runs inside the render window.
     .AddGenWaveDependencyHealth(cfg)
+    .AddGenWaveVoiceEngineWarmUp()
     // Admin surface: admin options, Data Protection, cookie auth, deny-by-default policy.
     .AddGenWaveAdminApi(cfg)
     // Named OutputCache policies for the public spectator surface (SPEC F62.10, STORY-171/T13).

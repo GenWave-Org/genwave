@@ -48,12 +48,5 @@ sealed class DependencyHealthProbeService(
     /// these only guard a hand-edited appsettings that bypasses it — a zero interval would spin
     /// this loop hot.
     /// </summary>
-    DependencyProbeCadence CurrentCadence()
-    {
-        var cfg = options.CurrentValue;
-        return new DependencyProbeCadence(
-            TimeSpan.FromSeconds(Math.Max(1, cfg.ProbeIntervalSeconds)),
-            TimeSpan.FromSeconds(Math.Max(1, cfg.ProbeTimeoutSeconds)),
-            Math.Max(1, cfg.UnhealthyThreshold));
-    }
+    DependencyProbeCadence CurrentCadence() => options.CurrentValue.ToCadence();
 }

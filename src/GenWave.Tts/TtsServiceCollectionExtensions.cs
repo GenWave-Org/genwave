@@ -426,6 +426,8 @@ public static class TtsServiceCollectionExtensions
             // FallbackTtsSynthesizer's factory just above reads, never on FallbackTtsSynthesizer
             // itself (resolving it would drag an IHttpClientFactory into a status read).
             .AddSingleton<VoiceHealthReader>()
+            // The active engine's boot warm-up line (SPEC F219.25); the Host's VoiceEngineWarmUpService drives it.
+            .AddSingleton<VoiceEngineWarmUp>()
             // The singleton every caller (TtsSegmentSource, SafeSegmentAuthor, TtsPreviewController)
             // actually resolves is NormalizingTtsSynthesizer (SPEC F68.1, STORY-185) decorating
             // FallbackTtsSynthesizer (T34) decorating ActiveEngineSynthesizer plus

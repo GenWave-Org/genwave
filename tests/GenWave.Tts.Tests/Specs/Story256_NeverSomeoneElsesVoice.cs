@@ -296,9 +296,13 @@ public static class FeatureNeverSomeoneElsesVoice
         public static void A_healthy_station_reports_no_degraded_voice_state()
         {
             // Given the engine's cached verdict is healthy...
+            // (T766: green also needs the engine's boot warm-up verdict, SPEC F219.25.)
             var health = new FakeDependencyHealth();
             health.Set(new DependencyHealthVerdict(
                 DependencyNames.Kokoro, Healthy: true, DateTimeOffset.UtcNow,
+                Reason: null, ConsecutiveFailureCount: 0));
+            health.Set(new DependencyHealthVerdict(
+                DependencyNames.VoiceEngine(DependencyNames.Kokoro), Healthy: true, DateTimeOffset.UtcNow,
                 Reason: null, ConsecutiveFailureCount: 0));
 
             // When the operator opens the health surface...

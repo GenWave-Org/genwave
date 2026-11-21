@@ -51,7 +51,7 @@ public sealed class StatusController(
     /// gardener: { open: { deadFile, nearDuplicate, staleMetadata, shelfDust, unreachable }, total },
     /// llm: { enabled, model, activePersona, lastOutcome, lastAttemptAt, dominantCause, dominantCauseCount, dominantCauseModel },
     /// degradation: { mode, pinned, since, cause },
-    /// voice: { engine, degraded, reason, checkedAt },
+    /// voice: { engine, degraded, warming, reason, checkedAt },
     /// plugins: [{ name, version, contracts, state, reason? }],
     /// version: { app, build, schema: { expected, applied } },
     /// repeats: { djs: [{ personaId, name, catches, trims, fallbacks }],
@@ -249,6 +249,7 @@ public sealed class StatusController(
             {
                 engine = voice.Engine,
                 degraded = voice.Degraded,
+                warming = voice.Warming,
                 reason = voice.Reason,
                 checkedAt = voice.CheckedAt,
             },

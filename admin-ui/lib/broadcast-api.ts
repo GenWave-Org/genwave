@@ -96,6 +96,8 @@ export interface StatusResponse {
   voice: {
     engine: string;
     degraded: boolean;
+    /** SPEC F219.25 — true until the engine has rendered its warm-up line; `degraded` stays true meanwhile. Absent on an older api. */
+    warming?: boolean;
     reason: string | null;
     checkedAt: string | null;
   };

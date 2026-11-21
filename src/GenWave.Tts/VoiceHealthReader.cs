@@ -20,6 +20,11 @@ namespace GenWave.Tts;
 /// (<see cref="DegradationController"/>). This reader answers only the engine-down half, so the
 /// two facts can sit side by side on the wire without ever colliding on one field.
 /// </para>
+/// <para>
+/// Since T766 (SPEC F219.25) green needs the engine's own warm-up verdict, written by <see cref="VoiceEngineWarmUp"/>
+/// under <see cref="DependencyNames.VoiceEngine"/>; no verdict yet reads degraded and <see cref="VoiceHealthSnapshot.Warming"/>,
+/// with <see cref="WarmingUpReason"/>.
+/// </para>
 /// </summary>
 public sealed class VoiceHealthReader(IActiveVoiceEngine active, IDependencyHealth health)
 {
@@ -33,10 +38,21 @@ public sealed class VoiceHealthReader(IActiveVoiceEngine active, IDependencyHeal
         }
 
         var engine = current.DependencyName;
-        var verdict = health.GetVerdict(engine);
 
-        return verdict is { Healthy: false } unhealthy
-            ? new VoiceHealthSnapshot(engine, Degraded: true, unhealthy.Reason, unhealthy.CheckedAt)
-            : new VoiceHealthSnapshot(engine, Degraded: false, Reason: null, verdict?.CheckedAt);
+        // The cheap kokoro/piper liveness probe still counts: unhealthy there is red whatever the warm-up says.
+        if (health.GetVerdict(engine) is { Healthy: false } probed)
+            return new VoiceHealthSnapshot(engine, Degraded: true, probed.Reason, probed.CheckedAt);
+
+        // Green needs the engine's own warm-up verdict (SPEC F219.25). No verdict yet is not green: the engine has
+        // not rendered its boot line, so the tile says so instead of claiming a voice nobody has heard.
+        return health.GetVerdict(DependencyNames.VoiceEngine(current.Name)) switch
+        {
+            { Healthy: false } failed => new VoiceHealthSnapshot(engine, Degraded: true, failed.Reason, failed.CheckedAt),
+            { } warmed => new VoiceHealthSnapshot(engine, Degraded: false, Reason: null, warmed.CheckedAt),
+            null => new VoiceHealthSnapshot(engine, Degraded: true, WarmingUpReason, CheckedAt: null, Warming: true),
+        };
     }
+
+    /// <summary>The reason shown while the engine's boot warm-up line has not finished.</summary>
+    public const string WarmingUpReason = "Warming up: the engine has not rendered its first line yet.";
 }

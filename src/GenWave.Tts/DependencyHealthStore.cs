@@ -17,6 +17,9 @@ public sealed class DependencyHealthStore : IDependencyHealth
     public DependencyHealthVerdict? GetVerdict(string dependencyName) =>
         verdicts.GetValueOrDefault(dependencyName);
 
+    /// <summary>Drops the cached verdict for <paramref name="dependencyName"/>, so a reader sees "no verdict yet" until the next record.</summary>
+    public void Forget(string dependencyName) => verdicts.TryRemove(dependencyName, out _);
+
     /// <summary>
     /// Records the outcome of one probe for <paramref name="dependencyName"/>.
     /// <paramref name="reason"/> must be null exactly when <paramref name="healthy"/> is true.

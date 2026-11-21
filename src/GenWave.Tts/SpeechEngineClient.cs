@@ -55,6 +55,17 @@ public sealed class SpeechEngineClient(
     public Task<string> RenderPiperAsync(VoiceEngine engine, TtsRenderContext context, CancellationToken ct) =>
         PiperWireProtocol.RenderAsync(http, engine.Endpoint, context, optionsMonitor.CurrentValue, ct);
 
+    /// <summary>
+    /// Reachability only: <c>OPTIONS {endpoint}/</c>. Any HTTP response at all proves the engine process is up and
+    /// accepting connections (the status is not the signal, as with <see cref="PiperHealthProbe"/>); a refused
+    /// connection or a timeout throws. Works for every profile because it names no engine-specific route.
+    /// </summary>
+    public async Task PingAsync(VoiceEngine engine, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Options, EndpointUri.Combine(engine.Endpoint, "/"));
+        using var response = await http.SendAsync(request, ct);
+    }
+
     public async Task<IReadOnlyList<string>> ListVoicesAsync(VoiceEngine engine, CancellationToken ct)
     {
         var response = await http.GetAsync(EndpointUri.Combine(engine.Endpoint, "/v1/audio/voices"), ct);

@@ -9,13 +9,16 @@ namespace GenWave.Tts;
 /// </summary>
 /// <param name="Engine">The primary engine's <see cref="DependencyNames"/> key — <c>kokoro</c> on
 /// every topology except the piper-only opt-in, where it is <c>piper</c> (SPEC F99.4).</param>
-/// <param name="Degraded">True when the cached verdict for <paramref name="Engine"/> is unhealthy.
-/// False both when it is healthy and when no probe cycle has completed yet (the brief startup
-/// window) — a degraded read is never fabricated ahead of real evidence.</param>
+/// <param name="Degraded">True when the engine is unhealthy OR has not yet rendered its boot warm-up line
+/// (SPEC F219.25): fail closed, green only on evidence. <see cref="VoiceHealthReader.WarmingUpReason"/> names the
+/// not-yet state.</param>
 /// <param name="Reason">The verdict's own reason, populated only when <paramref name="Degraded"/>
 /// — mirrors <see cref="DependencyHealthVerdict.Reason"/>'s own null-exactly-when-healthy
 /// invariant.</param>
 /// <param name="CheckedAt">When the verdict was last recorded; null before the first probe cycle
 /// completes.</param>
+/// <param name="Warming">True while the engine has no warm-up verdict yet (SPEC F219.25): not down, not green.
+/// <see cref="Degraded"/> stays true so nothing reads the engine as healthy ahead of evidence; a surface that wants
+/// to tell "starting" from "down" reads this.</param>
 public sealed record VoiceHealthSnapshot(
-    string Engine, bool Degraded, string? Reason, DateTimeOffset? CheckedAt);
+    string Engine, bool Degraded, string? Reason, DateTimeOffset? CheckedAt, bool Warming = false);
