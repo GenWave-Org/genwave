@@ -142,6 +142,11 @@ export interface StatusResponse {
    * database; absent on an api that predates it.
    */
   callbacks?: CallbacksStatus | null;
+  /**
+   * SPEC F219.23, STORY-559, PLAN T765 — items whose audio is still in the old voice. `null` means unknown
+   * (a database read failed, or the active engine has no station voice); absent on an api that predates it.
+   */
+  staleVoiceItems?: number | null;
 }
 
 export interface CallbacksStatus {

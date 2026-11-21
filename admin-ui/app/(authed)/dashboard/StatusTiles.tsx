@@ -179,6 +179,12 @@ function pluginLine(plugin: PluginStatusEntry): string {
   return plugin.state === "loaded" ? label : `${label} — skipped${plugin.reason ? `: ${plugin.reason}` : ""}`;
 }
 
+/** SPEC F219.23, STORY-559 AC5 — the Voice tile's old-voice line; `null` at zero (the line is hidden). */
+function staleVoiceLine(count: number): string | null {
+  if (count === 0) return null;
+  return `${count} ${count === 1 ? "item" : "items"} still in the old voice`;
+}
+
 interface StatusTilesProps {
   status: StatusResponse | null;
   error: boolean;
@@ -285,6 +291,9 @@ export function StatusTiles({ status, error, timeZone }: StatusTilesProps): Reac
               ) : (
                 <p className="mt-1 text-[0.8rem] text-mute">Reachable</p>
               )}
+              {/* SPEC F219.23 — `staleVoiceItems` is null when unknown, absent on an older api: both read as
+                  unavailable (the Repeats/Memories tiles' treatment); zero hides the line. */}
+              <StaleVoiceLine count={status.staleVoiceItems} />
             </>
           )}
         </Tile>
@@ -492,6 +501,14 @@ function RepeatsTileBody({ repeats, timeZone }: { repeats: RepeatsStatus; timeZo
       ))}
     </div>
   );
+}
+
+function StaleVoiceLine({ count }: { count: number | null | undefined }): ReactNode {
+  if (count === undefined || count === null) {
+    return <p className="mt-1 text-[0.75rem] text-mute">Old voice items: Unavailable</p>;
+  }
+  const line = staleVoiceLine(count);
+  return line === null ? null : <p className="mt-1 text-[0.75rem] text-mute">{line}</p>;
 }
 
 function TileSkeleton(): ReactNode {
