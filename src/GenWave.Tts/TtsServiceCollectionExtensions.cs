@@ -353,6 +353,9 @@ public static class TtsServiceCollectionExtensions
         // KokoroVoiceLister above both delegate to it.
         services.AddHttpClient<SpeechEngineClient>();
 
+        // What the speech renders are doing per engine (PLAN T768a): fed by SpeechEngineClient, read by the voice tile's warm-up.
+        services.AddSingleton<EngineRenderActivity>();
+
         // Live LLM-model listing (SPEC F205.7, STORY-479, PLAN T580) — the LLM-side sibling of
         // KokoroVoiceLister immediately above: same Llm:Endpoint the completions call itself uses,
         // no separate config key. The Host's LlmModelChoiceProbe (GenWave.Host, through

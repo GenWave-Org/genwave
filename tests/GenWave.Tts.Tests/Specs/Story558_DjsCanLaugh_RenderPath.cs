@@ -191,7 +191,7 @@ public static class FeatureDjsCanLaughOnTheRenderPathUnits
                 inputs.Add(JsonDocument.Parse(body).RootElement.GetProperty("input").GetString() ?? "");
                 return new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3]) };
             });
-            var client = new SpeechEngineClient(new HttpClient(handler), options);
+            var client = new SpeechEngineClient(new HttpClient(handler), options, new EngineRenderActivity());
             var context = new TtsRenderContext("[laugh] hi [dance]", "v", null);
 
             await client.RenderAsync(Engine("kokoro", VoiceEngineProfiles.Kokoro), context, default);

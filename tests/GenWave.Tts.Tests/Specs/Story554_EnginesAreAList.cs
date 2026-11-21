@@ -75,7 +75,7 @@ public static class FeatureEnginesAreAList
                 sent.Add((request.RequestUri ?? throw new InvalidOperationException("no uri"), body));
                 return new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3]) };
             });
-            var client = new SpeechEngineClient(new HttpClient(handler), options);
+            var client = new SpeechEngineClient(new HttpClient(handler), options, new EngineRenderActivity());
 
             client.RenderAsync(Engine("kokoro", "http://kokoro:8880", VoiceEngineProfiles.Kokoro), Context(), default)
                 .GetAwaiter().GetResult();
@@ -141,7 +141,7 @@ public static class FeatureEnginesAreAList
                 Content = new StringContent("{\"voices\":[\"ref-a\",\"ref-b\"]}", System.Text.Encoding.UTF8, "application/json"),
             }));
             var client = new SpeechEngineClient(
-                new HttpClient(handler), new TestOptionsMonitor<TtsOptions>(new TtsOptions()));
+                new HttpClient(handler), new TestOptionsMonitor<TtsOptions>(new TtsOptions()), new EngineRenderActivity());
             var engine = new VoiceEngine("chatterbox", "http://chatterbox:8004", VoiceEngineProfiles.Chatterbox, 30);
             voices = client.ListVoicesAsync(engine, default).GetAwaiter().GetResult();
         }

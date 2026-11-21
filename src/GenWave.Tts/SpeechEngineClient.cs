@@ -1,5 +1,6 @@
 namespace GenWave.Tts;
 
+using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using Microsoft.Extensions.Options;
@@ -16,17 +17,85 @@ using GenWave.Core.Domain;
 public sealed class SpeechEngineClient(
     HttpClient http,
     IOptionsMonitor<TtsOptions> optionsMonitor,
-    PronunciationRuleHitReporter? ruleHits = null)
+    EngineRenderActivity activity,
+    PronunciationRuleHitReporter? ruleHits = null,
+    TimeProvider? timeProvider = null)
 {
+    readonly TimeProvider time = timeProvider ?? TimeProvider.System;
+
     /// <summary>
     /// Renders on one NAMED registry engine over its own wire: Piper's bare text/plain for the piper profile, the
     /// OpenAI-style speech contract for every other. The one place that picks the wire for an engine, shared by the
     /// active-engine primary (<see cref="ActiveEngineSynthesizer"/>) and the admin preview of a chosen engine.
+    /// Every render here also reports to <see cref="EngineRenderActivity"/>, which the voice tile reads (SPEC F219.25):
+    /// in flight while it runs, then a failure (5xx, transport, timeout, or a finish past the engine's limit), a success,
+    /// or no verdict (4xx, an early caller cancel). Auditions count as in flight only. A new caller affects the tile.
     /// </summary>
-    public Task<string> RenderOnAsync(VoiceEngine engine, TtsRenderContext context, CancellationToken ct) =>
+    public async Task<string> RenderOnAsync(VoiceEngine engine, TtsRenderContext context, CancellationToken ct)
+    {
+        // T768a: tell the voice tile a render is in flight, so a busy engine that cannot answer a ping is not called down.
+        var identity = engine.Identity;
+        var startedAt = time.GetTimestamp();
+        activity.Started(identity);
+        try
+        {
+            var path = await DispatchAsync(engine, context, ct);
+            Settle(engine, context, LateReason(engine, startedAt));
+            return path;
+        }
+        catch (Exception ex)
+        {
+            Settle(engine, context, FaultReason(engine, ex, startedAt, ct));
+            throw;
+        }
+    }
+
+    Task<string> DispatchAsync(VoiceEngine engine, TtsRenderContext context, CancellationToken ct) =>
         engine.Profile == VoiceEngineProfiles.Piper
             ? RenderPiperAsync(engine, context, ct)
             : RenderAsync(engine, context, ct);
+
+    // fault null = no verdict on the engine. An audition ("Hear it") is never evidence either way: it still occupied the
+    // engine while it ran (so it counted as in flight), but a bad preview must not turn the tile red nor keep it green.
+    void Settle(VoiceEngine engine, TtsRenderContext context, RenderFault? fault)
+    {
+        if (context.IsAudition || fault is null)
+            activity.Abandoned(engine.Identity);
+        else if (fault.IsFailure)
+            activity.Failed(engine.Identity, fault.Reason);
+        else
+            activity.Succeeded(engine.Identity);
+    }
+
+    int LimitSeconds(VoiceEngine engine) => EngineRenderBudget.For(engine, optionsMonitor.CurrentValue);
+
+    bool PastTimeLimit(VoiceEngine engine, long startedAt) =>
+        time.GetElapsedTime(startedAt) >= TimeSpan.FromSeconds(LimitSeconds(engine));
+
+    /// <summary>
+    /// A render that came back is a success, unless it took longer than the engine's limit: the feeder never cancels at
+    /// the budget (it gives up on the line and lets the render finish), so a late finish is a timeout, not health.
+    /// </summary>
+    RenderFault LateReason(VoiceEngine engine, long startedAt) =>
+        PastTimeLimit(engine, startedAt)
+            ? RenderFault.Failure($"Took {time.GetElapsedTime(startedAt).TotalSeconds:F0} s, over the {LimitSeconds(engine)} s limit")
+            : RenderFault.Success;
+
+    /// <summary>
+    /// What a thrown render says about the engine. Only 5xx, transport errors and timeouts are engine failures; a 4xx is a
+    /// bad line or request, and a caller cancel inside the limit is the caller walking away: both are no verdict (null).
+    /// </summary>
+    RenderFault? FaultReason(VoiceEngine engine, Exception ex, long startedAt, CancellationToken ct) => ex switch
+    {
+        // The caller's token fired: only past the engine's limit is that a timeout. A live caller token means the
+        // HttpClient's own timeout ended the request.
+        OperationCanceledException when ct.IsCancellationRequested =>
+            PastTimeLimit(engine, startedAt) ? RenderFault.Failure($"Timed out after {LimitSeconds(engine)} s") : null,
+        OperationCanceledException => RenderFault.Failure($"Timed out after {http.Timeout.TotalSeconds:F0} s"),
+        HttpRequestException { StatusCode: null } => RenderFault.Failure(ex.Message),
+        HttpRequestException { StatusCode: >= HttpStatusCode.InternalServerError } => RenderFault.Failure(ex.Message),
+        _ => null,
+    };
 
     public async Task<string> RenderAsync(VoiceEngine engine, TtsRenderContext context, CancellationToken ct)
     {

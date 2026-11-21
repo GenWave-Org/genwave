@@ -90,7 +90,7 @@ public static class FeatureVoicesEndpoint
         new(
             voiceLister,
             new VoiceEngineRegistry(Microsoft.Extensions.Options.Options.Create(new VoiceEnginesOptions())),
-            new SpeechEngineClient(new HttpClient(), new FakeOptionsMonitor<TtsOptions>(new TtsOptions())),
+            new SpeechEngineClient(new HttpClient(), new FakeOptionsMonitor<TtsOptions>(new TtsOptions()), new EngineRenderActivity()),
             new FakeOptionsMonitor<TtsOptions>(new TtsOptions()),
             NullLogger<VoicesController>.Instance)
         {

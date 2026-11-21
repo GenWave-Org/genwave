@@ -266,4 +266,45 @@ public static class FeatureEngineDownMeansMusic
         public void NoOtherEngineIsCalled() =>
             Assert.Equal(0, otherEngineRequests());
     }
+
+    // T768a — the speech client and the warm-up must share ONE render-activity tracker, or the tile never hears about renders.
+    public sealed class ScenarioTheCompositionRoot : IAsyncLifetime
+    {
+        const string Identity = "chatterbox|http://chatterbox:8004";
+        static readonly DependencyProbeCadence Cadence = new(TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(10), UnhealthyThreshold: 2);
+
+        readonly WebApplicationFactory<Program> factory = new ActiveEngineWebFactory(new EnginesByHostHandler());
+
+        public Task InitializeAsync() => Task.CompletedTask;
+
+        public async Task DisposeAsync() => await factory.DisposeAsync();
+
+        [Fact]
+        public async Task TheSpeechClientFeedsTheSharedActivity()
+        {
+            var engine = factory.Services.GetRequiredService<IActiveVoiceEngine>().Current
+                ?? throw new InvalidOperationException("chatterbox is not registered");
+
+            await factory.Services.GetRequiredService<SpeechEngineClient>()
+                .RenderOnAsync(engine, new TtsRenderContext("Back to the music.", "reader-1", Kind: null), CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(10));
+
+            Assert.NotNull(factory.Services.GetRequiredService<EngineRenderActivity>().Read(Identity).LastSucceededAt);
+        }
+
+        [Fact]
+        public async Task TheWarmUpReadsTheSharedActivity()
+        {
+            var warmUp = factory.Services.GetRequiredService<VoiceEngineWarmUp>();
+            await warmUp.RunCycleAsync(Cadence, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));   // warmed: green
+
+            var activity = factory.Services.GetRequiredService<EngineRenderActivity>();
+            activity.Failed(Identity, "Connection refused (chatterbox:8004)");
+            activity.Failed(Identity, "Connection refused (chatterbox:8004)");
+            await warmUp.RunCycleAsync(Cadence, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+
+            var verdict = factory.Services.GetRequiredService<DependencyHealthStore>().GetVerdict(DependencyNames.VoiceEngine("chatterbox"));
+            Assert.False(verdict?.Healthy);
+        }
+    }
 }

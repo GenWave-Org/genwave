@@ -8,8 +8,8 @@ public static class TestKokoro
 {
     public static ActiveEngineSynthesizer Synthesizer(
         HttpClient http, IOptionsMonitor<TtsOptions> options, PronunciationRuleHitReporter? ruleHits = null) =>
-        new(new ActiveVoiceEngine(SeededVoiceEngineRegistry.Over(options), options), new SpeechEngineClient(http, options, ruleHits));
+        new(new ActiveVoiceEngine(SeededVoiceEngineRegistry.Over(options), options), new SpeechEngineClient(http, options, new EngineRenderActivity(), ruleHits));
 
     public static KokoroVoiceLister Lister(HttpClient http, IOptionsMonitor<TtsOptions> options) =>
-        new(new SpeechEngineClient(http, options), SeededVoiceEngineRegistry.Over(options));
+        new(new SpeechEngineClient(http, options, new EngineRenderActivity()), SeededVoiceEngineRegistry.Over(options));
 }

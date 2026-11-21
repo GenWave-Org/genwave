@@ -12,8 +12,10 @@ using Microsoft.Extensions.Logging;
 /// through <see cref="SpeechEngineClient"/> at its own endpoint, bounded by that engine's live render budget. Green
 /// only after it succeeds; red with a plain reason on refusal, error or timeout. The audio is deleted: never cached,
 /// never aired. Cold engines take 19 to 48 s, which is why the first line is a real render and not a ping.</item>
-/// <item>Once warmed, each cycle is a cheap reachability check (<see cref="SpeechEngineClient.PingAsync"/>). A flip to
-/// unhealthy forgets the warm-up, so green again needs another real line.</item>
+/// <item>Once warmed, each cycle is a cheap reachability check (<see cref="SpeechEngineClient.PingAsync"/>), unless
+/// <see cref="EngineRenderActivity"/> already says: a render in flight or one that succeeded within the interval counts as
+/// reachable with no ping (a busy single-threaded engine cannot answer one), and two renders that failed or timed out in a
+/// row (no success between) turn the tile red on that cycle; one alone is a grace miss, like one missed ping. A flip to unhealthy forgets the warm-up, so green again needs another real line.</item>
 /// </list>
 /// The warm-up never touches <see cref="FallbackTtsSynthesizer"/>: a down engine can only ever be reported, never
 /// rendered by another engine. It does not start while an on-air render is in flight (<see cref="IOnAirRenderSignal"/>):
@@ -29,6 +31,7 @@ public sealed class VoiceEngineWarmUp(
     IStationIdentityProvider station,
     IRenderBudgetProvider budget,
     IOnAirRenderSignal onAir,
+    EngineRenderActivity activity,
     DependencyHealthStore store,
     ILogger<VoiceEngineWarmUp> logger,
     TimeProvider? timeProvider = null)
@@ -65,7 +68,7 @@ public sealed class VoiceEngineWarmUp(
             return;   // the reader reports "not configured"
         }
 
-        var identity = $"{engine.Name}|{engine.Endpoint}";
+        var identity = engine.Identity;
         var key = DependencyNames.VoiceEngine(engine.Name);
         if (identity != observedEngine)
         {
@@ -127,6 +130,24 @@ public sealed class VoiceEngineWarmUp(
 
     async Task CheckReachableAsync(VoiceEngine engine, string key, string identity, DependencyProbeCadence cadence, CancellationToken ct)
     {
+        // T768a: real speech renders are better evidence than a ping, which a busy single-threaded engine cannot answer.
+        var evidence = activity.Read(identity);
+        if (evidence.IsDown)
+        {
+            // Applied on this cycle, not at the moment of the second failure: this loop is the only writer of the verdict
+            // and of warmedEngine. One failed render alone is a grace miss and falls through to the checks below.
+            activity.ClearFailure(identity);
+            Fail(key, engine, evidence.Failure ?? "Speech renders are failing", ex: null);
+            warmedEngine = null;
+            return;
+        }
+
+        if (evidence.InFlight || evidence.SucceededWithin(time.GetUtcNow(), cadence.Interval))
+        {
+            store.Record(key, healthy: true, reason: null);
+            return;
+        }
+
         using var timeout = new CancellationTokenSource(cadence.PerProbeTimeout, time);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
         try
@@ -169,9 +190,9 @@ public sealed class VoiceEngineWarmUp(
         var wasFailing = store.GetVerdict(key) is { Healthy: false };
         store.Record(key, healthy: false, reason);
         if (!wasFailing)
-            logger.LogWarning(ex, "Voice engine {Engine} warm-up failed ({Reason}); the voice tile is red", engine.Name, reason);
+            logger.LogWarning(ex, "Voice engine {Engine} failed ({Reason}); the voice tile is red", engine.Name, reason);
         else
-            logger.LogDebug(ex, "Voice engine {Engine} warm-up still failing ({Reason})", engine.Name, reason);
+            logger.LogDebug(ex, "Voice engine {Engine} still failing ({Reason})", engine.Name, reason);
     }
 
     void Forget(ref string? key)
