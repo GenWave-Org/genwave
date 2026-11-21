@@ -39,6 +39,7 @@ using GenWave.Host.Api;
 using GenWave.Host.Engine;
 using GenWave.Host.Options;
 using GenWave.Host.Tests.Fakes;
+using GenWave.Host.Tests.Support;
 using GenWave.Tts;
 
 namespace GenWave.Host.Tests.Specs;
@@ -186,7 +187,7 @@ public static class FeatureLlmStatus
         // scenarios only assert the pre-existing llm.* fields, so an unprobed (null-verdict) reader
         // is enough to keep those unaffected (mirrors degradationController immediately above).
         var voiceHealthReader = new VoiceHealthReader(
-            new PrimaryVoiceEngine(DependencyNames.Kokoro), new FakeDependencyHealth());
+            TestVoiceEngines.Active(DependencyNames.Kokoro), new FakeDependencyHealth());
 
         return new(
             new FakeMediaCatalog(ready: null),
@@ -207,7 +208,10 @@ public static class FeatureLlmStatus
             new SchemaVersionStatus(),
             new EngineSettingsStatus(),
             new FakeRepeatNumbersReader(),
-            new FakeCallbackRateReader())
+            new FakeCallbackRateReader(),
+            new FakeStaleVoiceItemsReader(),
+            new FakeTalkDroppedLateReader(),
+            TimeProvider.System)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
         };

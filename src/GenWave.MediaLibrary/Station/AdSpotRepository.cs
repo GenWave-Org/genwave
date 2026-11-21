@@ -41,7 +41,7 @@ sealed class AdSpotRepository(
     Lazy<NpgsqlDataSource> dataSource,
     IAdminMediaLookup adminLookup,
     IAuthoredCatalogWriter catalogWriter,
-    ILogger<AdSpotRepository> logger) : IAdSpotStore, IAdAudioReferences
+    ILogger<AdSpotRepository> logger) : IAdSpotStore, IStaleAdSpotCounter, IAdAudioReferences
 {
     /// <summary>
     /// The full column list, shared verbatim by every <c>SELECT</c> (via <see cref="SelectColumns"/>)
@@ -384,13 +384,43 @@ sealed class AdSpotRepository(
         return affected == 1;
     }
 
+    /// <summary>The ONE definition of a stale ready spot (SPEC F219.21/F219.23), shared by the re-render pick and the count.
+    /// Needs <c>@currentMarker</c>.</summary>
+    const string StaleReadyPredicate = """
+        state = 'ready'::station.ad_state
+          and render_version <> @currentMarker
+          and pending_retire_media_id is null
+          and pending_confirm_media_id is null
+        """;
+
+    /// <summary><see cref="IStaleAdSpotCounter.CountStaleReadyAsync"/> (SPEC F219.23) — the spots <see cref="StaleReadyPredicate"/>
+    /// picks, minus those the worker would skip as operator intent: media gone, switched off or never_play
+    /// (<see cref="AdminMediaAirability"/>, the same test the worker and the swap guard apply). Media lives in the library
+    /// schema, so that half is a lookup per candidate, not a join.</summary>
+    public async Task<int> CountStaleReadyAsync(int currentMarker, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var mediaIds = (await conn.QueryAsync<long>(new CommandDefinition(
+            $"select media_id from station.ad_spot where {StaleReadyPredicate} and media_id is not null",
+            new { currentMarker }, cancellationToken: ct))).ToList();
+
+        var count = 0;
+        foreach (var mediaId in mediaIds)
+        {
+            if (AdminMediaAirability.CanStillAir((await adminLookup.GetByIdWithLibraryAsync(mediaId, ct))?.Row))
+                count++;
+        }
+
+        return count;
+    }
+
     /// <summary><see cref="IAdSpotStore.FindStaleReadyAsync"/> (gh-#854) — the oldest
-    /// <see cref="AdState.Ready"/> spot behind <paramref name="currentVersion"/>, excluding
+    /// <see cref="AdState.Ready"/> spot whose stamped marker differs from <paramref name="currentMarker"/> (SPEC F219.21), excluding
     /// <paramref name="excludeIds"/> (the <see cref="ListAiringExclusionsAsync"/> array-parameter
     /// precedent). Never touches Rendering/Draft/etc — only a Ready spot is ever a re-render
     /// candidate.</summary>
     public async Task<AdSpot?> FindStaleReadyAsync(
-        int currentVersion, IReadOnlyCollection<long> excludeIds, CancellationToken ct)
+        int currentMarker, IReadOnlyCollection<long> excludeIds, CancellationToken ct)
     {
         var excluded = excludeIds.ToArray();
 
@@ -398,15 +428,12 @@ sealed class AdSpotRepository(
         var row = await conn.QuerySingleOrDefaultAsync<AdSpotRow>(new CommandDefinition(
             $"""
             {SelectColumns}
-            where state = 'ready'::station.ad_state
-              and render_version < @currentVersion
+            where {StaleReadyPredicate}
               and not (id = any(@excluded))
-              and pending_retire_media_id is null
-              and pending_confirm_media_id is null
             order by state_changed_at asc, id asc
             limit 1
             """,
-            new { currentVersion, excluded }, cancellationToken: ct));
+            new { currentMarker, excluded }, cancellationToken: ct));
         return row is null ? null : ToAdSpot(row);
     }
 
@@ -421,7 +448,7 @@ sealed class AdSpotRepository(
         long id, long oldMediaId, long newMediaId, int renderVersion, string appVersion, CancellationToken ct)
     {
         var oldMedia = await adminLookup.GetByIdWithLibraryAsync(oldMediaId, ct);
-        if (oldMedia is not { } found || !found.Row.Eligible || found.Row.NeverPlay)
+        if (!AdminMediaAirability.CanStillAir(oldMedia?.Row))
         {
             logger.LogInformation(
                 "Ad spot {Id} media {OldMediaId} is missing, ineligible, or never_play; declining its guarded swap",

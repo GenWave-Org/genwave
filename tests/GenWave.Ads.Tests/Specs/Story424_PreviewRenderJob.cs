@@ -52,10 +52,10 @@ public static class FeaturePreviewRenderJobRequiresWav
             var authoredRoot = Directory.CreateTempSubdirectory("t442-preview-").FullName;
             var locatorRoots = new AdSpotLocatorRoots("/media", authoredRoot);
             var renderService = new AdRenderService(
-                author, store, new FakeAdminMediaLookup(), libraries, stationIdentity, adsOptions, locatorRoots,
+                author, store, new FakeAdminMediaLookup(), libraries, stationIdentity, AdTestVoices.SpeakersFor(stationIdentity), adsOptions, locatorRoots,
                 new NoOpLogger<AdRenderService>());
             var stamper = new AdSpotStamper(
-                store, new FakeAdBedPool(), libraries, stationIdentity, adsOptions, new NoOpLogger<AdSpotStamper>());
+                store, new FakeAdBedPool(), libraries, adsOptions, new NoOpLogger<AdSpotStamper>());
             var llmOptions = new FakeOptionsMonitor<LlmOptions>(new LlmOptions
             {
                 Endpoint = "http://fake-llm.local", Model = "test-model", TimeoutSeconds = 5, MaxCopyChars = 300,
@@ -69,7 +69,7 @@ public static class FeaturePreviewRenderJobRequiresWav
 
             var service = new AdSpotJobService(
                 store, sponsors, scriptWriter, renderService, stamper, new FakePatterDurationEstimator(),
-                new FakeAudiencePostureProvider(), new FakeOnAirRenderSignal(), adsOptions, llmOptions, configuration,
+                new FakeAudiencePostureProvider(), new FakeOnAirRenderSignal(), adsOptions, llmOptions, configuration, AdTestVoices.Kokoro,
                 TimeProvider.System, new NoOpLogger<AdSpotJobService>());
 
             await service.StartAsync(CancellationToken.None);

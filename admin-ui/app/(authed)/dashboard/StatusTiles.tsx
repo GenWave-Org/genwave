@@ -102,11 +102,12 @@ function dominantCauseLine(llm: StatusResponse["llm"]): string | null {
   return `Red: ${count} ${noun} in the last 24h, ${model}`;
 }
 
-/** SPEC F99.5, F100.3, STORY-256 AC4 — the Voice tile has no "disabled" state (the primary engine
- * is always configured): "warning" when the cached verdict is unhealthy, "ok" otherwise (including
- * the brief startup window before the first probe cycle completes — a degraded read is never
- * shown ahead of real evidence). */
-function voiceTileVariant(voice: StatusResponse["voice"]): "ok" | "warning" {
+/** SPEC F99.5, F100.3, F219.25, STORY-256 AC4 — the Voice tile has no "disabled" state (the active engine
+ * is always configured). "ok" only after the engine rendered its warm-up line; "warning" when it is down;
+ * "caution" (orange) while it is still warming up (a cold engine takes up to a minute), which is neither green
+ * nor a claim that it failed. */
+function voiceTileVariant(voice: StatusResponse["voice"]): "ok" | "warning" | "caution" {
+  if (voice.warming === true) return "caution";
   return voice.degraded ? "warning" : "ok";
 }
 
@@ -177,6 +178,20 @@ function pluginLine(plugin: PluginStatusEntry): string {
   const name = plugin.name ?? "(unnamed plugin)";
   const label = plugin.version !== null ? `${name} ${plugin.version}` : name;
   return plugin.state === "loaded" ? label : `${label} — skipped${plugin.reason ? `: ${plugin.reason}` : ""}`;
+}
+
+/** SPEC F219.23, STORY-559 AC5 — the Voice tile's old-voice line; `null` at zero (the line is hidden). */
+function staleVoiceLine(count: number): string | null {
+  if (count === 0) return null;
+  return `${count} ${count === 1 ? "item" : "items"} still in the old voice`;
+}
+
+const TALK_SKIPPED_LATE_LABEL = "Talk skipped for lateness · last 7 days";
+
+/** SPEC F219.26 — a week with nothing skipped is the success rule; any skip warns; unknown stays neutral. */
+function talkSkippedLateVariant(count: number | null | undefined): "neutral" | "ok" | "warning" {
+  if (count === undefined || count === null) return "neutral";
+  return count === 0 ? "ok" : "warning";
 }
 
 interface StatusTilesProps {
@@ -273,7 +288,9 @@ export function StatusTiles({ status, error, timeZone }: StatusTilesProps): Reac
           {status !== null && (
             <>
               <p className="mt-1 text-[0.9rem] text-ink">{displayEngineName(status.voice.engine)}</p>
-              {status.voice.degraded ? (
+              {status.voice.warming === true ? (
+                <p className="mt-1 text-[0.8rem] text-mute">Warming up</p>
+              ) : status.voice.degraded ? (
                 <>
                   <p className="mt-1 text-[0.75rem] font-semibold text-danger">
                     Engine down — DJ breaks are dropped, music keeps playing
@@ -285,6 +302,9 @@ export function StatusTiles({ status, error, timeZone }: StatusTilesProps): Reac
               ) : (
                 <p className="mt-1 text-[0.8rem] text-mute">Reachable</p>
               )}
+              {/* SPEC F219.23 — `staleVoiceItems` is null when unknown, absent on an older api: both read as
+                  unavailable (the Repeats/Memories tiles' treatment); zero hides the line. */}
+              <StaleVoiceLine count={status.staleVoiceItems} />
             </>
           )}
         </Tile>
@@ -363,6 +383,22 @@ export function StatusTiles({ status, error, timeZone }: StatusTilesProps): Reac
           )}
         </Tile>
 
+        {/* SPEC F219.26, STORY-560 AC3, PLAN T768 — talk segments dropped because their render ran past the
+            engine's budget, last 7 days. `talkDroppedLate7d` is null when the api could not count, absent on
+            an older api: both read as unavailable. Zero is the goal, so it takes the success border. */}
+        <Tile label={TALK_SKIPPED_LATE_LABEL} variant={talkSkippedLateVariant(status?.talkDroppedLate7d)}>
+          {loading && <TileSkeleton />}
+          {(neverLoaded ||
+            (status !== null && (status.talkDroppedLate7d === undefined || status.talkDroppedLate7d === null))) && (
+            <TileUnavailable />
+          )}
+          {status !== null && status.talkDroppedLate7d !== undefined && status.talkDroppedLate7d !== null && (
+            <p className="text-[1.4rem] font-semibold tabular-nums text-ink">
+              {status.talkDroppedLate7d === 0 ? "None" : status.talkDroppedLate7d}
+            </p>
+          )}
+        </Tile>
+
         {/* SPEC F156.7, STORY-385/386 AC3, PLAN T394 — no tile at all when plugins[] is empty (a
             closed door, or a mount with zero valid plugins): non-empty implies the door is open, so
             rendering is gated on length rather than a loading/undefined check the way every OTHER
@@ -390,7 +426,7 @@ interface TileProps {
    * "ok" swaps the tile border to the success token; "warning" swaps it to the danger token
    * (SPEC F31.5); default "neutral" is the shipped border-line treatment.
    */
-  variant?: "neutral" | "ok" | "warning";
+  variant?: "neutral" | "ok" | "warning" | "caution";
   /**
    * SPEC F153.9, STORY-374 AC8, PLAN T378 — when set, the whole tile becomes a `next/link` to that
    * route (the Gardener tile's own "links to /gardener" requirement) instead of a plain `role="group"`
@@ -402,7 +438,13 @@ interface TileProps {
 
 function Tile({ label, variant = "neutral", href, children }: TileProps): ReactNode {
   const borderClass =
-    variant === "warning" ? "border-danger" : variant === "ok" ? "border-success" : "border-line";
+    variant === "warning"
+      ? "border-danger"
+      : variant === "ok"
+        ? "border-success"
+        : variant === "caution"
+          ? "border-caution"
+          : "border-line";
   const baseClass = cn("rounded-[6px] border bg-surface p-4", borderClass);
   const content = (
     <>
@@ -492,6 +534,14 @@ function RepeatsTileBody({ repeats, timeZone }: { repeats: RepeatsStatus; timeZo
       ))}
     </div>
   );
+}
+
+function StaleVoiceLine({ count }: { count: number | null | undefined }): ReactNode {
+  if (count === undefined || count === null) {
+    return <p className="mt-1 text-[0.75rem] text-mute">Old voice items: Unavailable</p>;
+  }
+  const line = staleVoiceLine(count);
+  return line === null ? null : <p className="mt-1 text-[0.75rem] text-mute">{line}</p>;
 }
 
 function TileSkeleton(): ReactNode {

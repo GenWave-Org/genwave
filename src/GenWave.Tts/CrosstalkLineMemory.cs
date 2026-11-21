@@ -68,7 +68,7 @@ internal sealed class CrosstalkLineMemory(
             // Crosstalk selects no capped quirks (T688), so there are no spent rules; the exclusions are
             // the speaker's own name and the station's — saying either is not a repeat.
             var result = repetitionCheck.Check(
-                line.Text, new RepetitionContext(history.Texts, [], history.PersonaName, stationName));
+                SoundTags.Strip(line.Text), new RepetitionContext(history.Texts, [], history.PersonaName, stationName));
             if (result.IsHit)
                 hits.Add(new LineHit(i, history.PersonaId, result.Hits.Select(h => h.Phrase).ToList()));
         }
@@ -161,7 +161,7 @@ internal sealed class CrosstalkLineMemory(
             try
             {
                 await utteranceStore.RecordAsync(
-                    new NewUtterance(id, request.ShowId, UtteranceKind.Crosstalk, SegmentKind, shiftKey, line.Text, Fallback: false),
+                    new NewUtterance(id, request.ShowId, UtteranceKind.Crosstalk, SegmentKind, shiftKey, SoundTags.Strip(line.Text), Fallback: false),
                     ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)

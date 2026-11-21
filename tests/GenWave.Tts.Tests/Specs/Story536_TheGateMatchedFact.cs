@@ -201,7 +201,7 @@ public static class FeatureTheGateMatchedFact
                 NoCorrections.PersonaPronunciationCache(),
                 NoCorrections.PersonaPaceCache(),
                 new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
-                NullLogger<TtsSegmentSource>.Instance,
+                NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"),
                 events);
 
             await source.RenderAsync(LeadIn(), CancellationToken.None);

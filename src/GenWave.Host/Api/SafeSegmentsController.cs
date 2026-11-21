@@ -28,7 +28,7 @@ namespace GenWave.Host.Api;
 /// <see cref="BedSpec"/> built from the row's own path and cue points.
 ///
 /// A synthesis/mix/measurement/insert failure reported by <see cref="ISafeSegmentAuthor"/>, or the
-/// render exceeding <c>Tts:RenderBudgetSeconds</c>, returns 502 ProblemDetails with no internals
+/// render exceeding the active engine's render budget, returns 502 ProblemDetails with no internals
 /// leaked (the underlying reason/detail is logged, never echoed to the caller).
 ///
 /// <b>Re-authoring posture</b> (SPEC F126.3, STORY-325 AC3, PLAN T276): a safe clip renders through
@@ -51,7 +51,8 @@ public sealed class SafeSegmentsController(
     IAdminMediaLookup adminLookup,
     IShowStore showStore,
     IOptionsMonitor<StationOptions> stationMonitor,
-    IOptionsMonitor<TtsOptions> ttsMonitor,
+    IVoiceResolver voiceResolver,
+    IRenderBudgetProvider renderBudget,
     ILogger<SafeSegmentsController> logger) : ControllerBase
 {
     const string GenericFailureDetail =
@@ -136,7 +137,7 @@ public sealed class SafeSegmentsController(
         //
         // Unlike ScheduleRepository's own showId check (its :214 remarks), this one is NOT inside a
         // transaction immediately before the write: the render below can run for up to
-        // Tts:RenderBudgetSeconds, so a show deleted in that window lands an orphaned show_id on the
+        // the render budget, so a show deleted in that window lands an orphaned show_id on the
         // inserted row (no FK to catch it) — the row simply never airs under T250's scoped pool.
         // Recovery today is delete-and-re-author; there's no re-scope UI this cycle (AuthoredMediaInsert
         // carries no path back through MediaPatch).
@@ -153,11 +154,24 @@ public sealed class SafeSegmentsController(
         var station = stationMonitor.CurrentValue;
         var safe    = station.Safe;
 
+        // SPEC F219.8/F219.9: Station:Voice may be an engine map; the default is the active engine's id, and
+        // a map without one cannot voice a segment that names no voice of its own.
+        var defaultVoice = voiceResolver.ResolveSetting(station.Voice);
+        if (defaultVoice is null && request.Voice is null)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Title  = "No voice for the active engine.",
+                Detail = "Station:Voice has no voice for the active engine; name a voice in the request or set one.",
+            });
+        }
+
         var authorRequest = new SafeSegmentRequest(
             Text: request.Text,
             LibraryId: libraryId,
             StationName: station.Name,
-            DefaultVoice: station.Voice,
+            DefaultVoice: defaultVoice ?? string.Empty,
             AuthoredRoot: safe.AuthoredRoot,
             BedDuckDb: safe.BedDuckDb,
             BedPadSeconds: safe.BedPadSeconds,
@@ -167,7 +181,7 @@ public sealed class SafeSegmentsController(
             Kind: kind,
             ShowId: request.ShowId);
 
-        var budget = TimeSpan.FromSeconds(ttsMonitor.CurrentValue.RenderBudgetSeconds);
+        var budget = renderBudget.Current;
         using var boundedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         boundedCts.CancelAfter(budget);
 
@@ -181,7 +195,7 @@ public sealed class SafeSegmentsController(
             // boundedCts fired on the budget timeout, not the caller disconnecting — a bounded
             // failure the caller should see, not an unhandled exception (F27.3).
             logger.LogWarning(
-                "Safe-segment render exceeded Tts:RenderBudgetSeconds={BudgetSeconds}s",
+                "Safe-segment render exceeded the active engine's render budget of {BudgetSeconds}s",
                 budget.TotalSeconds);
             return BadGateway();
         }

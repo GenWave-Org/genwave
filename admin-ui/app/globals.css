@@ -90,6 +90,7 @@
   --danger: #a63325; /* deeper rust-red, distinct from accent */
   --danger-ink: #fdf8ee; /* text/icons on --danger */
   --success: #5c7a3f; /* olive green */
+  --caution: #c2610f; /* burnt orange — in progress, not yet good and not failed (Voice tile warming) */
 
   /* Format-clock schedule editor (PLAN T129, SPEC F94.3): a small deterministic 6-hue palette a
      painted persona block cycles through (`personaSwatchClassName`, schedule-grid-model.ts) — no
@@ -131,6 +132,7 @@
   --danger: #e06a55;
   --danger-ink: #2a211b; /* text/icons on --danger */
   --success: #8fae6a;
+  --caution: #e8944a;
 
   /* Same 6 hues, darkened to "walnut & brass" swatches — dark enough that --ink's light dark-theme
      body text (#f0e7d8) still reads on top, matching --surface/--surface-2's own lightness range. */
@@ -162,6 +164,7 @@
     --danger: #e06a55;
     --danger-ink: #2a211b;
     --success: #8fae6a;
+    --caution: #e8944a;
     --sched-1: #5a3226;
     --sched-2: #5c4e22;
     --sched-3: #3c4630;
@@ -188,6 +191,7 @@
   --color-danger: var(--danger);
   --color-danger-ink: var(--danger-ink);
   --color-success: var(--success);
+  --color-caution: var(--caution);
   --color-sched-1: var(--sched-1);
   --color-sched-2: var(--sched-2);
   --color-sched-3: var(--sched-3);

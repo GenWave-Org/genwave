@@ -47,4 +47,21 @@ public sealed record SpeakerSnapshot(
     double Pace,
     IReadOnlyList<PronunciationRule> Rules,
     IReadOnlyList<SpeechCorrection> Corrections,
-    string ContentHash);
+    string ContentHash)
+{
+    /// <summary>
+    /// True when this speaker has no voice for the active TTS engine (SPEC F219.9, PLAN T753): its talk is
+    /// dropped with a <c>voice-missing</c> booth row, never rendered with another engine's voice id.
+    /// <see cref="Voice"/> is empty then.
+    /// </summary>
+    public bool VoiceMissing { get; init; }
+
+    /// <summary>
+    /// True when <see cref="Voice"/> came from the persona's per-engine map because the active engine is NOT the
+    /// engine of the card's own voice, so the persona row's flat voice does not apply and the planner stamps this
+    /// voice instead (SPEC F219.11, PLAN T753). False when the active engine owns the card voice: the validated row
+    /// voice stays authoritative. Needed because <see cref="Voice"/> stays the card's voice (published contract)
+    /// and two engines may share a voice id, so the planner cannot tell the cases apart from the strings.
+    /// </summary>
+    public bool VoiceOverridesRow { get; init; }
+}

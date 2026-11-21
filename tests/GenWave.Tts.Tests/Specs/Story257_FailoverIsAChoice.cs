@@ -50,7 +50,7 @@ public static class FeatureFailoverIsAChoice
 
     // ITtsSynthesizer, not FakeTtsSynthesizer (T148 review finding F2 widened this): most callers
     // still hand it a Fake, but ScenarioPiperOnlyIsUnaffectedInKind's voice-content fact below
-    // needs the REAL PiperPrimaryTtsSynthesizer as the primary — a Fake echoes back whatever
+    // needs the REAL piper-primary ActiveEngineSynthesizer as the primary — a Fake echoes back whatever
     // voice it was called with, which proves nothing about what production actually puts on the
     // wire.
     static FallbackTtsSynthesizer BuildRouter(
@@ -73,7 +73,7 @@ public static class FeatureFailoverIsAChoice
             NoCorrections.PersonaPronunciationCache(),
             NoCorrections.PersonaPaceCache(),
             new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
-            NullLogger<TtsSegmentSource>.Instance);
+            NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
 
     // LeadIn with no Track — PatterTemplateRenderer's documented safe fallback ("Coming up
     // next."), the same fixture shape Story256_NeverSomeoneElsesVoice's own DjBreakRequest uses.
@@ -266,7 +266,7 @@ public static class FeatureFailoverIsAChoice
             // Given the piper-only topology's shape: no fallback chain configured at all (F99.4
             // — the topology never leans on Tts:Fallback:*/Tts:EngineByKind, unlike the pre-
             // STORY-257 wiring), and a would-be substitute engine standing by
-            var primary = new FakeTtsSynthesizer();   // stands in for PiperPrimaryTtsSynthesizer
+            var primary = new FakeTtsSynthesizer();   // stands in for ActiveEngineSynthesizer
             var substitute = new FakeProfileRenderer(DependencyNames.Piper);
             var router = BuildRouter(primary, [substitute], new TtsFallbackOptions());
 
@@ -285,7 +285,7 @@ public static class FeatureFailoverIsAChoice
         {
             // T148 review finding F2: this fact used to assert request.Voice == primary.LastVoice
             // against a FAKE that just echoes back whatever voice it was called with — true of the
-            // fake, false of production. The real PiperPrimaryTtsSynthesizer/PiperWireProtocol
+            // fake, false of production. The real ActiveEngineSynthesizer/PiperWireProtocol
             // never puts ANY voice on the wire (no per-request selector exists on the upstream
             // piper.http_server wrapper — exactly one voice model is baked into the container at
             // start, compose.yaml's MODEL_DOWNLOAD_LINK), so a piper-only station's break airs in
@@ -295,11 +295,11 @@ public static class FeatureFailoverIsAChoice
             // construction, and F99.1's "no other voice speaks as them" reads per-topology (see
             // docs/SPEC.md F99.4's reconciliation note).
             //
-            // Given the piper-only topology (the REAL PiperPrimaryTtsSynthesizer as primary, wired
+            // Given the piper-only topology (the REAL piper-primary ActiveEngineSynthesizer as primary, wired
             // against a real stub server standing in for the piper sidecar) and a DJ break
             await using var piperStub = await PiperStubServer.StartAsync();
             var cacheRoot = CacheRoot();
-            var primary = new PiperPrimaryTtsSynthesizer(
+            var primary = TestPiperPrimary.Synthesizer(
                 new HttpClient(),
                 new TestOptionsMonitor<TtsOptions>(new TtsOptions
                 {
@@ -337,12 +337,12 @@ public static class FeatureFailoverIsAChoice
 
     // -------------------------------------------------------------------------------------
     // T148 REVIEW FINDING F1 — the primary-selection branch (TtsServiceCollectionExtensions),
-    // PiperPrimaryTtsSynthesizer, and PiperWireProtocol were reachable by zero facts: the
+    // ActiveEngineSynthesizer, and PiperWireProtocol were reachable by zero facts: the
     // reviewer deleted the whole selection and the suite stayed green. The two scenarios below
     // close that gap from opposite ends: (a) binds Tts:PiperPrimaryEndpoint through the REAL
     // configuration binder into the REAL AddGenWaveTts composition root and proves which concrete
     // primary a render actually reaches, against real (Kestrel-backed) stub servers; (b) pins
-    // PiperPrimaryTtsSynthesizer/PiperWireProtocol's own wire mechanics directly, the same
+    // ActiveEngineSynthesizer/PiperWireProtocol's own wire mechanics directly, the same
     // KokoroStubServer idiom Story124_EndpointLiveRepoint.cs uses, tailored to Piper's shape via
     // PiperStubServer.
     // -------------------------------------------------------------------------------------
@@ -358,7 +358,7 @@ public static class FeatureFailoverIsAChoice
             }).Build();
 
         [Fact]
-        public static async Task Setting_Tts_PiperPrimaryEndpoint_selects_PiperPrimaryTtsSynthesizer_as_the_primary()
+        public static async Task Setting_Tts_PiperPrimaryEndpoint_selects_the_piper_engine_as_the_primary()
         {
             // Given the real composition root, bound to a config that sets
             // Tts:PiperPrimaryEndpoint (the piper-only opt-in), against two real stub servers
@@ -387,7 +387,7 @@ public static class FeatureFailoverIsAChoice
         }
 
         [Fact]
-        public static async Task An_absent_Tts_PiperPrimaryEndpoint_selects_KokoroTtsSynthesizer_as_the_primary()
+        public static async Task An_absent_Tts_PiperPrimaryEndpoint_selects_the_kokoro_engine_as_the_primary()
         {
             // Given the real composition root, bound to a config that leaves
             // Tts:PiperPrimaryEndpoint unset — every topology except the piper-only opt-in
@@ -424,7 +424,7 @@ public static class FeatureFailoverIsAChoice
             // Given a stub standing in for the piper sidecar, configured as the primary
             await using var stub = await PiperStubServer.StartAsync();
             var cacheRoot = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-            var synthesizer = new PiperPrimaryTtsSynthesizer(
+            var synthesizer = TestPiperPrimary.Synthesizer(
                 new HttpClient(),
                 new TestOptionsMonitor<TtsOptions>(new TtsOptions
                 {
@@ -447,22 +447,6 @@ public static class FeatureFailoverIsAChoice
             {
                 if (Directory.Exists(cacheRoot)) Directory.Delete(cacheRoot, recursive: true);
             }
-        }
-
-        [Fact]
-        public static async Task It_throws_when_resolved_with_no_piper_primary_endpoint_configured()
-        {
-            // Guards hand-built wiring (tests, tools) that skips TtsServiceCollectionExtensions'
-            // own selection — see PiperPrimaryTtsSynthesizer's own remarks: unreachable through the
-            // real composition root, which never resolves this class unless PiperPrimaryEndpoint
-            // is set.
-            var synthesizer = new PiperPrimaryTtsSynthesizer(
-                new HttpClient(), new TestOptionsMonitor<TtsOptions>(new TtsOptions()));
-
-            var ex = await Assert.ThrowsAsync<InvalidOperationException>(
-                () => synthesizer.SynthesizeAsync("Coming up next", "af_heart", CancellationToken.None));
-
-            Assert.Contains("PiperPrimaryEndpoint", ex.Message, StringComparison.Ordinal);
         }
     }
 
@@ -492,7 +476,7 @@ public static class FeatureFailoverIsAChoice
                 new TestOptionsMonitor<TtsFallbackOptions>(new TtsFallbackOptions { Profiles = [KokoroHop()] }),
                 new CapturingLogger<FallbackTtsSynthesizer>(),
                 engineOverrides: null,
-                primaryDependencyName: DependencyNames.Piper);
+                primaryDependencyName: () => DependencyNames.Piper);
 
             // When a break renders
             await router.SynthesizeAsync("Coming up next", "af_heart", CancellationToken.None);
@@ -517,7 +501,7 @@ public static class FeatureFailoverIsAChoice
                 new TestOptionsMonitor<TtsFallbackOptions>(new TtsFallbackOptions { Profiles = [KokoroHop()] }),
                 logger,
                 engineOverrides: null,
-                primaryDependencyName: DependencyNames.Piper);
+                primaryDependencyName: () => DependencyNames.Piper);
 
             // When a break renders
             await router.SynthesizeAsync("Coming up next", "af_heart", CancellationToken.None);

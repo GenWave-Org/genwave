@@ -15,7 +15,7 @@ using GenWave.Core.Logging;
 ///
 /// Decorates the concrete synthesizer (mirrors <see cref="CachedVoiceLister"/>'s decorator shape
 /// one seam over on <see cref="ITtsVoiceLister"/>) rather than being folded into
-/// <see cref="KokoroTtsSynthesizer"/> itself, so the HTTP client stays a pure Kokoro adapter and
+/// <see cref="SpeechEngineClient"/> itself, so the HTTP client stays a pure Kokoro adapter and
 /// this stays a pure text-hand-off concern — two reasons to change, two classes.
 ///
 /// Also implements <see cref="ISpeechNormalizationPreview"/> (SPEC F68.6, STORY-186 AC2): the admin
@@ -61,7 +61,8 @@ public sealed class NormalizingTtsSynthesizer(
     SpeechCorrectionProvider corrections,
     ActivePersonaCorrectionsCache personaCorrections,
     CorrectionsFiredStats firedStats,
-    ILogger<NormalizingTtsSynthesizer> logger) : ITtsSynthesizer, ISpeechNormalizationPreview
+    ILogger<NormalizingTtsSynthesizer> logger,
+    SoundTagRenderGate soundTagGate) : ITtsSynthesizer, ISpeechNormalizationPreview
 {
     public Task<string> SynthesizeAsync(string text, string voice, CancellationToken ct) =>
         SynthesizeAsync(new TtsRenderContext(text, voice, Kind: null), ct);
@@ -73,8 +74,23 @@ public sealed class NormalizingTtsSynthesizer(
     /// see which speech kind is rendering. This decorator never inspects <c>Kind</c> itself —
     /// normalization and correction firing are kind-agnostic — it only relays it downstream.
     /// </summary>
-    public async Task<string> SynthesizeAsync(TtsRenderContext context, CancellationToken ct)
+    public Task<string> SynthesizeAsync(TtsRenderContext context, CancellationToken ct) =>
+        SynthesizeViaAsync(context, inner.SynthesizeAsync, ct);
+
+    /// <summary>
+    /// The one render body: resolves the merged corrections, applies rule-over-correction precedence, normalizes,
+    /// reports fired corrections, then hands the normalized text to <paramref name="render"/>. The on-air path passes
+    /// <c>inner</c> (the fallback chain); <see cref="NamedEngineSynthesizer"/> passes one chosen engine, so a
+    /// "Hear it" on that engine is normalized exactly as air is, without a second copy of this body.
+    /// </summary>
+    public async Task<string> SynthesizeViaAsync(
+        TtsRenderContext context, Func<TtsRenderContext, CancellationToken, Task<string>> render, CancellationToken ct,
+        VoiceEngine? engine = null)
     {
+        // SPEC F219.17/.19: sound tags are gated for the engine that renders, before normalisation, which leaves the tags
+        // that remain byte-intact. The gate is required: a render path with no gate would fail open and let tags through.
+        context = context with { Text = soundTagGate.Apply(context.Text, context.Kind, engine) };
+
         // SPEC F189.3 (STORY-456, PLAN T526): a planned speaker (TtsSegmentSource's snapshot arm)
         // already resolved its OWN card corrections once, at plan time — carried here on
         // context.Corrections — so this render merges the station's corrections with THAT list and
@@ -111,7 +127,7 @@ public sealed class NormalizingTtsSynthesizer(
 
         var normalized = RunNormalize(context.Text, snapshot);
         ReportFiredCorrections(context.Text, context.Voice, snapshot);
-        return await inner.SynthesizeAsync(context with { Text = normalized }, ct);
+        return await render(context with { Text = normalized }, ct);
     }
 
     /// <summary>

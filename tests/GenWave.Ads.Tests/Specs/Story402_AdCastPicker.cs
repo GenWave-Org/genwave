@@ -38,7 +38,8 @@ public static class FeatureAdCastPickerBuildsAVoicePlan
     static AdLiveSettings Settings(string announcerVoice, params string[] castVoices) =>
         new(
             announcerVoice, castVoices, BedFadeMs: AdLiveSettingsReader.DefaultBedFadeMs,
-            BedDuckDb: AdLiveSettingsReader.DefaultBedDuckDb, TargetLufs: AdLiveSettingsReader.DefaultTargetLufs);
+            BedDuckDb: AdLiveSettingsReader.DefaultBedDuckDb, TargetLufs: AdLiveSettingsReader.DefaultTargetLufs,
+            StationVoice: StationVoice, ActiveEngine: "kokoro");
 
     static string EntryFor(AdCastPick pick, string tag) => pick.Entries.Single(e => e.Tag == tag).VoiceId;
 

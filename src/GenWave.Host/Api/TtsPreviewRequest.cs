@@ -11,6 +11,14 @@ namespace GenWave.Host.Api;
 /// "audition the resolved merge as-is", the common case. Each entry is validated before any render
 /// runs; a malformed one 400s naming the offending field rather than silently degrading, mirroring
 /// <c>PronunciationsController</c>'s own write-path posture.
+///
+/// <para>
+/// <see cref="Engine"/> (SPEC F219.10, PLAN T754a) optionally names a registry engine to hear the voice on, however
+/// the active engine is set — the DJ page's per-engine "Hear it". Omitted or blank is the active engine, as before.
+/// When given, <see cref="Voice"/> is that engine's own bare voice id (an engine map is a 400; blank means the
+/// engine's default voice), the render runs on exactly that engine (no fallback chain: a failure is a 502, never
+/// another engine's voice) and under that engine's own render budget.
+/// </para>
 /// </summary>
 public sealed record TtsPreviewRequest(
-    string? Text, string? Voice, IReadOnlyList<TtsPreviewCandidateRule>? CandidateRules = null);
+    string? Text, string? Voice, IReadOnlyList<TtsPreviewCandidateRule>? CandidateRules = null, string? Engine = null);

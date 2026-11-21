@@ -33,6 +33,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\tools\PatterBench\PatterBench.csproj" />
+    <ProjectReference Include="..\GenWave.TestSupport\GenWave.TestSupport.csproj" />
   </ItemGroup>
 
 </Project>

@@ -6,6 +6,7 @@ import { Chip } from "@/components/ui/chip";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { toast } from "@/components/ui/toast";
 import { formatDateStamp } from "@/lib/format-clock";
+import { voiceSettingLabel } from "@/lib/voice-setting-label";
 import {
   AD_SOURCE_LABELS,
   approveAdSpot,
@@ -53,7 +54,7 @@ function CastChips({ spot }: { spot: AdSpotDto }): ReactNode {
   return (
     <span role="group" aria-label="Voice cast" className="flex flex-wrap items-center gap-1">
       {spot.voicePlan.map((entry, index) => (
-        <Chip key={`${index}-${entry.tag}`}>{`${entry.tag} · ${entry.voiceId}`}</Chip>
+        <Chip key={`${index}-${entry.tag}`}>{`${entry.tag} · ${voiceSettingLabel(entry.voiceId)}`}</Chip>
       ))}
     </span>
   );

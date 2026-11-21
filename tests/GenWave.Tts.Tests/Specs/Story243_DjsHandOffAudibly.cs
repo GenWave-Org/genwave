@@ -181,7 +181,7 @@ public static class FeatureDjsHandOffAudibly
                 NoCorrections.PersonaPronunciationCache(),
                 NoCorrections.PersonaPaceCache(),
                 new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
-                NullLogger<TtsSegmentSource>.Instance);
+                NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
 
         [Fact]
         public async Task GenuineLlmAuthoredSignOffLandsInBlurbs()
@@ -231,7 +231,7 @@ public static class FeatureDjsHandOffAudibly
                 NoCorrections.PersonaPronunciationCache(),
                 NoCorrections.PersonaPaceCache(),
                 new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
-                logger ?? NullLogger<TtsSegmentSource>.Instance);
+                logger ?? NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
 
         [Fact]
         public async Task TemplateFallbackSignOffRendersNull()

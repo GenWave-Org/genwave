@@ -1,0 +1,78 @@
+namespace GenWave.Tts;
+
+using System.Net.Http.Json;
+using System.Text;
+using Microsoft.Extensions.Options;
+using GenWave.Core.Abstractions;
+using GenWave.Core.Domain;
+
+/// <summary>
+/// The one typed-HttpClient egress type for the OpenAI-style speech contract (SPEC F219.4–F219.5):
+/// <c>POST {Endpoint}/v1/audio/speech</c> and <c>GET {Endpoint}/v1/audio/voices</c> for ANY
+/// <see cref="VoiceEngine"/>. The engine (endpoint + profile) is a per-call argument, so adding an
+/// engine is configuration, not a new client. No boot-frozen BaseAddress (F36): the absolute URI is
+/// built per call. Piper's bare text/plain wire is a different contract, rendered by <see cref="RenderPiperAsync"/> against the same engine endpoint.
+/// </summary>
+public sealed class SpeechEngineClient(
+    HttpClient http,
+    IOptionsMonitor<TtsOptions> optionsMonitor,
+    PronunciationRuleHitReporter? ruleHits = null)
+{
+    /// <summary>
+    /// Renders on one NAMED registry engine over its own wire: Piper's bare text/plain for the piper profile, the
+    /// OpenAI-style speech contract for every other. The one place that picks the wire for an engine, shared by the
+    /// active-engine primary (<see cref="ActiveEngineSynthesizer"/>) and the admin preview of a chosen engine.
+    /// </summary>
+    public Task<string> RenderOnAsync(VoiceEngine engine, TtsRenderContext context, CancellationToken ct) =>
+        engine.Profile == VoiceEngineProfiles.Piper
+            ? RenderPiperAsync(engine, context, ct)
+            : RenderAsync(engine, context, ct);
+
+    public async Task<string> RenderAsync(VoiceEngine engine, TtsRenderContext context, CancellationToken ct)
+    {
+        var cfg = optionsMonitor.CurrentValue;
+        // SPEC F219.17: the engine that actually renders (a fallback may differ from the one the text was gated for) only ever
+        // receives tags its own profile lists; an engine with none receives no bracket tag at all.
+        var text = SoundTags.Apply(context.Text, engine.Profile, int.MaxValue);
+        var body = SpeechRequestBody.Build(
+            engine.Profile, text, context.Voice, cfg.Format,
+            PronunciationRuleSet.FromContext(context.Rules), cfg.SentencePauseSeconds, context.Pace,
+            out var matches);
+        using var content = new StringContent(body, Encoding.UTF8, "application/json");
+
+        var response = await http.PostAsync(EndpointUri.Combine(engine.Endpoint, "/v1/audio/speech"), content, ct);
+        response.EnsureSuccessStatusCode();
+
+        var bytes = await response.Content.ReadAsByteArrayAsync(ct);
+        var path = await TransientAudioWriter.WriteAsync(cfg, bytes, ct);
+
+        // Only after the audio landed: "fired" means "aired" (STORY-253, T142).
+        ruleHits?.Report(matches, context.Kind, context.IsAudition);
+        return path;
+    }
+
+    /// <summary>Renders over Piper's bare text/plain wire at the engine's own endpoint (SPEC F99.4, F219.1).</summary>
+    public Task<string> RenderPiperAsync(VoiceEngine engine, TtsRenderContext context, CancellationToken ct) =>
+        PiperWireProtocol.RenderAsync(http, engine.Endpoint, context, optionsMonitor.CurrentValue, ct);
+
+    /// <summary>
+    /// Reachability only: <c>OPTIONS {endpoint}/</c>. Any HTTP response at all proves the engine process is up and
+    /// accepting connections (the status is not the signal, as with <see cref="PiperHealthProbe"/>); a refused
+    /// connection or a timeout throws. Works for every profile because it names no engine-specific route.
+    /// </summary>
+    public async Task PingAsync(VoiceEngine engine, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Options, EndpointUri.Combine(engine.Endpoint, "/"));
+        using var response = await http.SendAsync(request, ct);
+    }
+
+    public async Task<IReadOnlyList<string>> ListVoicesAsync(VoiceEngine engine, CancellationToken ct)
+    {
+        var response = await http.GetAsync(EndpointUri.Combine(engine.Endpoint, "/v1/audio/voices"), ct);
+        response.EnsureSuccessStatusCode();
+
+        // Kokoro and the bench shims both answer { "voices": [...] }; the parser takes either entry shape.
+        var payload = await response.Content.ReadFromJsonAsync<KokoroVoicesResponse>(ct);
+        return payload?.VoiceIds() ?? [];
+    }
+}

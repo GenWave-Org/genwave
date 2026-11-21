@@ -2,6 +2,7 @@
 
 import { type ChangeEvent, type ReactNode } from "react";
 import { useVoiceList } from "@/lib/use-voice-list";
+import { voiceSettingLabel } from "@/lib/voice-setting-label";
 
 interface VoiceControlProps {
   /** Current field value — "" means "Station default" (no `voice` field on the wire, F27.3). */
@@ -76,6 +77,10 @@ export function VoiceControl({ value, onChange, disabled, id = "safe-voice" }: V
               {voiceId}
             </option>
           ))}
+        {/* A saved voice the list does not carry (an engine map, or a voice since removed) stays selectable. */}
+        {status.kind === "loaded" && value !== STATION_DEFAULT_VALUE && !status.voices.includes(value) && (
+          <option value={value}>{voiceSettingLabel(value)}</option>
+        )}
       </select>
     </div>
   );

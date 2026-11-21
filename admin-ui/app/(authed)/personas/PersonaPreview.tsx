@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/toast";
+import { requestTtsPreview, useTtsPreviewPlayer } from "@/lib/use-tts-preview";
 
 /** What to preview: a saved persona by id, or the create/edit form's in-progress (possibly
  * unsaved) fields straight off the operator's draft (SPEC F35.6/F35.7 — preview also works for a
@@ -45,7 +46,6 @@ async function readPreviewFailureMessage(resp: Response): Promise<string> {
 }
 
 type CopyState = { kind: "idle" } | { kind: "loading" } | { kind: "loaded"; text: string };
-type PlaybackState = { kind: "idle" } | { kind: "loading" } | { kind: "ready"; url: string };
 
 /** Builds the POST /api/personas/preview body for a target (SPEC F35.6). No `kind`/`mediaId` —
  * this page never surfaces a kind or track picker; the endpoint's `LeadIn` default and legal
@@ -75,25 +75,11 @@ function previewRequestBody(target: PersonaPreviewTarget): Record<string, unknow
  */
 export function PersonaPreview({ target }: PersonaPreviewProps): ReactNode {
   const [copy, setCopy] = useState<CopyState>({ kind: "idle" });
-  const [playback, setPlayback] = useState<PlaybackState>({ kind: "idle" });
-  const audioUrlRef = useRef<string | null>(null);
-
-  // Revoke whatever blob URL this instance is holding on unmount so a closed preview panel
-  // doesn't leak a blob for the lifetime of the page.
-  useEffect(
-    () => () => {
-      if (audioUrlRef.current !== null) URL.revokeObjectURL(audioUrlRef.current);
-    },
-    []
-  );
+  const player = useTtsPreviewPlayer();
 
   async function handlePreview(): Promise<void> {
     setCopy({ kind: "loading" });
-    if (audioUrlRef.current !== null) {
-      URL.revokeObjectURL(audioUrlRef.current);
-      audioUrlRef.current = null;
-    }
-    setPlayback({ kind: "idle" });
+    player.clear();
 
     try {
       const resp = await fetch("/api/personas/preview", {
@@ -119,36 +105,8 @@ export function PersonaPreview({ target }: PersonaPreviewProps): ReactNode {
   async function handlePlay(): Promise<void> {
     if (copy.kind !== "loaded") return;
 
-    setPlayback({ kind: "loading" });
-    // A re-render ("Play" clicked again for a fresh render) would otherwise overwrite this ref
-    // with a new blob URL, leaking the previous one until unmount — revoke it first.
-    if (audioUrlRef.current !== null) {
-      URL.revokeObjectURL(audioUrlRef.current);
-      audioUrlRef.current = null;
-    }
     const voice = target.voice.trim() === "" ? undefined : target.voice;
-
-    try {
-      const resp = await fetch("/api/tts/preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: copy.text, voice }),
-      });
-
-      if (!resp.ok) {
-        setPlayback({ kind: "idle" });
-        toast.error(await readPreviewFailureMessage(resp));
-        return;
-      }
-
-      const blob = await resp.blob();
-      const url = URL.createObjectURL(blob);
-      audioUrlRef.current = url;
-      setPlayback({ kind: "ready", url });
-    } catch {
-      setPlayback({ kind: "idle" });
-      toast.error("Network error — check your connection");
-    }
+    await player.hear(() => requestTtsPreview({ text: copy.text, voice }, readPreviewFailureMessage));
   }
 
   return (
@@ -174,13 +132,11 @@ export function PersonaPreview({ target }: PersonaPreviewProps): ReactNode {
               onClick={() => {
                 void handlePlay();
               }}
-              disabled={playback.kind === "loading"}
+              disabled={player.isRendering}
             >
-              {playback.kind === "loading" ? "Rendering…" : "Play"}
+              {player.isRendering ? "Rendering…" : "Play"}
             </Button>
-            {playback.kind === "ready" && (
-              <audio controls src={playback.url} aria-label="Persona preview audio" />
-            )}
+            {player.url !== null && <audio controls src={player.url} aria-label="Persona preview audio" />}
           </div>
         </div>
       )}

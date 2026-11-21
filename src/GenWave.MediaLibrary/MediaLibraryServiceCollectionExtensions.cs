@@ -261,7 +261,7 @@ public static class MediaLibraryServiceCollectionExtensions
         // MusicBrainz year lookup (SPEC F48.1-F48.2, closes gitea-#208). No boot-frozen BaseAddress —
         // Library:YearLookup:Endpoint is read from IOptionsMonitor<YearLookupOptions>.CurrentValue
         // per call inside MusicBrainzYearLookup, so a live PUT applies to the next lookup with no
-        // api restart (the same F36.2 shape as KokoroTtsSynthesizer's own typed client). Registered
+        // api restart (the same F36.2 shape as SpeechEngineClient's own typed client). Registered
         // here (unlike Tts's Program.cs wiring) because MediaLibrary owns its own composition root.
         // Inert until X5 wires IYearLookup into EnrichmentService's backfill claim loop; the DI graph
         // resolves regardless, so Host boot is unaffected. MaxResponseContentBufferSize bounds a

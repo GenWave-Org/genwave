@@ -193,7 +193,7 @@ public static class FeatureKokoroSentencePauses
             try
             {
                 var (http, bodies) = WireCapture();
-                var synth = new KokoroTtsSynthesizer(http, Options(cacheRoot));
+                var synth = TestKokoro.Synthesizer(http, Options(cacheRoot));
 
                 await synth.SynthesizeAsync(Copy, "af_heart", CancellationToken.None);
 
@@ -309,7 +309,7 @@ public static class FeatureKokoroSentencePauses
             try
             {
                 var (http, bodies) = WireCapture();
-                var synth = new KokoroTtsSynthesizer(http, Options(cacheRoot, pauseSeconds: 0));
+                var synth = TestKokoro.Synthesizer(http, Options(cacheRoot, pauseSeconds: 0));
 
                 await synth.SynthesizeAsync(Copy, "af_heart", CancellationToken.None);
 
@@ -333,7 +333,7 @@ public static class FeatureKokoroSentencePauses
                 var (kokoroHttp, kokoroBodies) = WireCapture(HttpStatusCode.InternalServerError);
                 var (piperHttp, piperBodies) = WireCapture();
                 var router = new FallbackTtsSynthesizer(
-                    new KokoroTtsSynthesizer(kokoroHttp, Options(cacheRoot)),
+                    TestKokoro.Synthesizer(kokoroHttp, Options(cacheRoot)),
                     [new PiperTtsSynthesizer(piperHttp, Options(cacheRoot))],
                     new FakeDependencyHealth(),
                     new TestOptionsMonitor<TtsFallbackOptions>(
@@ -390,7 +390,7 @@ public static class FeatureKokoroSentencePauses
                     NoCorrections.PersonaPronunciationCache(),
                     NoCorrections.PersonaPaceCache(),
                     Options(cacheRoot),
-                    NullLogger<TtsSegmentSource>.Instance);
+                    NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
                 var request = new SegmentRequest(
                     SegmentKind.StationId, "af_heart", "GenWave", null,
                     new DateTimeOffset(2026, 7, 30, 12, 0, 0, TimeSpan.Zero), "test-station");

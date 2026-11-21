@@ -91,7 +91,7 @@ public static class FeatureSpeakerTravelsWithThePlan
         "for the whole run, and the api logs carry zero \"has no card\"/\"card lookup failed\" " +
         "degrade warnings. TtsSegmentSource.RenderCopyAsync (:249-251) branches on exactly " +
         "request.Speaker is {} — non-null routes to ResolveFromSnapshot (frozen speaker.Pace/Rules, " +
-        "key ComputeSnapshotHash(text, voice, stationId, speaker.ContentHash)); null routes to " +
+        "key ComputeSnapshotHash(text, voice, engine, stationId, speaker.ContentHash)); null routes to " +
         "ResolveFromAmbientAsync (live personaPace.Current, key TtsSegmentSource's own five-term " +
         "ComputeHash) — a structurally disjoint key space. So the snapshot arm, not the ambient " +
         "re-resolving one, is what rendered all four cited rows. Honest scope: the row's voice is " +

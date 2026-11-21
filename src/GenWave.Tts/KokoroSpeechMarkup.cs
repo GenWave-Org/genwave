@@ -54,7 +54,7 @@ using System.Text;
 ///
 /// <para>
 /// Kokoro-only by construction, same placement as <see cref="KokoroPauseMarkup"/>: applied inside
-/// both <see cref="KokoroTtsSynthesizer"/> (primary) and <see cref="KokoroFallbackRenderer"/>
+/// both <see cref="SpeechEngineClient"/> (primary) and <see cref="KokoroFallbackRenderer"/>
 /// (kokoro-kind fallback hops) at request build — below the
 /// <see cref="NormalizingTtsSynthesizer"/> chokepoint and below the fallback router (F96.1) — and
 /// never on the Piper path, which would speak either markup form aloud; see
@@ -80,7 +80,7 @@ public static class KokoroSpeechMarkup
     /// Same contract as the three-argument overload above, but also reports exactly which rules
     /// matched via <paramref name="matches"/> — SPEC F97.5's "a rule that fires ... names the rule
     /// [and] speech kind": mirrors <see cref="SpeechCorrectionSet.Apply"/>'s own out-<c>firedFroms</c>
-    /// shape one seam over, so a caller (<see cref="KokoroTtsSynthesizer"/>,
+    /// shape one seam over, so a caller (<see cref="SpeechEngineClient"/>,
     /// <see cref="KokoroFallbackRenderer"/>, via <see cref="PronunciationRuleHitReporter"/>) can
     /// log/count a fired rule without a second, redundant <see cref="PronunciationRuleSet.Match"/>
     /// call over the same text — <see cref="PronunciationMatch"/>'s own remarks state exactly this

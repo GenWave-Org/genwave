@@ -12,7 +12,7 @@ using System.Text.RegularExpressions;
 /// <c>" [pause:Ns]"</c> tag after each sentence-final run of <c>. ! ? …</c> so kokoro-kind
 /// renders breathe between sentences.
 ///
-/// Kokoro-only by construction: applied inside <see cref="KokoroTtsSynthesizer"/> (primary) and
+/// Kokoro-only by construction: applied inside <see cref="SpeechEngineClient"/> (primary) and
 /// <see cref="KokoroFallbackRenderer"/> (kokoro-kind chain hops) at request build — BELOW the
 /// <see cref="NormalizingTtsSynthesizer"/> chokepoint, so the normalized text, the gh-#161
 /// corrections fingerprints, and <see cref="TtsSegmentSource"/>'s final cache key (computed from

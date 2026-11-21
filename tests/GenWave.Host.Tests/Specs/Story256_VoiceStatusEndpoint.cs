@@ -185,6 +185,7 @@ public static class FeatureVoiceStatusEndpoint
             // When the engine recovers and the operator re-polls (no api restart in between,
             // mirroring the P9 stale-snapshot discipline every StatusController field follows)...
             store.Record(DependencyNames.Kokoro, healthy: true, reason: null);
+            store.Record(DependencyNames.VoiceEngine(DependencyNames.Kokoro), healthy: true, reason: null);   // T766: the warm-up verdict
             var recoveredResponse = await client.GetAsync("/api/status");
             Assert.Equal(HttpStatusCode.OK, recoveredResponse.StatusCode);
             var body = await recoveredResponse.Content.ReadFromJsonAsync<JsonElement>();

@@ -77,6 +77,7 @@ public sealed class AdSpotJobService : BackgroundService
     readonly IOptionsMonitor<AdsOptions> adsOptions;
     readonly IOptionsMonitor<LlmOptions> llmOptions;
     readonly IConfiguration configuration;
+    readonly IActiveVoiceEngine activeEngine;
     readonly TimeProvider timeProvider;
     readonly ILogger<AdSpotJobService> logger;
 
@@ -108,6 +109,7 @@ public sealed class AdSpotJobService : BackgroundService
         IOptionsMonitor<AdsOptions> adsOptions,
         IOptionsMonitor<LlmOptions> llmOptions,
         IConfiguration configuration,
+        IActiveVoiceEngine activeEngine,
         TimeProvider timeProvider,
         ILogger<AdSpotJobService> logger)
     {
@@ -122,6 +124,7 @@ public sealed class AdSpotJobService : BackgroundService
         this.adsOptions = adsOptions;
         this.llmOptions = llmOptions;
         this.configuration = configuration;
+        this.activeEngine = activeEngine;
         this.timeProvider = timeProvider;
         this.logger = logger;
 
@@ -426,7 +429,7 @@ public sealed class AdSpotJobService : BackgroundService
             return;
         }
 
-        var liveSettings = AdLiveSettingsReader.Read(configuration);
+        var liveSettings = AdLiveSettingsReader.Read(configuration, activeEngine);
         var castStamped = await stamper.StampCastIfNeededAsync(spot, liveSettings, ct);
         var stamped = await stamper.StampBedIfNeededAsync(castStamped, ct);
 

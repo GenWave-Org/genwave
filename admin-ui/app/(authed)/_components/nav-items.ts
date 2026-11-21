@@ -48,6 +48,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { href: "/safe-content", label: "Station sounds", iconName: "safe-content" },
       { href: "/ads", label: "Ads", iconName: "exploration" },
       { href: "/personas", label: "Personas", iconName: "persona" },
+      { href: "/voices", label: "Voices", iconName: "live" },
       { href: "/schedule", label: "Schedule", iconName: "schedule" },
       { href: "/shows", label: "Shows", iconName: "shows" },
     ],

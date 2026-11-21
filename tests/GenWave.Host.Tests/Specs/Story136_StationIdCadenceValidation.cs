@@ -57,7 +57,7 @@ public static class FeatureStationIdCadenceValidation
     // SettingValidator.Validate never reads the injected IConfiguration for this key (only
     // ValidateBatch's cross-field xfade check does), so an empty configuration is enough here.
     static SettingValidator BuildSettingValidator() =>
-        new(new ConfigurationBuilder().Build());
+        new(new ConfigurationBuilder().Build(), TestVoiceEngines.KokoroAndPiper());
 
     // ---------------------------------------------------------------------
     // HAPPY PATH

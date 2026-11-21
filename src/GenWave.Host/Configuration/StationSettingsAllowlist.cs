@@ -251,7 +251,7 @@ public static class StationSettingsAllowlist
         // break with no api restart. 0 turns callbacks off; 6 is the ceiling the planner clamps to.
         new("Memory:CallbacksPerHour", SettingApplyMode.Live, SettingKind.Number, "per hour", SettingGroup.Voice, Min: 0, Max: 6),
 
-        // TTS/LLM endpoint liveness (SPEC F36.1–F36.4, T8): KokoroTtsSynthesizer/KokoroVoiceLister
+        // TTS/LLM endpoint liveness (SPEC F36.1–F36.4, T8): SpeechEngineClient/KokoroVoiceLister
         // and LlmCopyWriter read these via IOptionsMonitor per call (no boot-frozen BaseAddress), so
         // a PUT here reroutes the very next render/voices call — no api restart. Llm:Endpoint is
         // legally empty (F34.2 — blurbs stay templated); Tts:Endpoint is not, since there is no
@@ -286,6 +286,10 @@ public static class StationSettingsAllowlist
         // wire for the piper engine.
         new("Tts:Fallback:Endpoint", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Voice),
         new("Tts:Fallback:Voice", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Voice),
+        // The engine every speech render uses (SPEC F219.2) — a name from the voice engine registry
+        // (Tts:Engines:<name>, GET /api/voices/engines); SettingValidator rejects any other name.
+        // Default "kokoro" lives in appsettings.json + TtsOptions.Engine.
+        new("Tts:Engine", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Voice),
         // Per-kind TTS engine override map (SPEC F70.3, STORY-191): a JSON-encoded object mapping
         // SegmentKind names to an engine name ("kokoro"/"piper"), e.g.
         // {"StationId":"piper","LeadIn":"kokoro"} — the same "single opaque string-kind setting"
@@ -296,6 +300,13 @@ public static class StationSettingsAllowlist
         // is legal and is the default (F70.3): every kind falls through to the existing F70.1
         // health-based Kokoro/Piper routing, unchanged.
         new("Tts:EngineByKind", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Voice),
+        // Per-engine render time limits (SPEC F219.6, T750a): a JSON object {engine: seconds}, each key a
+        // registry engine, each value 1-600. A present entry overrides that engine's own configured limit;
+        // GenWave.Tts.EngineRenderBudget reads it per render, so a PUT applies to the next one. Blank = no overrides.
+        new("Tts:EngineRenderBudgets", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Voice),
+        // Most sound tags ([laugh], [sigh]...) one break may carry on an engine whose profile lists tags (SPEC F219.16/.17);
+        // 0 = off. GenWave.Tts.OptionsMonitorSoundTagCapProvider reads it per render, so a PUT applies to the next one.
+        new("Tts:SoundTags:MaxPerBreak", SettingApplyMode.Live, SettingKind.Number, "tags", SettingGroup.Voice, Min: 0, Max: 5),
         new("Llm:Endpoint", SettingApplyMode.Live, SettingKind.String, "", SettingGroup.Voice),
         // Live model roster (SPEC F205.7, STORY-479, PLAN T580) — Station:Voice's LLM-side sibling
         // immediately above: SettingsController's choice resolver lists the configured Llm:Endpoint's
@@ -313,10 +324,9 @@ public static class StationSettingsAllowlist
 
         // F44.2 allowlist completion (closes gitea-#197) — six more boot-frozen consumers migrate to a
         // live provider/IOptionsMonitor read at use time:
-        //   • Tts:RenderBudgetSeconds — the Orchestrator's own copy used to be a TimeSpan computed
-        //     once in Program.cs; it now reads IRenderBudgetProvider fresh per unit. TtsPreviewController
-        //     and SafeSegmentsController already read IOptionsMonitor<TtsOptions> per call (T8/F29) —
-        //     unaffected by this change, just newly reachable through the settings API.
+        //   • Tts:RenderBudgetSeconds — the seeded kokoro/piper engines' budget, and the fallback when
+        //     no engine is configured (F219.6: each engine otherwise carries its own). Every render
+        //     path reads IRenderBudgetProvider fresh per unit; no boot-frozen copy remains.
         //   • Tts:BlurbRetentionHours — TtsSegmentSource's blurb GC sweep now reads
         //     IOptionsMonitor<TtsOptions>.CurrentValue per render instead of a frozen field (F34.6).
         //   • Llm:MaxCopyChars — LlmCopyWriter already reads IOptionsMonitor<LlmOptions> fresh per

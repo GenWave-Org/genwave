@@ -63,7 +63,7 @@ export interface SettingDto {
   kind: "boolean" | "number" | "number-list" | "string" | "choice" | "multi-choice";
   unit: string;
   /** The closed set of valid `(value, label)` pairs — present for `choice` and `multi-choice`. */
-  choices?: readonly SettingChoice[];
+  choices?: readonly SettingChoice[] | null;
   /**
    * True when {@link choices} is a live source's last KNOWN-good list, not this request's own
    * attempt (STORY-479, SPEC F205.7f) — the most recent live attempt failed, but an earlier one
@@ -127,12 +127,18 @@ export interface SettingControlProps {
    */
   isDirty?: boolean;
   /**
+   * The last-SAVED value (SettingsForm's re-baselined `original`). It changes exactly when a save
+   * lands, so a control that mirrors server state (`VoiceEngineSettingControl`) can refetch on it.
+   * Optional so controls that don't care ignore it.
+   */
+  savedValue?: string;
+  /**
    * The closed set of valid `(value, label)` pairs, straight off {@link SettingDto.choices} —
    * present for a `choice` or `multi-choice` setting (T175, SPEC F102.14). Optional so every
    * existing registered control (Corrections, EngineByKind, Audience), none of which read it, is
    * unaffected.
    */
-  choices?: readonly SettingChoice[];
+  choices?: readonly SettingChoice[] | null;
   /** Straight off {@link SettingDto.choicesStale} — see that field's own remarks (STORY-479). */
   choicesStale?: boolean;
   /** Straight off {@link SettingDto.choicesFailed} — see that field's own remarks (STORY-479). */

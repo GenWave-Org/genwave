@@ -86,7 +86,7 @@ public static class FeatureTwoVoicesOneClip
         // subject) never touches IAudioMixer at all — only the widened cast path (Story391,
         // AssembleCastAsync) does. Present here purely to satisfy the constructor.
         var assembler = new CrosstalkAssembler(
-            synth, pronunciations, loudnessAnalyzer, cueAnalyzer, new FakeAudioMixer(), ttsMonitor, crosstalkMonitor, logger);
+            synth, pronunciations, loudnessAnalyzer, cueAnalyzer, new FakeAudioMixer(), ttsMonitor, crosstalkMonitor, KokoroVoiceResolver.Instance, logger);
         return (assembler, synth, loudnessAnalyzer, cueAnalyzer, logger, cacheRoot);
     }
 

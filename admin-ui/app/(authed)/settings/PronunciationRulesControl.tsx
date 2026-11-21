@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/chip";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { toast } from "@/components/ui/toast";
 import { readErrorMessage, readProblemDetails } from "@/lib/problem-details";
+import { requestTtsPreview, useTtsPreviewPlayer, type TtsPreviewOutcome } from "@/lib/use-tts-preview";
 import { CELL_INPUT_CLASSES, HEADER_CELL } from "./rule-table-styles";
 import { isValidationProblemDetails, SETTINGS_VERSION_CONFLICT_PROBLEM_TYPE } from "./settings-types";
 
@@ -220,8 +221,6 @@ function auditionPhrase(pattern: string): string {
   return `Now playing: ${pattern}.`;
 }
 
-type AuditionOutcome = { kind: "ok"; blob: Blob } | { kind: "error"; message: string };
-
 /** Flattens a `ValidationProblemDetails.errors` dict into one string — the audition surfaces its
  * 400 as a single toast rather than the write-path form's per-field inline slots, so every failing
  * field's every message still has to reach the operator through that one line. */
@@ -265,19 +264,11 @@ async function readAuditionFailureMessage(resp: Response): Promise<string> {
  * station voice is the honest audition, not a stand-in for whichever persona happens to be active
  * right now.
  */
-async function requestAudition(candidate: AuditionCandidate): Promise<AuditionOutcome> {
-  try {
-    const resp = await fetch("/api/tts/preview", {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: auditionPhrase(candidate.pattern), candidateRules: [candidate] }),
-    });
-    if (!resp.ok) return { kind: "error", message: await readAuditionFailureMessage(resp) };
-    return { kind: "ok", blob: await resp.blob() };
-  } catch {
-    return { kind: "error", message: "Network error — check your connection." };
-  }
+async function requestAudition(candidate: AuditionCandidate): Promise<TtsPreviewOutcome> {
+  return requestTtsPreview(
+    { text: auditionPhrase(candidate.pattern), candidateRules: [candidate] },
+    readAuditionFailureMessage
+  );
 }
 
 /** `POST /api/pronunciations/derive`'s success body (T278, SPEC F126.2) — the one field this
@@ -1117,8 +1108,6 @@ function PronunciationRuleTableRow({
   );
 }
 
-type AuditionState = { kind: "idle" } | { kind: "loading" } | { kind: "ready"; url: string };
-
 interface AuditionButtonProps {
   pattern: string;
   word: string;
@@ -1150,36 +1139,7 @@ interface AuditionButtonProps {
  * trip for e.g. a still-blank add-form draft.
  */
 function AuditionButton({ pattern, word, ipa, buttonAriaLabel, audioLabel }: AuditionButtonProps): ReactNode {
-  const [state, setState] = useState<AuditionState>({ kind: "idle" });
-  const audioUrlRef = useRef<string | null>(null);
-
-  // Revoke whatever blob URL this instance is holding on unmount so a closed panel doesn't leak a
-  // blob for the lifetime of the page (the PersonaPreview idiom).
-  useEffect(
-    () => () => {
-      if (audioUrlRef.current !== null) URL.revokeObjectURL(audioUrlRef.current);
-    },
-    []
-  );
-
-  async function handleClick(): Promise<void> {
-    setState({ kind: "loading" });
-    if (audioUrlRef.current !== null) {
-      URL.revokeObjectURL(audioUrlRef.current);
-      audioUrlRef.current = null;
-    }
-
-    const outcome = await requestAudition(auditionCandidate(pattern, word, ipa));
-    if (outcome.kind === "error") {
-      setState({ kind: "idle" });
-      toast.error(outcome.message);
-      return;
-    }
-
-    const url = URL.createObjectURL(outcome.blob);
-    audioUrlRef.current = url;
-    setState({ kind: "ready", url });
-  }
+  const player = useTtsPreviewPlayer();
 
   return (
     <>
@@ -1187,14 +1147,14 @@ function AuditionButton({ pattern, word, ipa, buttonAriaLabel, audioLabel }: Aud
         type="button"
         variant="secondary"
         aria-label={buttonAriaLabel}
-        disabled={state.kind === "loading" || !canAudition(pattern, ipa)}
+        disabled={player.isRendering || !canAudition(pattern, ipa)}
         onClick={() => {
-          void handleClick();
+          void player.hear(() => requestAudition(auditionCandidate(pattern, word, ipa)));
         }}
       >
-        {state.kind === "loading" ? "Rendering…" : "Hear it"}
+        {player.isRendering ? "Rendering…" : "Hear it"}
       </Button>
-      {state.kind === "ready" && <audio controls src={state.url} aria-label={audioLabel} />}
+      {player.url !== null && <audio controls src={player.url} aria-label={audioLabel} />}
     </>
   );
 }

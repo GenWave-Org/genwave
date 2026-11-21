@@ -55,7 +55,7 @@ public static class FeatureTtsFallbackEngine
             NoCorrections.PersonaPronunciationCache(),
             NoCorrections.PersonaPaceCache(),
             new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
-            logger ?? NullLogger<TtsSegmentSource>.Instance);
+            logger ?? NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
 
     // ------------------------------------------------------------------
     // HAPPY PATH

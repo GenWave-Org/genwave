@@ -260,6 +260,9 @@ static class StationSettingsHostingExtensions
         // the ad-spot/brief stores just above shipped.
         builder.Services.AddVoicePackStore(stationConnStr);
 
+        // Voice clip store (SPEC F219.12; STORY-557; PLAN T756) — station.voice_clip, same station_svc connection.
+        builder.Services.AddVoiceClipStore(stationConnStr);
+
         // Jingle pack store (SPEC F165.2/F165.5/F165.6; STORY-399/401; PLAN T414) — the ONE store in
         // this extension needing both connection strings: station.jingle_pack lives in station_svc,
         // its asset rows are library.media rows in library_svc, and the two roles share no grant

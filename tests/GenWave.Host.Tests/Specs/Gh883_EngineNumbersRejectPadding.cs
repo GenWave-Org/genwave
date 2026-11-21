@@ -3,6 +3,7 @@
 //
 // BDD specification — xUnit. Drives SettingValidator.Validate directly.
 
+using GenWave.Host.Tests.Support;
 using GenWave.Host.Configuration;
 using Microsoft.Extensions.Configuration;
 
@@ -10,7 +11,7 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureEngineNumbersRejectPadding
 {
-    static SettingValidator Validator() => new(new ConfigurationBuilder().Build());
+    static SettingValidator Validator() => new(new ConfigurationBuilder().Build(), TestVoiceEngines.KokoroAndPiper());
 
     public sealed class ScenarioAPaddedNumberIsRefused
     {

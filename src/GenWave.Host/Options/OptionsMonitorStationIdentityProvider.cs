@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.Tts;
 
 namespace GenWave.Host.Options;
 
@@ -19,16 +20,22 @@ namespace GenWave.Host.Options;
 /// Builds a new <see cref="StationIdentity"/> from <see cref="StationOptions"/> on every call —
 /// nothing is cached here — <see cref="IOptionsMonitor{T}.CurrentValue"/> already is the cache, and
 /// caching again would reintroduce the boot-snapshot staleness this seam exists to fix.
+///
+/// <see cref="StationIdentity.Voice"/> is the voice id for the ACTIVE engine (SPEC F219.8, PLAN T753):
+/// <c>Station:Voice</c> may be a bare id or an engine map, so the raw setting is never handed on. A map with no
+/// entry for the active engine reads as <see cref="StationIdentity.VoiceMissing"/> with an empty voice.
 /// </summary>
-sealed class OptionsMonitorStationIdentityProvider(IOptionsMonitor<StationOptions> stationMonitor)
-    : IStationIdentityProvider
+sealed class OptionsMonitorStationIdentityProvider(
+    IOptionsMonitor<StationOptions> stationMonitor,
+    IVoiceResolver voiceResolver) : IStationIdentityProvider
 {
     public StationIdentity Current
     {
         get
         {
             var station = stationMonitor.CurrentValue;
-            return new StationIdentity(station.Id, station.Name, station.Voice);
+            var voice = voiceResolver.ResolveSetting(station.Voice);
+            return new StationIdentity(station.Id, station.Name, voice ?? string.Empty) { VoiceMissing = voice is null };
         }
     }
 }

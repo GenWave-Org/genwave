@@ -527,9 +527,9 @@ public static class FeatureAdoptionVerifyRepair
         [Fact]
         public void AnUnappliedMigrationIsReportedAgainstTheRepoDbMax()
         {
-            // db/52 (PLAN T730, station.memory_offer then station.one_time_fix) is this repo's own
+            // db/53 (PLAN T755, station.voice_clip) is this repo's own
             // newest table-creating migration — the derived marker — and is also the repo's db/ max,
-            // so the derived marker is db/52 with no gap. The marker has moved before (db/46, then
+            // so the derived marker is db/53 with no gap. The marker has moved before (db/46, then
             // db/47-db/49 only ALTERed existing tables); this fact asserts only the marker number —
             // see ScenarioMigrationMarkerDerivation's own scratch gap facts below for the
             // two-number case spelled out explicitly.
@@ -539,7 +539,7 @@ public static class FeatureAdoptionVerifyRepair
 
             var (_, stdOut, _) = RunSetup(ScriptProcess.MakeBinDir(), envFile, "", new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
 
-            Assert.Contains("db/52", stdOut, StringComparison.Ordinal);
+            Assert.Contains("db/53", stdOut, StringComparison.Ordinal);
         }
 
         [Fact]

@@ -63,30 +63,58 @@ public sealed partial class BreakPlanner
     // PLAN T527 (SPEC F188.4/F189.6, round-2 review finding F1): resolves the SpeakerSnapshot a
     // slot's PersonaId names, memoized per plan via SpeakerResolution — null speakers (no
     // ISpeakerSnapshotSource wired) means no stamping at all, the ambient path stays byte-identical.
-    // The planner-resolved `voice` is ALWAYS authoritative — it is the caller's own already-resolved
-    // voice term (the persona ROW via ResolvePersonaAsync, the station's own identity.Voice, or
-    // ResolveAnnouncementVoiceAsync's installed-voice check), never the card's. The snapshot is
-    // aligned to it, not the reverse: a card whose voiceId is uninstalled, unknown, or unresolvable
-    // (F79.4's blanked import, or any SpeakerSnapshotSource degrade to the station snapshot) must
-    // never override the voice that already passed validation. Every caller then stamps its request's
-    // Voice from this SAME `voice` parameter — never from the returned snapshot — so the two can
-    // never disagree (ruling 9's invariant, satisfied by construction). Returning `snapshot with
-    // { Voice = voice }` creates a new instance rather than the memoized one, which is fine — the
-    // memo's own StationAsync/PersonaAsync call still only fires once per plan; the aligned copy's
-    // stale ContentHash voice term is harmless too, since TtsRenderKey.ComputeSnapshotHash folds this
-    // request's own (now-authoritative) Voice into the render key as its own separate term. Never
-    // throws on its own: SpeakerResolution only wraps ISpeakerSnapshotSource, whose own contract
-    // already degrades internally.
+    // This overload serves the NON-persona callers (the station's own identity.Voice, or
+    // ResolveAnnouncementVoiceAsync's installed-voice check): the caller's already-resolved `voice`
+    // is authoritative and the snapshot is aligned to it, never the reverse. identity.Voice is itself
+    // resolved for the active engine on every read (IVoiceResolver, SPEC F219.8), so a Tts:Engine
+    // switch reaches the next break. Returning `snapshot with { Voice = voice }` creates a new
+    // instance rather than the memoized one, which is fine — the memo's own StationAsync call still
+    // only fires once per plan; the aligned copy keeps VoiceMissing (SPEC F219.9), and its stale
+    // ContentHash voice term is harmless, since TtsRenderKey.ComputeSnapshotHash folds the request's
+    // own Voice into the render key as a separate term. Never throws on its own: SpeakerResolution
+    // only wraps ISpeakerSnapshotSource, whose own contract already degrades internally.
+    //
+    // The persona-bearing slots use ResolvePersonaSpeakerAsync below instead.
     static async Task<SpeakerSnapshot?> ResolveSpeakerAsync(
-        SpeakerResolution? speakers, long? personaId, StationIdentity identity, string voice, CancellationToken ct)
+        SpeakerResolution? speakers, StationIdentity identity, string voice, CancellationToken ct)
     {
         if (speakers is null) return null;
 
-        var snapshot = personaId is { } id
-            ? await speakers.PersonaAsync(id, ct)
-            : await speakers.StationAsync(identity, ct);
+        var snapshot = await speakers.StationAsync(identity, ct);
 
-        return string.Equals(snapshot.Voice, voice, StringComparison.Ordinal) ? snapshot : snapshot with { Voice = voice };
+        var aligned = string.Equals(snapshot.Voice, voice, StringComparison.Ordinal) ? snapshot : snapshot with { Voice = voice };
+
+        // A caller voice that is not the station fallback (an installed announcement voice) is a voice this
+        // talk HAS: only the station's own missing voice drops it.
+        return aligned.VoiceMissing && !string.Equals(voice, identity.Voice, StringComparison.Ordinal)
+            ? aligned with { VoiceMissing = false }
+            : aligned;
+    }
+
+    // SPEC F219.8/F219.11 (PLAN T753): a persona-bearing slot's voice. The planner cannot resolve a
+    // per-engine voice map itself (GenWave.Orchestration references only Core + Abstractions, and the
+    // IVoiceResolver lives in Tts), so it asks the seam it already calls: ISpeakerSnapshotSource
+    // resolves the persona card's VoicesByEngine() for the ACTIVE engine on every call (station voice
+    // when the persona has none of its own). Ruling 9's invariant still holds by construction — the
+    // returned voice and the returned snapshot's Voice are the same string, and callers stamp
+    // request.Voice from this voice, never from the snapshot. The voice resolved for the active engine
+    // wins over the persona ROW's flat voice (which only ever names one engine's id) only when the
+    // snapshot says it overrides the row (VoiceOverridesRow: the active engine is not the engine of the
+    // card's own voice, decided by engine in SpeakerSnapshotSource), is that persona's own card, and
+    // is not VoiceMissing. Otherwise — a kokoro render whose card voice may be uninstalled or blanked
+    // (F79.4), a snapshot degraded to the station's (the card-less default persona), or a persona with
+    // no voice for this engine (the talk is dropped downstream) — the caller's already-validated
+    // `rowVoice` stands and the snapshot is aligned to it, so an unvalidated card voice never
+    // overrides a validated one (ruling 9).
+    static async Task<(SpeakerSnapshot? Speaker, string Voice)> ResolvePersonaSpeakerAsync(
+        SpeakerResolution? speakers, long? personaId, StationIdentity identity, string rowVoice, CancellationToken ct)
+    {
+        if (speakers is null || personaId is not { } id)
+            return (await ResolveSpeakerAsync(speakers, identity, rowVoice, ct), rowVoice);
+
+        var snapshot = await speakers.PersonaAsync(id, ct);
+        var voice = snapshot is { VoiceMissing: false, VoiceOverridesRow: true } && snapshot.PersonaId == id ? snapshot.Voice : rowVoice;
+        return (string.Equals(snapshot.Voice, voice, StringComparison.Ordinal) ? snapshot : snapshot with { Voice = voice }, voice);
     }
 
     // Verbatim copy of Orchestrator.ClaimAnnouncementsAsync (SPEC F144.1): a claim fault degrades to

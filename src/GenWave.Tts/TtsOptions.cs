@@ -9,14 +9,39 @@ public sealed class TtsOptions
     [Required, Url]
     public string Endpoint { get; set; } = "http://kokoro:8880";
 
+    /// <summary>The engine every speech render uses (SPEC F219.2): a name in <see cref="IVoiceEngineRegistry"/>. Live setting <c>Tts:Engine</c>.</summary>
+    [Required]
+    public string Engine { get; set; } = VoiceEngineProfiles.KokoroName;
+
     [Required]
     public string Format { get; set; } = "wav";
 
     [Range(1, int.MaxValue)]
     public int RenderBudgetSeconds { get; set; } = 30;
 
+    /// <summary>
+    /// Live setting <c>Tts:EngineRenderBudgets</c> (SPEC F219.6, T750a): a JSON object <c>{engine: seconds}</c>
+    /// that overrides an engine's own render budget. Blank means no overrides. Read through <see cref="EngineRenderBudget"/>.
+    /// </summary>
+    public string? EngineRenderBudgets { get; set; }
+
     [Required]
     public string CacheRoot { get; set; } = "/tts";
+
+    /// <summary>
+    /// The folder of voice-clone reference clips (SPEC F219.12/F219.28): one <c>&lt;slug&gt;.wav</c> per
+    /// <c>station.voice_clip</c> row. Deploy-time only (compose mounts the <c>voice-clips</c> volume here), the same class of
+    /// setting as <see cref="CacheRoot"/>.
+    /// </summary>
+    [Required]
+    public string ClipsRoot { get; set; } = "/clips";
+
+    /// <summary>
+    /// Where the shipped starter clips and their <c>starter.json</c> manifest live (SPEC F219.14): the api image carries them here,
+    /// read-only. Seeded into <see cref="ClipsRoot"/> on boot.
+    /// </summary>
+    [Required]
+    public string StarterClipsRoot { get; set; } = "/app/starter-clips";
 
     /// <summary>GC horizon for fresh-per-airing blurb audio under <c>blurbs/</c> (SPEC F34.6).</summary>
     [Range(1, int.MaxValue)]
@@ -24,7 +49,7 @@ public sealed class TtsOptions
 
     /// <summary>
     /// Digital-silence pause appended after each sentence on the KOKORO request path only
-    /// (gh-#116): <see cref="KokoroTtsSynthesizer"/> and <see cref="KokoroFallbackRenderer"/>
+    /// (gh-#116): <see cref="SpeechEngineClient"/> and <see cref="KokoroFallbackRenderer"/>
     /// append <c>[pause:Ns]</c> markup that kokoro-fastapi v0.6.0 honors as true silence — see
     /// <see cref="KokoroPauseMarkup"/> for the exact insertion contract and why Piper hops must
     /// never see a tag (piper-tts speaks it aloud). 0 disables insertion.
@@ -40,7 +65,7 @@ public sealed class TtsOptions
     ///
     /// Deliberately a SEPARATE key from <see cref="Endpoint"/>, never a re-point of it:
     /// <see cref="Endpoint"/> stays whatever <c>KokoroHealthProbe</c>/<c>KokoroVoiceLister</c>/
-    /// <see cref="KokoroTtsSynthesizer"/> already read it as — on the piper-only topology that is
+    /// <see cref="SpeechEngineClient"/> already read it as — on the piper-only topology that is
     /// deliberately the absent kokoro host (DEPLOYMENT.md's "expected on every piper-only box"
     /// note) — so those Kokoro-shaped probes are never fed a Piper response they would misread as
     /// healthy. That risk is real, not theoretical: <c>piper/server.py</c>'s <c>do_GET</c>

@@ -16,6 +16,7 @@
 // real ffmpeg mixing, real Postgres selectability, and the cookie/Content-Type pipeline all
 // need the live stack.
 
+using FakeRenderBudgetProvider = GenWave.TestSupport.Fakes.FakeRenderBudgetProvider;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -114,7 +115,8 @@ file static class SafeSegmentsControllerFactory
             adminLookup,
             showStore ?? new FakeShowStore(),
             new FakeOptionsMonitor<StationOptions>(stationOptions ?? DefaultStationOptions()),
-            new FakeOptionsMonitor<TtsOptions>(ttsOptions ?? new TtsOptions()),
+            KokoroVoiceResolver.Instance,
+            new FakeRenderBudgetProvider(TimeSpan.FromSeconds((ttsOptions ?? new TtsOptions()).RenderBudgetSeconds)),
             NullLogger<SafeSegmentsController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
@@ -357,6 +359,21 @@ public static class FeatureSafeSegmentsEndpointInProcess
             var badRequest = Assert.IsType<BadRequestObjectResult>(result);
             Assert.IsType<ProblemDetails>(badRequest.Value);
             Assert.Equal(0, author.CallCount);
+        }
+
+        [Fact]
+        public async Task AStationVoiceWithNoEntryForTheActiveEngineAndNoRequestVoiceReturns400()
+        {
+            var author = new FakeSafeSegmentAuthor();
+            var options = SafeSegmentsControllerFactory.DefaultStationOptions();
+            options.Voice = "{\"chatterbox\":\"reader-1\"}";
+            var controller = SafeSegmentsControllerFactory.Build(
+                author, new FakeSafeSegmentsLibraryRepository(1), new FakeSafeSegmentsAdminMediaLookup(), options);
+
+            var result = await controller.Create(
+                new SafeSegmentCreateRequest("Text", 1), CancellationToken.None);
+
+            Assert.IsType<BadRequestObjectResult>(result);
         }
 
         [Fact]

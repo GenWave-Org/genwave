@@ -18,8 +18,16 @@ import { AudienceSettingControl } from "./AudienceSettingControl";
 import { ChoiceSettingControl } from "./ChoiceSettingControl";
 import { CorrectionsSettingControl } from "./CorrectionsSettingControl";
 import { EngineByKindSettingControl } from "./EngineByKindSettingControl";
+import { VoiceEngineSettingControl } from "./VoiceEngineSettingControl";
+import { EngineRenderBudgetsSettingControl } from "./EngineRenderBudgetsSettingControl";
 import { MultiChoiceSettingControl } from "./MultiChoiceSettingControl";
 import { PersonaSettingControl } from "./PersonaSettingControl";
+import { VoiceDataProvider } from "@/lib/voice-data";
+import { CastVoicesSettingControl } from "./CastVoicesSettingControl";
+import {
+  AnnouncerVoiceSettingControl,
+  StationVoiceSettingControl,
+} from "./VoiceMapSettingControl";
 import { SafeScopeAvailabilityBadge } from "./SafeScopeAvailabilityBadge";
 import { SettingHelpFlyover } from "./SettingHelpFlyover";
 import { filterSectionsByQuery, groupSettingsBySection, type SettingsSection } from "./settings-sections";
@@ -113,11 +121,17 @@ const EMPTY_LIST_POLICIES: Record<string, EmptyListPolicy> = {
  */
 const SETTING_CONTROL_REGISTRY: Record<string, ComponentType<SettingControlProps>> = {
   "Tts:Corrections": CorrectionsSettingControl,
+  "Tts:Engine": VoiceEngineSettingControl,
   "Tts:EngineByKind": EngineByKindSettingControl,
+  "Tts:EngineRenderBudgets": EngineRenderBudgetsSettingControl,
   "Station:Audience": AudienceSettingControl,
   // T175 (SPEC F102.14, STORY-265) — ChoiceSettingControl is generic over `setting.choices`, not
   // Theme-specific; a future SettingKind.Choice setting registers the SAME component here.
   "Station:Theme": ChoiceSettingControl,
+  // F219.8/F219.10 — a voice per engine; falls back to the old control until the engine list loads.
+  "Station:Voice": StationVoiceSettingControl,
+  "Station:Ads:AnnouncerVoice": AnnouncerVoiceSettingControl,
+  "Station:Ads:CastVoices": CastVoicesSettingControl,
   // Station:IconPack (SPEC F130.4, STORY-337, PLAN T303) is deliberately NOT registered here
   // (review finding F1) — SettingField's own kind-chain fallback (`setting.kind === "choice"`)
   // already routes every unregistered Choice-kind setting to ChoiceSettingControl, the SAME
@@ -621,89 +635,91 @@ export function SettingsForm({
   const isSearching = searchQuery.trim() !== "";
 
   return (
-    <form onSubmit={(e) => { void handleSubmit(e); }} className="flex flex-col gap-6">
-      {status.kind === "noChanges" && (
-        <p role="status" aria-live="polite" className="text-[0.85rem] text-mute">
-          No changes to save.
-        </p>
-      )}
+    <VoiceDataProvider>
+      <form onSubmit={(e) => { void handleSubmit(e); }} className="flex flex-col gap-6">
+        {status.kind === "noChanges" && (
+          <p role="status" aria-live="polite" className="text-[0.85rem] text-mute">
+            No changes to save.
+          </p>
+        )}
 
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="settings-search" className="text-[0.82rem] font-semibold text-mute">
-          Search settings
-        </label>
-        <input
-          id="settings-search"
-          type="search"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.currentTarget.value)}
-          placeholder="Filter by label or help text"
-          className="h-9 w-full max-w-md rounded-[6px] border border-line bg-surface px-2 text-[0.85rem] text-ink"
-        />
-      </div>
-
-      <div className="flex flex-col gap-6 md:flex-row md:items-start">
-        {/* SPEC F205.5 AC6 — one link per RENDERED (post-filter) section, sticky on md+; below md
-            it stacks above the sections instead, un-stuck, and wraps rather than force a
-            horizontal scroll at phone width. */}
-        <nav
-          aria-label="Settings sections"
-          className="flex flex-row flex-wrap gap-x-4 gap-y-1 md:sticky md:top-4 md:w-44 md:shrink-0 md:flex-col md:flex-nowrap md:gap-1 md:self-start"
-        >
-          {visibleSections.map((section) => (
-            <a
-              key={section.id}
-              href={`#settings-section-${section.id}`}
-              className="text-[0.82rem] text-mute hover:text-ink"
-            >
-              {section.label}
-            </a>
-          ))}
-        </nav>
-
-        <div className="flex min-w-0 flex-1 flex-col gap-6">
-          {visibleSections.length === 0 ? (
-            // T577 round 2 review F4 — only while actually searching: an empty `settings` array
-            // with no search text renders nothing at all, matching pre-search-box HEAD.
-            isSearching && <p className="text-[0.85rem] text-mute">No settings match</p>
-          ) : (
-            visibleSections.map((section) => (
-              <SectionCard key={section.id} id={`settings-section-${section.id}`} title={section.label}>
-                {section.settings.map((setting) => (
-                  <SettingField
-                    key={setting.key}
-                    setting={setting}
-                    value={values[setting.key] ?? ""}
-                    savedValue={original[setting.key] ?? ""}
-                    errors={fieldErrors[setting.key] ?? []}
-                    isPending={isPending}
-                    libraries={libraries}
-                    isSafeScopeField={setting.key === SAFE_SCOPE_KEY}
-                    safeScopeEffectivelyEmpty={safeScopeEffectivelyEmpty}
-                    rotationCouplingNotice={setting.key === ARTIST_SEPARATION_KEY ? rotationCouplingNotice : null}
-                    timeZone={timeZone}
-                    onTextChange={handleTextChange(setting.key)}
-                    onCheckboxChange={handleCheckboxChange(setting.key)}
-                    onMultiSelectChange={handleMultiSelectChange(setting.key)}
-                    onSemanticChange={handleSemanticChange(setting.key)}
-                  />
-                ))}
-              </SectionCard>
-            ))
-          )}
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="settings-search" className="text-[0.82rem] font-semibold text-mute">
+            Search settings
+          </label>
+          <input
+            id="settings-search"
+            type="search"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.currentTarget.value)}
+            placeholder="Filter by label or help text"
+            className="h-9 w-full max-w-md rounded-[6px] border border-line bg-surface px-2 text-[0.85rem] text-ink"
+          />
         </div>
-      </div>
 
-      {/* T145 review F3, T576 — mounted at the end of the page, after every section card: AC1
-          calls for a TTS surface, and this keeps SettingsForm agnostic of which dedicated-API
-          surface a page wants (the timeZone injection precedent) rather than importing
-          PronunciationRulesControl directly. T577 — hidden while the search box is filtering. */}
-      {!isSearching && trailingContent}
+        <div className="flex flex-col gap-6 md:flex-row md:items-start">
+          {/* SPEC F205.5 AC6 — one link per RENDERED (post-filter) section, sticky on md+; below md
+              it stacks above the sections instead, un-stuck, and wraps rather than force a
+              horizontal scroll at phone width. */}
+          <nav
+            aria-label="Settings sections"
+            className="flex flex-row flex-wrap gap-x-4 gap-y-1 md:sticky md:top-4 md:w-44 md:shrink-0 md:flex-col md:flex-nowrap md:gap-1 md:self-start"
+          >
+            {visibleSections.map((section) => (
+              <a
+                key={section.id}
+                href={`#settings-section-${section.id}`}
+                className="text-[0.82rem] text-mute hover:text-ink"
+              >
+                {section.label}
+              </a>
+            ))}
+          </nav>
 
-      <Button type="submit" disabled={isPending} className="self-start">
-        {isPending ? "Saving…" : "Save settings"}
-      </Button>
-    </form>
+          <div className="flex min-w-0 flex-1 flex-col gap-6">
+            {visibleSections.length === 0 ? (
+              // T577 round 2 review F4 — only while actually searching: an empty `settings` array
+              // with no search text renders nothing at all, matching pre-search-box HEAD.
+              isSearching && <p className="text-[0.85rem] text-mute">No settings match</p>
+            ) : (
+              visibleSections.map((section) => (
+                <SectionCard key={section.id} id={`settings-section-${section.id}`} title={section.label}>
+                  {section.settings.map((setting) => (
+                    <SettingField
+                      key={setting.key}
+                      setting={setting}
+                      value={values[setting.key] ?? ""}
+                      savedValue={original[setting.key] ?? ""}
+                      errors={fieldErrors[setting.key] ?? []}
+                      isPending={isPending}
+                      libraries={libraries}
+                      isSafeScopeField={setting.key === SAFE_SCOPE_KEY}
+                      safeScopeEffectivelyEmpty={safeScopeEffectivelyEmpty}
+                      rotationCouplingNotice={setting.key === ARTIST_SEPARATION_KEY ? rotationCouplingNotice : null}
+                      timeZone={timeZone}
+                      onTextChange={handleTextChange(setting.key)}
+                      onCheckboxChange={handleCheckboxChange(setting.key)}
+                      onMultiSelectChange={handleMultiSelectChange(setting.key)}
+                      onSemanticChange={handleSemanticChange(setting.key)}
+                    />
+                  ))}
+                </SectionCard>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* T145 review F3, T576 — mounted at the end of the page, after every section card: AC1
+            calls for a TTS surface, and this keeps SettingsForm agnostic of which dedicated-API
+            surface a page wants (the timeZone injection precedent) rather than importing
+            PronunciationRulesControl directly. T577 — hidden while the search box is filtering. */}
+        {!isSearching && trailingContent}
+
+        <Button type="submit" disabled={isPending} className="self-start">
+          {isPending ? "Saving…" : "Save settings"}
+        </Button>
+      </form>
+    </VoiceDataProvider>
   );
 }
 
@@ -822,6 +838,7 @@ function SettingField({
           onChange={onSemanticChange}
           disabled={isPending}
           isDirty={value !== savedValue}
+          savedValue={savedValue}
           choices={setting.choices}
           choicesStale={setting.choicesStale}
           choicesFailed={setting.choicesFailed}
@@ -975,7 +992,7 @@ function ThemeProvenanceList({
   choices,
   timeZone,
 }: {
-  choices: readonly SettingChoice[] | undefined;
+  choices: readonly SettingChoice[] | null | undefined;
   timeZone?: string;
 }): ReactNode {
   const imported = (choices ?? []).filter(

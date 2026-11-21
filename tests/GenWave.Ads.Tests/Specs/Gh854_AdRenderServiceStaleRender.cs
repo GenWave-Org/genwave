@@ -26,7 +26,8 @@ public static class Gh854FeatureAdRenderServiceStaleReRender
     static AdLiveSettings LiveSettings() =>
         new(
             AnnouncerVoice: "", CastVoices: [], BedFadeMs: AdLiveSettingsReader.DefaultBedFadeMs,
-            BedDuckDb: AdLiveSettingsReader.DefaultBedDuckDb, TargetLufs: AdLiveSettingsReader.DefaultTargetLufs);
+            BedDuckDb: AdLiveSettingsReader.DefaultBedDuckDb, TargetLufs: AdLiveSettingsReader.DefaultTargetLufs,
+            StationVoice: "", ActiveEngine: "kokoro");
 
     /// <summary>Wires a REAL <see cref="AdRenderService"/> against fakes at every I/O seam — the
     /// Story391_AdRenderService.cs precedent, copied for this file's own facts.</summary>
@@ -42,7 +43,7 @@ public static class Gh854FeatureAdRenderServiceStaleReRender
         var locatorRoots = new AdSpotLocatorRoots("/media", "/authored");
 
         var service = new AdRenderService(
-            author, store, adminLookup, libraries, stationIdentity, adsOptions, locatorRoots,
+            author, store, adminLookup, libraries, stationIdentity, AdTestVoices.SpeakersFor(stationIdentity), adsOptions, locatorRoots,
             new NoOpLogger<AdRenderService>());
 
         return (service, author, store, adminLookup);
@@ -63,7 +64,7 @@ public static class Gh854FeatureAdRenderServiceStaleReRender
 
         [Fact]
         public void MarkReadyCarriesTheCurrentRenderVersion()
-            => Assert.Equal(AdRenderVersion.Current, built.Store.LastMarkReadyRenderVersion);
+            => Assert.Equal(AdRenderMarker.For(LiveSettings()), built.Store.LastMarkReadyRenderVersion);
     }
 
     // ---------------------------------------------------------------------
@@ -84,7 +85,7 @@ public static class Gh854FeatureAdRenderServiceStaleReRender
 
         [Fact]
         public void SwapsTheSpotsOldMediaForTheNewOneAtTheCurrentVersion()
-            => Assert.Equal((20L, 500L, 999L, AdRenderVersion.Current), (
+            => Assert.Equal((20L, 500L, 999L, AdRenderMarker.For(LiveSettings())), (
                 built.Store.LastSwapSpotId, built.Store.LastSwapOldMediaId, built.Store.LastSwapNewMediaId, built.Store.LastSwapRenderVersion));
 
         [Fact]

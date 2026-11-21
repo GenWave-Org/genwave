@@ -1,6 +1,7 @@
 using System.Text.Json;
 using GenWave.Core.Abstractions;
 using GenWave.Host.Theming;
+using GenWave.Tts;
 
 namespace GenWave.Host.Configuration;
 
@@ -184,7 +185,7 @@ internal sealed class SettingChoiceResolver(
             return resolved;
 
         if (allowed.Kind != SettingKind.MultiChoice)
-            return AppendMissing(resolved, [savedValue]);
+            return AppendMissing(allowed.Key, resolved, [savedValue]);
 
         string?[] savedSlugs;
         try
@@ -200,7 +201,7 @@ internal sealed class SettingChoiceResolver(
             return resolved;
         }
 
-        return AppendMissing(resolved, savedSlugs);
+        return AppendMissing(allowed.Key, resolved, savedSlugs);
     }
 
     /// <summary>Appends whichever entries of <paramref name="saved"/> are missing from
@@ -212,7 +213,7 @@ internal sealed class SettingChoiceResolver(
     /// SPEC F205.7e's "A blank value is never appended" applies regardless of source, and a slug
     /// repeated in the saved array (a hand-edited or historical row) must still surface as exactly ONE
     /// "not found" choice, not one per repetition.</summary>
-    ResolvedChoices AppendMissing(ResolvedChoices resolved, IEnumerable<string?> saved)
+    ResolvedChoices AppendMissing(string key, ResolvedChoices resolved, IEnumerable<string?> saved)
     {
         var missing = saved
             .Where(value => !string.IsNullOrWhiteSpace(value))
@@ -224,10 +225,25 @@ internal sealed class SettingChoiceResolver(
             return resolved;
 
         var appended = resolved.Choices
-            .Concat(missing.Select(value => new SettingChoice(value, settingCopy.NotFoundLabel(value))))
+            .Concat(missing.Select(value => new SettingChoice(value, SavedValueLabel(key, value))))
             .ToList();
         return resolved with { Choices = appended };
     }
+
+    /// <summary>
+    /// The label for a saved value the list does not carry. A voice setting written as an engine map (SPEC F219.8)
+    /// is a real value, not a missing one, so it reads in plain words (<c>One voice per engine (kokoro: af_nova,
+    /// chatterbox: nova)</c>) instead of the raw JSON with "(not found)". Only the voice settings take a map.
+    /// </summary>
+    static readonly HashSet<string> VoiceSettingKeys = new(StringComparer.Ordinal)
+    {
+        VoiceMap.StationVoiceSetting, VoiceMap.AnnouncerVoiceSetting, VoiceMap.CastVoicesSetting,
+    };
+
+    string SavedValueLabel(string key, string value) =>
+        VoiceSettingKeys.Contains(key) && VoiceMap.IsMapSetting(value) && VoiceMap.TryParseSetting(value) is { } map
+            ? $"One voice per engine ({string.Join(", ", map.Engines.Order(StringComparer.OrdinalIgnoreCase).Select(engine => $"{engine}: {map.VoiceFor(engine)}"))})"
+            : settingCopy.NotFoundLabel(value);
 
     /// <summary>Moved verbatim from <c>SettingsController.IconPackChoicesAsync</c> (PLAN T303) — see
     /// that method's former remarks for why <see cref="iconPackStore"/> is a required constructor

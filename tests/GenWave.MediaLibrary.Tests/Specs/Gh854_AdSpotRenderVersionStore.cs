@@ -14,10 +14,11 @@ namespace GenWave.MediaLibrary.Tests.Specs;
 
 public static class Gh854FeatureAdSpotRenderVersionStore
 {
-    // CurrentVersion mirrors GenWave.Ads.AdRenderVersion.Current — this test project carries no
-    // reference to GenWave.Ads (MediaLibrary never depends on Ads), so the value is pinned here by
-    // convention, the same posture Gh854_RenderVersionMigrationMirror.cs takes toward db/48 vs db/06.
-    const int CurrentVersion = 1;
+    // CurrentVersion stands in for the current ad render marker (GenWave.Ads.AdRenderMarker.For, a hashed
+    // 31-bit value held in render_version; legacy rows hold 0/1). This test project carries no reference to
+    // GenWave.Ads (MediaLibrary never depends on Ads), and the store only compares the value for inequality,
+    // so any value above the legacy range stands in. Same posture as Gh854_RenderVersionMigrationMirror.cs.
+    const int CurrentVersion = 70_000;
 
     static async Task SetStateChangedAtAsync(DatabaseFixture db, long id, DateTime stateChangedAt)
     {
@@ -130,6 +131,154 @@ public static class Gh854FeatureAdSpotRenderVersionStore
         public void NothingComesBack()
             // An up-to-date row is never a re-render candidate.
             => Assert.Null(found);
+    }
+
+    // T764 / SPEC F219.23 — the Status count: the candidate pick's predicate, minus spots the worker skips as operator intent.
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioTheStaleCountMatchesTheCandidates(DatabaseFixture db) : IAsyncLifetime
+    {
+        readonly AdSpotRepository repo = Harness.AdSpotRepo(db);
+        int count;
+
+        public async Task InitializeAsync()
+        {
+            // Given two stale ready spots and one at the current marker, all on airable media...
+            await db.ResetAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
+            await Harness.SeedReadySpotAsync(repo, sponsorId, await SeedAuthoredMediaAsync(db, eligible: true), renderVersion: 0);
+            await Harness.SeedReadySpotAsync(repo, sponsorId, await SeedAuthoredMediaAsync(db, eligible: true), renderVersion: CurrentVersion + 1_000);
+            await Harness.SeedReadySpotAsync(repo, sponsorId, await SeedAuthoredMediaAsync(db, eligible: true), renderVersion: CurrentVersion);
+
+            // When the stale ones are counted...
+            count = await repo.CountStaleReadyAsync(CurrentVersion, CancellationToken.None);
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void OnlyTheStaleOnesAreCounted() => Assert.Equal(2, count);
+    }
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioNothingStaleCountsZero(DatabaseFixture db) : IAsyncLifetime
+    {
+        readonly AdSpotRepository repo = Harness.AdSpotRepo(db);
+        int count = -1;
+
+        public async Task InitializeAsync()
+        {
+            await db.ResetAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
+            await Harness.SeedReadySpotAsync(repo, sponsorId, await SeedAuthoredMediaAsync(db, eligible: true), renderVersion: CurrentVersion);
+            count = await repo.CountStaleReadyAsync(CurrentVersion, CancellationToken.None);
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void TheCountIsZero() => Assert.Equal(0, count);
+    }
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioAStaleSpotWhoseMediaIsSwitchedOffIsNotCounted(DatabaseFixture db) : IAsyncLifetime
+    {
+        readonly AdSpotRepository repo = Harness.AdSpotRepo(db);
+        int count = -1;
+
+        public async Task InitializeAsync()
+        {
+            // Given a stale ready spot whose media Dean switched off (the worker leaves it as operator intent)...
+            await db.ResetAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
+            await Harness.SeedReadySpotAsync(repo, sponsorId, await SeedAuthoredMediaAsync(db, eligible: false), renderVersion: 0);
+            count = await repo.CountStaleReadyAsync(CurrentVersion, CancellationToken.None);
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void TheCountIsZero() => Assert.Equal(0, count);
+    }
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioAStaleSpotWhoseMediaIsNeverPlayIsNotCounted(DatabaseFixture db) : IAsyncLifetime
+    {
+        readonly AdSpotRepository repo = Harness.AdSpotRepo(db);
+        int count = -1;
+
+        public async Task InitializeAsync()
+        {
+            await db.ResetAsync();
+            await db.ResetAdsAndShowsAsync();
+            var mediaId = await SeedAuthoredMediaAsync(db, eligible: true);
+            await new MediaRatingRepository(db.DataSource, new FakeSafeScopeProvider())
+                .SetNeverPlayAsync(mediaId.ToString(), neverPlay: true, CancellationToken.None);
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
+            await Harness.SeedReadySpotAsync(repo, sponsorId, mediaId, renderVersion: 0);
+            count = await repo.CountStaleReadyAsync(CurrentVersion, CancellationToken.None);
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void TheCountIsZero() => Assert.Equal(0, count);
+    }
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioAStaleSpotWhoseMediaIsGoneIsNotCounted(DatabaseFixture db) : IAsyncLifetime
+    {
+        readonly AdSpotRepository repo = Harness.AdSpotRepo(db);
+        int count = -1;
+
+        public async Task InitializeAsync()
+        {
+            await db.ResetAsync();
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
+            await Harness.SeedReadySpotAsync(repo, sponsorId, mediaId: 987_654, renderVersion: 0);
+            count = await repo.CountStaleReadyAsync(CurrentVersion, CancellationToken.None);
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void TheCountIsZero() => Assert.Equal(0, count);
+    }
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioARowStampedAboveTheCurrentMarkerIsACandidate(DatabaseFixture db) : IAsyncLifetime
+    {
+        readonly AdSpotRepository repo = Harness.AdSpotRepo(db);
+        long spotId;
+        AdSpot? found;
+
+        public async Task InitializeAsync()
+        {
+            // Given a ready spot stamped with a marker numerically GREATER than the current one (a hashed
+            // marker is not ordered: a spot rendered on another engine can land above or below)...
+            await db.ResetAdsAndShowsAsync();
+            var sponsorId = await Harness.SeedSponsorAsync(db, "Bramble & Fitch");
+            spotId = await Harness.SeedReadySpotAsync(repo, sponsorId, mediaId: 500, renderVersion: CurrentVersion + 1_000);
+
+            // When the worker looks for a stale candidate...
+            found = await repo.FindStaleReadyAsync(CurrentVersion, excludeIds: [], CancellationToken.None);
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void TheRowIsFound()
+            // Then it is stale all the same: the rule is "differs from", never "is behind".
+            => Assert.Equal((long?)spotId, found?.Id);
     }
 
     [Collection(DatabaseCollection.Name)]

@@ -173,7 +173,8 @@ public interface IAdSpotStore
     /// happened. Total: a row not currently <see cref="AdState.Rendering"/> (already handled by a
     /// different call, or never claimed) leaves the guarded <c>WHERE</c> matching nothing — reports
     /// <see langword="false"/>, never throws. Clears the gh-#865 auto re-render note: an
-    /// operator-driven render supersedes it.
+    /// operator-driven render supersedes it. <paramref name="renderVersion"/> is the ad render marker (a hashed
+    /// engine and voice digest, SPEC F219.21), stored in <c>render_version</c> and compared for inequality only.
     /// </summary>
     Task<bool> MarkReadyAsync(long id, long mediaId, int renderVersion, CancellationToken ct);
 
@@ -187,14 +188,14 @@ public interface IAdSpotStore
     Task<bool> MarkFailedAsync(long id, string failReason, CancellationToken ct);
 
     /// <summary>
-    /// The oldest <see cref="AdState.Ready"/> spot whose <see cref="AdSpot.RenderVersion"/> trails
-    /// <paramref name="currentVersion"/> (gh-#854) — the background re-render backlog's own read,
+    /// The oldest <see cref="AdState.Ready"/> spot whose <see cref="AdSpot.RenderVersion"/> differs from
+    /// <paramref name="currentMarker"/> (gh-#854; the marker also folds engine and voices, SPEC F219.21) — the background re-render backlog's own read,
     /// oldest <c>state_changed_at</c> first. <paramref name="excludeIds"/> withholds spots the worker
     /// already gave up on this process lifetime (a render failure never retries in the same run) — the
     /// <see cref="ListAiringExclusionsAsync"/> array-parameter precedent, one seam over. Returns
     /// <see langword="null"/> when the backlog is empty, never an error.
     /// </summary>
-    Task<AdSpot?> FindStaleReadyAsync(int currentVersion, IReadOnlyCollection<long> excludeIds, CancellationToken ct);
+    Task<AdSpot?> FindStaleReadyAsync(int currentMarker, IReadOnlyCollection<long> excludeIds, CancellationToken ct);
 
     /// <summary>
     /// Atomically swaps a re-rendered spot onto <paramref name="newMediaId"/>; retires
@@ -238,6 +239,7 @@ public interface IAdSpotStore
     /// The same UPDATE stamps <c>auto_rerendered_at = now()</c> and
     /// <c>auto_rerendered_on_version = </c><paramref name="appVersion"/> (gh-#865, db/49) — the ad
     /// page's "Re-rendered automatically on vX" note; <see cref="MarkReadyAsync"/> clears both.
+    /// <paramref name="renderVersion"/> is the ad render marker, as for <see cref="MarkReadyAsync"/>.
     /// </summary>
     Task<bool> SwapRenderedMediaAsync(
         long id, long oldMediaId, long newMediaId, int renderVersion, string appVersion, CancellationToken ct);

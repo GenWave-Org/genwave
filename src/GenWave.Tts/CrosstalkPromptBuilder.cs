@@ -95,7 +95,7 @@ static class CrosstalkPromptBuilder
     /// </summary>
     public static string BuildSystemPrompt(
         PersonaCard hostCard, PersonaCard neighborCard, int durationTargetSeconds, DateTimeOffset stationLocalNow,
-        QuirkSelection? hostQuirks = null, QuirkSelection? neighborQuirks = null)
+        QuirkSelection? hostQuirks = null, QuirkSelection? neighborQuirks = null, SoundTagOffer? soundTags = null)
     {
         // Same spoken-rate estimate CrosstalkScriptParser.Parse applies to an accepted script — the
         // STATED word budget asks for what the duration gate will accept, no headroom added (unlike
@@ -115,6 +115,8 @@ static class CrosstalkPromptBuilder
             $"Across the WHOLE exchange use no more than approximately {wordBudget} words total. " +
             "Both DJs must speak at least once. Keep each line short and conversational, no commas, " +
             "no stage directions, no emoji, no markdown formatting. " +
+            // SPEC F219.16: tags are listed only when offered; null keeps today's bytes.
+            (soundTags is null ? "" : soundTags.ExchangePromptLine + " ") +
             AntiFabricationClause + " " + LlmPromptBuilder.BuildClockGuardLine(stationLocalNow) + " " +
             $"To have one speaker briefly cut in over the other's line, tag that one line " +
             $"\"{CrosstalkScriptParser.HostTag} {CrosstalkScriptParser.InterjectionMarker}: <line>\" " +

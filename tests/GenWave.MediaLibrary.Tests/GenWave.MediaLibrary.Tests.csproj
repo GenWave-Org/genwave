@@ -39,6 +39,8 @@
     <Compile Include="..\GenWave.Host.Tests\Support\ScriptProcess.cs" Link="Support\ScriptProcess.cs" />
     <Compile Include="..\GenWave.Host.Tests\Support\RepoRootLocator.cs" Link="Support\RepoRootLocator.cs" />
     <Compile Include="..\GenWave.Host.Tests\Support\TempDir.cs" Link="Support\TempDir.cs" />
+    <!-- T755: Story557 pins the db/06 and db/53 voice_clip block text-equal with the shared block reader. -->
+    <Compile Include="..\GenWave.Host.Tests\Support\MirroredSqlBlock.cs" Link="Support\MirroredSqlBlock.cs" />
     <!-- T591 review F5: MigrateShDatabase's own compose/port plumbing, shared rather than a third copy
          of what DatabaseFixture.cs and EphemeralStationDatabase.cs each already carry. -->
     <Compile Include="..\GenWave.Host.Tests\Support\ComposeProcess.cs" Link="Support\ComposeProcess.cs" />

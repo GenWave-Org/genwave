@@ -1,29 +1,17 @@
 namespace GenWave.Tts;
 
-using System.Net.Http.Json;
-using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 
 /// <summary>
-/// Typed-HttpClient proxy for Kokoro's <c>GET /v1/audio/voices</c> (SPEC F29.4). The endpoint comes
-/// from the shared <c>Tts:Endpoint</c> option — the same value <see cref="KokoroTtsSynthesizer"/>
-/// uses — so there is no separate config key for the voices call.
-///
-/// No boot-frozen <see cref="HttpClient.BaseAddress"/> (SPEC F36.1–F36.4): <c>Tts:Endpoint</c> is
-/// read from <see cref="IOptionsMonitor{TOptions}.CurrentValue"/> and an absolute URI is built per
-/// call (<see cref="EndpointUri"/>), so a live PUT to <c>Tts:Endpoint</c> applies to the very next
-/// <c>GET /api/voices</c> with no api restart.
+/// Kokoro's <c>GET /v1/audio/voices</c> (SPEC F29.4), through <see cref="SpeechEngineClient"/> (PLAN T749)
+/// at the registry's <c>kokoro</c> engine, the same entry the render chain uses. The registry is read per
+/// call (SPEC F36.1–F36.4), so a live <c>Tts:Endpoint</c> / <c>Tts:Engines:kokoro</c> change applies to the
+/// very next <c>GET /api/voices</c> with no api restart. No kokoro engine configured means no voices.
 /// </summary>
-public sealed class KokoroVoiceLister(HttpClient http, IOptionsMonitor<TtsOptions> optionsMonitor) : ITtsVoiceLister
+public sealed class KokoroVoiceLister(SpeechEngineClient client, IVoiceEngineRegistry registry) : ITtsVoiceLister
 {
-    public async Task<IReadOnlyList<string>> ListVoicesAsync(CancellationToken ct)
-    {
-        var cfg = optionsMonitor.CurrentValue;
-        var requestUri = EndpointUri.Combine(cfg.Endpoint, "/v1/audio/voices");
-        var response = await http.GetAsync(requestUri, ct);
-        response.EnsureSuccessStatusCode();   // throws HttpRequestException on non-2xx
-
-        var payload = await response.Content.ReadFromJsonAsync<KokoroVoicesResponse>(ct);
-        return payload?.VoiceIds() ?? [];
-    }
+    public Task<IReadOnlyList<string>> ListVoicesAsync(CancellationToken ct) =>
+        registry.Get(VoiceEngineProfiles.KokoroName) is { } kokoro
+            ? client.ListVoicesAsync(kokoro, ct)
+            : Task.FromResult<IReadOnlyList<string>>([]);
 }

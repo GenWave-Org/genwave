@@ -33,9 +33,10 @@ public static class FeaturePreviewKeyChangesWhenAnyInputChanges
 
     static AdLiveSettings MakeLive(
         string announcerVoice = "af_heart", IReadOnlyList<string>? castVoices = null, int bedFadeMs = 300,
-        double bedDuckDb = -12.0, double targetLufs = -16.0) =>
+        double bedDuckDb = -12.0, double targetLufs = -16.0, string stationVoice = "af_bella",
+        string activeEngine = "kokoro") =>
         new(announcerVoice, castVoices ?? ["voice_a", "voice_b"], BedFadeMs: bedFadeMs, BedDuckDb: bedDuckDb,
-            TargetLufs: targetLufs);
+            TargetLufs: targetLufs, StationVoice: stationVoice, ActiveEngine: activeEngine);
 
     static string BaseKey() => AdPreviewKey.Compute(MakeSpot(), MakeSponsor(), MakeLive());
 

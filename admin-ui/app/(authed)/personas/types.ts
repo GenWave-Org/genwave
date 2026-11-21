@@ -15,6 +15,11 @@ export interface PersonaDto {
   backstory: string;
   style: string;
   voice: string;
+  /** The DJ's voice per engine, `{engine: voiceId}` (SPEC F219.10); the server always sends it. */
+  voices?: Record<string, string>;
+  /** The engine `voice` belongs to (`voices[voiceEngine]` follows it on save); the server always sends it. Optional here
+   * only so a fixture that predates it still types — absent reads as kokoro. */
+  voiceEngine?: string;
   slug: string;
   importedFrom: string | null;
   importedAt: string | null;

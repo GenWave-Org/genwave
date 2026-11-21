@@ -142,7 +142,7 @@ public static class FeatureAcceptanceGate01RenderAheadGracefulSkipToMusic
         var ttsOptsMonitor = new FakeOptionsMonitor<TtsOptions>(ttsOptionsValue);
 
         var http = new HttpClient();
-        var synthesizer = new KokoroTtsSynthesizer(http, ttsOptsMonitor);
+        var synthesizer = TestKokoro.Synthesizer(http, ttsOptsMonitor);
         var analyzer    = new FakeLoudnessAnalyzer();
 
         var correctionsProvider = new SpeechCorrectionProvider(
@@ -169,7 +169,7 @@ public static class FeatureAcceptanceGate01RenderAheadGracefulSkipToMusic
             personaPronunciationCache,
             personaPaceCache,
             ttsOptsMonitor,
-            NullLogger<TtsSegmentSource>.Instance);
+            NullLogger<TtsSegmentSource>.Instance, new ActiveVoiceEngine(TestVoiceEngines.With("kokoro"), ttsOptsMonitor));
 
         var identityProvider = new FakeStationIdentityProvider(new StationIdentity(
             Id:    "test-station",

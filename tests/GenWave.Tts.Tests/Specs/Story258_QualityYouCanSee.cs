@@ -45,7 +45,7 @@ public static class FeatureQualityYouCanSee
             NoCorrections.PersonaPronunciationCache(),
             NoCorrections.PersonaPaceCache(),
             new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
-            logger);
+            logger, TestActiveEngine.Named("kokoro"));
 
     public static class ScenarioEveryEpicFactIsAtInformation
     {
@@ -96,7 +96,7 @@ public static class FeatureQualityYouCanSee
                 new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3, 4]) }));
             try
             {
-                var kokoro = new KokoroTtsSynthesizer(
+                var kokoro = TestKokoro.Synthesizer(
                     new HttpClient(handler),
                     new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
                     reporter);
@@ -106,7 +106,8 @@ public static class FeatureQualityYouCanSee
                     NullLogger<SpeechCorrectionProvider>.Instance);
                 var normalizingLogger = new CapturingLogger<NormalizingTtsSynthesizer>();
                 var normalizingSynth = new NormalizingTtsSynthesizer(
-                    kokoro, corrections, NoCorrections.PersonaCache(), new CorrectionsFiredStats(), normalizingLogger);
+                    kokoro, corrections, NoCorrections.PersonaCache(), new CorrectionsFiredStats(), normalizingLogger,
+                TestSoundTagGate.Kokoro);
                 var pronunciations = new PronunciationRuleProvider(
                     new TestOptionsMonitor<TtsPronunciationsOptions>(
                         new TtsPronunciationsOptions { Pronunciations = """[{"pattern":"Reykjavik","word":"Reykjavik","ipa":"/reykjavikIpa/"}]""" }),
@@ -118,7 +119,7 @@ public static class FeatureQualityYouCanSee
                     corrections, NoCorrections.PersonaCache(), pronunciations, NoCorrections.PersonaPronunciationCache(),
                     NoCorrections.PersonaPaceCache(),
                     new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
-                    sourceLogger);
+                    sourceLogger, TestActiveEngine.Named("kokoro"));
 
                 await source.RenderAsync(Request("Rusty Strings"), CancellationToken.None);
 

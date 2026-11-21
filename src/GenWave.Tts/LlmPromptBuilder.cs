@@ -89,7 +89,8 @@ static class LlmPromptBuilder
     /// one above.)
     /// </para>
     /// </summary>
-    public static string BuildSystemPrompt(string? personaSection, int maxCopyChars, DateTimeOffset? stationLocalNow = null)
+    public static string BuildSystemPrompt(
+        string? personaSection, int maxCopyChars, DateTimeOffset? stationLocalNow = null, SoundTagOffer? soundTags = null)
     {
         // gh-#152: "personality-neutral" and a persona section's "Style: bubbly, energetic,
         // expressive" cancelled each other inside the SAME prompt. The neutral framing now applies
@@ -136,7 +137,10 @@ static class LlmPromptBuilder
             "mid-line. When two ideas need separating end the sentence and start a new one. " +
             "When the words should run together leave the comma out entirely. " +
             "Plain spoken words only - no " +
-            "stage directions, no emoji, no markdown formatting, no sound-effect cues. You may add " +
+            "stage directions, no emoji, no markdown formatting" +
+            // SPEC F219.16: an offer replaces "no sound-effect cues"; null keeps today's bytes.
+            (soundTags is null ? ", no sound-effect cues. " : ". " + soundTags.PromptLine + " ") +
+            "You may add " +
             "color about the era or genre, but never state specific facts about the artist or track " +
             "that you were not given, and never alter the artist's name or the track's title - when " +
             "unsure, stay with what the prompt provides. Refer to artists and bands as " +

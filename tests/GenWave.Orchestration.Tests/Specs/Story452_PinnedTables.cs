@@ -69,7 +69,7 @@ static class Story452PinnedTables
         "(none)", // O9
     ];
 
-    public static readonly string[] EventKinds = ["HandoffPieceDropped"];
+    public static readonly string[] EventKinds = ["HandoffPieceDropped", "TalkDroppedLate"];
 
     /// <summary>AC6 (PLAN T522) — one <see cref="BreakPlan.ToTrace"/> line-block per unit, in build order.</summary>
     public static readonly string[] Traces =

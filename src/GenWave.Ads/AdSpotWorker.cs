@@ -80,12 +80,14 @@ public sealed class AdSpotWorker(
     IAuthoredCatalogWriter catalogWriter,
     IAdminMediaLookup adminLookup,
     AdSpotStamper stamper,
+    AdSpeakerVoices speakerVoices,
     IOnAirRenderSignal onAirRenderSignal,
     IBoothLogAppender boothLog,
     IAppVersion appVersion,
     IOptionsMonitor<AdsOptions> adsOptions,
     IOptionsMonitor<LlmOptions> llmOptions,
     IConfiguration configuration,
+    IActiveVoiceEngine activeEngine,
     TimeProvider timeProvider,
     ILogger<AdSpotWorker> logger) : BackgroundService
 {
@@ -150,7 +152,7 @@ public sealed class AdSpotWorker(
         try
         {
             var settings = AdStockSettingsReader.Read(configuration);
-            var liveSettings = AdLiveSettingsReader.Read(configuration);
+            var liveSettings = AdLiveSettingsReader.Read(configuration, activeEngine);
 
             // gh-#854 — drains db/48's own pending_retire_media_id/pending_confirm_media_id columns
             // before anything else: cheap (usually empty), and together they are what makes a swap's own
@@ -160,7 +162,7 @@ public sealed class AdSpotWorker(
             await DrainPendingConfirmsAsync(stoppingToken);
             await RepairReadyEligibilityAsync(stoppingToken);
             await RetireStaleAsync(settings.RefreshDays, stoppingToken);
-            await RefillIfNeededAsync(settings, stoppingToken);
+            await RefillIfNeededAsync(settings, liveSettings, stoppingToken);
             var approvedQueueEmpty = await RenderDueAsync(liveSettings, stoppingToken);
 
             // gh-#854 — the background re-render pass only ever gets the leftover budget: new/approved
@@ -365,10 +367,15 @@ public sealed class AdSpotWorker(
     /// <see cref="IAdBriefStore.SampleEnabledAsync"/> already excludes a paused sponsor's briefs (SPEC
     /// F173.2), so reaching this line at all already proves the sampled brief belongs to an unpaused
     /// sponsor.</summary>
-    async Task RefillIfNeededAsync(AdStockSettings settings, CancellationToken ct)
+    async Task RefillIfNeededAsync(AdStockSettings settings, AdLiveSettings liveSettings, CancellationToken ct)
     {
         var stockCount = await spotStore.CountStockGeneratedAsync(ct);
         if (stockCount >= settings.TargetCount)
+            return;
+
+        // SPEC F219.9: a configured ad voice with none on the active engine could only make spots that fail to
+        // render (and Failed spots do not count toward stock), so no spot is written until the voices resolve.
+        if (!speakerVoices.ConfiguredVoicesResolve(liveSettings))
             return;
 
         var brief = await briefStore.SampleEnabledAsync(ct);
@@ -576,7 +583,7 @@ public sealed class AdSpotWorker(
         if (onAirRenderSignal.InFlight)
             return;
 
-        if (await spotStore.FindStaleReadyAsync(AdRenderVersion.Current, staleReRenderSkip, stoppingToken) is not { } spot)
+        if (await spotStore.FindStaleReadyAsync(AdRenderMarker.For(liveSettings), staleReRenderSkip, stoppingToken) is not { } spot)
         {
             if (!staleBacklogAnnouncedEmpty)
             {
@@ -603,8 +610,7 @@ public sealed class AdSpotWorker(
         // before the swap itself; only a check made at that exact moment is honest against an operator
         // disabling the row mid-render, so this upfront check is never the guard, purely a wasted-render
         // avoidance.
-        if (await adminLookup.GetByIdWithLibraryAsync(oldMediaId, stoppingToken) is not { } oldMedia
-            || !oldMedia.Row.Eligible || oldMedia.Row.NeverPlay)
+        if (!AdminMediaAirability.CanStillAir((await adminLookup.GetByIdWithLibraryAsync(oldMediaId, stoppingToken))?.Row))
         {
             logger.LogWarning(
                 "Ad spot {Id} media {MediaId} no longer resolves, or is ineligible/never_play; skipping its stale re-render",
@@ -629,7 +635,7 @@ public sealed class AdSpotWorker(
             {
                 logger.LogInformation(
                     "Ad spot {Id} stale re-render swapped off media {OldMediaId} (render_version {Version})",
-                    spot.Id, oldMediaId, AdRenderVersion.Current);
+                    spot.Id, oldMediaId, AdRenderMarker.For(liveSettings));
                 await NarrateAutoRerenderAsync(spot, stoppingToken);
             }
             else

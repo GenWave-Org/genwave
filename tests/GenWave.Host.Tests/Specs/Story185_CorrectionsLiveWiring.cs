@@ -160,7 +160,8 @@ file sealed class CorrectionsLiveWiringWebFactory(RecordingEngineSynthesizer eng
                     sp.GetRequiredService<SpeechCorrectionProvider>(),
                     sp.GetRequiredService<ActivePersonaCorrectionsCache>(),
                     sp.GetRequiredService<CorrectionsFiredStats>(),
-                    sp.GetRequiredService<ILogger<NormalizingTtsSynthesizer>>()));
+                    sp.GetRequiredService<ILogger<NormalizingTtsSynthesizer>>(),
+                    sp.GetRequiredService<SoundTagRenderGate>()));
         });
     }
 }
@@ -247,7 +248,7 @@ public static class FeatureCorrectionsLiveWiring
                 .ToList();
 
             Assert.Contains(typeof(ITtsSynthesizer), paramTypes);
-            Assert.DoesNotContain(typeof(KokoroTtsSynthesizer), paramTypes);
+            Assert.DoesNotContain(typeof(ActiveEngineSynthesizer), paramTypes);
         }
 
         static IReadOnlyList<string> FindNormalizeCallSites()

@@ -29,8 +29,10 @@ type SegmentKindName = (typeof SEGMENT_KINDS)[number];
  * `SettingValidator.IsValidEngineByKindMap` (src/GenWave.Host/Configuration/SettingValidator.cs),
  * which accepts exactly "kokoro" | "piper" case-insensitively; the read path
  * (`GenWave.Tts.TtsEngineByKindProvider`) normalizes to the same two lowercase
- * `GenWave.Tts.DependencyNames` constants this list carries. Hardcoded — there is no endpoint
- * enumerating supported engines.
+ * `GenWave.Tts.DependencyNames` constants this list carries. Hardcoded on purpose — NOT the
+ * `Tts:Engine` registry list (`GET /api/voices/engines`): this setting only validates the two
+ * wire kinds the per-kind renderers can serve, so a registry engine like chatterbox must not
+ * be offered here.
  */
 const ENGINES = ["kokoro", "piper"] as const;
 

@@ -10,6 +10,7 @@
 // show is a one-liner (`new FakeShowStore([new Show(...)])`) that five call sites across this
 // project already share.
 
+using FakeRenderBudgetProvider = GenWave.TestSupport.Fakes.FakeRenderBudgetProvider;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -98,7 +99,8 @@ file static class Story313ControllerFactory
                     BedPadSeconds = 1.5,
                 },
             }),
-            new FakeOptionsMonitor<TtsOptions>(new TtsOptions()),
+            KokoroVoiceResolver.Instance,
+            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
             NullLogger<SafeSegmentsController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },

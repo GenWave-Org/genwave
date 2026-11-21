@@ -6,6 +6,7 @@
 // discipline forces help text to land with the key (the jest settings-help-coverage spec goes red
 // if Z2 adds the key without copy). Idiom mirrors Story149_SettingCeilings.
 
+using GenWave.Host.Tests.Support;
 using Microsoft.Extensions.Configuration;
 using GenWave.Host.Configuration;
 
@@ -24,7 +25,7 @@ public static class FeatureMissThresholdSetting
         Path.Combine(RepoRoot, "src", "GenWave.Host", "appsettings.json");
 
     static SettingValidator BuildValidator() =>
-        new(new ConfigurationBuilder().Build());
+        new(new ConfigurationBuilder().Build(), TestVoiceEngines.KokoroAndPiper());
 
     // ─────────────────────────────────────────────────────────────────────────
     // HAPPY PATH — a live, bounded knob

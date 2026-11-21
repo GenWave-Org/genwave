@@ -7,6 +7,13 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { toast } from "@/components/ui/toast";
 import { formatDateStamp } from "@/lib/format-clock";
 import { readErrorMessage } from "@/lib/problem-details";
+import { EngineVoicePickers } from "@/components/EngineVoicePickers";
+import {
+  KOKORO_ENGINE,
+  personaVoiceMap,
+  type EngineVoiceMap,
+} from "@/lib/engine-voice-map";
+import { useVoiceEngines } from "@/lib/use-voice-engines";
 import { useVoiceList } from "@/lib/use-voice-list";
 import { VoiceControl } from "../safe-content/VoiceControl";
 import { BulkApplySuggestedModal } from "./BulkApplySuggestedModal";
@@ -53,6 +60,8 @@ interface PersonaRequestBody {
   backstory: string;
   style: string;
   voice?: string;
+  /** Voice per engine, only sent while the per-engine pickers are showing (SPEC F219.10). */
+  voices?: Record<string, string>;
   soul?: string;
 }
 
@@ -70,11 +79,15 @@ interface FormValues {
   backstory: string;
   style: string;
   voice: string;
+  /** The voice per engine (SPEC F219.10), edited by the per-engine pickers; `voice` is its own-engine entry. */
+  voices: EngineVoiceMap;
+  /** The engine `voice` belongs to — the card's own, Kokoro for a new DJ. */
+  ownEngine: string;
   /** The card's soul text, verbatim (gh-#256) — only the card-narrative edit form binds it. */
   soul: string;
 }
 
-const EMPTY_FORM: FormValues = { name: "", backstory: "", style: "", voice: "", soul: "" };
+const EMPTY_FORM: FormValues = { name: "", backstory: "", style: "", voice: "", voices: {}, ownEngine: KOKORO_ENGINE, soul: "" };
 
 const STYLE_SUMMARY_MAX = 60;
 
@@ -155,13 +168,19 @@ function OnAirBadge(): ReactNode {
 /** gh-#256: a card-narrative edit submits the soul VERBATIM and leaves backstory/style at the
  * blank values the hire flow stored — never copies soul text into the legacy fields, which would
  * relabel it through the server's legacy soul rebuild and break the round trip. */
-function requestBodyFrom(form: FormValues, cardNarrative: boolean): PersonaRequestBody {
+function requestBodyFrom(form: FormValues, cardNarrative: boolean, engineNames: readonly string[] | null): PersonaRequestBody {
   const body: PersonaRequestBody = {
     name: form.name.trim(),
     backstory: form.backstory,
     style: form.style,
   };
   if (form.voice.trim() !== "") body.voice = form.voice;
+  // Lockstep (server, PersonaCard.WithVoice): `voice` is the voice of the card's own engine (`form.ownEngine`, from
+  // the server's `voiceEngine`) and wins over a disagreeing entry, so the picker edits keep it equal to that entry.
+  // Every registry engine is sent; a blank id clears that engine's voice.
+  if (engineNames !== null) {
+    body.voices = Object.fromEntries(engineNames.map((name) => [name, form.voices[name] ?? ""]));
+  }
   if (cardNarrative) body.soul = form.soul;
   return body;
 }
@@ -281,6 +300,8 @@ export function PersonasClient({
   // VoiceControl's own dropdown, see useVoiceList's remarks) compared against the edit-form
   // candidate's export card. null candidate outside the edit form clears any prior warning.
   const voiceList = useVoiceList();
+  // F219.10: one picker per engine once the engine list is known; until then (or if it fails) the single picker.
+  const voiceEngines = useVoiceEngines();
   const editingPersona = mode.kind === "edit" ? personas.find((p) => p.id === mode.id) ?? null : null;
   const voiceWarning = usePersonaVoiceWarning(editingPersona, voiceList);
 
@@ -338,6 +359,8 @@ export function PersonasClient({
       backstory: persona.backstory,
       style: persona.style,
       voice: persona.voice,
+      voices: personaVoiceMap(persona.voice, persona.voiceEngine ?? KOKORO_ENGINE, persona.voices),
+      ownEngine: persona.voiceEngine ?? KOKORO_ENGINE,
       soul: persona.soul,
     });
   }
@@ -356,7 +379,7 @@ export function PersonasClient({
     if (isNameBlank) return;
 
     setIsSaving(true);
-    const body = requestBodyFrom(form, mode.kind === "edit" && mode.cardNarrative);
+    const body = requestBodyFrom(form, mode.kind === "edit" && mode.cardNarrative, voiceEngines.kind === "loaded" ? voiceEngines.data.engines.map((e) => e.name) : null);
 
     try {
       const resp =
@@ -721,12 +744,29 @@ export function PersonasClient({
             </p>
           )}
 
-          <VoiceControl
-            id="persona-voice"
-            value={form.voice}
-            onChange={(voice) => setForm((prev) => ({ ...prev, voice }))}
-            disabled={isSaving}
-          />
+          {voiceEngines.kind === "loaded" ? (
+            <div id="persona-voice" className="flex flex-col gap-1.5">
+              <p className={FIELD_LABEL_CLASSES}>Voice</p>
+              <EngineVoicePickers
+                engines={voiceEngines.data}
+                voices={form.voices}
+                onChange={(voices) =>
+                  setForm((prev) => ({ ...prev, voices, voice: voices[prev.ownEngine] ?? "" }))
+                }
+                disabled={isSaving}
+                idPrefix="persona-voice"
+                emptyLabel="None"
+                quietWhenEmpty
+              />
+            </div>
+          ) : (
+            <VoiceControl
+              id="persona-voice"
+              value={form.voice}
+              onChange={(voice) => setForm((prev) => ({ ...prev, voice }))}
+              disabled={isSaving}
+            />
+          )}
 
           <div className="flex flex-wrap gap-2">
             <Button type="submit" disabled={isSaving || isNameBlank}>

@@ -170,7 +170,7 @@ file sealed class AuditionsWebFactory(
             services.RemoveAll<IActivePersonaAccessor>();
             services.AddSingleton<IActivePersonaAccessor>(new FakePersonaAccessor(activeCard));
 
-            services.AddHttpClient<KokoroTtsSynthesizer>().ConfigurePrimaryHttpMessageHandler(() => kokoroHandler);
+            services.AddHttpClient<SpeechEngineClient>().ConfigurePrimaryHttpMessageHandler(() => kokoroHandler);
         });
     }
 }

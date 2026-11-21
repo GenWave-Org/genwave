@@ -47,7 +47,7 @@ public static class FeatureBlurbAudioGc
                 Format = "wav",
                 BlurbRetentionHours = blurbRetentionHours,
             }),
-            logger ?? NullLogger<TtsSegmentSource>.Instance);
+            logger ?? NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
 
     // ---------------------------------------------------------------------
     // HAPPY PATH — routing and retention

@@ -28,6 +28,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.Core.Events;
 using GenWave.Host.Api;
 using GenWave.Host.Configuration;
 using GenWave.Host.Options;
@@ -221,7 +222,8 @@ file static class SafeLoopSeederFactory
         FakeMarkerStore Marker,
         FakeLibraryStore Libraries,
         FakeSeedSafeSegmentAuthor Author,
-        FakeSeedSettingsStore Settings) Build(StationOptions? stationOptions = null)
+        FakeSeedSettingsStore Settings) Build(
+        StationOptions? stationOptions = null, IStationEventSink? events = null, FakeSafeContentLedger? ledger = null)
     {
         var marker = new FakeMarkerStore();
         var libraries = new FakeLibraryStore();
@@ -235,6 +237,7 @@ file static class SafeLoopSeederFactory
             author,
             settings,
             new FakeOptionsMonitor<StationOptions>(stationOptions ?? DefaultStationOptions()),
+            KokoroVoiceResolver.Instance, TestVoiceEngines.Active("kokoro"), ledger ?? new FakeSafeContentLedger(), events ?? NoOpStationEventSink.Instance,
             NullLogger<SafeLoopSeeder>.Instance);
 
         return (seeder, marker, libraries, author, settings);
@@ -259,6 +262,34 @@ file static class SafeLoopSeederFactory
 
 public static class FeatureSafeSeedOnBootInProcess
 {
+    // ── SPEC F219.9 — Station:Voice has no voice for the active engine ───────────────────────────
+
+    public sealed class ScenarioTheStationVoiceHasNoEntryForTheActiveEngine : IAsyncLifetime
+    {
+        readonly CapturingEventSink events = new();
+        SafeLoopSeedOutcome outcome;
+
+        public async Task InitializeAsync()
+        {
+            // Given Station:Voice names only a chatterbox voice, with kokoro active
+            var options = SafeLoopSeederFactory.DefaultStationOptions();
+            options.Voice = "{\"chatterbox\":\"reader-1\"}";
+            var (seeder, _, _, _, _) = SafeLoopSeederFactory.Build(options, events);
+
+            // When  the boot seed runs
+            outcome = await seeder.SeedAsync(CancellationToken.None);
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void TheSeedIsRetriedNextBoot() => Assert.Equal(SafeLoopSeedOutcome.Failed, outcome);
+
+        [Fact]
+        public void AVoiceMissingEventNamesTheSetting() =>
+            Assert.Equal(VoiceMap.StationVoiceSetting, Assert.Single(events.Events.OfType<VoiceMissing>()).Speaker);
+    }
+
     // ── AC1 — first boot seeds library, row, and scope ──────────────────────────────────────────
 
     public sealed class ScenarioFirstBootSeedsLibraryRowAndScope
@@ -275,6 +306,19 @@ public static class FeatureSafeSeedOnBootInProcess
             Assert.Equal(1, libraries.CreateCallCount);
             var all = await libraries.GetAllWithMediaCountAsync(CancellationToken.None);
             Assert.Contains(all, l => l.Name == SafeLoopSeeder.SafeLibraryName);
+        }
+
+        [Fact]
+        public async Task TheSeededRowIsRecordedWithTheVoiceItWasMadeIn()
+        {
+            // SPEC F219.22: the re-render sweep only touches ledger items, and knows a file is stale by this marker.
+            var ledger = new FakeSafeContentLedger();
+            var (seeder, _, _, author, _) = SafeLoopSeederFactory.Build(ledger: ledger);
+            author.Result = SafeSegmentAuthorResult.Success(42);
+
+            await seeder.SeedAsync(CancellationToken.None);
+
+            Assert.Equal(new SafeContentRecord(42, SafeContentMarker.For("kokoro", "af_heart")), ledger.Records.Single());
         }
 
         [Fact]
@@ -488,6 +532,7 @@ public static class FeatureSafeSeedOnBootInProcess
             var seeder = new SafeLoopSeeder(
                 marker, throwingLibraries, throwingLibraries, author, settings,
                 new FakeOptionsMonitor<StationOptions>(SafeLoopSeederFactory.DefaultStationOptions()),
+                KokoroVoiceResolver.Instance, TestVoiceEngines.Active("kokoro"), new FakeSafeContentLedger(), NoOpStationEventSink.Instance,
                 NullLogger<SafeLoopSeeder>.Instance);
 
             var outcome = await seeder.SeedAsync(CancellationToken.None);
@@ -510,6 +555,7 @@ public static class FeatureSafeSeedOnBootInProcess
             var seeder = new SafeLoopSeeder(
                 throwingMarker, libraries, libraries, author, settings,
                 new FakeOptionsMonitor<StationOptions>(SafeLoopSeederFactory.DefaultStationOptions()),
+                KokoroVoiceResolver.Instance, TestVoiceEngines.Active("kokoro"), new FakeSafeContentLedger(), NoOpStationEventSink.Instance,
                 NullLogger<SafeLoopSeeder>.Instance);
 
             var outcome = await seeder.SeedAsync(CancellationToken.None);
@@ -539,7 +585,7 @@ public static class FeatureSafeSeedOnBootInProcess
             var store = new FakeSeedSettingsStore();
             store.SeedOperatorRow(SafeLoopSeedMarkerStore.Key, "\"2026-01-01T00:00:00Z\"");
             var controller = new SettingsController(
-                config, store, new SettingValidator(config), NullLogger<SettingsController>.Instance,
+                config, store, new SettingValidator(config, TestVoiceEngines.KokoroAndPiper()), NullLogger<SettingsController>.Instance,
                 TestSettingCopy.Real(), TestSettingChoiceResolver.Default())
             {
                 ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
@@ -570,6 +616,7 @@ public static class FeatureSafeSeedOnBootInProcess
             var seeder = new SafeLoopSeeder(
                 marker, libraries, libraries, author, settings,
                 new FakeOptionsMonitor<StationOptions>(SafeLoopSeederFactory.DefaultStationOptions()),
+                KokoroVoiceResolver.Instance, TestVoiceEngines.Active("kokoro"), new FakeSafeContentLedger(), NoOpStationEventSink.Instance,
                 NullLogger<SafeLoopSeeder>.Instance);
             using var hostedService = new SafeLoopSeedHostedService(
                 seeder, NullLogger<SafeLoopSeedHostedService>.Instance);

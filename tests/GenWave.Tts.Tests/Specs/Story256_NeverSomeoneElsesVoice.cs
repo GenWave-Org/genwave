@@ -77,7 +77,7 @@ public static class FeatureNeverSomeoneElsesVoice
             NoCorrections.PersonaPronunciationCache(),
             NoCorrections.PersonaPaceCache(),
             new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
-            logger ?? NullLogger<TtsSegmentSource>.Instance);
+            logger ?? NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
 
     // LeadIn (a DJ-spoken kind, ARCHITECTURE.md "while a persona is on air it is that persona's
     // voice reading the DJ-spoken kinds") with no Track — PatterTemplateRenderer's documented
@@ -266,10 +266,10 @@ public static class FeatureNeverSomeoneElsesVoice
         /// is a separate concern). <paramref name="primaryEngine"/> is parameterized (not hardcoded
         /// to Kokoro) so a mutated reader that always reported "kokoro" regardless of which engine
         /// is actually primary stays caught — the same F3 discipline T148's review already applied
-        /// to the render-time gate (see <see cref="PrimaryVoiceEngine"/>'s own remarks).
+        /// to the render-time gate (see <see cref="IActiveVoiceEngine"/>'s own remarks).
         /// </summary>
         static VoiceHealthReader BuildReader(FakeDependencyHealth health, string primaryEngine = DependencyNames.Kokoro) =>
-            new(new PrimaryVoiceEngine(primaryEngine), health);
+            new(TestActiveEngine.Named(primaryEngine), health);
 
         [Fact]
         public static void The_degraded_voice_state_is_visible_on_the_health_endpoint()
@@ -296,9 +296,13 @@ public static class FeatureNeverSomeoneElsesVoice
         public static void A_healthy_station_reports_no_degraded_voice_state()
         {
             // Given the engine's cached verdict is healthy...
+            // (T766: green also needs the engine's boot warm-up verdict, SPEC F219.25.)
             var health = new FakeDependencyHealth();
             health.Set(new DependencyHealthVerdict(
                 DependencyNames.Kokoro, Healthy: true, DateTimeOffset.UtcNow,
+                Reason: null, ConsecutiveFailureCount: 0));
+            health.Set(new DependencyHealthVerdict(
+                DependencyNames.VoiceEngine(DependencyNames.Kokoro), Healthy: true, DateTimeOffset.UtcNow,
                 Reason: null, ConsecutiveFailureCount: 0));
 
             // When the operator opens the health surface...

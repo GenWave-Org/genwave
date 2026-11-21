@@ -17,22 +17,37 @@ public sealed partial class BreakPlanner
     static MediaItem BuildPooledStationIdItem(MediaReference pooled) =>
         pooled.ToMediaItem() with { SegmentKind = SegmentKind.StationId };
 
-    // Verbatim copy of Orchestrator.BuildHandoffRequest (SPEC F92.2): built from the deferral's own
-    // captured HandoffContext, never a fresh persona resolve. Takes the already-derived SegmentKind
-    // rather than re-deriving it from SpeechDeferralKind — BuildHandoffDrainSlot computes it once
-    // (T521 review) and passes it straight through. Speaker (SPEC F189.5/F188.4, PLAN T527) forwards
-    // off the handoff — the counterpart's snapshot was already resolved (or reused across a re-arm)
-    // by Orchestrator at ARM time; the planner never RESOLVES one itself here. Round-2 review finding
-    // F3: handoff.Voice (the persona ROW, read via Orchestrator.ResolveHandoffPersonaAsync) and
-    // handoff.Speaker.Voice (the persona CARD, read via ISpeakerSnapshotSource) are captured from
-    // different seams and provably diverge in two shipped data states (F79.4's blanked import voice;
-    // PersonaCardMigrator's card-less default persona) — so this is the one place both terms are
-    // already known, and the ONLY place that must align them: the drained request's Voice always wins,
-    // aligning the forwarded snapshot to it, never the reverse (this is an alignment, not a resolve).
-    SegmentRequest BuildHandoffRequest(SegmentKind kind, HandoffContext handoff, StationIdentity identity) =>
-        StampShift(new(
+    // Built from the deferral's own captured HandoffContext (SPEC F92.2). Takes the already-derived
+    // SegmentKind rather than re-deriving it — BuildHandoffDrainSlotAsync computes it once. The
+    // HandoffContext is captured at ARM time, up to a ceremony-window ahead of the drain, so its Voice
+    // (the persona ROW's) and Speaker (the card as it was then) can be stale against a Tts:Engine
+    // switch made since: when a snapshot source is wired and the half names a persona, the voice is
+    // re-resolved HERE for the active engine through ResolvePersonaSpeakerAsync (SPEC F219.8/F219.11,
+    // "resolved per render"). Without one the arm-time pair is used as before. Either way the request's
+    // Voice and the snapshot's Voice are the same string (round-2 finding F3 / ruling 9): the
+    // snapshot is aligned to the voice, never the reverse. The ARMED snapshot is kept (SPEC F189.5: its
+    // rules, pace and content hash were captured with the counterpart); only its Voice and VoiceMissing
+    // are replaced by the fresh read. A card-less half keeps handoff.Voice.
+    async Task<SegmentRequest> BuildHandoffRequestAsync(
+        SegmentKind kind, HandoffContext handoff, StationIdentity identity, SpeakerResolution? speakers, CancellationToken ct)
+    {
+        var voice = handoff.Voice;
+        var speaker = handoff.Speaker is { } armed ? armed with { Voice = voice } : null;
+        if (speakers is not null && handoff.PersonaId is not null)
+        {
+            var (fresh, freshVoice) = await ResolvePersonaSpeakerAsync(speakers, handoff.PersonaId, identity, handoff.Voice, ct);
+            voice = freshVoice;
+
+            // SPEC F189.5: the armed snapshot (rules, pace, content hash) rides through; only the voice and
+            // its missing-ness are re-read for the engine active now.
+            speaker = handoff.Speaker is { } armedSnapshot
+                ? armedSnapshot with { Voice = freshVoice, VoiceMissing = fresh?.VoiceMissing ?? false }
+                : fresh;
+        }
+
+        return StampShift(new(
             kind,
-            handoff.Voice,
+            voice,
             identity.Name,
             null,
             StationLocalNow(),
@@ -45,9 +60,10 @@ public sealed partial class BreakPlanner
             ShowFlavor: handoff.ShowFlavor,
             CounterpartShowName: handoff.CounterpartShowName)
         {
-            Speaker = handoff.Speaker is { } s ? s with { Voice = handoff.Voice } : null,
+            Speaker = speaker,
             Handoff = HandoffBetween(kind, handoff),
         }, handoff.PersonaId);
+    }
 
     // SPEC F218.15(b): both sides known and distinct, else no handoff to remember (a same-persona show
     // transition has no counterpart; a music-only half never resolved one).
@@ -100,11 +116,11 @@ public sealed partial class BreakPlanner
         var (contextVoice, contextPersonaName, contextPersonaId) = await ResolveContextSegmentVoiceAsync(
             contextProviderSettings.PersonaId, providerKey, identity.Voice, ct);
 
-        var speaker = await ResolveSpeakerAsync(speakers, contextPersonaId, identity, contextVoice, ct);
+        var (speaker, resolvedVoice) = await ResolvePersonaSpeakerAsync(speakers, contextPersonaId, identity, contextVoice, ct);
 
         var contextReq = StampShift(new SegmentRequest(
             SegmentKind.ContextSegment,
-            contextVoice,
+            resolvedVoice,
             identity.Name,
             null,
             StationLocalNow(),

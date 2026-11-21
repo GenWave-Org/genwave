@@ -234,7 +234,7 @@ public static class FeatureRulesTheOperatorCanTrust
             var cacheRoot = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
             try
             {
-                var synth = new KokoroTtsSynthesizer(
+                var synth = TestKokoro.Synthesizer(
                     new HttpClient(handler),
                     new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
                     reporter);
@@ -315,7 +315,7 @@ public static class FeatureRulesTheOperatorCanTrust
             {
                 var ttsOptions = new TestOptionsMonitor<TtsOptions>(
                     new TtsOptions { CacheRoot = cacheRoot, Format = "wav" });
-                var primary = new KokoroTtsSynthesizer(new HttpClient(primaryHandler), ttsOptions, reporter);
+                var primary = TestKokoro.Synthesizer(new HttpClient(primaryHandler), ttsOptions, reporter);
                 var hop = new KokoroFallbackRenderer(new HttpClient(hopHandler), ttsOptions, reporter);
                 var fallbackOptions = new TestOptionsMonitor<TtsFallbackOptions>(new TtsFallbackOptions
                 {
@@ -393,14 +393,14 @@ public static class FeatureRulesTheOperatorCanTrust
             {
                 var source = new TtsSegmentSource(
                     new FakeSegmentCopyWriter("Say MacLeod now."),
-                    new KokoroTtsSynthesizer(new HttpClient(handler), new TestOptionsMonitor<TtsOptions>(
+                    TestKokoro.Synthesizer(new HttpClient(handler), new TestOptionsMonitor<TtsOptions>(
                         new TtsOptions { CacheRoot = cacheRoot, Format = "wav" })),
                     new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(),
                     NoCorrections.Provider(), NoCorrections.PersonaCache(),
                     NoCorrections.PronunciationProvider(), new ActivePersonaPronunciationRulesCache(accessor, TimeProvider.System),
                     NoCorrections.PersonaPaceCache(),
                     new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
-                    NullLogger<TtsSegmentSource>.Instance);
+                    NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
                 var request = new SegmentRequest(
                     SegmentKind.StationId, "af_heart", "GenWave", null, DateTimeOffset.UtcNow, "test-station");
 
@@ -513,7 +513,7 @@ public static class FeatureRulesTheOperatorCanTrust
             var cacheRoot = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
             try
             {
-                var synth = new KokoroTtsSynthesizer(
+                var synth = TestKokoro.Synthesizer(
                     new HttpClient(handler),
                     new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
                     reporter);

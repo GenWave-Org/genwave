@@ -1,5 +1,7 @@
 namespace GenWave.Ads;
 
+using GenWave.Core.Domain;
+using GenWave.Tts;
 using Microsoft.Extensions.Configuration;
 
 /// <summary>
@@ -67,9 +69,9 @@ public static class AdLiveSettingsReader
     internal const double MinTargetLufs = -40.0;
     internal const double MaxTargetLufs = 0.0;
 
-    public static AdLiveSettings Read(IConfiguration configuration) => new(
-        AnnouncerVoice: ReadString(configuration, "Station:Ads:AnnouncerVoice", DefaultAnnouncerVoice).Trim(),
-        CastVoices: ParseCastVoices(ReadString(configuration, "Station:Ads:CastVoices", "")),
+    public static AdLiveSettings Read(IConfiguration configuration, IActiveVoiceEngine activeEngine) => new(
+        AnnouncerVoice: ReadString(configuration, VoiceMap.AnnouncerVoiceSetting, DefaultAnnouncerVoice).Trim(),
+        CastVoices: ParseCastVoices(ReadString(configuration, VoiceMap.CastVoicesSetting, "")),
         BedFadeMs: Math.Clamp(
             AdSettingsRead.OrDefault(configuration, "Station:Ads:BedFadeMs", DefaultBedFadeMs), MinBedFadeMs,
             MaxBedFadeMs),
@@ -78,7 +80,10 @@ public static class AdLiveSettingsReader
             MaxBedDuckDb),
         TargetLufs: Math.Clamp(
             AdSettingsRead.OrDefault(configuration, "Loudness:TargetLufs", DefaultTargetLufs), MinTargetLufs,
-            MaxTargetLufs));
+            MaxTargetLufs),
+        StationVoice: ReadString(configuration, VoiceMap.StationVoiceSetting, "").Trim(),
+        // Always the active engine today: TtsEngineByKindProvider drops every Ad pin, so no Ad pin can change the marker yet.
+        ActiveEngine: activeEngine.EngineFor(SegmentKind.Ad));
 
     static string ReadString(IConfiguration configuration, string key, string fallback)
     {
@@ -97,8 +102,15 @@ public static class AdLiveSettingsReader
         }
     }
 
+    /// <summary>
+    /// A JSON array (SPEC F219.8: entries may be engine maps, so it must never be split on commas) goes through
+    /// <see cref="VoiceMap.TryParseCastSetting"/> and back to one setting value per speaker; a malformed array
+    /// reads as an empty pool. Anything else is the legacy comma list of bare ids.
+    /// </summary>
     static IReadOnlyList<string> ParseCastVoices(string raw) =>
-        raw.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
+        raw.TrimStart().StartsWith('[')
+            ? VoiceMap.TryParseCastSetting(raw)?.Select(speaker => speaker.ToSettingValue()).ToList() ?? []
+            : raw.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
 }

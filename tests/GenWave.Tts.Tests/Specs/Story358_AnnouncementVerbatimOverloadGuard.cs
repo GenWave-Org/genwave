@@ -36,7 +36,7 @@ public static class FeatureAnnouncementVerbatimOverloadGuard
             NoCorrections.PersonaPronunciationCache(),
             NoCorrections.PersonaPaceCache(),
             new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
-            logger);
+            logger, TestActiveEngine.Named("kokoro"));
 
     public sealed class ScenarioTheOverloadNowGuardsNonFreshCopyToo : IDisposable
     {
