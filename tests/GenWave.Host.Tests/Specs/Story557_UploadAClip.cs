@@ -11,6 +11,8 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using Dapper;
+using GenWave.Core.Abstractions;
+using GenWave.Core.Domain;
 using GenWave.Host.Tests.Fakes;
 using GenWave.Host.Voices;
 using GenWave.Host.Tests.Support;
@@ -58,6 +60,57 @@ public static class FeatureUploadAClip
 
         [Fact]
         public void TheFileIsGone() => Assert.False(arc.FreeFileSurvivesDelete);
+    }
+
+    // Edge — a slug with a trailing newline must not pass the slug gate (`$` would match before a final \n)
+    [Collection(UploadAClipCollection.Name)]
+    public sealed class ScenarioASlugWithATrailingNewline(UploadAClipArc arc)
+    {
+        [Fact]
+        public void TheDeleteReturns404() => Assert.Equal(HttpStatusCode.NotFound, arc.NewlineDeleteStatus);
+
+        [Fact]
+        public void TheRealClipRowSurvives() => Assert.True(arc.NewlineProbeRowSurvives);
+
+        [Fact]
+        public void TheRealClipFileSurvives() => Assert.True(arc.NewlineProbeFileSurvives);
+    }
+
+    // Edge — the slug gate itself (the service seam): a trailing newline must be refused before the store or the usage reader
+    // is touched, so the raw value never reaches a log line (CodeQL log forging; `$` matches before a final \n, `\z` does not).
+    public sealed class ScenarioTheSlugGate : IAsyncLifetime
+    {
+        VoiceClipDeleteResult? result;
+        int storeDeleteCalls;
+        int usageReaderCalls;
+
+        public async Task InitializeAsync()
+        {
+            var store = new RecordingClipStore();
+            var usage = new RecordingUsageReader();
+            using var provider = new ServiceCollection().AddOptions<GenWave.Tts.TtsOptions>().Services.BuildServiceProvider();
+            var service = new VoiceClipService(
+                store,
+                new VoiceClipFolder(provider.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<GenWave.Tts.TtsOptions>>()),
+                new VoiceClipNormalizer(new NeverCalledLoudnessAnalyzer()),
+                usage,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<VoiceClipService>.Instance);
+
+            result = await service.DeleteAsync("newline-probe\n", CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+            storeDeleteCalls = store.DeleteCalls;
+            usageReaderCalls = usage.Calls;
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void TheDeleteIsNotFound() => Assert.IsType<VoiceClipDeleteResult.NotFound>(result);
+
+        [Fact]
+        public void TheStoreIsNeverAskedToDelete() => Assert.Equal(0, storeDeleteCalls);
+
+        [Fact]
+        public void TheUsageReaderIsNeverAsked() => Assert.Equal(0, usageReaderCalls);
     }
 
     // AC5, AC11 — a fresh install: the real seeder runs against the empty clips folder, then the real GET lists
@@ -163,6 +216,10 @@ public sealed class UploadAClipArc : IAsyncLifetime
     public bool FreeRowSurvivesDelete { get; private set; } = true;
     public bool FreeFileSurvivesDelete { get; private set; } = true;
 
+    public HttpStatusCode NewlineDeleteStatus { get; private set; }
+    public bool NewlineProbeRowSurvives { get; private set; }
+    public bool NewlineProbeFileSurvives { get; private set; }
+
     public HttpStatusCode ShortStatus { get; private set; }
     public bool ShortBodyNamesTheReason { get; private set; }
     public HttpStatusCode OversizeStatus { get; private set; }
@@ -206,6 +263,12 @@ public sealed class UploadAClipArc : IAsyncLifetime
         Assert.Equal(HttpStatusCode.NoContent, (await admin.DeleteAsync("/api/voices/clips/free-one")).StatusCode);
         FreeRowSurvivesDelete = await CountRowsAsync(database.StationConnectionString, "free-one") > 0;
         FreeFileSurvivesDelete = File.Exists(Path.Combine(clipsRoot, "free-one.wav"));
+
+        // Edge — the slug of a real clip plus a trailing newline
+        Assert.Equal(HttpStatusCode.Created, (await UploadAsync(admin, "Newline Probe", tenSeconds)).StatusCode);
+        NewlineDeleteStatus = (await admin.DeleteAsync("/api/voices/clips/newline-probe%0A")).StatusCode;
+        NewlineProbeRowSurvives = await CountRowsAsync(database.StationConnectionString, "newline-probe") > 0;
+        NewlineProbeFileSurvives = File.Exists(Path.Combine(clipsRoot, "newline-probe.wav"));
 
         // AC7 — a 3 s clip
         var threeSeconds = await MakeWavAsync(audioDir.Path, "three.wav", seconds: 3);
@@ -386,4 +449,40 @@ file sealed class UploadAClipWebFactory(UploadAClipDatabase database, string cli
         Assert.Equal(HttpStatusCode.NoContent, login.StatusCode);
         return client;
     }
+}
+
+file sealed class RecordingClipStore : IVoiceClipStore
+{
+    int deleteCalls;
+
+    public int DeleteCalls => Volatile.Read(ref deleteCalls);
+
+    public Task<IReadOnlyList<VoiceClip>> ListAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<VoiceClip>>([]);
+
+    public Task<VoiceClip?> InsertAsync(NewVoiceClip clip, CancellationToken ct) => Task.FromResult<VoiceClip?>(null);
+
+    public Task<bool> DeleteAsync(string slug, CancellationToken ct)
+    {
+        Interlocked.Increment(ref deleteCalls);
+        return Task.FromResult(false);
+    }
+}
+
+file sealed class RecordingUsageReader : IVoiceClipUsageReader
+{
+    int calls;
+
+    public int Calls => Volatile.Read(ref calls);
+
+    public Task<IReadOnlyList<string>> FindUsersAsync(string slug, CancellationToken ct)
+    {
+        Interlocked.Increment(ref calls);
+        return Task.FromResult<IReadOnlyList<string>>([]);
+    }
+}
+
+file sealed class NeverCalledLoudnessAnalyzer : ILoudnessAnalyzer
+{
+    public Task<GenWave.Core.Domain.Loudness> AnalyzeAsync(string path, CancellationToken ct) =>
+        throw new InvalidOperationException("The slug gate spec never reaches the analyzer.");
 }

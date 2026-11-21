@@ -110,6 +110,6 @@ public sealed partial class VoiceClipService(
         return header[..read];
     }
 
-    [GeneratedRegex("^[a-z0-9]+(-[a-z0-9]+)*$")]
+    [GeneratedRegex(@"\A[a-z0-9]+(-[a-z0-9]+)*\z")]
     private static partial Regex SlugShape();
 }
