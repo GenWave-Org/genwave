@@ -610,8 +610,7 @@ public sealed class AdSpotWorker(
         // before the swap itself; only a check made at that exact moment is honest against an operator
         // disabling the row mid-render, so this upfront check is never the guard, purely a wasted-render
         // avoidance.
-        if (await adminLookup.GetByIdWithLibraryAsync(oldMediaId, stoppingToken) is not { } oldMedia
-            || !oldMedia.Row.Eligible || oldMedia.Row.NeverPlay)
+        if (!AdminMediaAirability.CanStillAir((await adminLookup.GetByIdWithLibraryAsync(oldMediaId, stoppingToken))?.Row))
         {
             logger.LogWarning(
                 "Ad spot {Id} media {MediaId} no longer resolves, or is ineligible/never_play; skipping its stale re-render",

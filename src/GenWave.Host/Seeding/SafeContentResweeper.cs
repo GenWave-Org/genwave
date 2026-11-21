@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
+using GenWave.Core.Domain;
 using GenWave.Core.Logging;
 using GenWave.Host.Options;
 using GenWave.Tts;
@@ -88,9 +89,7 @@ public sealed class SafeContentResweeper(
         if (voiceResolver.ResolveSetting(station.Voice) is not { } voice)
             return; // No voice for this engine: nothing can be re-rendered, and the old files keep airing.
 
-        var records = (await ledger.ListAsync(ct)).ToList();
-        if (records.Count == 0 && await seedRowFinder.FindSeedMediaIdAsync(ct) is { } seedId)
-            records.Add(new SafeContentRecord(seedId, Marker: string.Empty));
+        var records = await SafeContentLedgerReader.ListWithAdoptedSeedAsync(ledger, seedRowFinder, ct);
 
         await FinishPendingRetiresAsync(records, ct);
 
@@ -115,10 +114,10 @@ public sealed class SafeContentResweeper(
         (SafeContentRecord, long)? found = null;
         var dropped = false;
 
-        foreach (var record in records.Where(r => r.Marker != marker && r.PendingRetireMediaId is null).ToList())
+        foreach (var record in records.Where(r => SafeContentMarker.IsStale(r, marker)).ToList())
         {
             if (await mediaLookup.GetByIdWithLibraryAsync(record.MediaId, ct) is { } row
-                && row.Row.Eligible && !row.Row.NeverPlay)
+                && AdminMediaAirability.CanStillAir(row.Row))
             {
                 found = (record, row.LibraryId);
                 break;

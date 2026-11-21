@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **164 seams across 9 projects.**
+> **166 seams across 9 projects.**
 
 ## GenWave.Ads (2 seams)
 
@@ -66,7 +66,7 @@
 |---|---|---|---|
 | `GenWave.Core.Abstractions.IAppVersion` | `GenWave.Core.AppVersion` | Singleton | — |
 
-## GenWave.Host (40 seams)
+## GenWave.Host (41 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -109,6 +109,7 @@
 | `GenWave.Host.Seeding.ISafeContentLedger` | `GenWave.Host.Seeding.SafeContentLedger` | Singleton | — |
 | `GenWave.Host.Seeding.ISafeLoopSeedMarkerStore` | `GenWave.Host.Seeding.SafeLoopSeedMarkerStore` | Singleton | — |
 | `GenWave.Host.Seeding.ISeedRowFinder` | `GenWave.Host.Seeding.SeedRowFinder` | Singleton | — |
+| `GenWave.Host.Seeding.IStaleVoiceItemsReader` | `GenWave.Host.Seeding.StaleVoiceItemsReader` | Singleton | — |
 | `GenWave.Host.Voices.IVoiceClipUsageReader` | `GenWave.Host.Voices.VoiceClipUsageReader` | Singleton | — |
 
 ## GenWave.Loudness (5 seams)
@@ -121,7 +122,7 @@
 | `GenWave.Core.Abstractions.IEnergyAnalyzer` | `GenWave.Loudness.FfmpegEnergyAnalyzer` | Singleton | — |
 | `GenWave.Core.Abstractions.ILoudnessAnalyzer` | `GenWave.Loudness.FfmpegLoudnessAnalyzer` | Singleton | — |
 
-## GenWave.MediaLibrary (70 seams)
+## GenWave.MediaLibrary (71 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -188,6 +189,7 @@
 | `GenWave.Core.Abstractions.IShowImagingScope` | `GenWave.MediaLibrary.Catalog.ShowImagingScopeRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IShowStore` | `GenWave.MediaLibrary.Station.ShowRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.ISponsorStore` | `GenWave.MediaLibrary.Station.SponsorRepository` | Singleton | — |
+| `GenWave.Core.Abstractions.IStaleAdSpotCounter` | `GenWave.MediaLibrary.Station.AdSpotRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IStationImageStore` | `GenWave.MediaLibrary.Station.StationImageRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IThemeStore` | `GenWave.MediaLibrary.Station.ThemeRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IThumbStore` | `GenWave.MediaLibrary.Garden.MediaThumbRepository` | Singleton | — |

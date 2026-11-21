@@ -50,6 +50,7 @@ public static class AdStoreServiceCollectionExtensions
             sp.GetRequiredService<IAuthoredCatalogWriter>(),
             sp.GetRequiredService<ILogger<AdSpotRepository>>()));
         services.AddSingleton<IAdSpotStore>(sp => sp.GetRequiredService<AdSpotRepository>());
+        services.AddSingleton<IStaleAdSpotCounter>(sp => sp.GetRequiredService<AdSpotRepository>());
         // Retired ad audio sweep, station half (gh-#3): the SAME repository instance.
         services.AddSingleton<IAdAudioReferences>(sp => sp.GetRequiredService<AdSpotRepository>());
         return services;

@@ -8,4 +8,11 @@ namespace GenWave.Host.Seeding;
 public static class SafeContentMarker
 {
     public static string For(string engine, string voice) => $"{engine}\n{voice}";
+
+    /// <summary>
+    /// The ONE definition of "still in the old voice" for ledger items, shared by the sweep and the Status count: the marker
+    /// differs from the current one and no retire is still pending (that item is already replaced).
+    /// </summary>
+    public static bool IsStale(SafeContentRecord record, string currentMarker) =>
+        record.Marker != currentMarker && record.PendingRetireMediaId is null;
 }

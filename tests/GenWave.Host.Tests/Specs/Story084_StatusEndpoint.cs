@@ -186,7 +186,8 @@ public static class FeatureStatusEndpoint
             new SchemaVersionStatus(),
             new EngineSettingsStatus(),
             new FakeRepeatNumbersReader(),
-            new FakeCallbackRateReader())
+            new FakeCallbackRateReader(),
+            new FakeStaleVoiceItemsReader())
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
         };

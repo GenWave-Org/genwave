@@ -17,6 +17,7 @@ static class SafeLoopSeedServiceCollectionExtensions
         services.AddSingleton<ISafeContentLedger>(sp =>
             new SafeContentLedger(stationConnStr, sp.GetRequiredService<ILogger<SafeContentLedger>>()));
         services.AddSingleton<ISeedRowFinder, SeedRowFinder>();
+        services.AddSingleton<IStaleVoiceItemsReader, StaleVoiceItemsReader>();
         services.AddSingleton<SafeLoopSeeder>();
         services.AddHostedService<SafeContentResweeper>();
         services.AddHostedService<SafeLoopSeedHostedService>();

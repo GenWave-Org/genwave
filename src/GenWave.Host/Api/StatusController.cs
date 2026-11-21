@@ -6,6 +6,7 @@ using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Host.Engine;
 using GenWave.Host.Options;
+using GenWave.Host.Seeding;
 using GenWave.Plugins;
 using GenWave.Tts;
 
@@ -39,7 +40,8 @@ public sealed class StatusController(
     SchemaVersionStatus schemaVersionStatus,
     EngineSettingsStatus engineSettingsStatus,
     IRepeatNumbersReader repeatNumbersReader,
-    ICallbackRateReader callbackRateReader) : ControllerBase
+    ICallbackRateReader callbackRateReader,
+    IStaleVoiceItemsReader staleVoiceItemsReader) : ControllerBase
 {
     /// <summary>
     /// GET /api/status — cookie-auth (covered by the deny-by-default fallback policy when
@@ -58,6 +60,10 @@ public sealed class StatusController(
     /// station-wide used / DJ-hours over 7 days, null with no offers or no hours; <c>asks</c> and <c>used</c> are the
     /// offers and on-air uses behind it (T743); <c>callbacks</c> itself is
     /// null when the station database could not be read.
+    ///
+    /// <c>staleVoiceItems</c> (SPEC F219.23, STORY-559, PLAN T764) is how many ads plus boot-seed items are still in the
+    /// old voice, from <see cref="IStaleVoiceItemsReader"/> (the sweeps' own stale predicates, live engine and voice).
+    /// <see langword="null"/> when it could not be counted: unknown, never 0, which means all current.
     ///
     /// <c>Station:SafeScope:LibraryIds</c> is read via <see cref="IOptionsMonitor{TOptions}.CurrentValue"/>
     /// on every call — not a boot-time snapshot — so a live <c>PUT /api/settings</c> edit
@@ -179,6 +185,7 @@ public sealed class StatusController(
         var voice = voiceHealthReader.Evaluate();
         var repeats = await repeatNumbersReader.ReadAsync(ct);
         var callbacks = await callbackRateReader.ReadAsync(ct);
+        var staleVoiceItems = await staleVoiceItemsReader.CountAsync(ct);
 
         return Ok(new
         {
@@ -284,6 +291,8 @@ public sealed class StatusController(
             },
             // SPEC F218.47, STORY-551: "Callbacks per DJ-hour". Null when the station database could not be read.
             callbacks = callbacks is null ? null : new { perDjHour = callbacks.PerDjHour, asks = callbacks.Asks, used = callbacks.Used },
+            // SPEC F219.23, STORY-559: items still in the old voice. Null when it could not be counted (unknown, not zero).
+            staleVoiceItems,
         });
     }
 

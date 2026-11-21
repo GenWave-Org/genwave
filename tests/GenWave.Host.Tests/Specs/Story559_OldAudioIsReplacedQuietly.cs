@@ -2,10 +2,21 @@
 //
 // BDD specification — xUnit. The ad half of the sweep (one ad re-rendered per tick) lives in
 // GenWave.Ads.Tests/Specs/Story559_OldAudioIsReplacedQuietly.cs beside the ad worker harness; the status
-// count (T764) stays pending here.
+// count (T764) is below, with its SQL pinned in GenWave.MediaLibrary.Tests.
 
 namespace GenWave.Host.Tests.Specs;
 
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
+using GenWave.Ads;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using GenWave.Core.Abstractions;
@@ -100,11 +111,80 @@ public static class FeatureOldAudioIsReplacedQuietly
             Assert.Equal(SweepRig.Voice, rig.Author.Requests.Single().DefaultVoice);
     }
 
-    // AC5 — pending T764
+    // AC5 — the Status count (T764): the deployed pipeline, real reader, fakes at the I/O edges
     public sealed class ScenarioTheCount
     {
-        [Fact(Skip = "pending: T764")]
-        public void TheStatusResponseCarriesFour() { }
+        // Given 2 stale ads and 2 stale seeder items
+
+        [Fact]
+        public async Task TheStatusResponseCarriesFour()
+        {
+            await using var station = new StaleVoiceStatusWebFactory();
+            station.AddStaleAds(2);
+            station.AddStaleSeederItems(2);
+
+            Assert.Equal(4, (await station.StaleVoiceItemsAsync()).GetInt32());
+        }
+    }
+
+    public sealed class ScenarioNothingIsInTheOldVoice
+    {
+        [Fact]
+        public async Task TheStatusResponseCarriesZero()
+        {
+            await using var station = new StaleVoiceStatusWebFactory();
+            station.AddCurrentAds(1);
+            station.AddCurrentSeederItems(1);
+
+            Assert.Equal(0, (await station.StaleVoiceItemsAsync()).GetInt32());
+        }
+    }
+
+    public sealed class ScenarioAnItemIsSwitchedOff
+    {
+        [Fact]
+        public async Task ItIsNotCounted()
+        {
+            await using var station = new StaleVoiceStatusWebFactory();
+            station.AddStaleSeederItems(1);
+            station.AddStaleSeederItems(1, eligible: false);
+
+            Assert.Equal(1, (await station.StaleVoiceItemsAsync()).GetInt32());
+        }
+    }
+
+    public sealed class ScenarioAnItemIsAlreadyReplaced
+    {
+        [Fact]
+        public async Task ItIsNotCounted()
+        {
+            await using var station = new StaleVoiceStatusWebFactory();
+            station.AddStaleSeederItems(1);
+            station.AddSeederItemWaitingOnARetire();
+
+            Assert.Equal(1, (await station.StaleVoiceItemsAsync()).GetInt32());
+        }
+    }
+
+    public sealed class ScenarioTheCountCannotBeWorkedOut
+    {
+        [Fact]
+        public async Task TheStatusResponseCarriesNullNotZero()
+        {
+            await using var station = new StaleVoiceStatusWebFactory();
+            station.AdCounter.Fail = true;
+
+            Assert.Equal(JsonValueKind.Null, (await station.StaleVoiceItemsAsync()).ValueKind);
+        }
+
+        [Fact]
+        public async Task TheRestOfTheStatusIsIntact()
+        {
+            await using var station = new StaleVoiceStatusWebFactory();
+            station.AdCounter.Fail = true;
+
+            Assert.True((await station.StatusAsync()).TryGetProperty("catalog", out _));
+        }
     }
 
     // Sad path
@@ -421,5 +501,112 @@ public static class FeatureOldAudioIsReplacedQuietly
         [Fact]
         public void TheLedgerGoesBackToTheOldRow() =>
             Assert.Equal(SweepRig.FirstOldMediaId, Assert.Single(rig.Ledger.Records).MediaId);
+    }
+}
+
+/// <summary>Counts stale ready ads from stamped markers the way the real predicate does: a marker that differs from the current one.</summary>
+file sealed class FakeStaleAdSpotCounter : IStaleAdSpotCounter
+{
+    readonly List<int> stamped = [];
+
+    public bool Fail { get; set; }
+
+    public void Add(int marker) => stamped.Add(marker);
+
+    public Task<int> CountStaleReadyAsync(int currentMarker, CancellationToken ct) =>
+        Fail ? throw new Npgsql.NpgsqlException("ad store down") : Task.FromResult(stamped.Count(m => m != currentMarker));
+}
+
+/// <summary>The deployed pipeline on the kokoro station, the stale-count reader real, ledger, catalog and ad store faked.</summary>
+file sealed class StaleVoiceStatusWebFactory : WebApplicationFactory<Program>
+{
+    const string Password = "test-password-x7z";
+    const string Voice = "af_heart";
+    const long LibraryId = 7;
+
+    readonly FakeSafeContentLedger ledger = new();
+    readonly FakeSweepCatalog catalog = new();
+    readonly List<SafeContentRecord> records = [];
+    long nextMediaId = 500;
+
+    public FakeStaleAdSpotCounter AdCounter { get; } = new();
+
+    int CurrentAdMarker => AdRenderMarker.For(AdLiveSettingsReader.Read(
+        Services.GetRequiredService<IConfiguration>(), Services.GetRequiredService<IActiveVoiceEngine>()));
+
+    string CurrentSeederMarker => SafeContentMarker.For(Services.GetRequiredService<IActiveVoiceEngine>().Name, Voice);
+
+    public void AddStaleAds(int count) { for (var i = 0; i < count; i++) AdCounter.Add(1); }
+
+    public void AddCurrentAds(int count) { for (var i = 0; i < count; i++) AdCounter.Add(CurrentAdMarker); }
+
+    public void AddStaleSeederItems(int count, bool eligible = true) => AddSeederItems(count, "old\nvoice", eligible);
+
+    public void AddSeederItemWaitingOnARetire()
+    {
+        var id = nextMediaId++;
+        records.Add(new SafeContentRecord(id, "old\nvoice", PendingRetireMediaId: id - 1));
+        catalog.AddRow(id, LibraryId, $"/authored/{id}.wav", eligible: true);
+    }
+
+    public void AddCurrentSeederItems(int count) => AddSeederItems(count, CurrentSeederMarker, eligible: true);
+
+    void AddSeederItems(int count, string marker, bool eligible)
+    {
+        for (var i = 0; i < count; i++)
+        {
+            var id = nextMediaId++;
+            records.Add(new SafeContentRecord(id, marker));
+            catalog.AddRow(id, LibraryId, $"/authored/{id}.wav", eligible);
+        }
+    }
+
+    public async Task<JsonElement> StaleVoiceItemsAsync() => (await StatusAsync()).GetProperty("staleVoiceItems");
+
+    public async Task<JsonElement> StatusAsync()
+    {
+        await ledger.SaveAsync(records, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+        var client = CreateClient();
+        var login = await client.PostAsJsonAsync("/api/auth/login", new { password = Password }).WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(HttpStatusCode.NoContent, login.StatusCode);
+
+        var response = await client.GetAsync("/api/status").WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement.Clone();
+    }
+
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        builder.UseEnvironment("Development");
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
+        builder.UseSetting("Admin:Password", Password);
+        builder.UseSetting("Station:Voice", Voice);
+
+        builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<IHostedService>();
+            services.RemoveAll<IMediaCatalog>();
+            services.AddSingleton<IMediaCatalog>(new FakeMediaCatalog(ready: null));
+            services.RemoveAll<IMediaRotationSink>();
+            services.AddSingleton<IMediaRotationSink>(new FakeMediaRotationSink());
+            services.RemoveAll<IRotFindingStore>();
+            services.AddSingleton<IRotFindingStore>(new FakeRotFindingStore());
+            services.RemoveAll<IActivePersonaAccessor>();
+            services.AddSingleton<IActivePersonaAccessor>(new FakeActivePersonaAccessor());
+            services.RemoveAll<IRepeatNumbersReader>();
+            services.AddSingleton<IRepeatNumbersReader>(new FakeRepeatNumbersReader());
+            services.RemoveAll<ICallbackRateReader>();
+            services.AddSingleton<ICallbackRateReader>(new FakeCallbackRateReader());
+
+            services.RemoveAll<IStaleAdSpotCounter>();
+            services.AddSingleton<IStaleAdSpotCounter>(AdCounter);
+            services.RemoveAll<ISafeContentLedger>();
+            services.AddSingleton<ISafeContentLedger>(ledger);
+            services.RemoveAll<ISeedRowFinder>();
+            services.AddSingleton<ISeedRowFinder>(new FakeSeedRowFinder());
+            services.RemoveAll<IAdminMediaLookup>();
+            services.AddSingleton<IAdminMediaLookup>(catalog);
+        });
     }
 }
