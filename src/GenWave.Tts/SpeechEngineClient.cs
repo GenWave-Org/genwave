@@ -3,6 +3,8 @@ namespace GenWave.Tts;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
@@ -19,9 +21,15 @@ public sealed class SpeechEngineClient(
     IOptionsMonitor<TtsOptions> optionsMonitor,
     EngineRenderActivity activity,
     PronunciationRuleHitReporter? ruleHits = null,
-    TimeProvider? timeProvider = null)
+    TimeProvider? timeProvider = null,
+    ILogger<SpeechEngineClient>? logger = null,
+    PaceStretch? paceStretch = null)
 {
     readonly TimeProvider time = timeProvider ?? TimeProvider.System;
+
+    // SPEC F219.31: the pace of an engine with no speed of its own, applied to its output right here, below every
+    // measure and cache. Its warnings log under the SpeechEngineClient category (it is handed this client's logger).
+    readonly PaceStretch stretch = paceStretch ?? new PaceStretch(logger ?? NullLogger<SpeechEngineClient>.Instance);
 
     /// <summary>
     /// Renders on one NAMED registry engine over its own wire: Piper's bare text/plain for the piper profile, the
@@ -37,23 +45,57 @@ public sealed class SpeechEngineClient(
         var identity = engine.Identity;
         var startedAt = time.GetTimestamp();
         activity.Started(identity);
+        string path;
         try
         {
-            var path = await DispatchAsync(engine, context, ct);
+            path = await DispatchAsync(engine, context, ct);
             Settle(engine, context, LateReason(engine, startedAt));
-            return path;
         }
         catch (Exception ex)
         {
             Settle(engine, context, FaultReason(engine, ex, startedAt, ct));
             throw;
         }
+
+        // SPEC F219.31: the local ffmpeg stretch runs AFTER the engine is judged, so its time is never charged to the
+        // engine (T768a's late window) and a cancel inside it is no engine fault.
+        return await StretchAsync(engine, context, path, ct);
     }
 
     Task<string> DispatchAsync(VoiceEngine engine, TtsRenderContext context, CancellationToken ct) =>
         engine.Profile == VoiceEngineProfiles.Piper
             ? RenderPiperAsync(engine, context, ct)
             : RenderAsync(engine, context, ct);
+
+    // Whatever escapes the stretch (a caller cancel), the file the engine wrote is deleted: nothing else holds its path.
+    async Task<string> StretchAsync(VoiceEngine engine, TtsRenderContext context, string path, CancellationToken ct)
+    {
+        try
+        {
+            return await stretch.ApplyAsync(engine.Profile, context.Pace, path, ct);
+        }
+        catch
+        {
+            DeleteBestEffort(path);
+            throw;
+        }
+    }
+
+    static void DeleteBestEffort(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (IOException)
+        {
+            // Scratch file under CacheRoot with a unique name: an orphan is inert, and the original failure must surface.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // As above.
+        }
+    }
 
     // fault null = no verdict on the engine. An audition ("Hear it") is never evidence either way: it still occupied the
     // engine while it ran (so it counted as in flight), but a bad preview must not turn the tile red nor keep it green.

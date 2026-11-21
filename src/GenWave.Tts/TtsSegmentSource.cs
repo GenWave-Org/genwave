@@ -73,7 +73,10 @@ public sealed class TtsSegmentSource(
     // up to silence (F198.1). Same no-fingerprint-moves shape, same reason for the bump: every
     // evergreen clip re-renders once and picks up the new pauses instead of airing the pre-F198
     // punctuation forever.
-    internal const string MergePolicyVersion = "f97.4+gh541+gh703";
+    // "+f219.31": SPEC F219.31 stretches the render of a profile with no speed (chatterbox, piper) by the speaker's
+    // pace, so audio cached at a pace other than 1.0 before it was never stretched. Same no-fingerprint-moves shape:
+    // the bump re-keys every such evergreen clip once instead of airing it unstretched forever.
+    internal const string MergePolicyVersion = "f97.4+gh541+gh703+f219.31";
 
     public async Task<MediaItem?> RenderAsync(SegmentRequest request, CancellationToken ct)
     {
