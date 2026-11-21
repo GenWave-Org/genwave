@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **162 seams across 9 projects.**
+> **164 seams across 9 projects.**
 
 ## GenWave.Ads (2 seams)
 
@@ -66,7 +66,7 @@
 |---|---|---|---|
 | `GenWave.Core.Abstractions.IAppVersion` | `GenWave.Core.AppVersion` | Singleton | — |
 
-## GenWave.Host (38 seams)
+## GenWave.Host (40 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -106,7 +106,9 @@
 | `GenWave.Host.Images.IImageProcessRunner` | `GenWave.Host.Images.FfmpegImageProcessRunner` | Singleton | — |
 | `GenWave.Host.Playout.IAiringTokenResolver` | `GenWave.Host.Playout.AiringTokenRing` | Singleton | — |
 | `GenWave.Host.Pronunciations.IRespellOracle` | `GenWave.Host.Pronunciations.EspeakRespellOracle` | Singleton | — |
+| `GenWave.Host.Seeding.ISafeContentLedger` | `GenWave.Host.Seeding.SafeContentLedger` | Singleton | — |
 | `GenWave.Host.Seeding.ISafeLoopSeedMarkerStore` | `GenWave.Host.Seeding.SafeLoopSeedMarkerStore` | Singleton | — |
+| `GenWave.Host.Seeding.ISeedRowFinder` | `GenWave.Host.Seeding.SeedRowFinder` | Singleton | — |
 | `GenWave.Host.Voices.IVoiceClipUsageReader` | `GenWave.Host.Voices.VoiceClipUsageReader` | Singleton | — |
 
 ## GenWave.Loudness (5 seams)

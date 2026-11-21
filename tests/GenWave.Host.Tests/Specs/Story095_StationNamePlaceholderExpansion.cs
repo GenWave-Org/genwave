@@ -248,7 +248,7 @@ file static class SeederFactory
         var seeder = new SafeLoopSeeder(
             marker, libraries, libraries, author, settings,
             new FakeOptionsMonitor<StationOptions>(stationOptions),
-            KokoroVoiceResolver.Instance, NoOpStationEventSink.Instance,
+            KokoroVoiceResolver.Instance, GenWave.Host.Tests.Support.TestVoiceEngines.Active("kokoro"), new FakeSafeContentLedger(), NoOpStationEventSink.Instance,
             NullLogger<SafeLoopSeeder>.Instance);
         return (seeder, marker, libraries, settings);
     }

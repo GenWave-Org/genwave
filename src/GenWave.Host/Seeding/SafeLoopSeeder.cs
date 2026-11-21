@@ -34,6 +34,8 @@ public sealed class SafeLoopSeeder(
     IStationSettingsStore settingsStore,
     IOptionsMonitor<StationOptions> stationMonitor,
     IVoiceResolver voiceResolver,
+    IActiveVoiceEngine activeEngine,
+    ISafeContentLedger contentLedger,
     IStationEventSink events,
     ILogger<SafeLoopSeeder> logger)
 {
@@ -156,7 +158,6 @@ public sealed class SafeLoopSeeder(
     async Task<SafeSegmentAuthorResult> RenderSeedSegmentAsync(long libraryId, CancellationToken ct)
     {
         var station = stationMonitor.CurrentValue;
-        var safe = station.Safe;
 
         // SPEC F219.8/F219.9: the default voice is Station:Voice resolved for the active engine; a map with
         // none for it cannot voice the seed, so nothing is rendered (the seed retries on the next boot).
@@ -167,17 +168,14 @@ public sealed class SafeLoopSeeder(
             return SafeSegmentAuthorResult.Failure(SafeSegmentFailureReason.NoVoiceForEngine, "Station:Voice has no voice for the active engine");
         }
 
-        var request = new SafeSegmentRequest(
-            Text: safe.SeedMessage,
-            LibraryId: libraryId,
-            StationName: station.Name,
-            DefaultVoice: defaultVoice,
-            AuthoredRoot: safe.AuthoredRoot,
-            BedDuckDb: safe.BedDuckDb,
-            BedPadSeconds: safe.BedPadSeconds,
-            Title: SeedTitle);
+        // Read before the render: a switch that lands mid-render must leave the file reading as stale (SPEC F219.22).
+        var marker = SafeContentMarker.For(activeEngine.Name, defaultVoice);
 
-        return await author.AuthorAsync(request, ct);
+        var result = await author.AuthorAsync(SeedSegmentRequests.Build(station, defaultVoice, libraryId), ct);
+        if (result.Succeeded)
+            await contentLedger.SaveAsync([new SafeContentRecord(result.MediaId, marker)], ct);
+
+        return result;
     }
 
     /// <summary>

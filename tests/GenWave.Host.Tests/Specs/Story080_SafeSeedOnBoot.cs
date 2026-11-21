@@ -222,7 +222,8 @@ file static class SafeLoopSeederFactory
         FakeMarkerStore Marker,
         FakeLibraryStore Libraries,
         FakeSeedSafeSegmentAuthor Author,
-        FakeSeedSettingsStore Settings) Build(StationOptions? stationOptions = null, IStationEventSink? events = null)
+        FakeSeedSettingsStore Settings) Build(
+        StationOptions? stationOptions = null, IStationEventSink? events = null, FakeSafeContentLedger? ledger = null)
     {
         var marker = new FakeMarkerStore();
         var libraries = new FakeLibraryStore();
@@ -236,7 +237,7 @@ file static class SafeLoopSeederFactory
             author,
             settings,
             new FakeOptionsMonitor<StationOptions>(stationOptions ?? DefaultStationOptions()),
-            KokoroVoiceResolver.Instance, events ?? NoOpStationEventSink.Instance,
+            KokoroVoiceResolver.Instance, TestVoiceEngines.Active("kokoro"), ledger ?? new FakeSafeContentLedger(), events ?? NoOpStationEventSink.Instance,
             NullLogger<SafeLoopSeeder>.Instance);
 
         return (seeder, marker, libraries, author, settings);
@@ -305,6 +306,19 @@ public static class FeatureSafeSeedOnBootInProcess
             Assert.Equal(1, libraries.CreateCallCount);
             var all = await libraries.GetAllWithMediaCountAsync(CancellationToken.None);
             Assert.Contains(all, l => l.Name == SafeLoopSeeder.SafeLibraryName);
+        }
+
+        [Fact]
+        public async Task TheSeededRowIsRecordedWithTheVoiceItWasMadeIn()
+        {
+            // SPEC F219.22: the re-render sweep only touches ledger items, and knows a file is stale by this marker.
+            var ledger = new FakeSafeContentLedger();
+            var (seeder, _, _, author, _) = SafeLoopSeederFactory.Build(ledger: ledger);
+            author.Result = SafeSegmentAuthorResult.Success(42);
+
+            await seeder.SeedAsync(CancellationToken.None);
+
+            Assert.Equal(new SafeContentRecord(42, SafeContentMarker.For("kokoro", "af_heart")), ledger.Records.Single());
         }
 
         [Fact]
@@ -518,7 +532,7 @@ public static class FeatureSafeSeedOnBootInProcess
             var seeder = new SafeLoopSeeder(
                 marker, throwingLibraries, throwingLibraries, author, settings,
                 new FakeOptionsMonitor<StationOptions>(SafeLoopSeederFactory.DefaultStationOptions()),
-                KokoroVoiceResolver.Instance, NoOpStationEventSink.Instance,
+                KokoroVoiceResolver.Instance, TestVoiceEngines.Active("kokoro"), new FakeSafeContentLedger(), NoOpStationEventSink.Instance,
                 NullLogger<SafeLoopSeeder>.Instance);
 
             var outcome = await seeder.SeedAsync(CancellationToken.None);
@@ -541,7 +555,7 @@ public static class FeatureSafeSeedOnBootInProcess
             var seeder = new SafeLoopSeeder(
                 throwingMarker, libraries, libraries, author, settings,
                 new FakeOptionsMonitor<StationOptions>(SafeLoopSeederFactory.DefaultStationOptions()),
-                KokoroVoiceResolver.Instance, NoOpStationEventSink.Instance,
+                KokoroVoiceResolver.Instance, TestVoiceEngines.Active("kokoro"), new FakeSafeContentLedger(), NoOpStationEventSink.Instance,
                 NullLogger<SafeLoopSeeder>.Instance);
 
             var outcome = await seeder.SeedAsync(CancellationToken.None);
@@ -602,7 +616,7 @@ public static class FeatureSafeSeedOnBootInProcess
             var seeder = new SafeLoopSeeder(
                 marker, libraries, libraries, author, settings,
                 new FakeOptionsMonitor<StationOptions>(SafeLoopSeederFactory.DefaultStationOptions()),
-                KokoroVoiceResolver.Instance, NoOpStationEventSink.Instance,
+                KokoroVoiceResolver.Instance, TestVoiceEngines.Active("kokoro"), new FakeSafeContentLedger(), NoOpStationEventSink.Instance,
                 NullLogger<SafeLoopSeeder>.Instance);
             using var hostedService = new SafeLoopSeedHostedService(
                 seeder, NullLogger<SafeLoopSeedHostedService>.Instance);
