@@ -186,6 +186,14 @@ function staleVoiceLine(count: number): string | null {
   return `${count} ${count === 1 ? "item" : "items"} still in the old voice`;
 }
 
+const TALK_SKIPPED_LATE_LABEL = "Talk skipped for lateness · last 7 days";
+
+/** SPEC F219.26 — a week with nothing skipped is the success rule; any skip warns; unknown stays neutral. */
+function talkSkippedLateVariant(count: number | null | undefined): "neutral" | "ok" | "warning" {
+  if (count === undefined || count === null) return "neutral";
+  return count === 0 ? "ok" : "warning";
+}
+
 interface StatusTilesProps {
   status: StatusResponse | null;
   error: boolean;
@@ -372,6 +380,22 @@ export function StatusTiles({ status, error, timeZone }: StatusTilesProps): Reac
                 </p>
               )}
             </>
+          )}
+        </Tile>
+
+        {/* SPEC F219.26, STORY-560 AC3, PLAN T768 — talk segments dropped because their render ran past the
+            engine's budget, last 7 days. `talkDroppedLate7d` is null when the api could not count, absent on
+            an older api: both read as unavailable. Zero is the goal, so it takes the success border. */}
+        <Tile label={TALK_SKIPPED_LATE_LABEL} variant={talkSkippedLateVariant(status?.talkDroppedLate7d)}>
+          {loading && <TileSkeleton />}
+          {(neverLoaded ||
+            (status !== null && (status.talkDroppedLate7d === undefined || status.talkDroppedLate7d === null))) && (
+            <TileUnavailable />
+          )}
+          {status !== null && status.talkDroppedLate7d !== undefined && status.talkDroppedLate7d !== null && (
+            <p className="text-[1.4rem] font-semibold tabular-nums text-ink">
+              {status.talkDroppedLate7d === 0 ? "None" : status.talkDroppedLate7d}
+            </p>
           )}
         </Tile>
 

@@ -9,6 +9,7 @@ import { CUT_SHORT_WORDS, STOCK_LINE_SWAP_WORDS } from "@/lib/repeats-copy";
 export const REPEAT_CAUGHT_KIND = "repeat-caught";
 export const VOICE_MISSING_KIND = "voice-missing";
 export const HANDOFF_DROPPED_KIND = "handoff-dropped";
+export const TALK_DROPPED_LATE_KIND = "talk-dropped-late";
 
 /** Plain-words badge text for the kinds the feed names; any other kind renders its raw text. */
 export const BOOTH_LOG_KIND_LABELS: Readonly<Record<string, string>> = {
@@ -18,6 +19,7 @@ export const BOOTH_LOG_KIND_LABELS: Readonly<Record<string, string>> = {
   [REPEAT_CAUGHT_KIND]: "Repeat caught",
   [VOICE_MISSING_KIND]: "Voice missing",
   [HANDOFF_DROPPED_KIND]: "Handoff dropped",
+  [TALK_DROPPED_LATE_KIND]: "Talk dropped late",
 };
 
 /** The badge text for a row kind: its plain label, or the raw kind when this UI has none. */
