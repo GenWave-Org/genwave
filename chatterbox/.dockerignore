@@ -1,0 +1,5 @@
+clips/
+__pycache__/
+*.pyc
+.dockerignore
+ATTRIBUTION.txt
