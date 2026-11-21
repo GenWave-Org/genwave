@@ -13,7 +13,12 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using System.Threading.Channels;
+using Microsoft.Extensions.Time.Testing;
 using GenWave.Core.Abstractions;
+using GenWave.Core.Domain;
+using GenWave.Host.Tests.Fakes;
+using GenWave.Orchestration;
 using GenWave.Tts;
 
 /// <summary>
@@ -47,8 +52,10 @@ file sealed class EnginesByHostHandler : HttpMessageHandler
 }
 
 /// <summary>The real host with chatterbox as the active engine; only the engines' HTTP transport and the Postgres edges are faked.</summary>
-file sealed class ActiveEngineWebFactory(EnginesByHostHandler engines, IReadOnlyDictionary<string, string?>? extraSettings = null)
-    : WebApplicationFactory<Program>
+file sealed class ActiveEngineWebFactory(
+    EnginesByHostHandler engines,
+    IReadOnlyDictionary<string, string?>? extraSettings = null,
+    Action<IServiceCollection>? configureServices = null) : WebApplicationFactory<Program>
 {
     internal const string Password = "test-password-t766";
 
@@ -82,6 +89,7 @@ file sealed class ActiveEngineWebFactory(EnginesByHostHandler engines, IReadOnly
             services.AddSingleton<IRotFindingStore>(new FakeRotFindingStore());
             services.RemoveAll<IActivePersonaAccessor>();
             services.AddSingleton<IActivePersonaAccessor>(new FakeActivePersonaAccessor());
+            configureServices?.Invoke(services);
         });
     }
 }
@@ -135,14 +143,56 @@ public static class FeatureEngineDownMeansMusic
     // AC2, AC3 — a render past the engine's budget
     public sealed class ScenarioLateTalkIsLogged
     {
-        [Fact(Skip = "pending: T767")]
-        public void ATalkDroppedLateRowIsWritten() { }
+        static readonly DateTimeOffset Now = new(2026, 11, 21, 12, 0, 0, TimeSpan.Zero);
 
-        [Fact(Skip = "pending: T767")]
-        public void TheStatusResponseCarriesTheSevenDayCount() { }
+        // A hand-built one-slot break whose render the budget outran, pushed through the host's own BreakDelivery
+        // and event sink; the row is read off the booth log's queue, the seam the drain service persists from.
+        [Fact]
+        public async Task ATalkDroppedLateRowIsWritten()
+        {
+            await using var factory = new ActiveEngineWebFactory(new EnginesByHostHandler());
+            var identity = new StationIdentity("station-1", "GenWave", "reader-1");
+            var request = new SegmentRequest(SegmentKind.LeadIn, identity.Voice, identity.Name, null, Now, identity.Id);
+            var slot = new PlannedSlot(1, SegmentKind.LeadIn, new RenderSource(request), null, new SilentDrop(), ObserveDuration: true);
+            var context = new BreakContext(1, null, null, null, new CadenceConfig(), identity, Now, null, new HashSet<SpeechDeferralKind>(), TimeSpan.Zero);
+            var plan = new BreakPlan(1, context, TimeSpan.FromSeconds(5), [slot]);
 
-        [Fact(Skip = "pending: T767")]
-        public void ARowEightDaysOldIsNotCounted() { }
+            factory.Services.GetRequiredService<BreakDelivery>().Deliver(plan, [new TimedOutOutcome()]);
+
+            var row = await factory.Services.GetRequiredService<ChannelReader<BoothLogAppendRequest>>()
+                .ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal("talk-dropped-late", row.Kind);
+        }
+
+        [Fact]
+        public async Task TheStatusResponseCarriesTheSevenDayCount() =>
+            Assert.Equal(2, await SevenDayCountAsync(Now.AddDays(-1), Now.AddHours(-2)));
+
+        [Fact]
+        public async Task ARowEightDaysOldIsNotCounted() =>
+            Assert.Equal(0, await SevenDayCountAsync(Now.AddDays(-8)));
+
+        // GET /api/status through the real host, the clock held by a FakeTimeProvider and the booth rows by an in-memory reader.
+        static async Task<int> SevenDayCountAsync(params DateTimeOffset[] rowTimes)
+        {
+            await using var factory = new ActiveEngineWebFactory(
+                new EnginesByHostHandler(),
+                configureServices: services =>
+                {
+                    services.RemoveAll<TimeProvider>();
+                    services.AddSingleton<TimeProvider>(new FakeTimeProvider(Now));
+                    services.RemoveAll<ITalkDroppedLateReader>();
+                    services.AddSingleton<ITalkDroppedLateReader>(new FakeTalkDroppedLateReader(rowTimes));
+                });
+
+            var client = factory.CreateClient();
+            var login = await client.PostAsJsonAsync("/api/auth/login", new { password = ActiveEngineWebFactory.Password })
+                .WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(HttpStatusCode.NoContent, login.StatusCode);
+
+            var body = await client.GetFromJsonAsync<JsonElement>("/api/status").WaitAsync(TimeSpan.FromSeconds(10));
+            return body.GetProperty("talkDroppedLate7d").GetInt32();
+        }
     }
 
     // Before the warm-up line has rendered: not green, and not "down" either

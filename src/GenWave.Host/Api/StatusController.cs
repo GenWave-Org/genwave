@@ -41,8 +41,12 @@ public sealed class StatusController(
     EngineSettingsStatus engineSettingsStatus,
     IRepeatNumbersReader repeatNumbersReader,
     ICallbackRateReader callbackRateReader,
-    IStaleVoiceItemsReader staleVoiceItemsReader) : ControllerBase
+    IStaleVoiceItemsReader staleVoiceItemsReader,
+    ITalkDroppedLateReader talkDroppedLateReader,
+    TimeProvider timeProvider) : ControllerBase
 {
+    static readonly TimeSpan TalkDroppedLateWindow = TimeSpan.FromDays(7);
+
     /// <summary>
     /// GET /api/status — cookie-auth (covered by the deny-by-default fallback policy when
     /// Admin:Password is set, same as every other <c>/api/*</c> controller). Returns:
@@ -60,6 +64,10 @@ public sealed class StatusController(
     /// station-wide used / DJ-hours over 7 days, null with no offers or no hours; <c>asks</c> and <c>used</c> are the
     /// offers and on-air uses behind it (T743); <c>callbacks</c> itself is
     /// null when the station database could not be read.
+    ///
+    /// <c>talkDroppedLate7d</c> (SPEC F219.26, STORY-560, PLAN T767) is how many talk segments were dropped for a render
+    /// past the engine's time limit in the last 7 days, from <see cref="ITalkDroppedLateReader"/>.
+    /// <see langword="null"/> when it could not be counted: unknown, never 0.
     ///
     /// <c>staleVoiceItems</c> (SPEC F219.23, STORY-559, PLAN T764) is how many ads plus boot-seed items are still in the
     /// old voice, from <see cref="IStaleVoiceItemsReader"/> (the sweeps' own stale predicates, live engine and voice).
@@ -186,6 +194,7 @@ public sealed class StatusController(
         var repeats = await repeatNumbersReader.ReadAsync(ct);
         var callbacks = await callbackRateReader.ReadAsync(ct);
         var staleVoiceItems = await staleVoiceItemsReader.CountAsync(ct);
+        var talkDroppedLate7d = await talkDroppedLateReader.CountSinceAsync(timeProvider.GetUtcNow() - TalkDroppedLateWindow, ct);
 
         return Ok(new
         {
@@ -294,6 +303,8 @@ public sealed class StatusController(
             callbacks = callbacks is null ? null : new { perDjHour = callbacks.PerDjHour, asks = callbacks.Asks, used = callbacks.Used },
             // SPEC F219.23, STORY-559: items still in the old voice. Null when it could not be counted (unknown, not zero).
             staleVoiceItems,
+            // SPEC F219.26, STORY-560: talk dropped for a late render, last 7 days. Null when it could not be counted.
+            talkDroppedLate7d,
         });
     }
 

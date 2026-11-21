@@ -3,6 +3,7 @@ using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Npgsql;
 
@@ -40,6 +41,9 @@ public static class BoothLogServiceCollectionExtensions
             sp.GetRequiredService<IOptions<BoothLogOptions>>()));
         services.AddSingleton<IBoothLogAppender>(sp => sp.GetRequiredService<BoothLogRepository>());
         services.AddSingleton<IBoothLogReader>(sp => sp.GetRequiredService<BoothLogRepository>());
+        services.AddSingleton<ITalkDroppedLateReader>(sp => new TalkDroppedLateRepository(
+            new Lazy<NpgsqlDataSource>(() => new NpgsqlDataSourceBuilder(connectionString).Build()),
+            sp.GetRequiredService<ILogger<TalkDroppedLateRepository>>()));
 
         // Bounded so a DB outage/backlog can never grow memory unbounded — hobby-scale event rate
         // (at most one row per track start/patter/mode change, never a hot inner loop) means 512 is

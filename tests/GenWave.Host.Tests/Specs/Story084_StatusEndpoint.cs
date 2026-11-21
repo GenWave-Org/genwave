@@ -187,7 +187,9 @@ public static class FeatureStatusEndpoint
             new EngineSettingsStatus(),
             new FakeRepeatNumbersReader(),
             new FakeCallbackRateReader(),
-            new FakeStaleVoiceItemsReader())
+            new FakeStaleVoiceItemsReader(),
+            new FakeTalkDroppedLateReader(),
+            TimeProvider.System)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
         };

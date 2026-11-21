@@ -149,6 +149,11 @@ export interface StatusResponse {
    * (a database read failed, or the active engine has no station voice); absent on an api that predates it.
    */
   staleVoiceItems?: number | null;
+  /**
+   * SPEC F219.26, STORY-560, PLAN T767 — talk dropped in the last 7 days because its render ran past the engine's time
+   * limit. `null` means unknown (a database read failed); absent on an api that predates it.
+   */
+  talkDroppedLate7d?: number | null;
 }
 
 export interface CallbacksStatus {

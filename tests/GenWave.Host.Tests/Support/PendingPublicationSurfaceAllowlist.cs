@@ -86,5 +86,10 @@ public static class PendingPublicationSurfaceAllowlist
         "GenWave.Core.Events.VoiceMissing::PROPERTY System.Nullable<System.Int64> PersonaId { public get; public init; }",
         "GenWave.Core.Events.VoiceMissing::PROPERTY System.String Speaker { public get; public init; }",
         "GenWave.Core.Events.VoiceMissing::TYPE class : GenWave.Core.Events.StationEvent [System.IEquatable<GenWave.Core.Events.StationEvent>,System.IEquatable<GenWave.Core.Events.VoiceMissing>]",
+        // PLAN T767: a talk dropped for a render past the engine's time limit (F219.26).
+        "GenWave.Core.Events.TalkDroppedLate::CTOR (System.String Kind, System.String PersonaName = null)",
+        "GenWave.Core.Events.TalkDroppedLate::PROPERTY System.String Kind { public get; public init; }",
+        "GenWave.Core.Events.TalkDroppedLate::PROPERTY System.String PersonaName { public get; public init; }",
+        "GenWave.Core.Events.TalkDroppedLate::TYPE class : GenWave.Core.Events.StationEvent [System.IEquatable<GenWave.Core.Events.StationEvent>,System.IEquatable<GenWave.Core.Events.TalkDroppedLate>]",
     ];
 }
