@@ -146,6 +146,94 @@ public static class FeatureAdVoicesPerEngine
         }
     }
 
+    public sealed class ScenarioAStampedBareKokoroIdIsReCastOntoTheActiveEngine
+    {
+        const string Station = "{\"kokoro\":\"af_heart\",\"chatterbox\":\"reader-1\"}";
+        const string Cast = "{\"kokoro\":\"am_michael\",\"chatterbox\":\"reader-2\"}";
+        const string Announcer = "{\"kokoro\":\"af_heart\",\"chatterbox\":\"reader-3\"}";
+
+        static async Task<FakeCastSegmentAuthor> RenderOn(string engine, AdLiveSettings live)
+        {
+            var (service, author, _, _) = Build(engine);
+            await service.RenderAsync(Spot(Plan("af_heart", "am_michael")), live, CancellationToken.None);
+            return author;
+        }
+
+        [Fact]
+        public async Task TheAnnouncerTakesTheStationVoiceOnTheActiveEngine() =>
+            Assert.Equal(
+                "reader-1",
+                VoiceOf(await RenderOn("chatterbox", Live("chatterbox", stationVoice: Station, castVoices: [Cast])), "ANNOUNCER"));
+
+        [Fact]
+        public async Task ACastSpeakerTakesItsCastEntryOnTheActiveEngine() =>
+            Assert.Equal(
+                "reader-2",
+                VoiceOf(await RenderOn("chatterbox", Live("chatterbox", stationVoice: Station, castVoices: [Cast])), "VOICE1"));
+
+        [Fact]
+        public async Task TheAnnouncerSettingIsPreferredOverTheStationVoice() =>
+            Assert.Equal(
+                "reader-3",
+                VoiceOf(
+                    await RenderOn("chatterbox", Live("chatterbox", announcerVoice: Announcer, stationVoice: Station, castVoices: [Cast])),
+                    "ANNOUNCER"));
+
+        [Fact]
+        public async Task OnKokoroTheStoredIdsRenderUnchanged() =>
+            Assert.Equal(
+                "am_michael",
+                VoiceOf(await RenderOn("kokoro", Live("kokoro", stationVoice: Station, castVoices: [Cast])), "VOICE1"));
+    }
+
+    public sealed class ScenarioAStampedIdNoSettingCanReCastStaysMissing
+    {
+        const string BellaOnKokoro = "{\"kokoro\":\"af_bella\"}";
+        const string BellaWithChatterbox = "{\"kokoro\":\"af_bella\",\"chatterbox\":\"x\"}";
+
+        static async Task<(RecordingStationEventSink Events, FakeCastSegmentAuthor Author)> RenderOn(
+            AdLiveSettings live, string announcer = "af_heart", string voice1 = "am_michael")
+        {
+            var (service, author, _, events) = Build("chatterbox");
+            await service.RenderAsync(Spot(Plan(announcer, voice1), id: 12), live, CancellationToken.None);
+            return (events, author);
+        }
+
+        [Fact]
+        public async Task AStoredIdMatchingNoSettingNamesTheSpotVoiceCast()
+        {
+            var (events, _) = await RenderOn(Live("chatterbox", stationVoice: NovaMap, castVoices: [NovaMap]));
+
+            Assert.Equal("ad spot 12 voice cast", events.Published.OfType<VoiceMissing>().Single().Speaker);
+        }
+
+        [Fact]
+        public async Task AHoldingSettingWithNoVoiceOnTheActiveEngineNamesThatSetting()
+        {
+            var (events, _) = await RenderOn(Live("chatterbox", stationVoice: "{\"kokoro\":\"af_heart\"}"), voice1: NovaMap);
+
+            Assert.Equal("Station:Voice", events.Published.OfType<VoiceMissing>().Single().Speaker);
+        }
+
+        [Fact]
+        public async Task TheFirstHoldingSettingDecidesEvenWhenALaterOneHasAVoice()
+        {
+            var (events, _) = await RenderOn(
+                Live("chatterbox", announcerVoice: BellaOnKokoro, stationVoice: BellaWithChatterbox),
+                announcer: "af_bella", voice1: NovaMap);
+
+            Assert.Equal("Station:Ads:AnnouncerVoice", events.Published.OfType<VoiceMissing>().Single().Speaker);
+        }
+
+        [Fact]
+        public async Task TheSpotIsNotRendered()
+        {
+            var (_, author) = await RenderOn(Live("chatterbox", stationVoice: NovaMap));
+
+            Assert.Null(author.LastRequest);
+        }
+    }
+
     public sealed class ScenarioAStoredVoiceNoSettingHoldsNamesTheSpot
     {
         static string NamedFor(AdSpot spot, AdLiveSettings live)

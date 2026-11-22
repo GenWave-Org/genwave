@@ -111,7 +111,7 @@ internal static class AdCastPicker
     /// Two voice setting values are the same speaker when they are the same text, or are maps that give one
     /// voice id on a shared engine (a bare id reads as kokoro), SPEC F219.8.
     /// </summary>
-    static bool SameSpeaker(string a, string b) =>
+    internal static bool SameSpeaker(string a, string b) =>
         string.Equals(a, b, StringComparison.Ordinal)
         || (VoiceMap.TryParseSetting(a) is { } first && VoiceMap.TryParseSetting(b) is { } second && first.SharesVoiceWith(second));
 }
