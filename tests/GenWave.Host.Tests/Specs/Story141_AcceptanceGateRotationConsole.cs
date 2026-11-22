@@ -163,7 +163,7 @@ public static class FeatureAcceptanceGateRotationConsole
         // them are reworded for a home station; T646 then drops the "ollama" mention from the
         // kokoro comment (comment-only). No other service's behaviour changed. EngineScriptSha256
         // unchanged — this task does not touch engine/genwave.liq.
-        const string ComposeYamlSha256  = "6db461ebe5a2183005f206ce358cfaf54967861824dfb9bc367519ebfc74fc52";
+        const string ComposeYamlSha256  = "cfaed71418868da453bc541a193bae55a39cec293725ba768417a39ce804047b";
 
         [Fact]
         public void EngineScriptByteMatchesMain()

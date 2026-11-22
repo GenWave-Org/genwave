@@ -89,7 +89,7 @@ cd "$(dirname "$0")"
 # usage — prints the short plain help for -h/--help (and after a bad option).
 usage() {
   cat <<'EOF'
-Usage: ./launch.sh [--with a,b] [--piper-only] [--dry-run]
+Usage: ./launch.sh [--with a,b] [--piper-only | --chatterbox] [--dry-run]
 
 Starts or restarts the GenWave stack. Run ./build.sh to rebuild images after a code change.
 
@@ -99,6 +99,10 @@ Starts or restarts the GenWave stack. Run ./build.sh to rebuild images after a c
                                Set GW_PRESET in .env to keep it.
   --with a,b                   Turn on optional services for this launch (admin, logging, fallback).
   --piper-only                 Low-memory mode: no Kokoro, the Piper voice does all speech.
+  --chatterbox                 Chatterbox Turbo is the voice: no Kokoro. Dev flow only; the
+                               image builds on first launch and its weights download on first
+                               start (up to ~30 min; music plays meanwhile). Set GENWAVE_VOICE_CPUS
+                               (default 64, must not exceed this machine's cores).
   --dry-run                    Print the commands it would run, then exit. Changes nothing.
   -h, --help                   Show this help.
 
@@ -116,6 +120,7 @@ EOF
 }
 
 PIPER_ONLY=0
+CHATTERBOX=0
 DRY_RUN=0
 WITH=""
 # USE_PINNED_OVERLAY: whether compose.pinned.yaml joins the file set at all (SPEC F136.5).
@@ -134,6 +139,11 @@ while [ $# -gt 0 ]; do
       ;;
     --piper-only)
       PIPER_ONLY=1
+      TOPOLOGY_FLAG_GIVEN=1
+      shift
+      ;;
+    --chatterbox)
+      CHATTERBOX=1
       TOPOLOGY_FLAG_GIVEN=1
       shift
       ;;
@@ -161,6 +171,11 @@ while [ $# -gt 0 ]; do
       ;;
   esac
 done
+
+if [ "$CHATTERBOX" = "1" ] && [ "$PIPER_ONLY" = "1" ]; then
+  echo "launch.sh: --chatterbox and --piper-only are two different voice topologies; pick one." >&2
+  exit 2
+fi
 
 # --- GW_PRESET resolution (SPEC F132.5, vocabulary v2 SPEC F136.5) -----------------------
 # launch.sh is the ONLY reader of GW_PRESET in the repo: it resolves flags + preset into
@@ -223,12 +238,24 @@ if [ "$PIPER_ONLY" = "1" ]; then
   MIGRATE_ARGS+=(-f compose.piper-only.yaml)
 fi
 
+# --chatterbox (SPEC F219.29, PLAN T771): the overlay leaves kokoro out and registers the
+# engine on api. Like --piper-only it names compose.yaml explicitly (`-f` disables
+# auto-discovery) and merges last. An explicit topology flag outranks GW_PRESET, so a home
+# preset never reaches here: this is the build-from-source flow (the image is not published).
+# COMPOSE_ARGS is overwritten, not appended: --chatterbox outranks GW_PRESET (TOPOLOGY_FLAG_GIVEN), so
+# the pinned overlay is never in the set here. A future pinned+chatterbox path must append instead.
+if [ "$CHATTERBOX" = "1" ]; then
+  COMPOSE_ARGS=(-f compose.yaml -f compose.chatterbox.yaml)
+  MIGRATE_ARGS=(-f compose.yaml -f compose.chatterbox.yaml)
+fi
+
 # --- preflight topology inputs (F134.3a amendment): launch.sh alone resolves flags +
 # GW_PRESET into concrete topology (above) and hands preflight the result as two explicit
 # env inputs — tools/preflight.sh reads no preset key itself. Exported here, once topology
 # is fully known, ahead of every preflight_docker/preflight_env_secrets call site below.
 GW_PREFLIGHT_TOPOLOGY="full"
 [ "$PIPER_ONLY" = "1" ] && GW_PREFLIGHT_TOPOLOGY="piper-only"
+[ "$CHATTERBOX" = "1" ] && GW_PREFLIGHT_TOPOLOGY="chatterbox"
 export GW_PREFLIGHT_TOPOLOGY
 
 compose() {
@@ -309,6 +336,13 @@ if [ -n "$WITH" ]; then
   else
     EFFECTIVE_PROFILES="$WITH"
   fi
+fi
+# --chatterbox runs the profile-gated engine service (compose.yaml `chatterbox`).
+if [ "$CHATTERBOX" = "1" ]; then
+  case ",${EFFECTIVE_PROFILES}," in
+    *,chatterbox,*) ;;
+    *) EFFECTIVE_PROFILES="${EFFECTIVE_PROFILES:+$EFFECTIVE_PROFILES,}chatterbox" ;;
+  esac
 fi
 [ -n "$EFFECTIVE_PROFILES" ] && export COMPOSE_PROFILES="$EFFECTIVE_PROFILES"
 

@@ -156,13 +156,14 @@ check_render() {
 if [ -n "$CONFIG_FILE" ]; then
   check_render "$CONFIG_JSON" "$CONFIG_FILE"
 else
-  # Every file-set this repo deploys; piper-only is always merged last (launch.sh --piper-only).
+  # Every file-set this repo deploys; piper-only and chatterbox are always merged last (launch.sh).
   # `--profile '*'` activates every profile (admin, logging, fallback), so opt-in services
   # (admin_ui lives behind `admin`) are checked too; it also overrides an ambient COMPOSE_PROFILES.
   FILE_SETS=(
     "base:compose.yaml"
     "base+pinned:compose.yaml compose.pinned.yaml"
     "base+piper-only:compose.yaml compose.piper-only.yaml"
+    "base+chatterbox:compose.yaml compose.chatterbox.yaml"
     "base+pinned+piper-only:compose.yaml compose.pinned.yaml compose.piper-only.yaml"
   )
   for file_set in "${FILE_SETS[@]}"; do

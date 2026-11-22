@@ -40,6 +40,11 @@ volumes:
   # FLAT and non-recursive (`_scan_directories` in its own paths.py) — every file lives directly
   # here, never nested by pack slug, or kokoro's scan will never see it (F166.2/F166.3).
   voices: {}
+  # Voice clips (SPEC F219.12/F219.28): the clip .wav files ARE the chatterbox engine's voices.
+  # api writes them (upload + starter seed, TtsOptions.ClipsRoot=/clips); the engine only reads.
+  voice-clips: {}
+  # Chatterbox Turbo weights (HF_HOME=/models) — persisted so a restart never re-downloads.
+  chatterbox_models: {}
 
 services:
   db:
@@ -220,6 +225,7 @@ services:
       # as root, verified: `docker run --entrypoint sh genwave-api id` -> uid=0/gid=0), same as
       # voice-seed below — a root-owned 755 directory is never a write obstacle for it.
       - voices:/voices
+      - voice-clips:/clips                      # READ-WRITE: api stores voice clips (F219.12); the chatterbox engine mounts it :ro
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health"]
       interval: 10s
@@ -346,6 +352,29 @@ services:
       timeout: 3s
       retries: 10
       start_period: 60s   # first boot downloads the voice model from huggingface
+    restart: unless-stopped
+
+  # Chatterbox Turbo on CPU behind the GenWave speech contract (SPEC F219.28, PLAN T771). Opt-in:
+  # `./launch.sh --chatterbox` is the supported way — compose.chatterbox.yaml drops kokoro and
+  # registers this engine on api. The profile alone (COMPOSE_PROFILES=chatterbox) only starts this
+  # container; without that overlay api never registers the engine, so nothing speaks through it.
+  # Internal only — the engine has no auth, so 8880 is NEVER
+  # published (tools/check-compose-publish.sh). api deliberately does NOT depend_on this service:
+  # first start downloads the weights (up to ~30 min) and music must play meanwhile (F219.27).
+  chatterbox:
+    profiles: ["chatterbox"]
+    build:
+      context: ./chatterbox
+    networks: [core]
+    # cpus and the torch thread count read ONE variable (F219.28). Compose refuses a value above
+    # the host's core count, so launch.sh's preflight checks it first.
+    cpus: ${GENWAVE_VOICE_CPUS:-64}
+    environment:
+      GENWAVE_VOICE_CPUS: ${GENWAVE_VOICE_CPUS:-64}
+    volumes:
+      - chatterbox_models:/models               # writable by uid 10001 (the image chowns /models)
+      - voice-clips:/clips:ro                   # READ-ONLY: the clips are the voices; api writes them
+    # Healthcheck + 1800 s start period come from the image's own HEALTHCHECK (chatterbox/Dockerfile).
     restart: unless-stopped
 
   admin_ui:

@@ -5,7 +5,7 @@ namespace GenWave.Host.Tests.Support;
 
 /// <summary>
 /// Runs `docker compose -f compose.yaml [-f overlay ...] config --format json` from the repo root
-/// and parses the result. Extracted from Gh242; used by Gh242 and Story487 (Story181, Story202, Gh148,
+/// and parses the result. Extracted from Gh242; used by Gh242, Story487 and Story562 (Story181, Story202, Gh148,
 /// Gh310 and Gh334 still carry their own copies). No daemon is touched: `config` only merges text. Extracted from
 /// <c>Gh242_ComposePiperOnlyOverride</c> (PLAN T598 review) so Story487 didn't have to start life as
 /// a third near-identical copy of the same render + depends_on-names plumbing.
@@ -16,7 +16,13 @@ internal static class ComposeConfigRender
     /// Renders compose.yaml plus any overlay files, merged in the given order (last wins, same as
     /// a real `docker compose -f ... -f ...` invocation).
     /// </summary>
-    public static JsonDocument Render(params string[] overlayFiles)
+    public static JsonDocument Render(params string[] overlayFiles) => RenderWithProfiles("", overlayFiles);
+
+    /// <summary>
+    /// Like <see cref="Render"/> with <c>COMPOSE_PROFILES</c> set to <paramref name="profiles"/>
+    /// (comma-separated, empty for none) — the profile set a launch would run under.
+    /// </summary>
+    public static JsonDocument RenderWithProfiles(string profiles, params string[] overlayFiles)
     {
         var startInfo = new ProcessStartInfo("docker")
         {
@@ -38,6 +44,7 @@ internal static class ComposeConfigRender
         // a daemon or reads real credentials, it only needs every `${VAR:?}` to resolve.
         foreach (var (key, value) in DummyEnv)
             startInfo.Environment[key] = value;
+        startInfo.Environment["COMPOSE_PROFILES"] = profiles;
 
         using var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("failed to start docker compose config");
@@ -49,6 +56,10 @@ internal static class ComposeConfigRender
 
         return JsonDocument.Parse(stdOut);
     }
+
+    /// <summary>The service names a render defines (the profile-active set, same as `compose config --services`).</summary>
+    public static IReadOnlySet<string> Services(JsonDocument render) =>
+        render.RootElement.GetProperty("services").EnumerateObject().Select(p => p.Name).ToHashSet();
 
     /// <summary>The given service's `depends_on` keys, sorted — empty when the service has none.</summary>
     public static string[] DependsOnNames(JsonDocument render, string service)
