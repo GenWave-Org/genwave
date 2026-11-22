@@ -143,7 +143,10 @@ public static class FeatureEngineDownMeansMusic
     // AC2, AC3 — a render past the engine's budget
     public sealed class ScenarioLateTalkIsLogged
     {
-        static readonly DateTimeOffset Now = new(2026, 11, 21, 12, 0, 0, TimeSpan.Zero);
+        // Tracks the harness clock: the admin session cookie is signed on the host's TimeProvider but judged by the
+        // client's real clock, so a fixed Now goes stale and the login cookie gets dropped (401 on /api/status). Read once per
+        // process, so it holds while every fact runs within the 12 h session lifetime; whole seconds keep the row times tidy.
+        static readonly DateTimeOffset Now = DateTimeOffset.FromUnixTimeSeconds(TimeProvider.System.GetUtcNow().ToUnixTimeSeconds());
 
         // A hand-built one-slot break whose render the budget outran, pushed through the host's own BreakDelivery
         // and event sink; the row is read off the booth log's queue, the seam the drain service persists from.
