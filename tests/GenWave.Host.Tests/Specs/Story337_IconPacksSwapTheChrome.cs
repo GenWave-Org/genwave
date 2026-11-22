@@ -517,7 +517,7 @@ public static class FeatureIconPacksSwapTheChrome
             // owns an iconPackStore parameter/fallback — PLAN T580 review finding F2).
             var resolver = TestSettingChoiceResolver.Default(iconPackStore: iconPackStore);
             var controller = new SettingsController(
-                config, new FakeSettingsStore(), new SettingValidator(config), NullLogger<SettingsController>.Instance,
+                config, new FakeSettingsStore(), new SettingValidator(config, TestVoiceEngines.KokoroAndPiper()), NullLogger<SettingsController>.Instance,
                 settingCopy: TestSettingCopy.Real(), choiceResolver: resolver)
             {
                 ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
@@ -598,7 +598,7 @@ public static class FeatureIconPacksSwapTheChrome
             var resolverLogger = new CapturingLogger<SettingChoiceResolver>();
             var resolver = TestSettingChoiceResolver.Default(iconPackStore: iconPackStore, logger: resolverLogger);
             var controller = new SettingsController(
-                config, new FakeSettingsStore(), new SettingValidator(config),
+                config, new FakeSettingsStore(), new SettingValidator(config, TestVoiceEngines.KokoroAndPiper()),
                 NullLogger<SettingsController>.Instance,
                 settingCopy: TestSettingCopy.Real(),
                 choiceResolver: resolver)
@@ -630,7 +630,7 @@ public static class FeatureIconPacksSwapTheChrome
         // write-time gate should prevent. These three facts are what must go red the day a future
         // membership tightening changes that.
         static SettingValidator Validator() =>
-            new(new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>()).Build());
+            new(new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>()).Build(), TestVoiceEngines.KokoroAndPiper());
 
         [Fact]
         public void AnEmptyValueIsAcceptedTheHouseIconsDefault()

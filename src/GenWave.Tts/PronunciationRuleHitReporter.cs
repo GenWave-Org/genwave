@@ -6,7 +6,7 @@ using GenWave.Core.Logging;
 
 /// <summary>
 /// Logs and counts pronunciation-rule hits (SPEC F97.5, F100.1, STORY-253 AC4) — the one seam both
-/// Kokoro-kind request builders (<see cref="KokoroTtsSynthesizer"/>, the primary; and
+/// Kokoro-kind request builders (<see cref="SpeechEngineClient"/>, the primary; and
 /// <see cref="KokoroFallbackRenderer"/>, a fallback hop) call, each only AFTER its own render has
 /// fully landed: the engine returned success AND the audio was written to disk (review finding,
 /// PLAN T142) — never merely after <see cref="KokoroSpeechMarkup"/>'s out-matches overload finds a

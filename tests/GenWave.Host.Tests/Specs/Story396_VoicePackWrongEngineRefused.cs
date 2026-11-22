@@ -8,7 +8,7 @@
 // station) still reaches the voice-id collision check (SPEC F166.4, runs AFTER the engine check but
 // before any asset fetch) — so the shared fake HTTP handler also answers Kokoro's real
 // GET /v1/audio/voices route (ITtsVoiceLister is always Kokoro-HTTP-backed regardless of
-// PrimaryVoiceEngine) with an empty stock roster, so the happy path never collides. The SAD PATH (a
+// active voice engine) with an empty stock roster, so the happy path never collides. The SAD PATH (a
 // piper-only station, via Tts:PiperPrimaryEndpoint) never reaches that check at all — the engine
 // mismatch is the very first gate past manifest parsing, strictly before any byte is fetched.
 
@@ -40,7 +40,7 @@ public static class FeatureVoicePackForWrongEngineIsRefusedBeforeBytesHitDisk
         [Fact]
         public async Task KokoroStationAcceptsAKokoroPack()
         {
-            // Given a kokoro-primary station (the default PrimaryVoiceEngine — no
+            // Given a kokoro-primary station (the default active voice engine — no
             // Tts:PiperPrimaryEndpoint) and a pack declaring engine:"kokoro",
             var store = new FakeVoicePackStore();
             await using var factory = new VoicePackEngineWebFactory(store);
@@ -203,6 +203,22 @@ public static class FeatureVoicePackForWrongEngineIsRefusedBeforeBytesHitDisk
         }
     }
 
+    // A stored Tts:Engine whose registry entry is gone: refused, not a 500
+    public sealed class ScenarioStoredEngineMissingFromConfig
+    {
+        [Fact]
+        public async Task InstallReturns400()
+        {
+            var store = new FakeVoicePackStore();
+            await using var factory = new VoicePackEngineWebFactory(store, storedEngine: "chatterbox");
+            var client = await VoicePackEngineWebFactory.LoggedInClientAsync(factory);
+
+            var response = await client.PostAsync($"/api/voice-packs/{VoicePackEngineFixtures.Slug}/install", null);
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+    }
+
     // ---------------------------------------------------------------------
     // SAD PATH — engine outside the closed set entirely (T413 review round 2 finding B2)
     // ---------------------------------------------------------------------
@@ -329,13 +345,15 @@ file sealed class VoicePackEngineWebFactory : WebApplicationFactory<Program>
     readonly FakeVoicePackStore store;
     readonly FakeHttpMessageHandler handler;
     readonly string? piperPrimaryEndpoint;
+    readonly string? storedEngine;
     readonly TempDir voicesRootDir = new();
 
     public string VoicesRoot => voicesRootDir.Path;
 
-    public VoicePackEngineWebFactory(FakeVoicePackStore store, string? piperPrimaryEndpoint = null)
+    public VoicePackEngineWebFactory(FakeVoicePackStore store, string? piperPrimaryEndpoint = null, string? storedEngine = null)
     {
         this.store = store;
+        this.storedEngine = storedEngine;
         this.piperPrimaryEndpoint = piperPrimaryEndpoint;
         handler = VoicePackEngineFixtures.BuildRoutedHandler();
     }
@@ -349,6 +367,8 @@ file sealed class VoicePackEngineWebFactory : WebApplicationFactory<Program>
         builder.UseSetting("Packs:VoicesRoot", VoicesRoot);
         if (!string.IsNullOrEmpty(piperPrimaryEndpoint))
             builder.UseSetting("Tts:PiperPrimaryEndpoint", piperPrimaryEndpoint);
+        if (!string.IsNullOrEmpty(storedEngine))
+            builder.UseSetting("Tts:Engine", storedEngine);
 
         builder.ConfigureTestServices(services =>
         {

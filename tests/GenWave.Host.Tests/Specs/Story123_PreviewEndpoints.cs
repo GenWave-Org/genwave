@@ -19,6 +19,7 @@
 //
 // See docs/PLAN.md Epic T.
 
+using FakeRenderBudgetProvider = GenWave.TestSupport.Fakes.FakeRenderBudgetProvider;
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Hosting;
@@ -228,6 +229,8 @@ file static class PreviewControllerFactory
             new NotUsedPersonaTasteReader(),
             new NotUsedPersonaImportStore(),
             new NotUsedTtsVoiceLister(),
+            KokoroVoiceResolver.Instance,
+            new GenWave.Tts.VoiceEngineRegistry(Microsoft.Extensions.Options.Options.Create(new GenWave.Tts.VoiceEnginesOptions())),
             new FakeStationClockProvider(DateTimeOffset.UtcNow),
             new NotUsedCatalogPersonaAvatarInstaller(),
             NullLogger<PersonaController>.Instance)
@@ -240,6 +243,10 @@ file static class PreviewControllerFactory
         new(
             synthesizer,
             new FakeOptionsMonitor<StationOptions>(stationOptions ?? DefaultStationOptions()),
+            KokoroVoiceResolver.Instance,
+            new FakeRenderBudgetProvider(TimeSpan.FromSeconds((ttsOptions ?? new TtsOptions()).RenderBudgetSeconds)),
+            new GenWave.Tts.VoiceEngineRegistry(Microsoft.Extensions.Options.Options.Create(new GenWave.Tts.VoiceEnginesOptions())),
+            new GenWave.Host.Tests.Fakes.NotUsedNamedEngineSynthesizer(),
             new FakeOptionsMonitor<TtsOptions>(ttsOptions ?? new TtsOptions()),
             // T274 (SPEC F126.1): the preview now resolves rules/pace through these same three
             // real, cheap-to-construct DI seams TtsSegmentSource uses — no station/card rules

@@ -51,7 +51,7 @@ public static class FeatureStationTimezoneSetting
         Path.Combine(RepoRoot, "src", "GenWave.Host", "appsettings.json");
 
     static SettingValidator BuildValidator() =>
-        new(new ConfigurationBuilder().Build());
+        new(new ConfigurationBuilder().Build(), TestVoiceEngines.KokoroAndPiper());
 
     public sealed class ScenarioTheSettingExists
     {
@@ -204,7 +204,7 @@ public static class FeatureStationTimezoneSetting
         var store = new SeededSettingsStore(seed, provider);
 
         var settingsController = new SettingsController(
-            root, store, new SettingValidator(root), NullLogger<SettingsController>.Instance,
+            root, store, new SettingValidator(root, TestVoiceEngines.KokoroAndPiper()), NullLogger<SettingsController>.Instance,
             TestSettingCopy.Real(), TestSettingChoiceResolver.Default())
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },

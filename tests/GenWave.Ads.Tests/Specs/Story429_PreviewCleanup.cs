@@ -40,6 +40,11 @@ public static class FeaturePreviewFilesCleanUpAutomatically
 
     const string StationName = "GWAV Test Station";
 
+    static AdLiveSettings Live() =>
+        new(AnnouncerVoice: "", CastVoices: [], BedFadeMs: AdLiveSettingsReader.DefaultBedFadeMs,
+            BedDuckDb: AdLiveSettingsReader.DefaultBedDuckDb, TargetLufs: AdLiveSettingsReader.DefaultTargetLufs,
+            StationVoice: "", ActiveEngine: "kokoro");
+
     static AdSpot MakeSpot(long id, string previewPath) =>
         new(
             Id: id, SponsorId: 1, SponsorName: "Acme", Title: "Acme spot", Brief: null,
@@ -70,7 +75,7 @@ public static class FeaturePreviewFilesCleanUpAutomatically
         var previewPath = SeedPreviewFile(authoredRoot, $"{spotId}-deadbeef.wav");
 
         var service = new AdRenderService(
-            author, store, adminLookup, libraries, stationIdentity, adsOptions, locatorRoots,
+            author, store, adminLookup, libraries, stationIdentity, AdTestVoices.SpeakersFor(stationIdentity), adsOptions, locatorRoots,
             new NoOpLogger<AdRenderService>());
 
         return (service, author, Path.Combine(authoredRoot, "ads"), previewPath);
@@ -88,7 +93,7 @@ public static class FeaturePreviewFilesCleanUpAutomatically
             using var authoredRoot = NewAuthoredRoot("t445-promote-ac1-");
             var (service, _, _, previewPath) = BuildPromotion(authoredRoot, spotId: 51);
 
-            var outcome = await service.PromotePreviewAsync(MakeSpot(51, previewPath), CancellationToken.None);
+            var outcome = await service.PromotePreviewAsync(MakeSpot(51, previewPath), Live(), CancellationToken.None);
 
             Assert.IsType<AdPromotionOutcome.Landed>(outcome);
             Assert.False(File.Exists(previewPath), "the original preview file survived promotion — File.Move did not run");
@@ -100,7 +105,7 @@ public static class FeaturePreviewFilesCleanUpAutomatically
             using var authoredRoot = NewAuthoredRoot("t445-promote-ac1-");
             var (service, author, adsDir, previewPath) = BuildPromotion(authoredRoot, spotId: 51);
 
-            var outcome = await service.PromotePreviewAsync(MakeSpot(51, previewPath), CancellationToken.None);
+            var outcome = await service.PromotePreviewAsync(MakeSpot(51, previewPath), Live(), CancellationToken.None);
 
             var landed = Assert.IsType<AdPromotionOutcome.Landed>(outcome);
             Assert.Equal(4200, landed.MediaId);
@@ -131,7 +136,7 @@ public static class FeaturePreviewFilesCleanUpAutomatically
             var (service, _, _, previewPath) = BuildPromotion(
                 authoredRoot, spotId: 52, measureThrows: new InvalidOperationException("measure boom"));
 
-            var outcome = await service.PromotePreviewAsync(MakeSpot(52, previewPath), CancellationToken.None);
+            var outcome = await service.PromotePreviewAsync(MakeSpot(52, previewPath), Live(), CancellationToken.None);
 
             var failed = Assert.IsType<AdPromotionOutcome.Failed>(outcome);
             Assert.True(failed.FileMoved, "a measurement failure after File.Move must report FileMoved: true");
@@ -144,7 +149,7 @@ public static class FeaturePreviewFilesCleanUpAutomatically
             var (service, _, adsDir, previewPath) = BuildPromotion(
                 authoredRoot, spotId: 52, measureThrows: new InvalidOperationException("measure boom"));
 
-            await service.PromotePreviewAsync(MakeSpot(52, previewPath), CancellationToken.None);
+            await service.PromotePreviewAsync(MakeSpot(52, previewPath), Live(), CancellationToken.None);
 
             Assert.True(
                 !Directory.Exists(adsDir) || Directory.GetFiles(adsDir).Length == 0,

@@ -168,7 +168,8 @@ file sealed class CorrectionsObservabilityWebFactory(
                     sp.GetRequiredService<SpeechCorrectionProvider>(),
                     sp.GetRequiredService<ActivePersonaCorrectionsCache>(),
                     sp.GetRequiredService<CorrectionsFiredStats>(),
-                    sp.GetRequiredService<ILogger<NormalizingTtsSynthesizer>>()));
+                    sp.GetRequiredService<ILogger<NormalizingTtsSynthesizer>>(),
+                    sp.GetRequiredService<SoundTagRenderGate>()));
         });
     }
 }

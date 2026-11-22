@@ -10,7 +10,7 @@ using Microsoft.Extensions.Logging;
 /// finding F1) — same shape as <see cref="KokoroStubServer"/>, tailored to Piper's own wire shape
 /// (<c>POST /</c>, plain text body, WAV bytes back) rather than Kokoro's JSON
 /// <c>POST /v1/audio/speech</c>. Both <see cref="PiperTtsSynthesizer"/> (a fallback hop) and
-/// <see cref="PiperPrimaryTtsSynthesizer"/> (F99.4's primary-engine seam) speak this exact shape
+/// <see cref="ActiveEngineSynthesizer"/> (the piper-engine primary) speak this exact shape
 /// via the shared <see cref="PiperWireProtocol"/>, so one stub serves specs for either caller.
 /// </summary>
 sealed class PiperStubServer : IAsyncDisposable

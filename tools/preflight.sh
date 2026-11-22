@@ -23,8 +23,9 @@
 # itself. SPEC F132.5 (amended 2026-08-18) makes `launch.sh` the ONLY reader of GW_PRESET in
 # the whole repo — it alone resolves flags + preset into concrete topology. This script takes
 # that resolution as an explicit input instead of reading GW_PRESET (or any preset) itself:
-#   * GW_PREFLIGHT_TOPOLOGY — `full` or `piper-only` (default `full` when unset) — selects the
-#     disk-headroom constant.
+#   * GW_PREFLIGHT_TOPOLOGY — `full`, `piper-only` or `chatterbox` (default `full` when unset) —
+#     selects the disk-headroom constant; `chatterbox` also checks GENWAVE_VOICE_CPUS against the
+#     machine's cores.
 #   * COMPOSE_PROFILES — unchanged, the existing compose mechanism; an "admin" entry still adds
 #     port 3000 to the port check (rides the same env-value convention as MEDIA_DIR below:
 #     process env wins, else the last assignment in GW_ENV_FILE).
@@ -319,6 +320,7 @@ GW_PREFLIGHT_RAM_MIN_GIB=6
 
 preflight_resources() {
   preflight_disk_headroom
+  preflight_voice_cpus
   preflight_ram_headroom
   preflight_pi_cgroup_memory
 }
@@ -387,6 +389,31 @@ preflight_disk_headroom() {
   else
     preflight_record PASS "Disk headroom" "${avail_gib} GiB free (>= ~${min_gib} GiB ${topology} guideline)"
   fi
+}
+
+# GENWAVE_VOICE_CPUS feeds the chatterbox service's `cpus:` (default 64, compose.yaml). Compose
+# rejects a value above the host's core count ("range of CPUs is from 0.01 to N"), which would
+# fail the whole `up` after the teardown — so catch it here, before anything is touched. Only the
+# chatterbox topology runs that service. GW_NPROC_CMD is the test seam.
+preflight_voice_cpus() {
+  [ "${GW_PREFLIGHT_TOPOLOGY:-full}" = "chatterbox" ] || return 0
+
+  local nproc_cmd="${GW_NPROC_CMD:-nproc}" cores cpus
+  cpus="$(preflight_env_value GENWAVE_VOICE_CPUS)"
+  cpus="${cpus:-64}"
+  if ! [[ "$cpus" =~ ^[1-9][0-9]*$ ]]; then
+    preflight_fail "GENWAVE_VOICE_CPUS='${cpus}' is not a whole number of cores." \
+      "Set GENWAVE_VOICE_CPUS in .env to a whole number from 1 up to this machine's core count."
+  fi
+  if ! cores="$("$nproc_cmd" 2>/dev/null)" || ! [[ "$cores" =~ ^[0-9]+$ ]]; then
+    preflight_record WARN "Voice CPUs" "Could not read the core count (${nproc_cmd}) — check GENWAVE_VOICE_CPUS (${cpus}) fits this machine."
+    return 0
+  fi
+  if [ "$cpus" -gt "$cores" ]; then
+    preflight_fail "GENWAVE_VOICE_CPUS=${cpus} is more than this machine's ${cores} cores; compose would refuse to start chatterbox." \
+      "Set GENWAVE_VOICE_CPUS=${cores} (or fewer) in .env, then re-run ./launch.sh --chatterbox."
+  fi
+  preflight_record PASS "Voice CPUs" "${cpus} of ${cores} cores for chatterbox"
 }
 
 preflight_ram_headroom() {

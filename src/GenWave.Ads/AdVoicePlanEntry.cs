@@ -10,7 +10,8 @@ namespace GenWave.Ads;
 /// only reader today; T403's owner editor is the shape's first intended writer.
 /// </summary>
 /// <param name="Tag">The voice tag this entry casts (e.g. <c>ANNOUNCER</c>, <c>VOICE1</c>).</param>
-/// <param name="VoiceId">The TTS engine voice identifier to render this tag with.</param>
+/// <param name="VoiceId">A voice setting value: a bare Kokoro voice id, or a JSON map of engine to voice id
+/// (SPEC F219.8). Resolved for the active engine at render time, never stored resolved.</param>
 /// <param name="Pace">Speaking-rate multiplier, clamped at render time by <c>TtsPace.Clamp</c> exactly
 /// like every other voice cast (persona or bare).</param>
 ///

@@ -31,6 +31,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Host.Api;
+using GenWave.Host.Tests.Support;
 using GenWave.Tts;
 
 namespace GenWave.Host.Tests.Specs;
@@ -86,7 +87,12 @@ file sealed class VoicesApiWebFactory(Uri kokoroBaseUri) : WebApplicationFactory
 public static class FeatureVoicesEndpoint
 {
     static VoicesController BuildController(ITtsVoiceLister voiceLister) =>
-        new(voiceLister, NullLogger<VoicesController>.Instance)
+        new(
+            voiceLister,
+            new VoiceEngineRegistry(Microsoft.Extensions.Options.Options.Create(new VoiceEnginesOptions())),
+            new SpeechEngineClient(new HttpClient(), new FakeOptionsMonitor<TtsOptions>(new TtsOptions()), new EngineRenderActivity()),
+            new FakeOptionsMonitor<TtsOptions>(new TtsOptions()),
+            NullLogger<VoicesController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
         };
@@ -102,7 +108,7 @@ public static class FeatureVoicesEndpoint
     {
         var optionsMonitor = new FakeOptionsMonitor<TtsOptions>(new TtsOptions { Endpoint = endpoint.ToString() });
         var http = new HttpClient();
-        return new CachedVoiceLister(new KokoroVoiceLister(http, optionsMonitor), optionsMonitor, TimeSpan.FromMinutes(5));
+        return new CachedVoiceLister(TestKokoro.Lister(http, optionsMonitor), optionsMonitor, TimeSpan.FromMinutes(5));
     }
 
     // ---------------------------------------------------------------------
@@ -118,7 +124,7 @@ public static class FeatureVoicesEndpoint
             var lister = BuildLister(stub.BaseUri);
             var controller = BuildController(lister);
 
-            var result = await controller.Get(CancellationToken.None);
+            var result = await controller.Get(null, CancellationToken.None);
 
             var ok = Assert.IsType<OkObjectResult>(result);
             var voices = Assert.IsAssignableFrom<IReadOnlyList<string>>(ok.Value);
@@ -156,8 +162,8 @@ public static class FeatureVoicesEndpoint
             var lister = BuildLister(stub.BaseUri);
             var controller = BuildController(lister);
 
-            await controller.Get(CancellationToken.None);
-            await controller.Get(CancellationToken.None);
+            await controller.Get(null, CancellationToken.None);
+            await controller.Get(null, CancellationToken.None);
 
             Assert.Equal(1, stub.CallCount);
         }
@@ -181,7 +187,7 @@ public static class FeatureVoicesEndpoint
             var lister = BuildLister(baseUri);
             var controller = BuildController(lister);
 
-            var result = await controller.Get(CancellationToken.None);
+            var result = await controller.Get(null, CancellationToken.None);
 
             var problem = Assert.IsType<ObjectResult>(result);
             Assert.Equal(StatusCodes.Status502BadGateway, problem.StatusCode);

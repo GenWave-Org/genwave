@@ -22,6 +22,7 @@ docs/audit/
 # Smoke-test artifacts
 smoke-candidates.json
 *.wav
+!chatterbox/clips/*.wav
 *-smoke.png
 
 # Playwright MCP session artifacts
@@ -38,3 +39,6 @@ TestResults/
 # will happily try to stage every one of them.
 .claude/worktrees/
 tools/PatterBench/report-*.md
+
+# Python bytecode (chatterbox/, piper/ images)
+__pycache__/

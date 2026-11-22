@@ -5,6 +5,7 @@
 // distinctly from one an operator authors manually through POST /api/safe-segments, which still
 // defaults to the plain "Please Stand By" (SafeSegmentAuthor.DefaultTitle, F27.3 unchanged).
 
+using FakeRenderBudgetProvider = GenWave.TestSupport.Fakes.FakeRenderBudgetProvider;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -108,6 +109,7 @@ file static class SeederFactory
         var seeder = new SafeLoopSeeder(
             marker, libraries, libraries, author, settings,
             new FakeOptionsMonitor<StationOptions>(stationOptions),
+            KokoroVoiceResolver.Instance, GenWave.Host.Tests.Support.TestVoiceEngines.Active("kokoro"), new FakeSafeContentLedger(), NoOpStationEventSink.Instance,
             NullLogger<SafeLoopSeeder>.Instance);
         return (seeder, marker, libraries, settings);
     }
@@ -257,7 +259,8 @@ file static class EndpointFixture
             new BridgingAdminMediaLookup(writer),
             new FakeShowStore(),
             new FakeOptionsMonitor<StationOptions>(stationOptions),
-            new FakeOptionsMonitor<TtsOptions>(new TtsOptions()),
+            KokoroVoiceResolver.Instance,
+            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
             NullLogger<SafeSegmentsController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },

@@ -13,7 +13,7 @@ using GenWave.Core.Domain;
 ///
 /// <see cref="TtsRenderContext"/> — not the bare <c>(text, voice)</c> pair this contract carried
 /// pre-T137 — so a kokoro-kind hop can read <see cref="TtsRenderContext.Rules"/> the identical way
-/// the primary <see cref="KokoroTtsSynthesizer"/> already does (SPEC F97.6): resolved upstream, at
+/// the primary <see cref="SpeechEngineClient"/> already does (SPEC F97.6): resolved upstream, at
 /// <see cref="TtsSegmentSource"/>, and carried down unchanged — an implementation must never resolve
 /// rules itself from a persona/rules provider (ARCHITECTURE.md "Carrying persona facts to the
 /// engine"). An implementation that has no use for anything beyond text/voice

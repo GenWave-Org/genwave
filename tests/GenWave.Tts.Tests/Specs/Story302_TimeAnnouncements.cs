@@ -30,7 +30,7 @@ public static class FeatureTimeAnnouncementCacheHit
             NoCorrections.PersonaPronunciationCache(),
             NoCorrections.PersonaPaceCache(),
             new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
-            NullLogger<TtsSegmentSource>.Instance);
+            NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
 
     static SegmentRequest TimeDateRequest(DateTimeOffset localNow) =>
         new(SegmentKind.TimeDate, "af_heart", "GenWave", null, localNow, "test-station");

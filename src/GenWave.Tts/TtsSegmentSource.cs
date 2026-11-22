@@ -27,6 +27,7 @@ public sealed class TtsSegmentSource(
     ActivePersonaPaceCache personaPace,
     IOptionsMonitor<TtsOptions> options,
     ILogger<TtsSegmentSource> logger,
+    IActiveVoiceEngine activeEngine,
     IStationEventSink? events = null) : ITtsSegmentSource, IVerbatimSegmentRenderer
 {
     // SegmentGenerated publish seam (gitea-#246); no-op unless the host binds a real sink.
@@ -72,12 +73,20 @@ public sealed class TtsSegmentSource(
     // up to silence (F198.1). Same no-fingerprint-moves shape, same reason for the bump: every
     // evergreen clip re-renders once and picks up the new pauses instead of airing the pre-F198
     // punctuation forever.
-    internal const string MergePolicyVersion = "f97.4+gh541+gh703";
+    // "+f219.31": SPEC F219.31 stretches the render of a profile with no speed (chatterbox, piper) by the speaker's
+    // pace, so audio cached at a pace other than 1.0 before it was never stretched. Same no-fingerprint-moves shape:
+    // the bump re-keys every such evergreen clip once instead of airing it unstretched forever.
+    internal const string MergePolicyVersion = "f97.4+gh541+gh703+f219.31";
 
     public async Task<MediaItem?> RenderAsync(SegmentRequest request, CancellationToken ct)
     {
         try
         {
+            // SPEC F219.9: no voice for the active engine = no talk. Checked before the copy is written, so
+            // no LLM time is spent on a line that can never be spoken.
+            if (DropsForMissingVoice(request))
+                return null;
+
             var copy = await copyWriter.WriteAsync(request, ct);
 
             // Design ruling, spec-cited (T123 review finding, extended to ContextSegment at T224,
@@ -182,7 +191,7 @@ public sealed class TtsSegmentSource(
     {
         try
         {
-            if (ShouldDropNonFreshGuardedCopy(request, copy))
+            if (DropsForMissingVoice(request) || ShouldDropNonFreshGuardedCopy(request, copy))
                 return null;
 
             return await RenderCopyAsync(request, copy, ct);
@@ -201,6 +210,24 @@ public sealed class TtsSegmentSource(
             LogRenderOutcome(request, OutcomeFailure, ex.GetType().Name);
             return null;
         }
+    }
+
+    /// <summary>
+    /// SPEC F219.9 (PLAN T753): true, after one <see cref="VoiceMissing"/> event (the <c>voice-missing</c> booth
+    /// row) and a log line, when the planned speaker has no voice for the active engine. The caller returns
+    /// null, which the planner already treats as "this talk does not air" while the music carries on.
+    /// </summary>
+    bool DropsForMissingVoice(SegmentRequest request)
+    {
+        if (request.Speaker is not { VoiceMissing: true } speaker)
+            return false;
+
+        var who = request.PersonaName ?? VoiceMap.StationVoiceSetting;
+        logger.LogWarning(
+            "No voice for the active engine for {Speaker}; dropping the {Kind} talk (SPEC F219.9)",
+            LogSanitize.Strip(who), request.Kind);
+        events.Publish(new VoiceMissing(who, speaker.PersonaId));
+        return true;
     }
 
     /// <summary>
@@ -394,7 +421,7 @@ public sealed class TtsSegmentSource(
                 LogSanitize.Strip(speaker.Voice), LogSanitize.Strip(request.Voice), request.Kind);
         }
 
-        var hash = TtsRenderKey.ComputeSnapshotHash(copy.Text, request.Voice, request.StationId, speaker.ContentHash);
+        var hash = TtsRenderKey.ComputeSnapshotHash(copy.Text, request.Voice, activeEngine.EngineFor(request.Kind), request.StationId, speaker.ContentHash);
         return (speaker.Rules, speaker.Pace, hash);
     }
 
@@ -487,7 +514,7 @@ public sealed class TtsSegmentSource(
         var pace = personaPace.Current;
 
         var hash = ComputeHash(
-            copy.Text, request.Voice, request.StationId, corrections.ContentHash, personaCorrections.ContentHash,
+            copy.Text, request.Voice, activeEngine.EngineFor(request.Kind), request.StationId, corrections.ContentHash, personaCorrections.ContentHash,
             pronunciations.ContentHash, personaPronunciations.ContentHash, MergePolicyVersion, pace);
         return (contextRules, pace, hash);
     }
@@ -601,11 +628,11 @@ public sealed class TtsSegmentSource(
     // edited rate would keep serving its old cached clip forever, exactly the class of bug the four
     // rule-content hashes above already guard against for corrections/pronunciations.
     static string ComputeHash(
-        string text, string voice, string stationId, string correctionsContentHash, string personaCorrectionsContentHash,
+        string text, string voice, string engine, string stationId, string correctionsContentHash, string personaCorrectionsContentHash,
         string pronunciationsContentHash, string personaPronunciationsContentHash, string mergePolicyVersion, double pace) =>
         Convert.ToHexString(SHA256.HashData(
             Encoding.UTF8.GetBytes(
-                text + "|" + voice + "|" + stationId + "|" + correctionsContentHash + "|" + personaCorrectionsContentHash +
+                text + "|" + voice + "|" + engine + "|" + stationId + "|" + correctionsContentHash + "|" + personaCorrectionsContentHash +
                 "|" + pronunciationsContentHash + "|" + personaPronunciationsContentHash + "|" + mergePolicyVersion +
                 "|" + pace.ToString("0.####", CultureInfo.InvariantCulture))));
 

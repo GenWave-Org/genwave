@@ -23,10 +23,18 @@ using GenWave.Core.Domain;
 /// (<see cref="PronunciationRuleResolver.ResolveForRender"/>) — pronunciation rules have no
 /// equivalent late-merge consumer, so resolving them once here is both correct and final.
 /// </para>
+///
+/// <para>
+/// <b>Voice per engine (SPEC F219.9, PLAN T753):</b> a persona's voice is the card's map resolved for the active
+/// engine; a card with no voice of its own takes the station voice (which the identity provider already
+/// resolved). A speaker whose map names other engines only gets an empty voice and
+/// <see cref="SpeakerSnapshot.VoiceMissing"/>, and the render drops that talk.
+/// </para>
 /// </summary>
 public sealed class SpeakerSnapshotSource(
     IPersonaCardByIdSource cards,
     IStationIdentityProvider identityProvider,
+    IVoiceResolver voiceResolver,
     PronunciationRuleProvider pronunciationRuleProvider,
     SpeechCorrectionProvider speechCorrectionProvider,
     ILogger<SpeakerSnapshotSource> logger) : ISpeakerSnapshotSource
@@ -40,7 +48,7 @@ public sealed class SpeakerSnapshotSource(
     const string NoCardCorrectionsHash = "no-card-corrections";
 
     public Task<SpeakerSnapshot> ForStationAsync(StationIdentity identity, CancellationToken ct) =>
-        Task.FromResult(Build(null, null, identity.Voice, TtsPace.EngineDefault, [], []));
+        Task.FromResult(Build(null, null, identity.Voice, identity.VoiceMissing, TtsPace.EngineDefault, [], []));
 
     public async Task<SpeakerSnapshot> ForPersonaAsync(long personaId, CancellationToken ct)
     {
@@ -73,15 +81,33 @@ public sealed class SpeakerSnapshotSource(
             : [];
 
         var pace = TtsPace.Clamp(card.Voice is { } voice ? voice.Pace : TtsPace.EngineDefault);
-        var voiceId = card.Voice is { VoiceId.Length: > 0 } spec ? spec.VoiceId : identityProvider.Current.Voice;
+        var (voiceId, voiceMissing) = ResolveVoice(card);
 
-        return Build(personaId, card.Name, voiceId, pace, cardRules, cardCorrections);
+        // Decided by engine, never by id strings (F219.11): off the card voice's own engine the map's voice
+        // overrides the persona row's flat voice; on it the validated row voice stays authoritative.
+        var overridesRow = !voiceMissing && voiceId.Length > 0 && !voiceResolver.ActiveEngineOwnsCardVoice(card);
+
+        return Build(personaId, card.Name, voiceId, voiceMissing, pace, cardRules, cardCorrections) with { VoiceOverridesRow = overridesRow };
+    }
+
+    (string Voice, bool Missing) ResolveVoice(PersonaCard card)
+    {
+        var own = voiceResolver.ResolveCard(card);
+        if (own is null)
+            return (string.Empty, true);
+
+        if (own.Length > 0)
+            return (own, false);
+
+        var station = identityProvider.Current;
+        return (station.Voice, station.VoiceMissing);
     }
 
     SpeakerSnapshot Build(
         long? personaId,
         string? personaName,
         string voice,
+        bool voiceMissing,
         double pace,
         IReadOnlyList<PronunciationRule> cardRules,
         IReadOnlyList<SpeechCorrection> cardCorrections)
@@ -102,6 +128,9 @@ public sealed class SpeakerSnapshotSource(
             TtsSegmentSource.MergePolicyVersion,
             pace);
 
-        return new SpeakerSnapshot(personaId, personaName, voice, pace, rules, cardCorrections, hash);
+        return new SpeakerSnapshot(personaId, personaName, voice, pace, rules, cardCorrections, hash)
+        {
+            VoiceMissing = voiceMissing,
+        };
     }
 }

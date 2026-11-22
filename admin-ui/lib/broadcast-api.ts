@@ -96,6 +96,8 @@ export interface StatusResponse {
   voice: {
     engine: string;
     degraded: boolean;
+    /** SPEC F219.25 — true until the engine has rendered its warm-up line; `degraded` stays true meanwhile. Absent on an older api. */
+    warming?: boolean;
     reason: string | null;
     checkedAt: string | null;
   };
@@ -142,6 +144,16 @@ export interface StatusResponse {
    * database; absent on an api that predates it.
    */
   callbacks?: CallbacksStatus | null;
+  /**
+   * SPEC F219.23, STORY-559, PLAN T765 — items whose audio is still in the old voice. `null` means unknown
+   * (a database read failed, or the active engine has no station voice); absent on an api that predates it.
+   */
+  staleVoiceItems?: number | null;
+  /**
+   * SPEC F219.26, STORY-560, PLAN T767 — talk dropped in the last 7 days because its render ran past the engine's time
+   * limit. `null` means unknown (a database read failed); absent on an api that predates it.
+   */
+  talkDroppedLate7d?: number | null;
 }
 
 export interface CallbacksStatus {

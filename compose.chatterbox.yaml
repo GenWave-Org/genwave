@@ -1,0 +1,33 @@
+# =============================================================================
+# compose.chatterbox.yaml — Chatterbox Turbo as the station voice (SPEC F219.29, PLAN T771).
+#
+#   ./launch.sh --chatterbox        # dev flow; merges this file LAST, adds profile `chatterbox`
+#
+# On top of compose.yaml it:
+#   * leaves out kokoro (and voice-seed, which only seeds kokoro's voices) — same profile-assignment idiom
+#     as compose.piper-only.yaml (see its header for why not a service removal)
+#   * drops api's depends_on on them. api never waits on chatterbox either: its first start can
+#     take ~30 min (weight download) and music must play while it is down (F219.27)
+#   * registers the engine on api and makes it the default active engine
+#
+# Tts:Engine here is only the env DEFAULT. A Tts:Engine row saved in the settings table (live,
+# Admin UI) outranks it, so a saved choice is never overridden.
+# =============================================================================
+
+services:
+  kokoro:
+    profiles: ["disabled-by-chatterbox"]
+
+  voice-seed:
+    profiles: ["disabled-by-chatterbox"]
+
+  api:
+    depends_on: !override
+      db:
+        condition: service_healthy              # schema must exist before first query
+    environment:
+      Tts__Engine: "chatterbox"
+      Tts__Engines__chatterbox__Endpoint: "http://chatterbox:8880"
+      Tts__Engines__chatterbox__Profile: "chatterbox"
+      # F219.6: CPU Chatterbox renders far slower than the 30 s default allows.
+      Tts__Engines__chatterbox__RenderBudgetSeconds: "120"

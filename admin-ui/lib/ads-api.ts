@@ -53,6 +53,7 @@ export const AD_STATE_EMPTY_LABELS: Record<AdState, string> = {
  * `AdRenderService.ParseVoicePlan` reads back). */
 export interface AdVoicePlanEntry {
   tag: string;
+  /** A voice setting value: a bare Kokoro voice id, or a JSON map of engine to voice id (SPEC F219.8). */
   voiceId: string;
   pace: number;
 }

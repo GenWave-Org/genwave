@@ -141,7 +141,8 @@ public sealed class LlmCopyWriter(
     ILlmContextWindow? contextWindow = null, // T701: absent (or either seam absent) means no memory, exactly the pre-memory behaviour
     IMemoryRecallSource? memoryRecall = null,
     ILifeExtractor? lifeExtractor = null, // T704: absent means no life extraction, exactly the pre-extractor behaviour
-    BreakCallbacks? callbacks = null) // T736: absent means no callback breaks, exactly the pre-callback behaviour
+    BreakCallbacks? callbacks = null, // T736: absent means no callback breaks, exactly the pre-callback behaviour
+    ISoundTagOfferProvider? soundTagOffers = null) // T760: absent means no sound tags in the prompt, exactly the pre-tag behaviour
     : ISegmentCopyWriter, IPersonaPreviewWriter, IAnnouncementCopyWriter
 {
     readonly IStationEventSink events = events ?? NoOpStationEventSink.Instance;
@@ -356,7 +357,7 @@ public sealed class LlmCopyWriter(
         {
             var id = await utteranceStore.RecordAsync(
                 new NewUtterance(
-                    personaId, request.ShowId, UtteranceKind.Patter, request.Kind.ToString(), shiftKey, copy.Text, fallbackCopy),
+                    personaId, request.ShowId, UtteranceKind.Patter, request.Kind.ToString(), shiftKey, SoundTags.Strip(copy.Text), fallbackCopy),
                 ct);
             return copy with { UtteranceId = id };
         }
@@ -1010,7 +1011,7 @@ public sealed class LlmCopyWriter(
 
         var recentTexts = recent.Where(e => !e.Fallback).Take(RepetitionWindow).Select(e => e.Text).ToList();
         var result = repetitionCheck.Check(
-            copy,
+            SoundTags.Strip(copy), // SPEC F219.18
             new RepetitionContext(
                 recentTexts, CappedNotSelectedRules(card, quirkSelection), personaName, request.StationName,
                 request.Track?.Title, request.Track?.Artist, request.Track?.Album, request.Track?.Year,
@@ -1211,6 +1212,7 @@ public sealed class LlmCopyWriter(
                 Taglines = taglines,
                 Memory = memory,
                 Callback = callbackAsk,
+                SoundTags = soundTagOffers?.Current,
                 AnnouncementMessage = requiredCore,
                 PatterFact = patterFact?.Fact,
                 ShowFlavor = showFlavorFact,
@@ -1243,7 +1245,7 @@ public sealed class LlmCopyWriter(
             // its own outcome instead of only discoverable by re-reading Response after the fact.
             // gh-#620: a reasoning-only reply is recognised BEFORE hygiene ever sees the (empty) text,
             // so the fallback WARN can name the real cause; see CleanupOf's own remarks.
-            var cleanup = CleanupOf(reply, cfg.MaxCopyChars, personaName);
+            var cleanup = CleanupOf(reply, cfg.MaxCopyChars, personaName, soundTagOffers?.Current?.Tags);
             LogIfTrimmed(request, personaName, cleanup);
 
             // SPEC F138.2/F138.3/F138.4 (STORY-350, STORY-351, PLAN T331/T332) — the truth-gate
@@ -1390,7 +1392,7 @@ public sealed class LlmCopyWriter(
                 var reaskReply = await PostChatCompletionAsync(
                     http, requestUri, cfg, systemPrompt, userPrompt, DeriveMaxTokens(cfg.MaxCopyChars), timeoutCts.Token);
                 var reaskText = reaskReply.Content;
-                var reaskCleanup = CleanupOf(reaskReply, cfg.MaxCopyChars, personaName);
+                var reaskCleanup = CleanupOf(reaskReply, cfg.MaxCopyChars, personaName, soundTagOffers?.Current?.Tags);
                 LogIfTrimmed(request, personaName, reaskCleanup);
 
                 // The tri-state (no candidate to even check / checked-and-failed / checked-and-passed)
@@ -1513,6 +1515,8 @@ public sealed class LlmCopyWriter(
         string copy, string? factBlock, DateTimeOffset stationLocalNow, string? trackTitle, string? stationName,
         string? requiredCore = null)
     {
+        // SPEC F219.18: the gate reads the copy with sound tags removed.
+        copy = SoundTags.Strip(copy);
         var violations = new List<ClaimViolation>();
         if (factBlock is not null)
             violations.AddRange(CopyClaims.CheckFacts(copy, factBlock, stationName).Violations);
@@ -1604,10 +1608,11 @@ public sealed class LlmCopyWriter(
     /// sent the 2026-08-24 bench morning at the endpoint and max_tokens for a failure only
     /// <c>Llm:ReasoningEffort</c> fixes. Every other reply runs the unchanged hygiene pass.
     /// </summary>
-    internal static LlmCopyCleanupResult CleanupOf(CompletionReply reply, int maxCopyChars, string? personaName) =>
+    internal static LlmCopyCleanupResult CleanupOf(
+        CompletionReply reply, int maxCopyChars, string? personaName, IReadOnlyList<string>? keepTags = null) =>
         reply.IsReasoningOnly
             ? new LlmCopyCleanupResult.ReasoningOnly(reply.ReasoningChars, reply.FinishReason)
-            : CleanCopy(SpeakerLabel.Strip(reply.Content, personaName), maxCopyChars);
+            : CleanCopy(SpeakerLabel.Strip(reply.Content, personaName), maxCopyChars, keepTags);
 
     long ElapsedMs(DateTimeOffset startedAt) => (long)(timeProvider.GetUtcNow() - startedAt).TotalMilliseconds;
 
@@ -1779,12 +1784,14 @@ public sealed class LlmCopyWriter(
     /// copy of these five steps, with zero change to <see cref="CleanCopy"/>'s own byte-for-byte
     /// output (a pure extract-method refactor).
     /// </summary>
-    internal static string ApplyCopyHygiene(string raw)
+    internal static string ApplyCopyHygiene(string raw, IReadOnlyList<string>? keepTags = null)
     {
         var text = StripChatPreamble(raw.Trim());   // gh-#186 — must run BEFORE quote unwrapping
         text = StripWrappingQuotes(text);
         text = NewlinePattern.Replace(text, " ");
-        text = BracketStageDirectionPattern.Replace(text, string.Empty);
+        // SPEC F219.17: a bracket naming one of the active engine's sound tags is the one bracket that survives; the render
+        // gate (SoundTags.Apply) enforces the cap and the engine, so this keeps only what could legally air.
+        text = BracketStageDirectionPattern.Replace(text, bracket => SoundTags.IsListed(bracket.Value, keepTags) ? bracket.Value : string.Empty);
         text = AsteriskStageDirectionPattern.Replace(text, string.Empty);
         text = MarkdownEmphasisPattern.Replace(text, string.Empty);
         return RepeatedWhitespacePattern.Replace(text, " ").Trim();
@@ -1800,9 +1807,9 @@ public sealed class LlmCopyWriter(
     /// hygiene left an empty string, or nothing complete under the cap survives that filter — no
     /// candidate at all, or every candidate under the cap was an abbreviation/lone-initial period.
     /// </summary>
-    static LlmCopyCleanupResult CleanCopy(string raw, int maxChars)
+    static LlmCopyCleanupResult CleanCopy(string raw, int maxChars, IReadOnlyList<string>? keepTags = null)
     {
-        var text = ApplyCopyHygiene(raw);
+        var text = ApplyCopyHygiene(raw, keepTags);
 
         if (text.Length == 0)
             return new LlmCopyCleanupResult.Rejected(WasOverLength: false);

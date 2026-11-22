@@ -153,8 +153,10 @@ describe("Feature: Live model and voice lists in the form", () => {
       );
     });
 
-    it("AC19 — Station:Voice has no registry entry", () => {
-      expect(fetchMock).not.toHaveBeenCalled();
+    // T754: Station:Voice now has a registry entry (VoiceMapSettingControl, a voice per engine). It reads the engine
+    // list, never the old bare voice listing the retired VoiceSettingControl fetched.
+    it("AC19 — Station:Voice never calls the bare voice listing", () => {
+      expect(fetchMock).not.toHaveBeenCalledWith("/api/voices", expect.anything());
     });
 
     it("AC19 — VoiceSettingControl.tsx does not exist", () => {

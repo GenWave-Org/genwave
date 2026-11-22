@@ -35,7 +35,7 @@ public static class FeatureEndpointLiveness
         new(
             config,
             store,
-            new SettingValidator(config),
+            new SettingValidator(config, TestVoiceEngines.KokoroAndPiper()),
             NullLogger<SettingsController>.Instance,
             TestSettingCopy.Real(),
             TestSettingChoiceResolver.Default())

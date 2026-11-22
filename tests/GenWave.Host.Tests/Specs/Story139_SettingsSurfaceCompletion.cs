@@ -20,8 +20,8 @@ using GenWave.Host.Options;
 using GenWave.Host.Playout;
 using GenWave.Host.Tests.Fakes;
 using GenWave.Host.Tests.Support;
-using GenWave.Orchestration;
 using GenWave.TestSupport;
+using GenWave.Orchestration;
 using GenWave.TestSupport.Fakes;
 
 // Alias to disambiguate GenWave.Loudness (the analyzer project) from the Loudness domain type.
@@ -87,7 +87,7 @@ public static class FeatureSettingsSurfaceCompletion
         new(
             config,
             store,
-            new SettingValidator(config),
+            new SettingValidator(config, TestVoiceEngines.KokoroAndPiper()),
             NullLogger<SettingsController>.Instance,
             TestSettingCopy.Real(), TestSettingChoiceResolver.Default())
         {
@@ -136,7 +136,7 @@ public static class FeatureSettingsSurfaceCompletion
         [Fact]
         public void EveryNewKeyHasAWorkingValidatorEntry()
         {
-            var validator = new SettingValidator(BuildConfig(NewKeyDefaults()));
+            var validator = new SettingValidator(BuildConfig(NewKeyDefaults()), TestVoiceEngines.KokoroAndPiper());
 
             // A valid value passes …
             Assert.Null(validator.Validate("Tts:RenderBudgetSeconds", "30"));
@@ -254,7 +254,7 @@ public static class FeatureSettingsSurfaceCompletion
                 "Station:Rotation:ArtistSeparation", out var artistSeparation));
             Assert.Equal(SettingApplyMode.Live, artistSeparation.ApplyMode);
 
-            var validator = new SettingValidator(BuildConfig(NewKeyDefaults()));
+            var validator = new SettingValidator(BuildConfig(NewKeyDefaults()), TestVoiceEngines.KokoroAndPiper());
             Assert.Null(validator.Validate("Station:Rotation:RecentWindow", "0"));      // 0 legally disables
             Assert.NotNull(validator.Validate("Station:Rotation:RecentWindow", "-1"));  // negative rejected
             Assert.Null(validator.Validate("Station:Rotation:ArtistSeparation", "0"));

@@ -74,7 +74,7 @@ public static class FeatureDjsSpeakAtTheirOwnPace
             try
             {
                 var (http, bodies) = WireCapture();
-                var synth = new KokoroTtsSynthesizer(
+                var synth = TestKokoro.Synthesizer(
                     http, new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }));
 
                 await synth.SynthesizeAsync(
@@ -96,7 +96,7 @@ public static class FeatureDjsSpeakAtTheirOwnPace
             try
             {
                 var (http, bodies) = WireCapture();
-                var synth = new KokoroTtsSynthesizer(
+                var synth = TestKokoro.Synthesizer(
                     http, new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }));
 
                 // The plain two-arg overload — every caller with no TtsRenderContext to draw a
@@ -140,7 +140,7 @@ public static class FeatureDjsSpeakAtTheirOwnPace
                 var source = new TtsSegmentSource(
                     new FakeSegmentCopyWriter("Coming up next."), synth, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(),
                     NoCorrections.Provider(), NoCorrections.PersonaCache(), NoCorrections.PronunciationProvider(),
-                    NoCorrections.PersonaPronunciationCache(), personaPace, opts, NullLogger<TtsSegmentSource>.Instance);
+                    NoCorrections.PersonaPronunciationCache(), personaPace, opts, NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
                 var request = StationIdRequest();
 
                 var slow = await source.RenderAsync(request, CancellationToken.None);
@@ -181,7 +181,7 @@ public static class FeatureDjsSpeakAtTheirOwnPace
                 var source = new TtsSegmentSource(
                     new FakeSegmentCopyWriter("Coming up next."), synth, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(),
                     NoCorrections.Provider(), NoCorrections.PersonaCache(), NoCorrections.PronunciationProvider(),
-                    NoCorrections.PersonaPronunciationCache(), personaPace, opts, NullLogger<TtsSegmentSource>.Instance);
+                    NoCorrections.PersonaPronunciationCache(), personaPace, opts, NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
                 var request = StationIdRequest();
 
                 var first = await source.RenderAsync(request, CancellationToken.None);

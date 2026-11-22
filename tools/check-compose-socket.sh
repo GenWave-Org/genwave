@@ -167,16 +167,19 @@ else
 
   # Every file-set this repo actually deploys: the base stack, the --pinned published-image
   # pins, and the piper-only low-memory overlay on each (gh-#242 — always merged last,
-  # matching launch.sh --piper-only). Add a new overlay here the day one ships.
+  # matching launch.sh --piper-only), and the chatterbox overlay (launch.sh --chatterbox).
+  # Add a new overlay here the day one ships.
   FILE_SETS=(
     "base:compose.yaml"
     "base+pinned:compose.yaml compose.pinned.yaml"
     "base+piper-only:compose.yaml compose.piper-only.yaml"
+    "base+chatterbox:compose.yaml compose.chatterbox.yaml"
     "base+pinned+piper-only:compose.yaml compose.pinned.yaml compose.piper-only.yaml"
   )
 
   # Every profile combination that changes which services exist. "admin" gates admin_ui,
-  # "fallback" gates the piper fallback voice, "logging" gates alloy (and its socket mount).
+  # "fallback" gates the piper fallback voice, "logging" gates alloy (and its socket mount),
+  # "chatterbox" gates the chatterbox voice.
   # An unknown profile name is not an error to `docker compose config` (verified) — it just
   # filters out services that don't opt in, exactly like a real one.
   PROFILE_COMBOS=(
@@ -184,7 +187,8 @@ else
     "admin:admin"
     "logging:logging"
     "fallback:fallback"
-    "admin+logging+fallback:admin,logging,fallback"
+    "chatterbox:chatterbox"
+    "admin+logging+fallback+chatterbox:admin,logging,fallback,chatterbox"
   )
 
   for file_set in "${FILE_SETS[@]}"; do

@@ -22,7 +22,7 @@ using GenWave.Tts;
 /// declared value is PRESERVED on <see cref="CatalogVoicePackManifest.Engine"/> verbatim, never
 /// narrowed to <see cref="DependencyNames.Kokoro"/>. Two SEPARATE refusals both need the SAME
 /// machine-readable <c>not_supported_engine</c> 400 SPEC F164.2 requires — "this database can't store
-/// this engine at all" (mirrors db/45's own <c>check (engine in ('kokoro'))</c>) and "this station's
+/// this engine at all" (the controller's supported set; db/53 dropped the old database check) and "this station's
 /// actual primary engine doesn't match" — and only <c>Api.VoicePackController</c> can produce that one
 /// shared body for both; a parse-time <see langword="null"/> here would instead degrade EITHER case to
 /// the wrong "malformed manifest" 400. So both checks now live at the controller, right next to each
@@ -118,8 +118,8 @@ public static partial class CatalogVoicePackManifestSerializer
         if (raw is not { PackName: { Length: > 0 and <= MaxPackNameLength } packName } || string.IsNullOrWhiteSpace(packName))
             return null;
 
-        // SHAPE only (T413 review round 2 finding B2) — closed-set membership (db/45's own
-        // `check (engine in ('kokoro'))`) and the station's-own-primary-engine match are BOTH the
+        // SHAPE only (T413 review round 2 finding B2) — supported-set membership (the controller's
+        // SupportedEngines; db/53 dropped the old database check) and the station's-own-primary-engine match are BOTH the
         // controller's job now, so a "piper" manifest parses cleanly here and gets the SAME
         // not_supported_engine 400 body an engine-mismatch does, never this parser's own "malformed
         // manifest" 400.

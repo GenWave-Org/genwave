@@ -614,8 +614,8 @@ public static class FeatureVoicePackInstallGoesLiveWithoutARestart
         public async Task AStoreFailureAfterTheWritesReturns500WithAGenericBody()
         {
             // Given a store that fails AFTER the .pt writes would already have landed on disk —
-            // e.g. db/45's own `check (engine in ('kokoro'))` tripping on a non-kokoro engine that
-            // reached the store (F2's own reachability note; this fake throws directly rather than
+            // e.g. a database error surfacing from the store
+            // (F2's original reachability note was db/45's since-dropped engine check; this fake throws directly rather than
             // standing up a real 23514 to prove the CONTROLLER'S unwind, independent of which
             // SQLSTATE triggered it),
             var store = new FakeVoicePackStore { ThrowOnUpsert = new InvalidOperationException("simulated 23514") };
@@ -934,7 +934,7 @@ public static class FeatureVoicePackInstallGoesLiveWithoutARestart
             // T413 review round 2 finding B2 — reverses round 1 finding F2's own narrowing: engine
             // is a SHAPE gate only here now (a safe lowercase token), never closed-set membership.
             // Whether "piper" is actually SUPPORTED is Api.VoicePackController's own closed-set gate
-            // (SupportedEngines, mirroring db/45's `check (engine in ('kokoro'))`) — see
+            // (its SupportedEngines; db/53 dropped db/45's closed-set check) — see
             // Story396_VoicePackWrongEngineRefused.cs's own HTTP-level fact for that refusal, which
             // this manifest must reach unparsed-null-free in order to exercise.
             var manifest = CatalogVoicePackManifestSerializer.Deserialize(

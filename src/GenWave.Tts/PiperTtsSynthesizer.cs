@@ -10,7 +10,7 @@ using GenWave.Core.Domain;
 /// <c>Tts:Fallback:Endpoint</c>/<c>Voice</c> keys form). Targets the upstream
 /// <c>piper.http_server</c> HTTP wrapper the compose <c>piper</c> service runs — the actual
 /// POST/strip/write wire mechanics live in <see cref="PiperWireProtocol"/>, shared with
-/// <see cref="PiperPrimaryTtsSynthesizer"/> (Piper as the PRIMARY engine, SPEC F99.4); only the
+/// <see cref="SpeechEngineClient.RenderPiperAsync"/> (Piper as the PRIMARY engine, SPEC F99.4); only the
 /// endpoint SOURCE differs between the two: this reads it from the operator's
 /// <see cref="TtsFallbackProfile"/>, not a fixed option.
 ///
@@ -21,7 +21,7 @@ using GenWave.Core.Domain;
 /// schema-level remarks (gh-#147's honest-labeling contract).
 ///
 /// No boot-frozen <see cref="HttpClient.BaseAddress"/>, same discipline as
-/// <see cref="KokoroTtsSynthesizer"/> (SPEC F36.1-F36.2): the hop endpoint arrives per call from
+/// <see cref="SpeechEngineClient"/> (SPEC F36.1-F36.2): the hop endpoint arrives per call from
 /// the profile, itself resolved from <see cref="IOptionsMonitor{TOptions}.CurrentValue"/>
 /// upstream, so a live repoint of the legacy <c>Tts:Fallback:Endpoint</c> applies to the very
 /// next render with no api restart.

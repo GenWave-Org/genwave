@@ -17,6 +17,7 @@
 // 300s ceiling. The floor/ceiling shape this file pins is otherwise byte-identical to the F124.4
 // original; only the key, unit, and default number changed.
 
+using GenWave.Host.Tests.Support;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using GenWave.Host.Configuration;
@@ -41,7 +42,7 @@ public static class FeatureTimeAnnouncementBudgetSecondsValidation
         new(NullLogger<StationOptionsValidator>.Instance);
 
     static SettingValidator BuildSettingValidator() =>
-        new(new ConfigurationBuilder().Build());
+        new(new ConfigurationBuilder().Build(), TestVoiceEngines.KokoroAndPiper());
 
     // ── HAPPY PATH ──────────────────────────────────────────────────────────
 

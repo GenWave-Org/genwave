@@ -40,7 +40,7 @@ public static class FeatureLegalizeEmptySafeScope
 
     public sealed class ScenarioSettingValidatorAcceptsEmptySafeScope
     {
-        readonly SettingValidator validator = new(new ConfigurationBuilder().Build());
+        readonly SettingValidator validator = new(new ConfigurationBuilder().Build(), TestVoiceEngines.KokoroAndPiper());
 
         [Fact]
         public void AnEmptyJsonArrayReturnsNullFromValidate()
@@ -63,7 +63,7 @@ public static class FeatureLegalizeEmptySafeScope
 
     public sealed class ScenarioNonPositiveSafeScopeIdsStillFail
     {
-        readonly SettingValidator validator = new(new ConfigurationBuilder().Build());
+        readonly SettingValidator validator = new(new ConfigurationBuilder().Build(), TestVoiceEngines.KokoroAndPiper());
 
         [Fact]
         public void ZeroAsAnIdReturnsARejectionMessage()
@@ -90,7 +90,7 @@ public static class FeatureLegalizeEmptySafeScope
 
     public sealed class ScenarioMainScopeStaysRejectEmpty
     {
-        readonly SettingValidator validator = new(new ConfigurationBuilder().Build());
+        readonly SettingValidator validator = new(new ConfigurationBuilder().Build(), TestVoiceEngines.KokoroAndPiper());
 
         [Fact]
         public void AnEmptyJsonArrayForMainScopeReturnsARejectionMessage()
@@ -153,7 +153,7 @@ public static class FeatureLegalizeEmptySafeScope
             .Build();
 
         static SettingsController BuildController(IConfiguration config, IStationSettingsStore store, ILogger<SettingsController> logger) =>
-            new(config, store, new SettingValidator(config), logger, TestSettingCopy.Real(), TestSettingChoiceResolver.Default())
+            new(config, store, new SettingValidator(config, TestVoiceEngines.KokoroAndPiper()), logger, TestSettingCopy.Real(), TestSettingChoiceResolver.Default())
             {
                 ControllerContext = new ControllerContext
                 {

@@ -14,7 +14,7 @@ namespace GenWave.Host.Api;
 /// F126.1; STORY-123, STORY-323). Calls <see cref="ITtsSynthesizer"/> — the same production Kokoro
 /// client patter uses — directly, with no <c>TtsSegmentSource</c> in front of it: no loudness/cue
 /// measurement, no <c>MediaItem</c>, no catalog row, no engine annotation. Bounded by
-/// <c>Tts:RenderBudgetSeconds</c>, mirroring <c>SafeSegmentsController</c>'s render-budget/502 shape.
+/// the active engine's render budget, mirroring <c>SafeSegmentsController</c>'s render-budget/502 shape.
 ///
 /// <para>
 /// <b>The audition renders through the resolved rules</b> (SPEC F126.1, PLAN T274; amending
@@ -62,7 +62,11 @@ namespace GenWave.Host.Api;
 public sealed class TtsPreviewController(
     ITtsSynthesizer synthesizer,
     IOptionsMonitor<StationOptions> stationMonitor,
-    IOptionsMonitor<TtsOptions> ttsMonitor,
+    IVoiceResolver voiceResolver,
+    IRenderBudgetProvider renderBudget,
+    IVoiceEngineRegistry engines,
+    INamedEngineSynthesizer namedEngine,
+    IOptionsMonitor<TtsOptions> ttsOptions,
     PronunciationRuleProvider pronunciations,
     ActivePersonaPronunciationRulesCache personaPronunciations,
     ActivePersonaPaceCache personaPace,
@@ -101,8 +105,17 @@ public sealed class TtsPreviewController(
         if (candidateProblem is not null)
             return BadRequest(candidateProblem);
 
-        var voice  = string.IsNullOrWhiteSpace(request.Voice) ? stationMonitor.CurrentValue.Voice : request.Voice;
-        var budget = TimeSpan.FromSeconds(ttsMonitor.CurrentValue.RenderBudgetSeconds);
+        // SPEC F219.8/F219.9: a map resolves to the active engine's voice (the station voice when none is
+        // given); a bare id is passed through as the voice to hear on the active engine, as before.
+        // SPEC F219.10: a named engine renders that engine's own bare voice under its own budget, through the air's normalization body
+        // (INamedEngineSynthesizer), so "Hear it" is normalized exactly as air is.
+        var (named, voice, voiceProblem) = ResolveTarget(request);
+        if (voiceProblem is not null)
+            return BadRequest(voiceProblem);
+
+        var budget = named is null
+            ? renderBudget.Current
+            : TimeSpan.FromSeconds(EngineRenderBudget.For(named, ttsOptions.CurrentValue));
 
         // The AUDITION event itself (SPEC F126.5, T274 review finding F2) — one Information line
         // per accepted request, logged unconditionally here (before the render can fail), naming
@@ -127,13 +140,16 @@ public sealed class TtsPreviewController(
         try
         {
             var context = await BuildAuditionContextAsync(request.Text, voice, candidates, boundedCts.Token);
-            path = await synthesizer.SynthesizeAsync(context, boundedCts.Token);
+            path = named is null
+                ? await synthesizer.SynthesizeAsync(context, boundedCts.Token)
+                : await namedEngine.SynthesizeOnAsync(named, context, boundedCts.Token);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             // boundedCts fired on the render budget, not the caller disconnecting.
             logger.LogWarning(
-                "TTS preview synthesis exceeded Tts:RenderBudgetSeconds={BudgetSeconds}s", budget.TotalSeconds);
+                "TTS preview synthesis on engine {Engine} exceeded its render budget of {BudgetSeconds}s",
+                LogSanitize.Strip(named?.Name ?? "active"), budget.TotalSeconds);
             return BadGateway();
         }
         catch (Exception ex)
@@ -154,6 +170,50 @@ public sealed class TtsPreviewController(
 
         return File(bytes, "audio/wav");
     }
+
+    /// <summary>
+    /// Decides who speaks. No <see cref="TtsPreviewRequest.Engine"/> is the active-engine path
+    /// (<see cref="ResolvePreviewVoice"/>, unchanged). A named engine must be in the registry (400 otherwise) and takes
+    /// the voice as a bare id for THAT engine; an engine-to-voice map is a 400 (the caller picks the entry), and a
+    /// blank voice is the engine's own default voice.
+    /// </summary>
+    (VoiceEngine? Engine, string Voice, ProblemDetails? Problem) ResolveTarget(TtsPreviewRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Engine))
+        {
+            var (activeVoice, problem) = ResolvePreviewVoice(request.Voice);
+            return (null, activeVoice, problem);
+        }
+
+        if (engines.Get(request.Engine) is not { } engine)
+            return (null, string.Empty, VoiceEngineProblems.Unknown());
+
+        if (!string.IsNullOrWhiteSpace(request.Voice) && VoiceMap.IsMapSetting(request.Voice))
+            return (null, string.Empty, VoiceProblem(
+                "voice must be a single voice id when an engine is named.", "Malformed voice."));
+
+        return (engine, request.Voice ?? string.Empty, null);
+    }
+
+    (string Voice, ProblemDetails? Problem) ResolvePreviewVoice(string? requested)
+    {
+        if (!string.IsNullOrWhiteSpace(requested) && !VoiceMap.IsMapSetting(requested))
+            return (requested, null);
+
+        var setting = string.IsNullOrWhiteSpace(requested) ? stationMonitor.CurrentValue.Voice : requested;
+        if (string.IsNullOrWhiteSpace(setting))
+            return (string.Empty, null);
+
+        if (VoiceMap.TryParseSetting(setting) is not { } map)
+            return (string.Empty, VoiceProblem("The voice is not a voice id or an engine-to-voice map.", "Malformed voice."));
+
+        return voiceResolver.Resolve(map) is { } voice
+            ? (voice, null)
+            : (string.Empty, VoiceProblem("The voice has no entry for the active engine.", "No voice for the active engine."));
+    }
+
+    static ProblemDetails VoiceProblem(string detail, string title) =>
+        new() { Status = StatusCodes.Status400BadRequest, Title = title, Detail = detail };
 
     /// <summary>
     /// Resolves the SAME station∪persona∪candidate rule set <see cref="PronunciationRuleResolver.ResolveForRender"/>

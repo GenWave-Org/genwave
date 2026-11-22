@@ -34,4 +34,10 @@ public enum SafeSegmentFailureReason
     /// and the raw exception never escapes this reason.
     /// </summary>
     InsertFailed,
+
+    /// <summary>
+    /// The caller's default voice (<c>Station:Voice</c>) has no entry for the active TTS engine (SPEC F219.9), so
+    /// nothing was synthesized.
+    /// </summary>
+    NoVoiceForEngine,
 }

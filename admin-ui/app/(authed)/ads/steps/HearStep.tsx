@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/chip";
 import { inFlightJob, listBackgroundMusic, updateAdSpot, type AdSpotDto, type BackgroundMusicOption } from "@/lib/ads-api";
+import { voiceSettingLabel } from "@/lib/voice-setting-label";
 import { FIELD_INPUT_CLASSES, FIELD_LABEL_CLASSES } from "../FieldRow";
 import { JobRunner } from "./JobRunner";
 import { StepActions } from "./StepActions";
@@ -87,7 +88,7 @@ export function HearStep({ spot, onSpotUpdated, onError, onNext, onPreview, onCa
       {spot.voicePlan !== null && spot.voicePlan.length > 0 && (
         <span role="group" aria-label="Voice cast" className="flex flex-wrap items-center gap-1">
           {spot.voicePlan.map((entry, index) => (
-            <Chip key={`${index}-${entry.tag}`}>{`${entry.tag} · ${entry.voiceId}`}</Chip>
+            <Chip key={`${index}-${entry.tag}`}>{`${entry.tag} · ${voiceSettingLabel(entry.voiceId)}`}</Chip>
           ))}
         </span>
       )}

@@ -7,6 +7,7 @@
 // shared home; both spec files call CrosstalkWorkerHarness.BuildAsync instead of keeping their own
 // copy.
 
+using FakeRenderBudgetProvider = GenWave.TestSupport.Fakes.FakeRenderBudgetProvider;
 using System.Net;
 using System.Text.Json;
 using GenWave.Abstractions.Playout;
@@ -263,6 +264,7 @@ internal static class CrosstalkWorkerHarness
             new NeverCalledAudioMixer(),
             ttsOptions,
             new FakeOptionsMonitor<CrosstalkOptions>(new CrosstalkOptions()),
+            KokoroVoiceResolver.Instance,
             NullLogger<CrosstalkAssembler>.Instance);
 
         var identityProvider = new FakeStationIdentityProvider(new StationIdentity("st-1", "GenWave", "af_heart"));
@@ -270,7 +272,8 @@ internal static class CrosstalkWorkerHarness
 
         var worker = new CrosstalkStockWorker(
             planner, scriptWriter, assembler, scheduleResolver, nowPlayingService,
-            identityProvider, stationClock, ttsOptions, gate,
+            identityProvider, stationClock, ttsOptions,
+            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)), gate,
             NullLogger<CrosstalkStockWorker>.Instance, timeProvider,
             llmOptionsMonitor, recorder, degradationModeReader);
 

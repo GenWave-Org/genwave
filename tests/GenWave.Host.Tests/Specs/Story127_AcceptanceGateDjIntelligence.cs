@@ -59,8 +59,16 @@ public static class FeatureAcceptanceGateDjIntelligence
     static string RepoRoot =>
         Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
 
-    static string KokoroTtsSynthesizerSourceText =>
-        File.ReadAllText(Path.Combine(RepoRoot, "src", "GenWave.Tts", "KokoroTtsSynthesizer.cs"));
+    // PLAN T749: KokoroTtsSynthesizer is gone; the engine (endpoint included) is looked up per call through
+    // ActiveVoiceEngine over the registry, and the speech POST lives in the one SpeechEngineClient.
+    static string ActiveVoiceEngineSourceText =>
+        File.ReadAllText(Path.Combine(RepoRoot, "src", "GenWave.Tts", "ActiveVoiceEngine.cs"));
+
+    static string VoiceEngineRegistrySourceText =>
+        File.ReadAllText(Path.Combine(RepoRoot, "src", "GenWave.Tts", "VoiceEngineRegistry.cs"));
+
+    static string SpeechEngineClientSourceText =>
+        File.ReadAllText(Path.Combine(RepoRoot, "src", "GenWave.Tts", "SpeechEngineClient.cs"));
 
     static string LlmCopyWriterSourceText =>
         File.ReadAllText(Path.Combine(RepoRoot, "src", "GenWave.Tts", "LlmCopyWriter.cs"));
@@ -230,13 +238,19 @@ public static class FeatureAcceptanceGateDjIntelligence
             // freeze the endpoint at DI-registration time and make a live PUT /api/settings edit
             // invisible until an api restart (SPEC F36.1-F36.2). A future edit that reintroduces a
             // boot-frozen BaseAddress assignment on either class breaks one of these literal matches.
-            var kokoroSource = KokoroTtsSynthesizerSourceText;
+            var activeSource = ActiveVoiceEngineSourceText;
+            var registrySource = VoiceEngineRegistrySourceText;
             var llmSource = LlmCopyWriterSourceText;
+            var clientSource = SpeechEngineClientSourceText;
 
-            Assert.Contains("optionsMonitor.CurrentValue", kokoroSource, StringComparison.Ordinal);
+            // The Kokoro adapter reads Tts:Endpoint fresh per call and hands it to the one client,
+            // which builds the absolute URI per call.
+            Assert.Contains("options.CurrentValue", activeSource, StringComparison.Ordinal);
+            Assert.Contains("() => options.CurrentValue", registrySource, StringComparison.Ordinal);
+            Assert.DoesNotContain("BaseAddress =", registrySource, StringComparison.Ordinal);
             Assert.Contains(
-                "EndpointUri.Combine(cfg.Endpoint, \"/v1/audio/speech\")", kokoroSource, StringComparison.Ordinal);
-            Assert.DoesNotContain("BaseAddress =", kokoroSource, StringComparison.Ordinal);
+                "EndpointUri.Combine(engine.Endpoint, \"/v1/audio/speech\")", clientSource, StringComparison.Ordinal);
+            Assert.DoesNotContain("BaseAddress =", clientSource, StringComparison.Ordinal);
 
             Assert.Contains("optionsMonitor.CurrentValue", llmSource, StringComparison.Ordinal);
             Assert.Contains(

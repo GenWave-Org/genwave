@@ -57,7 +57,7 @@ public static class FeatureSnapshotDrivesTheRender
             var source = new TtsSegmentSource(
                 new FakeSegmentCopyWriter("Nguyen is coming up next."), synth, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(),
                 NoCorrections.Provider(), NoCorrections.PersonaCache(), NoCorrections.PronunciationProvider(),
-                NoCorrections.PersonaPronunciationCache(), NoCorrections.PersonaPaceCache(), opts, NullLogger<TtsSegmentSource>.Instance);
+                NoCorrections.PersonaPronunciationCache(), NoCorrections.PersonaPaceCache(), opts, NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
             var snapshot = Snapshot(voice: "af_heart", pace: 1.2, contentHash: "hash-a");
             var request = StationIdRequest() with { Speaker = snapshot };
 
@@ -97,7 +97,7 @@ public static class FeatureSnapshotDrivesTheRender
             var source = new TtsSegmentSource(
                 new FakeSegmentCopyWriter("Coming up next."), synth, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(),
                 NoCorrections.Provider(), personaCorrections, NoCorrections.PronunciationProvider(),
-                personaPronunciations, personaPace, opts, NullLogger<TtsSegmentSource>.Instance);
+                personaPronunciations, personaPace, opts, NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
             var snapshot = Snapshot(voice: "af_heart", pace: 1.0, contentHash: "hash-a");
             var request = StationIdRequest() with { Speaker = snapshot };
 
@@ -133,7 +133,8 @@ public static class FeatureSnapshotDrivesTheRender
             var personaCorrections = new ActivePersonaCorrectionsCache(throwingAccessor, TimeProvider.System);
             var normalizer = new NormalizingTtsSynthesizer(
                 inner, NoCorrections.Provider(), personaCorrections, new CorrectionsFiredStats(),
-                NullLogger<NormalizingTtsSynthesizer>.Instance);
+                NullLogger<NormalizingTtsSynthesizer>.Instance,
+                TestSoundTagGate.Kokoro);
             var context = new TtsRenderContext("Now playing: MacLeod.", "af_heart", Kind: null)
             {
                 Corrections = [new SpeechCorrection("MacLeod", "Maa-cloud")],
@@ -173,7 +174,7 @@ public static class FeatureSnapshotDrivesTheRender
             var source = new TtsSegmentSource(
                 new FakeSegmentCopyWriter("Coming up next."), synth, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(),
                 NoCorrections.Provider(), NoCorrections.PersonaCache(), NoCorrections.PronunciationProvider(),
-                NoCorrections.PersonaPronunciationCache(), NoCorrections.PersonaPaceCache(), opts, NullLogger<TtsSegmentSource>.Instance);
+                NoCorrections.PersonaPronunciationCache(), NoCorrections.PersonaPaceCache(), opts, NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
 
             await source.RenderAsync(
                 StationIdRequest() with { Speaker = Snapshot(voice: "af_heart", pace: 1.0, contentHash: "hash-a") }, CancellationToken.None);
@@ -207,7 +208,7 @@ public static class FeatureSnapshotDrivesTheRender
             var source = new TtsSegmentSource(
                 new FakeSegmentCopyWriter("Coming up next."), synth, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(),
                 NoCorrections.Provider(), NoCorrections.PersonaCache(), NoCorrections.PronunciationProvider(),
-                NoCorrections.PersonaPronunciationCache(), personaPace, opts, NullLogger<TtsSegmentSource>.Instance);
+                NoCorrections.PersonaPronunciationCache(), personaPace, opts, NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
 
             await source.RenderAsync(StationIdRequest(), CancellationToken.None);
         }
@@ -238,7 +239,7 @@ public static class FeatureSnapshotDrivesTheRender
             var source = new TtsSegmentSource(
                 new FakeSegmentCopyWriter("Coming up next."), synth, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(),
                 NoCorrections.Provider(), NoCorrections.PersonaCache(), NoCorrections.PronunciationProvider(),
-                NoCorrections.PersonaPronunciationCache(), NoCorrections.PersonaPaceCache(), opts, logger);
+                NoCorrections.PersonaPronunciationCache(), NoCorrections.PersonaPaceCache(), opts, logger, TestActiveEngine.Named("kokoro"));
             var snapshot = Snapshot(voice: "bf_emma", pace: 1.0, contentHash: "hash-a");
 
             await source.RenderAsync(StationIdRequest() with { Speaker = snapshot }, CancellationToken.None);
@@ -279,7 +280,7 @@ public static class FeatureSnapshotDrivesTheRender
                 new TestOptionsMonitor<TtsCorrectionsOptions>(new TtsCorrectionsOptions()),
                 NullLogger<SpeechCorrectionProvider>.Instance);
 
-            var source = new SpeakerSnapshotSource(cards, identityProvider, pronunciations, corrections, logger);
+            var source = new SpeakerSnapshotSource(cards, identityProvider, KokoroVoiceResolver.Instance, pronunciations, corrections, logger);
             snapshot = await source.ForPersonaAsync(UnknownPersonaId, CancellationToken.None);
         }
 

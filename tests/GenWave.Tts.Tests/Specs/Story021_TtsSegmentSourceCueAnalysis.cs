@@ -33,7 +33,7 @@ public static class FeatureTtsSegmentSourceCueAnalysis
             NoCorrections.PersonaPronunciationCache(),
             NoCorrections.PersonaPaceCache(),
             opts,
-            NullLogger<TtsSegmentSource>.Instance);
+            NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
     }
 
     static SegmentRequest StationIdRequest() =>

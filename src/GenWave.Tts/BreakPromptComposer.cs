@@ -14,7 +14,8 @@ internal static class BreakPromptComposer
                 inputs.Persona, inputs.Card, inputs.MentionOwnName, inputs.Quirks, inputs.RecentLines, inputs.Taglines,
                 inputs.Memory),
             inputs.MaxCopyChars,
-            inputs.StationLocalNow);
+            inputs.StationLocalNow,
+            inputs.SoundTags);
 
         var clockLine = LlmPromptBuilder.BuildStationClockLine(inputs.StationLocalNow);
         var user = inputs.AnnouncementMessage is { } message

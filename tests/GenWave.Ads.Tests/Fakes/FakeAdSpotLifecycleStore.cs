@@ -103,6 +103,10 @@ public sealed class FakeAdSpotLifecycleStore(
         return this;
     }
 
+    /// <summary>The render marker <see cref="AddSpot"/> stamps when a scenario names none — the harness sets it to
+    /// the marker its own live settings compute, so a default-seeded Ready spot is current, never stale.</summary>
+    public int DefaultRenderVersion { get; set; } = AdRenderVersion.Current;
+
     /// <summary>Seeds one row with sane defaults for everything a scenario does not care about — the
     /// common case (state/source/media id/age are the only things most specs vary).</summary>
     public FakeAdSpotLifecycleStore AddSpot(
@@ -110,7 +114,7 @@ public sealed class FakeAdSpotLifecycleStore(
         DateTime? stateChangedAt = null, string? failReason = null, string? packSlug = null,
         long sponsorId = 1, string sponsorName = "Acme",
         string script = "ANNOUNCER: Come on down.\nVOICE1: Prices you won't believe.",
-        int renderVersion = AdRenderVersion.Current)
+        int? renderVersion = null)
     {
         var stamp = stateChangedAt ?? DateTime.UtcNow;
         return AddExisting(new AdSpot(
@@ -118,7 +122,7 @@ public sealed class FakeAdSpotLifecycleStore(
             SpotSeconds: 30, VoicePlan: null, BedMediaId: null, state, failReason, mediaId, Generation: 1,
             CreatedAt: stamp, StateChangedAt: stamp, RenderedAt: state == AdState.Ready ? stamp : null,
             RetiredAt: state == AdState.Retired ? stamp : null, Version: NextVersion(),
-            RenderVersion: renderVersion));
+            RenderVersion: renderVersion ?? DefaultRenderVersion));
     }
 
     public Task<AdSpot> CreateAsync(NewAdSpot spot, CancellationToken ct)
@@ -277,7 +281,7 @@ public sealed class FakeAdSpotLifecycleStore(
     {
         FindStaleReadyCallCount++;
         var candidate = spots
-            .Where(s => s.State == AdState.Ready && s.RenderVersion < currentVersion && !excludeIds.Contains(s.Id)
+            .Where(s => s.State == AdState.Ready && s.RenderVersion != currentVersion && !excludeIds.Contains(s.Id)
                 && !pendingRetireBySpot.ContainsKey(s.Id) && !pendingConfirmBySpot.ContainsKey(s.Id))
             .OrderBy(s => s.StateChangedAt).ThenBy(s => s.Id)
             .FirstOrDefault();

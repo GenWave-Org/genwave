@@ -108,7 +108,7 @@ export function ChoiceSettingControl({
   const stale = choicesStale === true;
   const [filter, setFilter] = useState("");
 
-  if ((choices === undefined || choices.length === 0) && !failed) {
+  if ((choices == null || choices.length === 0) && !failed) {
     return (
       <p role="alert" className="text-[0.85rem] text-danger">
         No choices available for this setting — the settings API returned none.

@@ -15,4 +15,11 @@ namespace GenWave.Core.Domain;
 /// the soul": the store falls back to the legacy rebuild-from-backstory/style behavior, preserving
 /// an existing non-empty soul when that rebuild would be empty.
 /// </param>
-public sealed record PersonaDraft(string Name, string Backstory, string Style, string Voice, string? Soul = null);
+/// <param name="Voices">
+/// Optional per-engine voices, <c>{engine: voiceId}</c> (SPEC F219.10). <see langword="null"/> means "not editing
+/// the map": the card's map is left exactly as it was. When given, <see cref="PersonaVoiceLockstep"/> folds it
+/// into the card in lockstep with <paramref name="Voice"/>.
+/// </param>
+public sealed record PersonaDraft(
+    string Name, string Backstory, string Style, string Voice, string? Soul = null,
+    IReadOnlyDictionary<string, string>? Voices = null);

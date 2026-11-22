@@ -4,7 +4,7 @@ namespace GenWave.Host.Catalog;
 /// A voice pack's manifest content (SPEC F164.1/F164.5, STORY-395/396/398, PLAN T413) — mirrors
 /// <see cref="CatalogAvatarPackManifest"/>'s own "ephemeral, hardened, null-tolerant" shape for a
 /// third assets-carrying kind: a display <see cref="PackName"/>, the declared <see cref="Engine"/>
-/// (compared against the station's <c>PrimaryVoiceEngine</c> by <c>Api.VoicePackController</c>, never
+/// (compared against the station's active voice engine (<c>IActiveVoiceEngine</c>) by <c>Api.VoicePackController</c>, never
 /// by this type or its serializer), the pack's shared <see cref="Preview"/> clip file name, and its
 /// <see cref="Voices"/> roster. <c>synthetic</c>/<c>sourceRef</c> (SPEC F164.3) are gate conditions
 /// <see cref="CatalogVoicePackManifestSerializer"/> enforces at parse time and never surfaces as

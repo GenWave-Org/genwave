@@ -94,7 +94,7 @@ public static class FeatureSeededDefaults
     }
 
     static SettingsController BuildController(IConfiguration config, IStationSettingsStore store) =>
-        new(config, store, new SettingValidator(config), NullLogger<SettingsController>.Instance, TestSettingCopy.Real(), TestSettingChoiceResolver.Default())
+        new(config, store, new SettingValidator(config, TestVoiceEngines.KokoroAndPiper()), NullLogger<SettingsController>.Instance, TestSettingCopy.Real(), TestSettingChoiceResolver.Default())
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
         };
@@ -176,6 +176,7 @@ public static class FeatureSeededDefaults
         "Tts:Corrections",
         "Tts:Pronunciations",
         "Tts:EngineByKind",
+        "Tts:EngineRenderBudgets", // SPEC F219.6, PLAN T750a: blank = no per-engine overrides; each engine keeps its own limit.
         "Tts:Fallback:Endpoint",
         "Tts:Fallback:Voice",
         "Station:Envelope:Genres",

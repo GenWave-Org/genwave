@@ -50,5 +50,7 @@ RUN apt-get update \
 
 WORKDIR /app
 COPY --from=build /app ./
+# Starter voice clips (SPEC F219.14): seeded into the clips volume on boot by StarterClipSeeder (Tts:StarterClipsRoot).
+COPY chatterbox/clips/ ./starter-clips/
 EXPOSE 8080
 ENTRYPOINT ["dotnet", "GenWave.Host.dll"]

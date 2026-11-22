@@ -53,7 +53,9 @@ internal static class AdSpotWorkerHarness
         FakeAdBedPool BedPool,
         FakeHttpMessageHandler LlmHandler,
         long AdsLibraryId,
-        FakeBoothLogAppender BoothLog);
+        FakeBoothLogAppender BoothLog,
+        RecordingStationEventSink Events,
+        int CurrentMarker);
 
     /// <summary>A minimal, well-formed <c>library.media</c> row for the repair sweep's own recency/
     /// eligibility facts (PLAN T402 review F2) — every field this project's own reads actually
@@ -106,6 +108,7 @@ internal static class AdSpotWorkerHarness
     /// here instead — that logging moved to <see cref="AdSpotStamper"/> when PLAN T442 hoisted the
     /// stamping pair out of this worker, so it no longer reaches <paramref name="workerLogger"/>.
     /// </param>
+    /// <param name="engine">The voice engine speaking; a scenario about voices missing on another engine names it.</param>
     /// <param name="appVersion">Defaults to <see cref="HarnessAppVersion"/> — a scenario proving the
     /// re-render marker's own display-form spelling (STORY-483, PLAN T589) passes its own
     /// <see cref="AppVersion.From(string?)"/> build instead.</param>
@@ -113,7 +116,7 @@ internal static class AdSpotWorkerHarness
         DateTimeOffset now, IReadOnlyDictionary<string, string?>? stationSettings = null,
         int renderBudgetSeconds = 300, double durationToleranceRatio = 0.4, FakeHttpMessageHandler? llmHandler = null,
         ILogger<AdSpotWorker>? workerLogger = null, ILogger<AdSpotStamper>? stamperLogger = null,
-        IAppVersion? appVersion = null)
+        IAppVersion? appVersion = null, string engine = VoiceEngineProfiles.KokoroName)
     {
         var timeProvider = new FakeTimeProvider(now);
         var adminLookup = new FakeAdminMediaLookup();
@@ -162,15 +165,18 @@ internal static class AdSpotWorkerHarness
         // worker hands it the SAME AdLiveSettingsReader.Read result each tick instead (see
         // AdSpotWorker.cs's own remarks).
         var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { [VoiceMap.StationVoiceSetting] = StationVoice })
             .AddInMemoryCollection(stationSettings ?? new Dictionary<string, string?>())
             .Build();
 
+        var events = new RecordingStationEventSink();
+        var speakers = AdTestVoices.SpeakersFor(stationIdentity, engine, events);
         var renderService = new AdRenderService(
-            author, store, adminLookup, libraries, stationIdentity, adsOptions, locatorRoots,
+            author, store, adminLookup, libraries, stationIdentity, speakers, adsOptions, locatorRoots,
             new NoOpLogger<AdRenderService>());
 
         var stamper = new AdSpotStamper(
-            store, bedPool, libraries, stationIdentity, adsOptions, stamperLogger ?? new NoOpLogger<AdSpotStamper>());
+            store, bedPool, libraries, adsOptions, stamperLogger ?? new NoOpLogger<AdSpotStamper>());
 
         var handler = llmHandler ?? new FakeHttpMessageHandler((_, _) =>
             throw new InvalidOperationException(
@@ -183,14 +189,18 @@ internal static class AdSpotWorkerHarness
         var boothLog = new FakeBoothLogAppender();
         var worker = new AdSpotWorker(
             store, briefs, sponsors, scriptWriter, renderService, durationEstimator, audiencePosture, catalogWriter,
-            adminLookup, stamper, gate, boothLog, appVersion ?? HarnessAppVersion, adsOptions, llmOptions, configuration,
+            adminLookup, stamper, speakers, gate, boothLog, appVersion ?? HarnessAppVersion, adsOptions, llmOptions, configuration, new FixedActiveVoiceEngine(engine),
             timeProvider, workerLogger ?? new NoOpLogger<AdSpotWorker>());
 
         var guardian = new AdSpotLifecycleGuardianService(
             store, adsOptions, locatorRoots, timeProvider, new NoOpLogger<AdSpotLifecycleGuardianService>());
 
+        var currentMarker = AdRenderMarker.For(AdLiveSettingsReader.Read(configuration, new FixedActiveVoiceEngine(engine)));
+        store.DefaultRenderVersion = currentMarker;
+
         return new Harness(
             worker, guardian, store, briefs, sponsors, gate, author, timeProvider, adsOptions, catalogWriter,
-            adminLookup, bedPool, handler, adsLibraryId, boothLog);
+            adminLookup, bedPool, handler, adsLibraryId, boothLog, events,
+            currentMarker);
     }
 }

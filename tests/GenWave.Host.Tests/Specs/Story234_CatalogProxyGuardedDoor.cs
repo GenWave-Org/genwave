@@ -12,6 +12,7 @@
 // the two seams T101's CatalogController builds its endpoints on top of. Same "direct
 // SettingValidator construction" idiom as Story124_EndpointLiveness.cs/Story149_SettingCeilings.cs.
 
+using GenWave.Host.Tests.Support;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
@@ -460,7 +461,7 @@ public static class FeatureCatalogProxyGuardedDoor
         // shape (Story124_EndpointLiveness.cs's sibling coverage for those two keys) — empty is the
         // F90.1 kill switch, not an error.
 
-        static SettingValidator BuildValidator() => new(new ConfigurationBuilder().Build());
+        static SettingValidator BuildValidator() => new(new ConfigurationBuilder().Build(), TestVoiceEngines.KokoroAndPiper());
 
         [Fact]
         public void AnAbsoluteHttpsUrlIsAccepted()

@@ -88,6 +88,7 @@ public sealed class BreakDelivery(
                 break;
             case TimedOutOutcome:
                 ReportDrop(slot, "render budget exceeded");
+                events.Publish(new TalkDroppedLate(slot.Kind.ToString(), PersonaNameOf(slot.Source)));
                 Settle(new DroppedReservation("render budget exceeded"));
                 break;
             case FailedOutcome failed:
@@ -179,6 +180,13 @@ public sealed class BreakDelivery(
         VerbatimSource verbatim => verbatim.Request,
         ReadySource => throw new UnreachableException($"{nameof(ReadySource)} never observes duration"),
         SlotSource => throw new UnreachableException($"Unhandled {nameof(SlotSource)} case: {source.GetType()}"),
+    };
+
+    static string? PersonaNameOf(SlotSource source) => source switch
+    {
+        RenderSource render => render.Request.PersonaName,
+        VerbatimSource verbatim => verbatim.Request.PersonaName,
+        _ => null,
     };
 
     static long AnnouncementIdOf(PlannedSlot slot) =>

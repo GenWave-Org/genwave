@@ -90,7 +90,7 @@ public static class FeatureSettingCeilings
     ];
 
     static SettingValidator BuildValidator() =>
-        new(new ConfigurationBuilder().Build());
+        new(new ConfigurationBuilder().Build(), TestVoiceEngines.KokoroAndPiper());
 
     static IConfiguration BuildConfig(IEnumerable<KeyValuePair<string, string?>> values) =>
         new ConfigurationBuilder().AddInMemoryCollection(values).Build();
@@ -99,7 +99,7 @@ public static class FeatureSettingCeilings
         new(
             config,
             store,
-            new SettingValidator(config),
+            new SettingValidator(config, TestVoiceEngines.KokoroAndPiper()),
             NullLogger<SettingsController>.Instance,
             TestSettingCopy.Real(), TestSettingChoiceResolver.Default())
         {

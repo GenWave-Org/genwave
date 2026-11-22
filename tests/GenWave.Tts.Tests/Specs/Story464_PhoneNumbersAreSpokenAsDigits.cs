@@ -102,14 +102,15 @@ public static class FeaturePhonenumbersarespokenasdigits
         {
             var normalizingSynth = new NormalizingTtsSynthesizer(
                 innerSynth, NoCorrections.Provider(), NoCorrections.PersonaCache(),
-                new CorrectionsFiredStats(), NullLogger<NormalizingTtsSynthesizer>.Instance);
+                new CorrectionsFiredStats(), NullLogger<NormalizingTtsSynthesizer>.Instance,
+                TestSoundTagGate.Kokoro);
             var opts = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" });
             var source = new TtsSegmentSource(
                 new FakeSegmentCopyWriter("Call 555-0142 today."),
                 normalizingSynth, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), NoCorrections.Provider(),
                 NoCorrections.PersonaCache(), NoCorrections.PronunciationProvider(),
                 NoCorrections.PersonaPronunciationCache(), NoCorrections.PersonaPaceCache(), opts,
-                NullLogger<TtsSegmentSource>.Instance);
+                NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
 
             await source.RenderAsync(StationIdRequest(), CancellationToken.None);
 

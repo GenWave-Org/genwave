@@ -47,15 +47,15 @@ public static class FeatureTheSkipPathIsKeyedByInstanceNotBySpotIdAlone
             var libraries = new FakeAdsLibraryStore();
             var locatorRoots = new AdSpotLocatorRoots("/media", "/authored");
             var renderService = new AdRenderService(
-                new FakeCastSegmentAuthor(), store, new FakeAdminMediaLookup(), libraries, stationIdentity, adsOptions,
+                new FakeCastSegmentAuthor(), store, new FakeAdminMediaLookup(), libraries, stationIdentity, AdTestVoices.SpeakersFor(stationIdentity), adsOptions,
                 locatorRoots, new NoOpLogger<AdRenderService>());
             var stamper = new AdSpotStamper(
-                store, new FakeAdBedPool(), libraries, stationIdentity, adsOptions, new NoOpLogger<AdSpotStamper>());
+                store, new FakeAdBedPool(), libraries, adsOptions, new NoOpLogger<AdSpotStamper>());
             var configuration = new ConfigurationBuilder().Build();
 
             var service = new AdSpotJobService(
                 store, sponsors, scriptWriter, renderService, stamper, new FakePatterDurationEstimator(),
-                new FakeAudiencePostureProvider(), gate, adsOptions, llmOptions, configuration, TimeProvider.System,
+                new FakeAudiencePostureProvider(), gate, adsOptions, llmOptions, configuration, AdTestVoices.Kokoro, TimeProvider.System,
                 new NoOpLogger<AdSpotJobService>());
 
             // The race itself: the ORIGINAL job's own ClearJobAsync call re-enters TryEnqueueAsync for

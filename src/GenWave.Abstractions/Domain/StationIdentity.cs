@@ -29,4 +29,11 @@ namespace GenWave.Core.Domain;
 public sealed record StationIdentity(
     string Id,
     string Name,
-    string Voice);
+    string Voice)
+{
+    /// <summary>
+    /// True when <c>Station:Voice</c> names voices only for other engines than the active one (SPEC F219.9,
+    /// PLAN T753); <see cref="Voice"/> is empty then and station-voiced talk drops.
+    /// </summary>
+    public bool VoiceMissing { get; init; }
+}

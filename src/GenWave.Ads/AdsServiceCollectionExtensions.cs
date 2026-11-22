@@ -74,6 +74,8 @@ public static class AdsServiceCollectionExtensions
         // options, a logger). AdSpotWorker (below) is this seam's one caller — it claims a spot via
         // IAdSpotStore.ClaimNextApprovedAsync, then calls AdRenderService.RenderAsync with what it
         // claimed.
+        // The per-engine voice decision for a spot's speakers (SPEC F219.8, F219.9; PLAN T753b).
+        services.AddSingleton<AdSpeakerVoices>();
         services.AddSingleton<AdRenderService>();
 
         // The cast/bed stamping pair (SPEC F167, F168; STORY-402, STORY-403; PLAN T415, T416) — a

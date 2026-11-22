@@ -23,7 +23,7 @@ public static class FeatureAHandoffSurvivesTheRender
             NoCorrections.PersonaPronunciationCache(),
             NoCorrections.PersonaPaceCache(),
             new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
-            NullLogger<TtsSegmentSource>.Instance);
+            NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
 
     static SegmentRequest SignOff(HandoffParticipants handoff) =>
         new(SegmentKind.SignOff, "af_heart", "GenWave", null, DateTimeOffset.UtcNow, "test-station", "DJ Alpha")

@@ -13,4 +13,11 @@ public static class DependencyNames
     public const string Kokoro = "kokoro";
     public const string Piper = "piper";
     public const string LlmContextWindow = "llm-context-window";
+
+    /// <summary>
+    /// The key of one voice engine's warm-up verdict (SPEC F219.25): written only by <see cref="VoiceEngineWarmUp"/>
+    /// and read only by <see cref="VoiceHealthReader"/>. Deliberately not the engine's profile name, which the cheap
+    /// kokoro/piper probes already write: a probe that merely reaches a slow engine must not turn a failed warm-up green.
+    /// </summary>
+    public static string VoiceEngine(string engineName) => $"voice-engine:{engineName}";
 }

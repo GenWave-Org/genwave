@@ -4,7 +4,7 @@ namespace GenWave.Tts;
 /// Classifies and clamps a persona's raw <c>VoiceSpec.Pace</c> before it ever reaches
 /// <c>TtsRenderContext.Pace</c> or <see cref="TtsSegmentSource"/>'s own segment cache key (SPEC
 /// F98.2, PLAN T140). <see cref="ActivePersonaPaceCache"/> is the ONE call site — every reader of
-/// <c>TtsRenderContext.Pace</c> downstream (<see cref="KokoroTtsSynthesizer"/>,
+/// <c>TtsRenderContext.Pace</c> downstream (<see cref="SpeechEngineClient"/>,
 /// <see cref="KokoroFallbackRenderer"/>) trusts the value it carries without re-validating it,
 /// exactly the way both adapters already trust an upstream-resolved
 /// <c>TtsRenderContext.Rules</c> (SPEC F97.6) — resolved once, at the segment source, never

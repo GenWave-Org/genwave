@@ -11,7 +11,7 @@ using Microsoft.Extensions.Options;
 /// failure.
 /// <para>
 /// No boot-frozen <see cref="HttpClient.BaseAddress"/>, same discipline as
-/// <see cref="KokoroTtsSynthesizer"/>/<see cref="KokoroVoiceLister"/> (SPEC F36.1–F36.2):
+/// <see cref="SpeechEngineClient"/>/<see cref="KokoroVoiceLister"/> (SPEC F36.1–F36.2):
 /// <c>Llm:Endpoint</c> is read from <see cref="IOptionsMonitor{TOptions}.CurrentValue"/> per
 /// probe, so a live repoint applies to the very next cycle.
 /// </para>

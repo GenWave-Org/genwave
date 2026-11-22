@@ -166,7 +166,7 @@ public static class FeatureContextSegmentsAir
                 NoCorrections.PersonaPronunciationCache(),
                 NoCorrections.PersonaPaceCache(),
                 new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
-                NullLogger<TtsSegmentSource>.Instance);
+                NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
 
         [Fact]
         public async Task GenuineLlmAuthoredContextSegmentLandsInBlurbs()
@@ -216,7 +216,7 @@ public static class FeatureContextSegmentsAir
                 NoCorrections.PersonaPronunciationCache(),
                 NoCorrections.PersonaPaceCache(),
                 new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
-                logger ?? NullLogger<TtsSegmentSource>.Instance);
+                logger ?? NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
 
         [Fact]
         public async Task TemplateFallbackContextSegmentRendersNull()
@@ -333,7 +333,7 @@ public static class FeatureContextSegmentsAir
                 NoCorrections.PersonaPronunciationCache(),
                 NoCorrections.PersonaPaceCache(),
                 new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
-                NullLogger<TtsSegmentSource>.Instance);
+                NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
 
         static SegmentRequest LeadInRequest() =>
             new(SegmentKind.LeadIn, "af_heart", "GenWave",

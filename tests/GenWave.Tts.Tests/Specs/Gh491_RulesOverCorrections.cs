@@ -27,7 +27,7 @@ public static class FeatureGh491RulesOverCorrections
         SpeechCorrectionProvider corrections,
         CorrectionsFiredStats firedStats,
         ILogger<NormalizingTtsSynthesizer> logger) =>
-        new(inner, corrections, NoCorrections.PersonaCache(), firedStats, logger);
+        new(inner, corrections, NoCorrections.PersonaCache(), firedStats, logger, TestSoundTagGate.Kokoro);
 
     static TtsRenderContext ContextWithRule(string pattern) =>
         new(Text, "af_heart", Kind: null)

@@ -120,7 +120,7 @@ public static class FeatureStationTaglineValidation
 {
     const string Key = "Station:Tagline";
 
-    static SettingValidator BuildSettingValidator() => new(new ConfigurationBuilder().Build());
+    static SettingValidator BuildSettingValidator() => new(new ConfigurationBuilder().Build(), TestVoiceEngines.KokoroAndPiper());
 
     public sealed class ScenarioBlankAndInBudgetAreValid
     {

@@ -310,7 +310,7 @@ public static class Gh854FeatureAPendingMarkerExcludesASecondStalePass
         [Fact]
         public async Task TheSpotIsExcludedFromASecondStalePassWhileItsMarkerIsPending()
         {
-            var candidate = await harness.Store.FindStaleReadyAsync(AdRenderVersion.Current, [], CancellationToken.None);
+            var candidate = await harness.Store.FindStaleReadyAsync(harness.CurrentMarker, [], CancellationToken.None);
             Assert.Null(candidate);
         }
     }

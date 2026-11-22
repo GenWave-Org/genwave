@@ -50,7 +50,7 @@ public static class FeatureHonestTimeSignal
             NoCorrections.PersonaPronunciationCache(),
             NoCorrections.PersonaPaceCache(),
             new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
-            logger ?? NullLogger<TtsSegmentSource>.Instance);
+            logger ?? NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
 
     public static class ScenarioTheBudgetIsConfiguration
     {

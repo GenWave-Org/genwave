@@ -62,6 +62,29 @@ public static class TtsServiceCollectionExtensions
             .ValidateOnStart();
         services.AddSingleton<IValidateOptions<TtsFallbackOptions>, TtsFallbackOptionsValidator>();
 
+        // Engine registry (SPEC F219.1, F219.6) — Tts:Engines:<name>, seeded from the legacy
+        // Tts:Endpoint / Tts:PiperPrimaryEndpoint keys; an unknown profile or blank endpoint fails boot.
+        // The registry reads IOptionsMonitor, and the seeding reads the live Tts:Endpoint, so a saved
+        // Tts:Endpoint / Tts:Engines reaches the next lookup with no restart (SPEC F219.3). The seed
+        // binds the Tts section afresh instead of reading IOptionsMonitor<TtsOptions>: on a reload
+        // each monitor rebuilds eagerly, and this one can run before TtsOptions' own cache refreshes.
+        services
+            .AddOptions<VoiceEnginesOptions>()
+            .Bind(configuration.GetSection(VoiceEnginesOptions.Section))
+            .PostConfigure(engines => VoiceEngineSeeding.Seed(
+                engines, configuration.GetSection(TtsOptions.Section).Get<TtsOptions>() ?? new TtsOptions()))
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<VoiceEnginesOptions>, VoiceEnginesOptionsValidator>();
+        services.AddSingleton<IVoiceEngineRegistry>(sp =>
+            new VoiceEngineRegistry(sp.GetRequiredService<IOptionsMonitor<VoiceEnginesOptions>>()));
+        // The engine every render uses, resolved per read from the live Tts:Engine (SPEC F219.3).
+        // The per-kind answer (SPEC F219.21) needs the by-kind map and the chain, so the routed wrapper is the one
+        // IActiveVoiceEngine; ActiveVoiceEngine stays the plain Tts:Engine lookup it wraps.
+        services.AddSingleton<ActiveVoiceEngine>();
+        services.AddSingleton<IActiveVoiceEngine, RoutedActiveVoiceEngine>();
+        // Per-engine voice maps resolve against that engine (SPEC F219.8).
+        services.AddSingleton<IVoiceResolver, ActiveEngineVoiceResolver>();
+
         // Per-kind engine override map (SPEC F70.3, STORY-191) — a raw JSON leaf, not
         // DataAnnotations-validated: malformed JSON (or an unknown kind/engine entry) degrades to
         // no per-kind overrides with a WARN (TtsEngineByKindProvider) rather than failing boot,
@@ -70,6 +93,14 @@ public static class TtsServiceCollectionExtensions
             .AddOptions<TtsEngineByKindOptions>()
             .Bind(configuration.GetSection(TtsEngineByKindOptions.Section));
         services.AddSingleton<TtsEngineByKindProvider>();
+
+        // Live sound-tag cap (SPEC F219.16/.17): Tts:SoundTags:MaxPerBreak, re-read per render.
+        services
+            .AddOptions<TtsSoundTagsOptions>()
+            .Bind(configuration.GetSection(TtsSoundTagsOptions.Section));
+        services.AddSingleton<ISoundTagCapProvider, OptionsMonitorSoundTagCapProvider>();
+        services.AddSingleton<SoundTagRenderGate>();
+        services.AddSingleton<ISoundTagOfferProvider, ActiveEngineSoundTagOfferProvider>();
 
         // LLM options — registered unconditionally (SPEC F34.2); an empty Llm:Endpoint just means
         // LlmCopyWriter stays disabled. IOptionsMonitor<LlmOptions> (not IOptions) is what
@@ -198,7 +229,7 @@ public static class TtsServiceCollectionExtensions
 
         // Fired-rule observability for pronunciation rules (SPEC F97.5, F100.1, STORY-253 AC4) — the
         // pronunciation-rule sibling of CorrectionsFiredStats immediately above. PronunciationRuleHitReporter
-        // is resolved automatically as an ordinary constructor dependency by KokoroTtsSynthesizer's and
+        // is resolved automatically as an ordinary constructor dependency by SpeechEngineClient's and
         // KokoroFallbackRenderer's own AddHttpClient<T> registrations below — no explicit factory needed
         // here, only the two singletons themselves.
         services.AddSingleton<PronunciationRuleHitStats>();
@@ -210,24 +241,12 @@ public static class TtsServiceCollectionExtensions
         // NormalizingTtsSynthesizer/LlmCopyWriter "one instance, every interface" shape below.
         // The probes themselves live here too (Ollama/Kokoro endpoints are Tts:Endpoint/
         // Llm:Endpoint, already this project's own options) with the same no-BaseAddress typed
-        // HttpClient discipline as KokoroTtsSynthesizer/KokoroVoiceLister — each is added to the
+        // HttpClient discipline as SpeechEngineClient/KokoroVoiceLister — each is added to the
         // IDependencyProbe collection declaratively; the Host's DependencyHealthProbeService
         // (GenWave.Host) resolves IEnumerable<IDependencyProbe> and drives the cadence, wholly
         // unaware of which probes exist.
         services.AddSingleton<DependencyHealthStore>();
         services.AddSingleton<IDependencyHealth>(sp => sp.GetRequiredService<DependencyHealthStore>());
-
-        // Primary voice engine fact (SPEC F99.4, STORY-257, PLAN T149) — computed ONCE from
-        // Tts:PiperPrimaryEndpoint, same deployment-decision timing as the FallbackTtsSynthesizer
-        // registration below that consumes it. Shared as its own singleton (see its own remarks)
-        // so VoiceHealthReader can depend on "which engine is primary" without ever resolving
-        // FallbackTtsSynthesizer's own HTTP-backed primary as a side effect.
-        services.AddSingleton<PrimaryVoiceEngine>(sp =>
-        {
-            var piperPrimaryEndpoint = sp.GetRequiredService<IOptions<TtsOptions>>().Value.PiperPrimaryEndpoint;
-            return new PrimaryVoiceEngine(
-                string.IsNullOrEmpty(piperPrimaryEndpoint) ? DependencyNames.Kokoro : DependencyNames.Piper);
-        });
 
         services.AddHttpClient<OllamaHealthProbe>();
         services.AddSingleton<IDependencyProbe>(sp => sp.GetRequiredService<OllamaHealthProbe>());
@@ -319,17 +338,24 @@ public static class TtsServiceCollectionExtensions
 
         // TTS/voices clients deliberately carry no BaseAddress (SPEC F36.1–F36.2, F36.4) —
         // Tts:Endpoint is read from IOptionsMonitor<TtsOptions>.CurrentValue and an absolute URI is
-        // built per call inside KokoroTtsSynthesizer/KokoroVoiceLister, so a live PUT to
+        // built per call inside SpeechEngineClient, so a live PUT to
         // Tts:Endpoint applies to the next render/voices call with no api restart.
         // IOptionsMonitor<TtsOptions> is resolved automatically as an ordinary constructor
         // dependency — no configure delegate needed on either registration.
-        services.AddHttpClient<KokoroTtsSynthesizer>();
-
         // Voices listing (SPEC F29.4, STORY-097): same Tts:Endpoint as the synthesizer above — no
-        // separate config key for the voices call. CachedVoiceLister wraps the typed HttpClient
+        // separate config key for the voices call. CachedVoiceLister wraps KokoroVoiceLister (over SpeechEngineClient)
         // with a ~5 min in-memory TTL so a Safe content form load never round-trips Kokoro on
         // every keystroke.
-        services.AddHttpClient<KokoroVoiceLister>();
+        services.AddTransient<KokoroVoiceLister>();
+
+        // The engine-agnostic OpenAI-style speech client (SPEC F219.4-F219.5, PLAN T746): the one
+        // egress type for any VoiceEngine — the active-engine primary and
+        // KokoroVoiceLister above both delegate to it.
+        // No client-wide timeout (T771a): each request carries its own cap, so a long engine budget (F219.6) is not cut at the 100 s default.
+        services.AddHttpClient<SpeechEngineClient>(client => client.Timeout = Timeout.InfiniteTimeSpan);
+
+        // What the speech renders are doing per engine (PLAN T768a): fed by SpeechEngineClient, read by the voice tile's warm-up.
+        services.AddSingleton<EngineRenderActivity>();
 
         // Live LLM-model listing (SPEC F205.7, STORY-479, PLAN T580) — the LLM-side sibling of
         // KokoroVoiceLister immediately above: same Llm:Endpoint the completions call itself uses,
@@ -346,13 +372,6 @@ public static class TtsServiceCollectionExtensions
         services.AddSingleton<IFallbackProfileRenderer>(sp => sp.GetRequiredService<PiperTtsSynthesizer>());
         services.AddHttpClient<KokoroFallbackRenderer>();
         services.AddSingleton<IFallbackProfileRenderer>(sp => sp.GetRequiredService<KokoroFallbackRenderer>());
-
-        // Piper as PRIMARY (SPEC F99.4, STORY-257) — a second typed client alongside
-        // PiperTtsSynthesizer above, sharing its wire mechanics (PiperWireProtocol) but reading a
-        // separate endpoint key (Tts:PiperPrimaryEndpoint). Registered unconditionally; selected
-        // below only when that key is set (the piper-only topology's opt-in), so every other
-        // deployment never resolves it at all.
-        services.AddHttpClient<PiperPrimaryTtsSynthesizer>();
 
         // LlmCopyWriter's HTTP client (SPEC F34.3, F36.2): deliberately no BaseAddress here — the
         // endpoint comes from IOptionsMonitor<LlmOptions>.CurrentValue per render, so a live PUT
@@ -383,18 +402,16 @@ public static class TtsServiceCollectionExtensions
             // FallbackTtsSynthesizer (SPEC F70.1, F70.4, STORY-190, gh-#147) sits BELOW
             // NormalizingTtsSynthesizer, executing the ordered fallback chain — the primary first,
             // then each configured hop — see its own remarks for the routing rule. The primary is
-            // Kokoro on every topology except the piper-only opt-in (SPEC F99.4, STORY-257),
-            // chosen ONCE here at composition time from Tts:PiperPrimaryEndpoint — never
-            // per-render, since swapping wire protocol mid-render is a deployment decision, not a
-            // live reroute (see TtsOptions.PiperPrimaryEndpoint's own remarks). Registered
-            // concretely once; nothing else in this project resolves it directly.
+            // ActiveEngineSynthesizer: the engine is looked up per render from the live Tts:Engine
+            // (SPEC F219.3); the piper-only opt-in (SPEC F99.4, STORY-257) resolves to the piper
+            // engine through ActiveVoiceEngine's own rule. Registered concretely once; nothing
+            // else in this project resolves it directly.
             .AddSingleton<FallbackTtsSynthesizer>(sp =>
             {
-                var primaryEngine = sp.GetRequiredService<PrimaryVoiceEngine>();
-                var piperIsPrimary = primaryEngine.DependencyName == DependencyNames.Piper;
-                ITtsSynthesizer primary = piperIsPrimary
-                    ? sp.GetRequiredService<PiperPrimaryTtsSynthesizer>()
-                    : sp.GetRequiredService<KokoroTtsSynthesizer>();
+                var active = sp.GetRequiredService<IActiveVoiceEngine>();
+                ITtsSynthesizer primary = new ActiveEngineSynthesizer(
+                    active,
+                    sp.GetRequiredService<SpeechEngineClient>());
 
                 return new FallbackTtsSynthesizer(
                     primary,
@@ -403,21 +420,21 @@ public static class TtsServiceCollectionExtensions
                     sp.GetRequiredService<IOptionsMonitor<TtsFallbackOptions>>(),
                     sp.GetRequiredService<ILogger<FallbackTtsSynthesizer>>(),
                     sp.GetRequiredService<TtsEngineByKindProvider>(),
-                    // T148 review finding F3: the primary's own dependency name travels with it —
+                    // T148 review finding F3: the active engine's dependency name, read per render —
                     // a piper-only station's cached-health lookup and log {Engine} slot must read
                     // Piper's verdict, never absent-Kokoro's (FallbackTtsSynthesizer's own remarks).
-                    primaryEngine.DependencyName);
+                    () => active.DependencyName);
             })
             // Voice health read model (SPEC F99.5, F100.3, PLAN T149) — GET /api/status
-            // (GenWave.Host) resolves this. Depends on the SAME PrimaryVoiceEngine singleton
+            // (GenWave.Host) resolves this. Depends on the SAME IActiveVoiceEngine
             // FallbackTtsSynthesizer's factory just above reads, never on FallbackTtsSynthesizer
-            // itself (see PrimaryVoiceEngine's own remarks for why that distinction matters).
+            // itself (resolving it would drag an IHttpClientFactory into a status read).
             .AddSingleton<VoiceHealthReader>()
-            // The typed HttpClient factory registers KokoroTtsSynthesizer as transient; the
-            // singleton every caller (TtsSegmentSource, SafeSegmentAuthor, TtsPreviewController)
+            // The active engine's boot warm-up line (SPEC F219.25); the Host's VoiceEngineWarmUpService drives it.
+            .AddSingleton<VoiceEngineWarmUp>()
+            // The singleton every caller (TtsSegmentSource, SafeSegmentAuthor, TtsPreviewController)
             // actually resolves is NormalizingTtsSynthesizer (SPEC F68.1, STORY-185) decorating
-            // FallbackTtsSynthesizer (T34) decorating whichever primary was chosen above
-            // (KokoroTtsSynthesizer or, piper-only, PiperPrimaryTtsSynthesizer) plus
+            // FallbackTtsSynthesizer (T34) decorating ActiveEngineSynthesizer plus
             // PiperTtsSynthesizer's own fallback-hop shape — the single Normalize call site sits
             // here, not in any of those callers, and runs
             // exactly once whichever engine ultimately renders. Registered concretely ONCE and
@@ -432,9 +449,12 @@ public static class TtsServiceCollectionExtensions
                     sp.GetRequiredService<SpeechCorrectionProvider>(),
                     sp.GetRequiredService<ActivePersonaCorrectionsCache>(),
                     sp.GetRequiredService<CorrectionsFiredStats>(),
-                    sp.GetRequiredService<ILogger<NormalizingTtsSynthesizer>>()))
+                    sp.GetRequiredService<ILogger<NormalizingTtsSynthesizer>>(),
+                    sp.GetRequiredService<SoundTagRenderGate>()))
             .AddSingleton<ITtsSynthesizer>(sp => sp.GetRequiredService<NormalizingTtsSynthesizer>())
-            .AddSingleton<ISpeechNormalizationPreview>(sp => sp.GetRequiredService<NormalizingTtsSynthesizer>());
+            .AddSingleton<ISpeechNormalizationPreview>(sp => sp.GetRequiredService<NormalizingTtsSynthesizer>())
+            // SPEC F219.10: the admin "Hear it" on a chosen engine renders through the same normalizing body.
+            .AddSingleton<INamedEngineSynthesizer, NamedEngineSynthesizer>();
 
         return services;
     }

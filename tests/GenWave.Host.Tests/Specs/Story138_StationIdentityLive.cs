@@ -134,11 +134,11 @@ public static class FeatureStationIdentityLive
         services.AddOptions<StationOptions>().Bind(root.GetSection(StationOptions.Section));
         var monitor = services.BuildServiceProvider().GetRequiredService<IOptionsMonitor<StationOptions>>();
 
-        var identityProvider = new OptionsMonitorStationIdentityProvider(monitor);
+        var identityProvider = new OptionsMonitorStationIdentityProvider(monitor, KokoroVoiceResolver.Instance);
         var store = new SeededSettingsStore(seed, provider);
 
         var settingsController = new SettingsController(
-            root, store, new SettingValidator(root), NullLogger<SettingsController>.Instance,
+            root, store, new SettingValidator(root, TestVoiceEngines.KokoroAndPiper()), NullLogger<SettingsController>.Instance,
             TestSettingCopy.Real(), TestSettingChoiceResolver.Default())
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },

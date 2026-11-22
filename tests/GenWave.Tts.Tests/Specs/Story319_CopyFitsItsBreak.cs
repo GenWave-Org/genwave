@@ -246,7 +246,7 @@ public static class FeatureCopyFitsItsBreak
                 writer, synth, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(),
                 NoCorrections.Provider(), NoCorrections.PersonaCache(), NoCorrections.PronunciationProvider(),
                 NoCorrections.PersonaPronunciationCache(), NoCorrections.PersonaPaceCache(), opts,
-                NullLogger<TtsSegmentSource>.Instance);
+                NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
 
             // When the segment is rendered end-to-end (copywriter -> hygiene+salvage -> TtsSegmentSource's
             // own SignOff/SignOn/ContextSegment drop guard)...

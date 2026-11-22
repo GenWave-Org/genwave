@@ -73,8 +73,8 @@ namespace GenWave.Core.Domain;
 /// compiling.</param>
 /// <param name="RenderVersion">The render pipeline version stamped by the <see cref="MediaId"/> this
 /// row currently carries (gh-#854, db/48) — 0 for every pre-existing row. The ad worker re-renders a
-/// <see cref="AdState.Ready"/> spot in the background, one at a time, whenever this trails
-/// <c>AdRenderVersion.Current</c>; the OLD media keeps airing until the swap lands. A trailing
+/// <see cref="AdState.Ready"/> spot in the background, one at a time, whenever this differs from
+/// the current <c>AdRenderMarker</c> (pipeline version, engine and voices); the OLD media keeps airing until the swap lands. A trailing
 /// DEFAULTED param, the <see cref="JobFailedKind"/> precedent, matching db/48's own column
 /// default.</param>
 /// <param name="AutoRerenderedAt">When the stale pass last swapped this spot's take (gh-#865, db/49),

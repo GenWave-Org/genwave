@@ -7,8 +7,8 @@ using GenWave.Core.Domain;
 /// Shared "speak text against <c>piper.http_server</c>" wire mechanics (SPEC F70.1, F99.4) — the
 /// single POST-text/plain-get-WAV protocol both a piper FALLBACK hop
 /// (<see cref="PiperTtsSynthesizer"/>, endpoint from an operator's <see cref="TtsFallbackProfile"/>)
-/// and Piper as the PRIMARY engine (<see cref="PiperPrimaryTtsSynthesizer"/>, endpoint from
-/// <see cref="TtsOptions.PiperPrimaryEndpoint"/>) speak identically — only WHERE the endpoint comes
+/// and Piper as the PRIMARY engine (<see cref="SpeechEngineClient.RenderPiperAsync"/>, endpoint from the engine registry,
+/// seeded from <see cref="TtsOptions.PiperPrimaryEndpoint"/>) speak identically — only WHERE the endpoint comes
 /// from differs between the two callers, never the wire shape itself. Extracted so that difference
 /// never drifts into two copies of the same POST/strip/write logic (SPEC F96.3's markup-strip guard
 /// included).
@@ -61,7 +61,7 @@ static class PiperWireProtocol
 
         // Path.GetDirectoryName always returns a non-null string when the path is produced
         // by Path.Combine with a non-empty CacheRoot; the guard below satisfies the compiler
-        // without using the null-forgiving operator (mirrors KokoroTtsSynthesizer).
+        // without using the null-forgiving operator (mirrors SpeechEngineClient).
         var dir = Path.GetDirectoryName(path);
         if (dir is not null)
         {

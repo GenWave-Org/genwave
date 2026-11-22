@@ -83,11 +83,11 @@ public static class FeatureTheflattenkeepsthepause
     {
         // Given: TtsSegmentSource.MergePolicyVersion
 
-        /// <summary>AC7 — ends with "+gh703"</summary>
+        /// <summary>AC7 — carries "+gh703" (later epochs append after it)</summary>
         [Fact]
         public void MovesTheEpoch()
         {
-            Assert.EndsWith("+gh703", TtsSegmentSource.MergePolicyVersion, StringComparison.Ordinal);
+            Assert.Contains("+gh703", TtsSegmentSource.MergePolicyVersion, StringComparison.Ordinal);
         }
     }
 

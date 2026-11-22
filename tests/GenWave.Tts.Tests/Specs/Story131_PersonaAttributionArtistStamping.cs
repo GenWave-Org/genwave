@@ -37,7 +37,7 @@ public static class FeaturePersonaAttributionArtistStamping
             NoCorrections.PersonaPronunciationCache(),
             NoCorrections.PersonaPaceCache(),
             new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
-            NullLogger<TtsSegmentSource>.Instance);
+            NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
 
     static SegmentRequest Request(SegmentKind kind, string? personaName, MediaItem? track = null) =>
         new(kind, "af_heart", "GenWave", track, DateTimeOffset.UtcNow, "test-station", personaName);

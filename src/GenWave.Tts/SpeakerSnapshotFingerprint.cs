@@ -11,7 +11,7 @@ using System.Globalization;
 /// <b>T526 deliberately did NOT reproduce the ambient digest.</b> An earlier revision of this
 /// comment read as an instruction to splice <c>text</c> and <c>stationId</c> back into positions 1
 /// and 3 so both paths would agree on a key; the shipped code does the opposite.
-/// <c>TtsRenderKey.ComputeSnapshotHash</c> hashes <c>text|voice|stationId|</c> plus this whole
+/// <c>TtsRenderKey.ComputeSnapshotHash</c> hashes <c>text|voice|engine|stationId|</c> plus this whole
 /// string as one fourth term, so the snapshot arm and the ambient arm occupy DISJOINT key spaces:
 /// for a single <c>(text, voice, stationId)</c> the ambient input carries five separators after
 /// <c>stationId</c> and the snapshot input six, and no term in the REMAINDER after
@@ -32,8 +32,8 @@ using System.Globalization;
 static class SpeakerSnapshotFingerprint
 {
     /// <summary>
-    /// Term order mirrors <c>TtsSegmentSource.ComputeHash</c> exactly (its own <c>text</c> and
-    /// <c>stationId</c> terms simply omitted): voice, station corrections, card corrections,
+    /// Term order mirrors <c>TtsSegmentSource.ComputeHash</c> exactly (its own <c>text</c>,
+    /// <c>engine</c> and <c>stationId</c> terms simply omitted): voice, station corrections, card corrections,
     /// station pronunciations, card pronunciations, merge-policy version, pace.
     /// </summary>
     public static string Compute(

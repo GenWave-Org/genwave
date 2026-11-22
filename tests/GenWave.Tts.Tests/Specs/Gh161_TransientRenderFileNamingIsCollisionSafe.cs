@@ -46,7 +46,7 @@ public static class FeatureTransientRenderFileNamingIsCollisionSafe
             try
             {
                 var opts = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" });
-                var synth = new KokoroTtsSynthesizer(new HttpClient(OkHandler([1, 2, 3, 4])), opts);
+                var synth = TestKokoro.Synthesizer(new HttpClient(OkHandler([1, 2, 3, 4])), opts);
                 const string Text = "That was MacLeod spinning something special for us.";
 
                 var first = synth.SynthesizeAsync(Text, "af_nova", CancellationToken.None);
@@ -78,7 +78,7 @@ public static class FeatureTransientRenderFileNamingIsCollisionSafe
             try
             {
                 var opts = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" });
-                var synth = new KokoroTtsSynthesizer(new HttpClient(OkHandler([1, 2, 3, 4])), opts);
+                var synth = TestKokoro.Synthesizer(new HttpClient(OkHandler([1, 2, 3, 4])), opts);
                 const string Text = "That was MacLeod spinning something special for us.";
                 var finalPath = Path.Combine(cacheRoot, "final.wav");
 
@@ -193,7 +193,7 @@ public static class FeatureTransientRenderFileNamingIsCollisionSafe
                     new TemplateCopyWriter(new PatterTemplateRenderer()), synth, new FakeLoudnessAnalyzer(),
                     new FakeCueAnalyzer(), NoCorrections.Provider(), NoCorrections.PersonaCache(),
                     NoCorrections.PronunciationProvider(), NoCorrections.PersonaPronunciationCache(),
-                    NoCorrections.PersonaPaceCache(), opts, NullLogger<TtsSegmentSource>.Instance);
+                    NoCorrections.PersonaPaceCache(), opts, NullLogger<TtsSegmentSource>.Instance, TestActiveEngine.Named("kokoro"));
                 var request = StationIdRequest();
 
                 // A first render discovers the deterministic destination path for this exact
