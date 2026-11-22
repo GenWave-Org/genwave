@@ -25,6 +25,9 @@ public sealed class SpeechEngineClient(
     ILogger<SpeechEngineClient>? logger = null,
     PaceStretch? paceStretch = null)
 {
+    // Ping and voices never wait longer than this; it is also the floor of a render's cap, so a short-budget engine is cut where it always was.
+    static readonly TimeSpan ShortRequestCap = TimeSpan.FromSeconds(100);
+
     readonly TimeProvider time = timeProvider ?? TimeProvider.System;
 
     // SPEC F219.31: the pace of an engine with no speed of its own, applied to its output right here, below every
@@ -44,16 +47,17 @@ public sealed class SpeechEngineClient(
         // T768a: tell the voice tile a render is in flight, so a busy engine that cannot answer a ping is not called down.
         var identity = engine.Identity;
         var startedAt = time.GetTimestamp();
+        using var cap = RenderCapFor(engine, ct);
         activity.Started(identity);
         string path;
         try
         {
-            path = await DispatchAsync(engine, context, ct);
+            path = await DispatchAsync(engine, context, cap.Token);
             Settle(engine, context, LateReason(engine, startedAt));
         }
         catch (Exception ex)
         {
-            Settle(engine, context, FaultReason(engine, ex, startedAt, ct));
+            Settle(engine, context, FaultReason(engine, ex, startedAt, cap, ct));
             throw;
         }
 
@@ -62,10 +66,10 @@ public sealed class SpeechEngineClient(
         return await StretchAsync(engine, context, path, ct);
     }
 
-    Task<string> DispatchAsync(VoiceEngine engine, TtsRenderContext context, CancellationToken ct) =>
+    Task<string> DispatchAsync(VoiceEngine engine, TtsRenderContext context, CancellationToken capped) =>
         engine.Profile == VoiceEngineProfiles.Piper
-            ? RenderPiperAsync(engine, context, ct)
-            : RenderAsync(engine, context, ct);
+            ? PostPiperAsync(engine, context, capped)
+            : PostSpeechAsync(engine, context, capped);
 
     // Whatever escapes the stretch (a caller cancel), the file the engine wrote is deleted: nothing else holds its path.
     async Task<string> StretchAsync(VoiceEngine engine, TtsRenderContext context, string path, CancellationToken ct)
@@ -109,6 +113,14 @@ public sealed class SpeechEngineClient(
             activity.Succeeded(engine.Identity);
     }
 
+    /// <summary>
+    /// How long one render request may stay open (T771a): twice the engine's live limit, never under 100 s. The cap sits past
+    /// the limit on purpose: the feeder gives up at the limit and lets the render finish, and that late finish must still be
+    /// seen and judged late. Read at the start of each render, so a live budget edit applies to the next one.
+    /// </summary>
+    RequestCap RenderCapFor(VoiceEngine engine, CancellationToken ct) =>
+        new(TimeSpan.FromSeconds(Math.Max(ShortRequestCap.TotalSeconds, 2d * LimitSeconds(engine))), time, ct);
+
     int LimitSeconds(VoiceEngine engine) => EngineRenderBudget.For(engine, optionsMonitor.CurrentValue);
 
     bool PastTimeLimit(VoiceEngine engine, long startedAt) =>
@@ -127,19 +139,26 @@ public sealed class SpeechEngineClient(
     /// What a thrown render says about the engine. Only 5xx, transport errors and timeouts are engine failures; a 4xx is a
     /// bad line or request, and a caller cancel inside the limit is the caller walking away: both are no verdict (null).
     /// </summary>
-    RenderFault? FaultReason(VoiceEngine engine, Exception ex, long startedAt, CancellationToken ct) => ex switch
+    RenderFault? FaultReason(VoiceEngine engine, Exception ex, long startedAt, RequestCap cap, CancellationToken ct) => ex switch
     {
-        // The caller's token fired: only past the engine's limit is that a timeout. A live caller token means the
-        // HttpClient's own timeout ended the request.
+        // The cap passing is a timeout whatever else fired with it. Otherwise the caller's token fired: only past the
+        // engine's limit is that a timeout. A live caller token means something other than the caller ended the request.
+        OperationCanceledException when cap.TimedOut => RenderFault.Failure($"Timed out after {cap.After.TotalSeconds:F0} s"),
         OperationCanceledException when ct.IsCancellationRequested =>
             PastTimeLimit(engine, startedAt) ? RenderFault.Failure($"Timed out after {LimitSeconds(engine)} s") : null,
-        OperationCanceledException => RenderFault.Failure($"Timed out after {http.Timeout.TotalSeconds:F0} s"),
+        OperationCanceledException => RenderFault.Failure($"Timed out after {cap.After.TotalSeconds:F0} s"),
         HttpRequestException { StatusCode: null } => RenderFault.Failure(ex.Message),
         HttpRequestException { StatusCode: >= HttpStatusCode.InternalServerError } => RenderFault.Failure(ex.Message),
         _ => null,
     };
 
     public async Task<string> RenderAsync(VoiceEngine engine, TtsRenderContext context, CancellationToken ct)
+    {
+        using var cap = RenderCapFor(engine, ct);
+        return await PostSpeechAsync(engine, context, cap.Token);
+    }
+
+    async Task<string> PostSpeechAsync(VoiceEngine engine, TtsRenderContext context, CancellationToken ct)
     {
         var cfg = optionsMonitor.CurrentValue;
         // SPEC F219.17: the engine that actually renders (a fallback may differ from the one the text was gated for) only ever
@@ -163,7 +182,13 @@ public sealed class SpeechEngineClient(
     }
 
     /// <summary>Renders over Piper's bare text/plain wire at the engine's own endpoint (SPEC F99.4, F219.1).</summary>
-    public Task<string> RenderPiperAsync(VoiceEngine engine, TtsRenderContext context, CancellationToken ct) =>
+    public async Task<string> RenderPiperAsync(VoiceEngine engine, TtsRenderContext context, CancellationToken ct)
+    {
+        using var cap = RenderCapFor(engine, ct);
+        return await PostPiperAsync(engine, context, cap.Token);
+    }
+
+    Task<string> PostPiperAsync(VoiceEngine engine, TtsRenderContext context, CancellationToken ct) =>
         PiperWireProtocol.RenderAsync(http, engine.Endpoint, context, optionsMonitor.CurrentValue, ct);
 
     /// <summary>
@@ -173,17 +198,19 @@ public sealed class SpeechEngineClient(
     /// </summary>
     public async Task PingAsync(VoiceEngine engine, CancellationToken ct)
     {
+        using var cap = new RequestCap(ShortRequestCap, time, ct);
         using var request = new HttpRequestMessage(HttpMethod.Options, EndpointUri.Combine(engine.Endpoint, "/"));
-        using var response = await http.SendAsync(request, ct);
+        using var response = await http.SendAsync(request, cap.Token);
     }
 
     public async Task<IReadOnlyList<string>> ListVoicesAsync(VoiceEngine engine, CancellationToken ct)
     {
-        var response = await http.GetAsync(EndpointUri.Combine(engine.Endpoint, "/v1/audio/voices"), ct);
+        using var cap = new RequestCap(ShortRequestCap, time, ct);
+        var response = await http.GetAsync(EndpointUri.Combine(engine.Endpoint, "/v1/audio/voices"), cap.Token);
         response.EnsureSuccessStatusCode();
 
         // Kokoro and the bench shims both answer { "voices": [...] }; the parser takes either entry shape.
-        var payload = await response.Content.ReadFromJsonAsync<KokoroVoicesResponse>(ct);
+        var payload = await response.Content.ReadFromJsonAsync<KokoroVoicesResponse>(cap.Token);
         return payload?.VoiceIds() ?? [];
     }
 }

@@ -351,7 +351,8 @@ public static class TtsServiceCollectionExtensions
         // The engine-agnostic OpenAI-style speech client (SPEC F219.4-F219.5, PLAN T746): the one
         // egress type for any VoiceEngine — the active-engine primary and
         // KokoroVoiceLister above both delegate to it.
-        services.AddHttpClient<SpeechEngineClient>();
+        // No client-wide timeout (T771a): each request carries its own cap, so a long engine budget (F219.6) is not cut at the 100 s default.
+        services.AddHttpClient<SpeechEngineClient>(client => client.Timeout = Timeout.InfiniteTimeSpan);
 
         // What the speech renders are doing per engine (PLAN T768a): fed by SpeechEngineClient, read by the voice tile's warm-up.
         services.AddSingleton<EngineRenderActivity>();
