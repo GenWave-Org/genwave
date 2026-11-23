@@ -12,6 +12,6 @@ namespace GenWave.Core;
 /// </summary>
 public static class SchemaVersion
 {
-    /// <summary>The highest <c>NN</c> among <c>db/NN-*-migration.sh</c> this build was compiled against — currently <c>db/53-voice-clip-migration.sh</c>.</summary>
-    public const int Expected = 53;
+    /// <summary>The highest <c>NN</c> among <c>db/NN-*-migration.sh</c> this build was compiled against — currently <c>db/54-talk-rules-migration.sh</c>.</summary>
+    public const int Expected = 54;
 }

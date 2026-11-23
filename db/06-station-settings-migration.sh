@@ -516,6 +516,36 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	);
 	-- end f219-voice-clip
 
+	-- begin f220-talk-rules
+	-- F220 (STORY-566; PLAN T778): the talk-rule book's two tables. talk_rule_switch holds one row per rule the owner
+	-- switched away from its default; talk_check is the append-only record of every check attempt (shadow and rules
+	-- mode). Mirrored verbatim between db/06 and db/54 (a spec pins the text equal). v_repeat_catches_7d is untouched.
+	CREATE TABLE IF NOT EXISTS station.talk_rule_switch (
+	  rule_id    text        NOT NULL CHECK (rule_id ~ '^[a-z0-9]+(-[a-z0-9]+)*$'),
+	  talk_kind  text        NOT NULL CHECK (talk_kind IN ('dj-line','chat','ad')),
+	  enabled    boolean     NOT NULL,
+	  changed_at timestamptz NOT NULL DEFAULT now(),
+	  PRIMARY KEY (rule_id, talk_kind)
+	);  -- no row = the rule's OnByDefault; a row for an unknown rule is ignored (rule removed)
+
+	CREATE TABLE IF NOT EXISTS station.talk_check (
+	  id             bigserial   PRIMARY KEY,  -- bigserial: ~1,000 rows a day, swept, ids never reused
+	  checked_at     timestamptz NOT NULL DEFAULT now(),
+	  talk_kind      text        NOT NULL CHECK (talk_kind IN ('dj-line','chat','ad')),
+	  segment_kind   text,
+	  persona_id     integer,            -- no FK: a deleted DJ must not delete the record
+	  attempt        smallint    NOT NULL CHECK (attempt IN (1,2)),
+	  mode           text        NOT NULL CHECK (mode IN ('shadow','rules')),
+	  raw_reply      text        NOT NULL,
+	  cleaned        text,               -- null = clean-up failed
+	  snapshot       jsonb       NOT NULL,
+	  verdicts       jsonb       NOT NULL, -- {rule_id: {on: bool, flag: {reason, ask, evidence}|null}}
+	  legacy_outcome text,               -- shadow only: passed|trimmed|re-asked|template|dropped
+	  outcome        text        NOT NULL  -- accepted|re-asked|template|dropped|failed
+	);
+	CREATE INDEX IF NOT EXISTS talk_check_checked_at ON station.talk_check (checked_at);
+	-- end f220-talk-rules
+
 	-- The weekly format-clock grid (SPEC F91.1, F91.2; STORY-240, STORY-242; PLAN T118) that replaces
 	-- the single owner-toggled Station:Persona:ActiveId. day_of_week is System.DayOfWeek's own 0-6
 	-- numbering (0 = Sunday) — no translation ever happens between this column and the C# side.
