@@ -324,7 +324,7 @@ static partial class CrosstalkScriptParser
     // unlike ClaimVocabulary's own dropped "clear", neither "fm" nor "am" has a common innocent
     // same-shape sense worth protecting mid-sentence, and a model's casing is not part of the contract.
     [GeneratedRegex(@"\b\d+\.\d+\s?FM\b|\b\d{2,3}\s?FM\b|\b\d{3,4}\s?AM\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex FrequencyRx();
+    internal static partial Regex FrequencyRx();
 
     // SPEC F138.6: K/W-prefixed 3-4 letter call signs — US broadcast call signs always start with K
     // or W and are conventionally written in full caps. Deliberately CASE-SENSITIVE (no IgnoreCase):
@@ -336,7 +336,7 @@ static partial class CrosstalkScriptParser
     // false discard here costs nothing but a silent restock (F127.4/F140 — no ladder, no template,
     // the stock worker simply tries again on its own cadence).
     [GeneratedRegex(@"\b[KW][A-Z]{2,3}\b", RegexOptions.CultureInvariant)]
-    private static partial Regex CallSignRx();
+    internal static partial Regex CallSignRx();
 
     // SPEC F138.6: digit-date shapes, scoped honestly to what a checker can verify mechanically —
     // a calendar-shaped year ("2026"), a month name immediately followed by a day number
@@ -349,5 +349,5 @@ static partial class CrosstalkScriptParser
     [GeneratedRegex(
         $@"\b(?:19|20)\d{{2}}\b|\b(?:{ClaimVocabulary.MonthAlternation})\s+\d{{1,2}}(?:st|nd|rd|th)?\b|\b\d{{1,2}}(?:st|nd|rd|th)\s+of\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex DateClaimRx();
+    internal static partial Regex DateClaimRx();
 }

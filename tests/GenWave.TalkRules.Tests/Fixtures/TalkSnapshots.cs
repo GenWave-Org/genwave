@@ -20,4 +20,13 @@ internal static class TalkSnapshots
             TalkList<TalkRecentLine>.Empty,
             null,
             memos ?? TalkMemos.Empty);
+
+    /// <summary>A chat attempt: host and neighbor lines alternate, starting with the host. The station is "GenWave"; the clock is as for <see cref="DjLine"/>.</summary>
+    public static TalkSnapshot Chat(params string[] lines) =>
+        DjLine(string.Empty) with
+        {
+            Kind = TalkKinds.Chat,
+            SegmentKind = "Crosstalk",
+            Lines = new TalkList<TalkLine>(lines.Select((text, index) => new TalkLine(index % 2 == 0 ? "HOST" : "NEIGHBOR", text))),
+        };
 }

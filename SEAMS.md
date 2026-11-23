@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **174 seams across 10 projects.**
+> **175 seams across 10 projects.**
 
 ## GenWave.Ads (3 seams)
 
@@ -229,10 +229,11 @@
 | `GenWave.Orchestration.IRandomSource` | `GenWave.Orchestration.SystemRandomSource` | Singleton | — |
 | `GenWave.Orchestration.IRequestFulfillmentSource` | `GenWave.Orchestration.RequestFulfillmentProvider` | Singleton | also registered: `GenWave.Orchestration.NoOpRequestFulfillmentSource` (GenWave.Orchestration) |
 
-## GenWave.TalkRules (2 seams)
+## GenWave.TalkRules (3 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
+| `GenWave.Core.TalkRules.ITalkRule` | `GenWave.TalkRules.StationDetailsRule` | Singleton | also registered: `GenWave.TalkRules.DayAndTimeRule` (GenWave.TalkRules), `GenWave.TalkRules.OfferedFactsRule` (GenWave.TalkRules), `GenWave.TalkRules.OwnerMessageRule` (GenWave.TalkRules) |
 | `GenWave.Core.TalkRules.ITalkRuleBook` | `GenWave.TalkRules.TalkRuleBook` | Singleton | — |
 | `GenWave.Core.TalkRules.ITalkRuleSwitches` | `GenWave.TalkRules.InMemoryTalkRuleSwitches` | Singleton | — |
 

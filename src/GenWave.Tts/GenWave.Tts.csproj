@@ -21,5 +21,9 @@
     <InternalsVisibleTo Include="VoiceOff" />
     <!-- tools/PatterBench posts through PostChatCompletionAsync and gates with CheckTruthGate, as the writer does. -->
     <InternalsVisibleTo Include="PatterBench" />
+    <!-- The talk rules (SPEC F220) call the existing claim checks and truth-shape patterns instead of copying them. -->
+    <InternalsVisibleTo Include="GenWave.TalkRules" />
+    <!-- The talk-rule parity specs run the same input through the legacy checks (CheckTruthGate, the crosstalk parser) and the rules. -->
+    <InternalsVisibleTo Include="GenWave.TalkRules.Tests" />
   </ItemGroup>
 </Project>
