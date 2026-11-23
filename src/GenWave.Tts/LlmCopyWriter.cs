@@ -1027,7 +1027,7 @@ public sealed class LlmCopyWriter(
     /// the cap (no spend recorded). Shared by the repeat check and the tagline ledger so they cannot disagree:
     /// the selector already wrote THIS break's spend row, so a rule it just selected must stay available.
     /// </summary>
-    static IReadOnlyList<string> CappedNotSelectedRules(PersonaCard? card, QuirkSelection? quirkSelection) =>
+    internal static IReadOnlyList<string> CappedNotSelectedRules(PersonaCard? card, QuirkSelection? quirkSelection) =>
         quirkSelection is null
             ? []
             : (card?.QuirkRules ?? [])

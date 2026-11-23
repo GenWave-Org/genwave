@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
+using GenWave.Core.TalkRules;
 using GenWave.Loudness;
 
 namespace GenWave.Tts;
@@ -314,6 +315,9 @@ public static class TtsServiceCollectionExtensions
             // F35.6/T7) — so the persona preview endpoint reuses the exact same prompt-building/
             // hygiene instance the feeder does, never a second parallel writer.
             .AddSingleton<LlmCopyWriter>()
+            // DJ-line snapshot source (SPEC F220.7, PLAN T780): builds the talk-rule snapshot from the writer's inputs.
+            // Not wired into the writer yet.
+            .AddSingleton<ITalkSnapshotSource<DjLineSnapshotInput>, DjLineSnapshotSource>()
             // The life extractor's own completion seam (SPEC F218.17, PLAN T704): same endpoint/key/timeout, called
             // only from the background LifeExtractionService, never from the render path.
             .AddSingleton<ILifeClaimLlm, LifeClaimLlm>()

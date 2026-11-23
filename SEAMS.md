@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **171 seams across 10 projects.**
+> **172 seams across 10 projects.**
 
 ## GenWave.Ads (2 seams)
 
@@ -235,7 +235,7 @@
 | `GenWave.Core.TalkRules.ITalkRuleBook` | `GenWave.TalkRules.TalkRuleBook` | Singleton | — |
 | `GenWave.Core.TalkRules.ITalkRuleSwitches` | `GenWave.TalkRules.InMemoryTalkRuleSwitches` | Singleton | — |
 
-## GenWave.Tts (27 seams)
+## GenWave.Tts (28 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -251,6 +251,7 @@
 | `GenWave.Core.Abstractions.ITtsSynthesizer` | `GenWave.Tts.NormalizingTtsSynthesizer` | Singleton | — |
 | `GenWave.Core.Abstractions.ITtsVoiceLister` | `GenWave.Tts.CachedVoiceLister` | Singleton | — |
 | `GenWave.Core.Abstractions.IVerbatimSegmentRenderer` | `GenWave.Tts.TtsSegmentSource` | Singleton | — |
+| `GenWave.Core.TalkRules.ITalkSnapshotSource<GenWave.Tts.DjLineSnapshotInput>` | `GenWave.Tts.DjLineSnapshotSource` | Singleton | — |
 | `GenWave.Tts.IActiveVoiceEngine` | `GenWave.Tts.RoutedActiveVoiceEngine` | Singleton | wraps: `GenWave.Tts.ActiveVoiceEngine` (GenWave.Tts) |
 | `GenWave.Tts.ICastSegmentAuthor` | `GenWave.Tts.CastSegmentAuthor` | Singleton | — |
 | `GenWave.Tts.IDegradationModeReader` | `GenWave.Tts.DegradationController` | Singleton | — |
