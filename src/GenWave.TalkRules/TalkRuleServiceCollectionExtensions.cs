@@ -25,7 +25,8 @@ public static class TalkRuleServiceCollectionExtensions
         return services;
     }
 
-    private static bool IsRule(Type type) =>
+    /// <summary>The scan's predicate: what <see cref="AddTalkRules(IServiceCollection, Assembly[])"/> registers as a rule. Shared so the architecture laws check exactly what production runs.</summary>
+    public static bool IsRule(Type type) =>
         type is { IsClass: true, IsAbstract: false, IsGenericTypeDefinition: false }
         && typeof(ITalkRule).IsAssignableFrom(type);
 }
