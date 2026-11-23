@@ -107,7 +107,7 @@ internal static class RepeatParity
         new(PersonaCard.CurrentSchemaVersion, name, tagline, "", [], new VoiceSpec("", "af_nova", 1.0, "en"), 0, [], []);
 
     /// <summary>Stored rows, newest first, two minutes apart, so a tagline used a few rows back is still inside the hour.</summary>
-    static List<UtteranceEntry> Rows(long personaId, IReadOnlyList<RecentSaid> said) =>
+    internal static List<UtteranceEntry> Rows(long personaId, IReadOnlyList<RecentSaid> said) =>
         [.. said.Select((line, index) => new UtteranceEntry(
             personaId * 1000 - index, personaId, null, UtteranceKind.Patter, "LeadIn",
             ShiftKey.Unscheduled(personaId, DateOnly.FromDateTime(Now.DateTime)),

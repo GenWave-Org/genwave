@@ -437,13 +437,69 @@ public static class FeatureMovedDjLineRulesGiveTodaysVerdicts
     }
 
     // AC5 — a capped catchphrase not offered this break, and an unavailable tagline
-    public sealed class ScenarioCatchphraseLimits
+    // Each case trips only this family: the earlier lines never share five words with the reply, and no fact, name or track is set.
+    public sealed class ScenarioCatchphraseLimits : IAsyncLifetime
     {
-        [Fact(Skip = "pending: T785")]
-        public void TheCatchphraseIsFlagged() { }
+        private const string Quirk = "Finish a break with \"log it that was a banger\" now and then";
+        private const string Banger = "Well log it that was a banger tonight";
 
-        [Fact(Skip = "pending: T785")]
-        public void TheUnavailableTaglineIsFlagged() { }
+        // No quoted span, so the card has no tagline from it: only the spent-quirk input can flag this one (key: "a proper floor filler").
+        private const string PlainQuirk = "Call a loud song a proper floor filler";
+        private const string FloorFiller = "That one is a proper floor filler for sure";
+
+        private const int BangerSpent = 0;
+        private const int BangerOffered = 1;
+        private const int TaglineUsedUp = 2;
+        private const int TaglineAvailable = 3;
+        private const int NeitherSaid = 4;
+        private const int PlainQuirkSpent = 5;
+        private const int PlainQuirkOffered = 6;
+
+        private static readonly CatchphraseParityCase[] Cases =
+        [
+            new(Banger, [], CappedQuirk: Quirk),
+            new(Banger, [], CappedQuirk: Quirk, CappedQuirkOffered: true),
+            new("Well stay golden my friends tonight", [new("Stay golden my friends and good night")], "Stay golden my friends"),
+            new("Well stay golden my friends tonight", [], "Stay golden my friends"),
+            new("Here is a quiet one for the road", [new("Stay golden my friends and good night")], "Stay golden my friends", Quirk),
+            new(FloorFiller, [], CappedQuirk: PlainQuirk),
+            new(FloorFiller, [], CappedQuirk: PlainQuirk, CappedQuirkOffered: true),
+        ];
+
+        private List<string> legacyNamed = [];
+        private List<string> ruleNamed = [];
+
+        public Task InitializeAsync()
+        {
+            (legacyNamed, ruleNamed) = CatchphraseParity.Verdicts(new CatchphraseLimitsRule(new RepetitionCheck()), Cases);
+            return Task.CompletedTask;
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void TheRuleNamesWhatTheQuirkAndTaglineHitsName() => Assert.Equal(legacyNamed, ruleNamed);
+
+        [Fact]
+        public void TheCatchphraseIsFlagged() => Assert.Equal("log it that was a banger", ruleNamed[BangerSpent]);
+
+        [Fact]
+        public void TheCatchphraseOfferedThisBreakIsNotFlagged() => Assert.Equal(string.Empty, ruleNamed[BangerOffered]);
+
+        [Fact]
+        public void TheUnavailableTaglineIsFlagged() => Assert.Equal("Stay golden my friends", ruleNamed[TaglineUsedUp]);
+
+        [Fact]
+        public void TheAvailableTaglineIsNotFlagged() => Assert.Equal(string.Empty, ruleNamed[TaglineAvailable]);
+
+        [Fact]
+        public void NeitherSaidIsNotFlagged() => Assert.Equal(string.Empty, ruleNamed[NeitherSaid]);
+
+        [Fact]
+        public void TheSpentQuirkWithNoQuotedPhraseIsFlagged() => Assert.Equal("a proper floor filler", ruleNamed[PlainQuirkSpent]);
+
+        [Fact]
+        public void TheQuirkWithNoQuotedPhraseOfferedThisBreakIsNotFlagged() => Assert.Equal(string.Empty, ruleNamed[PlainQuirkOffered]);
     }
 
     // AC6 — any flag from the truth rules
@@ -484,14 +540,22 @@ public static class FeatureMovedDjLineRulesGiveTodaysVerdicts
         private static readonly RepeatParityCase Repeat =
             new("We have a really lovely long set coming up for you tonight", [new("We have a really lovely long set coming up next")]);
 
+        private static readonly CatchphraseParityCase Catchphrase =
+            new("Well log it that was a banger tonight", [], CappedQuirk: "Finish a break with \"log it that was a banger\" now and then");
+
         private RuleFlag? preview;
         private RuleFlag? onAir;
+        private RuleFlag? catchphrasePreview;
+        private RuleFlag? catchphraseOnAir;
 
         public Task InitializeAsync()
         {
             var rule = new RepeatPhrasesRule(new RepetitionCheck());
             preview = rule.Judge(RepeatParity.DjSnapshot(Repeat, preview: true));
             onAir = rule.Judge(RepeatParity.DjSnapshot(Repeat));
+            var limits = new CatchphraseLimitsRule(new RepetitionCheck());
+            catchphrasePreview = limits.Judge(CatchphraseParity.Snapshot(Catchphrase, preview: true));
+            catchphraseOnAir = limits.Judge(CatchphraseParity.Snapshot(Catchphrase));
             return Task.CompletedTask;
         }
 
@@ -502,13 +566,31 @@ public static class FeatureMovedDjLineRulesGiveTodaysVerdicts
 
         [Fact]
         public void TheSameLineOnAirIsFlagged() => Assert.NotNull(onAir);
+
+        [Fact]
+        public void CatchphraseLimitsDoesNotJudge() => Assert.Null(catchphrasePreview);
+
+        [Fact]
+        public void TheSameCatchphraseOnAirIsFlagged() => Assert.NotNull(catchphraseOnAir);
     }
 
     // Sad path
     // AC8 — no catchphrase memo on the snapshot
-    public sealed class ScenarioNoCatchphraseMemo
+    public sealed class ScenarioNoCatchphraseMemo : IAsyncLifetime
     {
-        [Fact(Skip = "pending: T785")]
-        public void NothingIsFlagged() { }
+        private RuleFlag? flag;
+
+        public Task InitializeAsync()
+        {
+            var said = new CatchphraseParityCase(
+                "Well log it that was a banger tonight", [], CappedQuirk: "Finish a break with \"log it that was a banger\" now and then");
+            flag = new CatchphraseLimitsRule(new RepetitionCheck()).Judge(CatchphraseParity.Snapshot(said, withMemo: false));
+            return Task.CompletedTask;
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void NothingIsFlagged() => Assert.Null(flag);
     }
 }
