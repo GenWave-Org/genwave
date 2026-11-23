@@ -66,7 +66,7 @@ public static partial class AdScriptValidator
 {
     /// <summary>The house spoken-rate constant (chars/second) — see <see cref="CheckDuration"/>'s own
     /// remarks and this class's own "duration is text-driven" summary above.</summary>
-    const double CharsPerSecond = 15.0;
+    internal const double CharsPerSecond = 15.0;
 
     public static AdScriptValidationResult Validate(
         string rawScript, AdScriptValidationRequest request, IPatterDurationEstimator durationEstimator)

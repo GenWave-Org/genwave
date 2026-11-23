@@ -35,7 +35,7 @@ public static class FeatureSnapshotRoundTrip
     {
         private readonly TalkSnapshot djLine = Snapshot(TalkKinds.DjLine, null, TalkMemos.Empty);
         private readonly TalkSnapshot chat = Snapshot(TalkKinds.Chat, null, TalkMemos.Empty);
-        private readonly TalkSnapshot ad = Snapshot(TalkKinds.Ad, new TalkAdFields("Acme", "555-0100", 30, true), TalkMemos.Empty);
+        private readonly TalkSnapshot ad = Snapshot(TalkKinds.Ad, new TalkAdFields("Acme", "555-0100", 30, true, 0.4, 220, 15.0, TalkList<double>.Empty), TalkMemos.Empty);
         private readonly TalkSnapshot withMemos;
         private readonly TalkSnapshot withoutFacts;
 
@@ -63,6 +63,16 @@ public static class FeatureSnapshotRoundTrip
         }
 
         [Fact]
+        public void AnAdSnapshotWithItsLimitFieldsEqualsTheOriginal()
+        {
+            var withLengths = ad with
+            {
+                Ad = new TalkAdFields("Acme", null, 30, false, 0.4, 220, 15.0, new TalkList<double>([0, 7.5])),
+            };
+            Assert.Equal(withLengths, RoundTrip(withLengths));
+        }
+
+        [Fact]
         public void MemosSurviveTheRoundTrip() => Assert.Equal(withMemos, RoundTrip(withMemos));
 
         [Fact]
@@ -81,7 +91,7 @@ public static class FeatureSnapshotRoundTrip
     {
         private readonly string djLine = TalkSnapshotJson.Serialize(Snapshot(TalkKinds.DjLine, null, TalkMemos.Empty));
         private readonly string chat = TalkSnapshotJson.Serialize(Snapshot(TalkKinds.Chat, null, TalkMemos.Empty));
-        private readonly string ad = TalkSnapshotJson.Serialize(Snapshot(TalkKinds.Ad, new TalkAdFields("Acme", "555-0100", 30, true), TalkMemos.Empty));
+        private readonly string ad = TalkSnapshotJson.Serialize(Snapshot(TalkKinds.Ad, new TalkAdFields("Acme", "555-0100", 30, true, 0.4, 220, 15.0, TalkList<double>.Empty), TalkMemos.Empty));
         private readonly string withMemo;
         private readonly string withUnsortedMemo;
 

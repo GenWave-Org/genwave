@@ -412,10 +412,11 @@ public sealed partial class AdScriptWriter(
     /// the most frequent voice (first on ties) IS the announcer — for a generated spot every tag maps
     /// to the station voice anyway (<c>AdRenderService</c> with a null voice plan), so nothing audible
     /// changes. Owner-typed scripts never pass through here (SPEC F160.4: verbatim, validator at save),
-    /// so the widening is confined to the one path that needed it.
+    /// so the widening applies only to generated scripts. This method is also the ad snapshot's fixed clean-up
+    /// (ARCHITECTURE data flow step 2), so two callers depend on it.
     /// </para>
     /// </summary>
-    internal static string ApplyLineAwareHygiene(string raw)
+    public static string ApplyLineAwareHygiene(string raw)
     {
         var lines = new List<(string Tag, string Text)>();
 

@@ -33,6 +33,6 @@ public static class TalkSnapshotFixtures
         null,
         new TalkStation("GenWave", "Friends at home."),
         TalkList<TalkRecentLine>.Empty,
-        kind == TalkKinds.Ad ? new TalkAdFields("Corner Bakery", null, 20, false) : null,
+        kind == TalkKinds.Ad ? new TalkAdFields("Corner Bakery", null, 20, false, 0.4, 220, 15.0, TalkList<double>.Empty) : null,
         TalkMemos.Empty);
 }
