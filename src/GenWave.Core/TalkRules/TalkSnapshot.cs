@@ -20,7 +20,8 @@ public sealed record TalkSnapshot(
     TalkStation Station,
     TalkList<TalkRecentLine> RecentLines,
     TalkAdFields? Ad,
-    TalkMemos Memos)
+    TalkMemos Memos,
+    TalkChatFields? Chat = null)
 {
     /// <summary>The memo this rule left, or null. A rule reads only its own (F220.8).</summary>
     public JsonElement? MemoOf(ITalkRule rule) => Memos.Find(rule.Id);

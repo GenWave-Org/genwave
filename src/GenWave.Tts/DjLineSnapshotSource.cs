@@ -33,33 +33,13 @@ public sealed class DjLineSnapshotSource(
             input.Timezone,
             TrackOf(request),
             new TalkStation(request.StationName, audiencePosture.Current.ToString()),
-            RecentLinesOf(input),
+            TalkRecentLines.Of(input.NewestRows.Concat(input.TaglineWindowRows).Concat(input.LastHourRows)),
             null,
             MemosOf(input.Legacy)));
     }
 
-    /// <summary>Every row any rule may read, once each (by id), newest first. Each rule picks its own window.</summary>
-    static TalkList<TalkRecentLine> RecentLinesOf(DjLineSnapshotInput input) =>
-        new(input.NewestRows.Concat(input.TaglineWindowRows).Concat(input.LastHourRows)
-            .DistinctBy(e => e.Id)
-            .OrderByDescending(e => e.WrittenAt)
-            .ThenByDescending(e => e.Id)
-            .Select(e => new TalkRecentLine(e.PersonaId, e.Text, e.WrittenAt, e.Fallback)));
-
-    /// <summary>
-    /// Every tagline span of the card (a ledger read over no history lists them all, available or not) plus the
-    /// card's raw quirk rule texts. Depends on the card only, never on which rules run.
-    /// </summary>
-    TalkList<string> CardPhrasesOf(DjLineSnapshotInput input)
-    {
-        var spans = input.Card is { } card && taglineLedger is not null
-            ? taglineLedger.Evaluate(card, [], [], input.Request.LocalNow).Select(t => t.Span)
-            : [];
-
-        return new TalkList<string>(spans
-            .Concat((input.Card?.QuirkRules ?? []).Select(r => r.Text))
-            .Distinct(StringComparer.Ordinal));
-    }
+    TalkList<string> CardPhrasesOf(DjLineSnapshotInput input) =>
+        TalkCardPhrases.Of(input.Card, taglineLedger, input.Request.LocalNow);
 
     static TalkList<string>? FactsOf(string? factBlock)
     {

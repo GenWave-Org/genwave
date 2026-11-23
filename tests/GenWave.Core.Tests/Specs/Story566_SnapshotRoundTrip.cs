@@ -56,6 +56,13 @@ public static class FeatureSnapshotRoundTrip
         public void AnAdSnapshotEqualsTheOriginal() => Assert.Equal(ad, RoundTrip(ad));
 
         [Fact]
+        public void AChatSnapshotWithItsChatFieldsEqualsTheOriginal()
+        {
+            var withChatFields = chat with { Chat = new TalkChatFields(60, 220, 15.0, 7, null, new TalkList<int>([22, 13])) };
+            Assert.Equal(withChatFields, RoundTrip(withChatFields));
+        }
+
+        [Fact]
         public void MemosSurviveTheRoundTrip() => Assert.Equal(withMemos, RoundTrip(withMemos));
 
         [Fact]

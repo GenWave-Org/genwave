@@ -277,7 +277,7 @@ static partial class CrosstalkScriptParser
         return false;
     }
 
-    static string DescribeSpeaker(CrosstalkSpeaker speaker) =>
+    internal static string DescribeSpeaker(CrosstalkSpeaker speaker) =>
         speaker == CrosstalkSpeaker.Host ? HostTag : NeighborTag;
 
     /// <summary>Truncates a raw model line to <see cref="MaxEchoedLineChars"/> before it is echoed
