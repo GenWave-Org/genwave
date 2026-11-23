@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **167 seams across 9 projects.**
+> **169 seams across 10 projects.**
 
 ## GenWave.Ads (2 seams)
 
@@ -225,6 +225,13 @@
 | `GenWave.Orchestration.IPersonaPickProvider` | `GenWave.Orchestration.RankerPersonaPickProvider` | Singleton | also registered: `GenWave.Orchestration.NoOpPersonaPickProvider` (GenWave.Orchestration) |
 | `GenWave.Orchestration.IRandomSource` | `GenWave.Orchestration.SystemRandomSource` | Singleton | — |
 | `GenWave.Orchestration.IRequestFulfillmentSource` | `GenWave.Orchestration.RequestFulfillmentProvider` | Singleton | also registered: `GenWave.Orchestration.NoOpRequestFulfillmentSource` (GenWave.Orchestration) |
+
+## GenWave.TalkRules (2 seams)
+
+| Port | Adapter | Lifetime | Notes |
+|---|---|---|---|
+| `GenWave.Core.TalkRules.ITalkRuleBook` | `GenWave.TalkRules.TalkRuleBook` | Singleton | — |
+| `GenWave.Core.TalkRules.ITalkRuleSwitches` | `GenWave.TalkRules.InMemoryTalkRuleSwitches` | Singleton | — |
 
 ## GenWave.Tts (27 seams)
 

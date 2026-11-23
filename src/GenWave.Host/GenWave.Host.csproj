@@ -18,6 +18,7 @@
          lets the composition root reach it without landing any of its own logic in that namespace. -->
     <ProjectReference Include="..\GenWave.Plugins\GenWave.Plugins.csproj" />
     <ProjectReference Include="..\GenWave.Ads\GenWave.Ads.csproj" />
+    <ProjectReference Include="..\GenWave.TalkRules\GenWave.TalkRules.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -23,6 +23,7 @@ using GenWave.Host.Voices;
 using GenWave.MediaLibrary;
 using GenWave.MediaLibrary.Options;
 using GenWave.Orchestration;
+using GenWave.TalkRules;
 using GenWave.Tts;
 using Microsoft.Extensions.Options;
 
@@ -167,6 +168,9 @@ builder.Services
     // TryAddSingleton<IContextPatterFactSource, NoOpContextPatterFactSource> default) — both already
     // ran above. See AddGenWaveContextHost's own remarks for the full ordering rationale.
     .AddGenWaveContextHost(cfg)
+    // DJ-line rules (SPEC F220): every ITalkRule found by scan, the rule book, and the in-memory switch
+    // stand-in (TryAdd) until the Postgres store (PLAN T799) swaps in its own ITalkRuleSwitches with Replace after this call.
+    .AddTalkRules()
     // Playout chain: engine control → feeder → feeder service → PlayoutSupervisor (hosted).
     .AddGenWavePlayout()
     // The announcement lifecycle guardians (SPEC F143.2/.3, F144.5/.6; STORY-358,

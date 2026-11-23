@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- DJ-line rules (SPEC F220): one class per rule, found by assembly scan, run by the rule book.
+         References Core (contract), Tts, Memory and Ads (the existing checks the rules call). -->
+    <ProjectReference Include="..\GenWave.Core\GenWave.Core.csproj" />
+    <ProjectReference Include="..\GenWave.Tts\GenWave.Tts.csproj" />
+    <ProjectReference Include="..\GenWave.Memory\GenWave.Memory.csproj" />
+    <ProjectReference Include="..\GenWave.Ads\GenWave.Ads.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="GenWave.TalkRules.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+</Project>

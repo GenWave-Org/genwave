@@ -32,6 +32,7 @@ internal static class ProductionArchitecture
             ProductionAssemblies.Plugins,
             ProductionAssemblies.Ads,
             ProductionAssemblies.Memory,
+            ProductionAssemblies.TalkRules,
             ProductionAssemblies.Npgsql,
             ProductionAssemblies.Dapper)
         .Build();

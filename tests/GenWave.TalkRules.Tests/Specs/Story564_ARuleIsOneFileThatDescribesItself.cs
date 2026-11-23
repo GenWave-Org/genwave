@@ -1,28 +1,80 @@
 // STORY-564 — A rule is one file that describes itself (SPEC F220 · PLAN F220)
 //
-// BDD specification — xUnit. Pending: each fact is activated by the task its Skip names.
+// BDD specification — xUnit. Facts run over fixture rules in this test assembly, scanned the way the
+// host scans GenWave.TalkRules, so they stay meaningful before and after real rules ship.
+
+using GenWave.Core.TalkRules;
+using GenWave.TalkRules.Tests.Fixtures;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace GenWave.TalkRules.Tests.Specs;
 
 public static class FeatureARuleIsOneFileThatDescribesItself
 {
-    // AC2 — a rule class added as one file
-    public sealed class ScenarioARuleAddedAsOneFile
+    private static TalkRuleBook ScannedRuleBook()
     {
-        [Fact(Skip = "pending: T776")]
-        public void TheRuleBookListsIt() { }
-
-        [Fact(Skip = "pending: T776")]
-        public void TheRuleBookRunsItsJudge() { }
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddTalkRules(typeof(TalkRuleBook).Assembly, typeof(FactsFixtureRule).Assembly);
+        return services.BuildServiceProvider().GetRequiredService<TalkRuleBook>();
     }
 
-    // AC1 — every shipped rule, through the rule book listing
-    public sealed class ScenarioEveryShippedRuleIsListed
+    // AC2 — a rule class added as one file
+    public sealed class ScenarioARuleAddedAsOneFile : IAsyncLifetime
     {
-        [Fact(Skip = "pending: T776")]
-        public void EachRuleHasADescription() { }
+        private readonly TalkRuleBook book = ScannedRuleBook();
+        private TalkList<RuleVerdict> verdicts = TalkList<RuleVerdict>.Empty;
 
-        [Fact(Skip = "pending: T776")]
-        public void EachRuleNamesTheTalkItCanCover() { }
+        public async Task InitializeAsync() =>
+            verdicts = await book.JudgeAsync(TalkSnapshots.DjLine("This is an invented fact."), CancellationToken.None);
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void TheRuleBookListsIt() =>
+            Assert.Contains(book.Rules, rule => rule.Id == "fixture-facts");
+
+        [Fact]
+        public void TheRuleBookRunsItsJudge() =>
+            Assert.NotNull(Assert.Single(verdicts, v => v.RuleId == "fixture-facts").Flag);
+    }
+
+    // AC1 — every rule, through the rule book listing
+    public sealed class ScenarioEveryScannedRuleIsListed
+    {
+        private readonly IReadOnlyList<ITalkRule> listed;
+
+        public ScenarioEveryScannedRuleIsListed()
+        {
+            listed = ScannedRuleBook().Rules;
+            if (listed.Count == 0)
+            {
+                throw new InvalidOperationException("The scan found no rules, so the facts below would be vacuous.");
+            }
+        }
+
+        [Fact]
+        public void EachRuleHasAName() =>
+            Assert.All(listed, rule => Assert.False(string.IsNullOrWhiteSpace(rule.Describe().Name)));
+
+        [Fact]
+        public void EachRuleSaysWhatItDoes() =>
+            Assert.All(listed, rule => Assert.False(string.IsNullOrWhiteSpace(rule.Describe().WhatItDoes)));
+
+        [Fact]
+        public void EachRuleSaysWhy() =>
+            Assert.All(listed, rule => Assert.False(string.IsNullOrWhiteSpace(rule.Describe().Why)));
+
+        [Fact]
+        public void EachRuleGivesAnExample() =>
+            Assert.All(listed, rule => Assert.False(string.IsNullOrWhiteSpace(rule.Describe().Example)));
+
+        [Fact]
+        public void EachRuleCanCoverSomeTalk() =>
+            Assert.All(listed, rule => Assert.NotEqual(TalkKinds.None, rule.CanCover));
+
+        [Fact]
+        public void EachRuleIsOnByDefaultOnlyWhereItCanCover() =>
+            Assert.All(listed, rule => Assert.Equal(TalkKinds.None, rule.OnByDefault & ~rule.CanCover));
     }
 }
