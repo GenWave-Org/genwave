@@ -63,6 +63,13 @@ public static class FeatureSnapshotRoundTrip
         }
 
         [Fact]
+        public void APreviewSnapshotEqualsTheOriginal()
+        {
+            var preview = djLine with { Preview = true };
+            Assert.Equal(preview, RoundTrip(preview));
+        }
+
+        [Fact]
         public void AnAdSnapshotWithItsLimitFieldsEqualsTheOriginal()
         {
             var withLengths = ad with

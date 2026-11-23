@@ -1,5 +1,7 @@
 using System.Reflection;
+using GenWave.Core.Abstractions;
 using GenWave.Core.TalkRules;
+using GenWave.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -7,7 +9,7 @@ namespace GenWave.TalkRules;
 
 public static class TalkRuleServiceCollectionExtensions
 {
-    /// <summary>Registers every <see cref="ITalkRule"/> in GenWave.TalkRules, the rule book, and the in-memory switch stand-in (registered with TryAdd: an earlier <see cref="ITalkRuleSwitches"/> registration wins; a later one must use Replace). A new rule is one file, no edit here (F220.2).</summary>
+    /// <summary>Registers every <see cref="ITalkRule"/> in GenWave.TalkRules, the rule book, the shared-run <see cref="IRepetitionCheck"/> the repeat judge takes (TryAdd), and the in-memory switch stand-in (registered with TryAdd: an earlier <see cref="ITalkRuleSwitches"/> registration wins; a later one must use Replace). A new rule is one file, no edit here (F220.2).</summary>
     public static IServiceCollection AddTalkRules(this IServiceCollection services) =>
         services.AddTalkRules(typeof(TalkRuleBook).Assembly);
 
@@ -19,6 +21,7 @@ public static class TalkRuleServiceCollectionExtensions
             services.TryAddEnumerable(ServiceDescriptor.Singleton(typeof(ITalkRule), type));
         }
 
+        services.TryAddSingleton<IRepetitionCheck, RepetitionCheck>(); // the pure shared-run check the repeat-phrases judge takes
         services.TryAddSingleton<ITalkRuleSwitches, InMemoryTalkRuleSwitches>();
         services.TryAddSingleton<TalkRuleBook>();
         services.TryAddSingleton<ITalkRuleBook>(provider => provider.GetRequiredService<TalkRuleBook>());

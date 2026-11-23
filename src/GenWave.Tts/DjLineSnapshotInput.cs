@@ -19,6 +19,7 @@ namespace GenWave.Tts;
 /// <param name="NewestRows">The newest rows the writer read (<c>RecentAsync(personaId, 10)</c>), fallbacks included.</param>
 /// <param name="TaglineWindowRows">The tagline-window rows (<c>ReadTaglineEntriesAsync</c>), fallbacks included.</param>
 /// <param name="LastHourRows">The rows from the last hour, fallbacks included.</param>
+/// <param name="Preview">True for a preview render: the writer's on-air flag (<c>spendQuirks</c>) is false, so legacy never ran its repeat check.</param>
 /// <param name="Legacy">The legacy quirk + tagline result while it still runs (shadow); null otherwise.</param>
 public sealed record DjLineSnapshotInput(
     SegmentRequest Request,
@@ -33,4 +34,5 @@ public sealed record DjLineSnapshotInput(
     IReadOnlyList<UtteranceEntry> NewestRows,
     IReadOnlyList<UtteranceEntry> TaglineWindowRows,
     IReadOnlyList<UtteranceEntry> LastHourRows,
-    LegacyCatchphraseResult? Legacy = null);
+    LegacyCatchphraseResult? Legacy = null,
+    bool Preview = false);

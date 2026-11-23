@@ -3,6 +3,7 @@
 // BDD specification — xUnit. Facts still carrying a Skip are activated by the task their Skip names.
 
 using GenWave.Core.TalkRules;
+using GenWave.Memory;
 using GenWave.TalkRules.Tests.Fixtures;
 
 namespace GenWave.TalkRules.Tests.Specs;
@@ -100,11 +101,81 @@ public static class FeatureChatAndAdRulesMoved
         public void ADjLineIsNotJudged() => Assert.Null(djLine);
     }
 
-    // AC2 — a chat line sharing 5 words with that speaker's last 10 chat lines
-    public sealed class ScenarioChatRepeats
+    // AC2 — a chat line sharing 5 words with that speaker's last 10 chat lines, against today's per-speaker repeat check
+    public sealed class ScenarioChatRepeats : IAsyncLifetime
     {
-        [Fact(Skip = "pending: T784")]
-        public void ItIsFlagged() { }
+        private const string Said = "We have a really lovely long set coming up next";
+        private const string Repeat = "We have a really lovely long set coming up for you";
+
+        private static readonly RecentSaid[] None = [];
+
+        private static readonly ChatRepeatCase[] Cases =
+        [
+            // 0 — the host repeats the host's own history
+            new(["Hello there.", "Hi.", Repeat, "Indeed."], [new(Said)], None),
+            // 1 — the same words sit in the neighbor's history, so the host line is not a repeat
+            new(["Hello there.", "Hi.", Repeat, "Indeed."], None, [new(Said)]),
+            // 2 — four words in a row
+            new(["Hello there.", "Hi.", "A really lovely long song to play.", "Indeed."], [new(Said)], None),
+            // 3 — the neighbor repeats the neighbor's own history
+            new(["Hello there.", Repeat, "Indeed.", "Yes."], None, [new(Said)]),
+            // 4 — the repeat is in a template line only
+            new(["Hello there.", "Hi.", Repeat, "Indeed."], [new(Said, Fallback: true)], None),
+            // 5 — nothing said before
+            new(["Hello there.", "Hi.", Repeat, "Indeed."], None, None),
+        ];
+
+        private List<string> legacyNamed = [];
+        private List<string> ruleNamed = [];
+        private RuleFlag? flag;
+
+        public Task InitializeAsync()
+        {
+            var rule = new RepeatPhrasesRule(new RepetitionCheck());
+            (legacyNamed, ruleNamed) = RepeatParity.ChatVerdicts(rule, Cases);
+            flag = rule.Judge(RepeatParity.ChatSnapshot(Cases[0]));
+            return Task.CompletedTask;
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void ItIsFlagged() => Assert.NotNull(flag);
+
+        [Fact]
+        public void ItNamesWhatTheCrosstalkRepeatCheckNames() => Assert.Equal(legacyNamed, ruleNamed);
+
+        [Fact]
+        public void OnlyTheSpeakersOwnRealLinesCount() => Assert.Equal([true, false, false, true, false, false], ruleNamed.Select(named => named.Length > 0));
+    }
+
+    // AC2 — a known difference from today: a chat speaker's own tagline is skipped too (PLAN T784 note: card phrases are always skipped;
+    // the chat check today passes no allowed phrases). The shadow report must explain it; if it shows, raise it with Dean.
+    public sealed class ScenarioTheSpeakersTaglineIsSkippedToo : IAsyncLifetime
+    {
+        private const string Tagline = "Stay golden my friends and keep going";
+
+        private static readonly ChatRepeatCase Case =
+            new(["Hello there.", "Hi.", Tagline + ".", "Indeed."], [new(Tagline)], [], Tagline);
+
+        private RuleFlag? ruleFlag;
+        private string legacyNamed = string.Empty;
+
+        public Task InitializeAsync()
+        {
+            var rule = new RepeatPhrasesRule(new RepetitionCheck());
+            ruleFlag = rule.Judge(RepeatParity.ChatSnapshot(Case));
+            legacyNamed = RepeatParity.ChatVerdicts(rule, [Case]).Legacy[0];
+            return Task.CompletedTask;
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void TheRuleDoesNotFlagTheTagline() => Assert.Null(ruleFlag);
+
+        [Fact]
+        public void TodaysChatCheckStillFlagsIt() => Assert.NotEqual(string.Empty, legacyNamed);
     }
 
     // AC3 — talk longer than its time

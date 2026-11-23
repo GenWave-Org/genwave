@@ -35,7 +35,8 @@ public sealed class DjLineSnapshotSource(
             new TalkStation(request.StationName, audiencePosture.Current.ToString()),
             TalkRecentLines.Of(input.NewestRows.Concat(input.TaglineWindowRows).Concat(input.LastHourRows)),
             null,
-            MemosOf(input.Legacy)));
+            MemosOf(input.Legacy),
+            Preview: input.Preview));
     }
 
     TalkList<string> CardPhrasesOf(DjLineSnapshotInput input) =>

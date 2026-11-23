@@ -3,6 +3,7 @@
 // BDD specification — xUnit. Facts still carrying a Skip are activated by the task their Skip names.
 
 using GenWave.Core.TalkRules;
+using GenWave.Memory;
 using GenWave.TalkRules.Tests.Fixtures;
 using GenWave.Tts;
 
@@ -246,14 +247,193 @@ public static class FeatureMovedDjLineRulesGiveTodaysVerdicts
         public void ATalkWithNoOwnerMessageIsNotJudged() => Assert.False(ruleFlags[0]);
     }
 
-    // AC4 — the repeat fixtures
-    public sealed class ScenarioRepeatedPhrases
+    // AC4 — the repeat fixtures, against today's DJ-line repeat check
+    public sealed class ScenarioRepeatedPhrases : IAsyncLifetime
     {
-        [Fact(Skip = "pending: T784")]
-        public void ItFlagsExactlyTheLinesTheSharedRunCheckFlags() { }
+        private const string Said = "We have a really lovely long set coming up next";
+        private const string Tagline = "Stay golden my friends";
 
-        [Fact(Skip = "pending: T784")]
-        public void CardPhrasesAreNeverTheFlaggedWords() { }
+        // Filler lines share no five words with any copy below.
+        private static RecentSaid[] Filler(int count) =>
+            [.. Enumerable.Range(1, count).Select(i => new RecentSaid($"Filler row {i} says hello"))];
+
+        private static readonly RepeatParityCase[] Cases =
+        [
+            // 0 — five fresh words in a row from the newest line
+            new("We have a really lovely long set coming up for you tonight", [new(Said)]),
+            // 1 — only four words in a row
+            new("A really lovely long song to play", [new(Said)]),
+            // 2 — the repeat is in a template line only
+            new("We have a really lovely long set coming up for you tonight", [new(Said, Fallback: true)]),
+            // 3 — the repeat is the tenth row
+            new("We have a really lovely long set coming up for you tonight", [.. Filler(9), new(Said)]),
+            // 4 — the repeat is the eleventh row, past the window
+            new("We have a really lovely long set coming up for you tonight", [.. Filler(10), new(Said)]),
+            // 5 — a template line is the tenth row, the repeat the eleventh: ten rows then drop templates, not ten real rows
+            new("We have a really lovely long set coming up for you tonight", [.. Filler(9), new("Template line here", Fallback: true), new(Said)]),
+            // 6 — a template line among the newest ten leaves the real repeat still inside
+            new("We have a really lovely long set coming up for you tonight", [new("Template line here", Fallback: true), new(Said)]),
+            // 7 — the card's tagline is used again; once the tagline is cut away fewer than five words are left
+            new("Stay golden my friends and keep it going", [.. Filler(3), new("Stay golden my friends and keep it going")], Tagline),
+            // 8 — the same run with no tagline on the card is a repeat
+            new("Stay golden my friends and keep it going", [.. Filler(3), new("Stay golden my friends and keep it going")]),
+            // 9 — a run made only of the track's own words is not a repeat
+            new("Bohemian Rhapsody by Queen is up next", [new("Bohemian Rhapsody by Queen is on now")], TrackTitle: "Bohemian Rhapsody", TrackArtist: "Queen"),
+            // 10 — the same run with no track set is a repeat
+            new("Bohemian Rhapsody by Queen is up next", [new("Bohemian Rhapsody by Queen is on now")]),
+            // 11 — nothing said before
+            new("We have a really lovely long set coming up for you tonight", []),
+        ];
+
+        private List<string> legacyNamed = [];
+        private List<string> ruleNamed = [];
+
+        public Task InitializeAsync()
+        {
+            (legacyNamed, ruleNamed) = RepeatParity.DjVerdicts(new RepeatPhrasesRule(new RepetitionCheck()), Cases);
+            return Task.CompletedTask;
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void ItNamesExactlyThePhrasesTheSharedRunCheckNames() => Assert.Equal(legacyNamed, ruleNamed);
+
+        [Fact]
+        public void ItFlagsTheFiveWordRunsInsideTheTenRealLines() =>
+            Assert.Equal(
+                [true, false, false, true, false, false, true, false, true, false, true, false],
+                ruleNamed.Select(named => named.Length > 0));
+    }
+
+    // AC4 — an unavailable tagline (used inside its minimum breaks apart) sitting in a longer repeated run
+    public sealed class ScenarioAnUnavailableTaglineInsideARun : IAsyncLifetime
+    {
+        private const string Tagline = "Stay golden my friends";
+        private const string Run = "Stay golden my friends and keep it going tonight folks";
+
+        // Filler lines share no five words with any copy below.
+        private static RecentSaid[] Filler(int count) =>
+            [.. Enumerable.Range(1, count).Select(i => new RecentSaid($"Filler row {i} says hello"))];
+
+        private static readonly RepeatParityCase[] Cases =
+        [
+            // 0 — the tagline was said two lines back (inside its three breaks apart), so it is unavailable; the run goes on past it
+            new(Run, [.. Filler(2), new(Run)], Tagline),
+            // 1 — unavailable again, but only four words follow it: the shared run has nothing left to name
+            new("Stay golden my friends and keep it going", [.. Filler(2), new("Stay golden my friends and keep it going")], Tagline),
+        ];
+
+        private List<string> legacyNamed = [];
+        private List<string> ruleNamed = [];
+
+        public Task InitializeAsync()
+        {
+            (legacyNamed, ruleNamed) = RepeatParity.DjVerdicts(new RepeatPhrasesRule(new RepetitionCheck()), Cases);
+            return Task.CompletedTask;
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void TheRuleNamesWhatTheSharedRunPartNames() => Assert.Equal(legacyNamed, ruleNamed);
+
+        [Fact]
+        public void OnlyTheWordsOutsideTheTaglineAreNamed() =>
+            Assert.Equal(["and keep it going tonight folks", string.Empty], ruleNamed);
+    }
+
+    // AC4 — each thing the check never counts breaks a run that would otherwise repeat. The run is stop words around one word, and
+    // nothing else (no clock, fact or containment words), so only the repeat rule can trip. Each is paired with a control where
+    // the same run has no such exclusion and is flagged.
+    public sealed class ScenarioExclusionsBreakARun : IAsyncLifetime
+    {
+        private static RepeatParityCase[] Pair(string word, Func<RepeatParityCase, RepeatParityCase> exclude)
+        {
+            var run = $"We have the {word} by the";
+            var plain = new RepeatParityCase($"Here {run} tonight", [new($"Now {run} again")]);
+            return [exclude(plain), plain];
+        }
+
+        private static readonly RepeatParityCase[] Cases =
+        [
+            .. Pair("moonlight", c => c with { TrackTitle = "Untitled", TrackAlbum = "Moonlight" }),
+            // The year is digits: a year fact is never fresh. The control keeps the digits with no track year.
+            .. Pair("1975", c => c with { TrackTitle = "Untitled", TrackYear = 1975 }),
+            .. Pair("sunrise", c => c with { CrossingTitle = "Sunrise", CrossingArtist = "Band" }),
+            .. Pair("sunset", c => c with { CrossingTitle = "Song", CrossingArtist = "Sunset" }),
+            .. Pair("tony", c => c with { PersonaName = "Tony" }),
+            .. Pair("radiorama", c => c with { StationName = "Radiorama" }),
+        ];
+
+        private List<string> legacyNamed = [];
+        private List<string> ruleNamed = [];
+
+        public Task InitializeAsync()
+        {
+            (legacyNamed, ruleNamed) = RepeatParity.DjVerdicts(new RepeatPhrasesRule(new RepetitionCheck()), Cases);
+            return Task.CompletedTask;
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void TheRuleNamesWhatTheSharedRunCheckNames() => Assert.Equal(legacyNamed, ruleNamed);
+
+        [Fact]
+        public void OnlyTheRunsWithNoExclusionAreFlagged() =>
+            Assert.Equal(
+                [false, true, false, true, false, true, false, true, false, true, false, true],
+                ruleNamed.Select(named => named.Length > 0));
+    }
+
+    // AC4 — card phrases are never the flagged words
+    public sealed class ScenarioCardPhrasesAreSkipped : IAsyncLifetime
+    {
+        private RuleFlag? flag;
+
+        public Task InitializeAsync()
+        {
+            var said = new RecentSaid("Stay golden my friends and keep it going tonight folks");
+            var snapshot = RepeatParity.DjSnapshot(
+                new RepeatParityCase("Stay golden my friends and keep it going tonight folks", [said], "Stay golden my friends"));
+            flag = new RepeatPhrasesRule(new RepetitionCheck()).Judge(snapshot);
+            return Task.CompletedTask;
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void OnlyTheWordsOutsideTheTaglineAreNamed() => Assert.Equal("and keep it going tonight folks", flag?.Evidence);
+    }
+
+    // AC4 — a known difference from today: a quirk's own words are skipped too (PLAN T784 note: legacy skips tagline spans only).
+    // The shadow report must explain it; if it shows, raise it with Dean.
+    public sealed class ScenarioQuirkPhrasesAreSkippedToo : IAsyncLifetime
+    {
+        private const string Copy = "Honestly log it that was a banger";
+        private const string QuirkRule = "Finish with log it that was a banger";
+
+        private RuleFlag? ruleFlag;
+        private bool legacyFlags;
+
+        public Task InitializeAsync()
+        {
+            var said = new RecentSaid("Honestly log it that was a banger");
+            var snapshot = RepeatParity.DjSnapshot(new RepeatParityCase(Copy, [said]));
+            var speaker = snapshot.Speakers[0] with { CardPhrases = new TalkList<string>([QuirkRule]) };
+            ruleFlag = new RepeatPhrasesRule(new RepetitionCheck()).Judge(snapshot with { Speakers = new TalkList<TalkSpeaker>([speaker]) });
+            legacyFlags = RepeatParity.LegacyDjFlags(new RepeatParityCase(Copy, [said]));
+            return Task.CompletedTask;
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void TheRuleDoesNotFlagTheQuirkWords() => Assert.Null(ruleFlag);
+
+        [Fact]
+        public void TodaysCheckStillFlagsThem() => Assert.True(legacyFlags);
     }
 
     // AC5 — a capped catchphrase not offered this break, and an unavailable tagline
@@ -299,10 +479,29 @@ public static class FeatureMovedDjLineRulesGiveTodaysVerdicts
 
     // Sad path
     // AC7 — a preview render
-    public sealed class ScenarioAPreviewRender
+    public sealed class ScenarioAPreviewRender : IAsyncLifetime
     {
-        [Fact(Skip = "pending: T784")]
-        public void RepeatPhrasesDoesNotJudge() { }
+        private static readonly RepeatParityCase Repeat =
+            new("We have a really lovely long set coming up for you tonight", [new("We have a really lovely long set coming up next")]);
+
+        private RuleFlag? preview;
+        private RuleFlag? onAir;
+
+        public Task InitializeAsync()
+        {
+            var rule = new RepeatPhrasesRule(new RepetitionCheck());
+            preview = rule.Judge(RepeatParity.DjSnapshot(Repeat, preview: true));
+            onAir = rule.Judge(RepeatParity.DjSnapshot(Repeat));
+            return Task.CompletedTask;
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void RepeatPhrasesDoesNotJudge() => Assert.Null(preview);
+
+        [Fact]
+        public void TheSameLineOnAirIsFlagged() => Assert.NotNull(onAir);
     }
 
     // Sad path

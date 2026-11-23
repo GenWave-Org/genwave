@@ -148,7 +148,7 @@ public sealed class LlmCopyWriter(
     readonly IStationEventSink events = events ?? NoOpStationEventSink.Instance;
 
     /// <summary>How many of the persona's newest non-template utterances the repetition check compares against (SPEC F218.11).</summary>
-    const int RepetitionWindow = 10;
+    internal const int RepetitionWindow = 10;
 
     /// <summary>Name of the <see cref="IHttpClientFactory"/> client this writer resolves (registered in Program.cs).</summary>
     public const string HttpClientName = "Llm";
@@ -1004,11 +1004,17 @@ public sealed class LlmCopyWriter(
     /// </summary>
     IReadOnlyList<string> FindRepeats(
         string copy, SegmentRequest request, string? personaName, IReadOnlyList<UtteranceEntry> recent,
-        PersonaCard? card, QuirkSelection? quirkSelection, IReadOnlyList<TaglineStatus> taglines)
-    {
-        if (repetitionCheck is null)
-            return [];
+        PersonaCard? card, QuirkSelection? quirkSelection, IReadOnlyList<TaglineStatus> taglines) =>
+        repetitionCheck is null
+            ? []
+            : FindRepeats(repetitionCheck, copy, request, personaName, recent, card, quirkSelection, taglines);
 
+    /// <summary>The check itself, static so the <c>repeat-phrases</c> parity specs run the real legacy path without building a writer.</summary>
+    internal static IReadOnlyList<string> FindRepeats(
+        IRepetitionCheck repetitionCheck, string copy, SegmentRequest request, string? personaName,
+        IReadOnlyList<UtteranceEntry> recent, PersonaCard? card, QuirkSelection? quirkSelection,
+        IReadOnlyList<TaglineStatus> taglines)
+    {
         var recentTexts = recent.Where(e => !e.Fallback).Take(RepetitionWindow).Select(e => e.Text).ToList();
         var result = repetitionCheck.Check(
             SoundTags.Strip(copy), // SPEC F219.18

@@ -4,7 +4,8 @@ namespace GenWave.Core.TalkRules;
 
 /// <summary>
 /// Everything a rule may look at for one written attempt. Stored as JSON, it is enough to re-judge the
-/// attempt later (F220.30).
+/// attempt later (F220.30). <paramref name="Preview"/> is true for an operator's preview render, which is never judged for
+/// repeats or catchphrase limits (legacy runs those only on air).
 /// </summary>
 public sealed record TalkSnapshot(
     TalkKinds Kind,
@@ -21,7 +22,8 @@ public sealed record TalkSnapshot(
     TalkList<TalkRecentLine> RecentLines,
     TalkAdFields? Ad,
     TalkMemos Memos,
-    TalkChatFields? Chat = null)
+    TalkChatFields? Chat = null,
+    bool Preview = false)
 {
     /// <summary>The memo this rule left, or null. A rule reads only its own (F220.8).</summary>
     public JsonElement? MemoOf(ITalkRule rule) => Memos.Find(rule.Id);

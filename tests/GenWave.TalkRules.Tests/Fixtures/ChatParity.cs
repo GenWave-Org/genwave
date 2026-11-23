@@ -11,11 +11,6 @@ internal static class ChatParity
     static readonly DateTimeOffset Now = TalkSnapshots.DjLine(string.Empty).LocalNow;
     static readonly string[] KeepTags = ["[laughs]"];
 
-    sealed class FixedPosture : IAudiencePostureProvider
-    {
-        public AudiencePosture Current => AudiencePosture.Everyone;
-    }
-
     /// <summary>Builds a reply from its HOST and NEIGHBOR lines, alternating from HOST.</summary>
     public static string Reply(params string[] lines) =>
         string.Join('\n', lines.Select((text, index) => $"{(index % 2 == 0 ? "HOST" : "NEIGHBOR")}: {text}"));
@@ -38,7 +33,7 @@ internal static class ChatParity
         var card = new PersonaCard(PersonaCard.CurrentSchemaVersion, "Flip", "", "", [], new VoiceSpec("", "af_nova", 1.0, "en"), 0, [], []);
         var request = new CrosstalkExchangeRequest(card, card, "GenWave", null, null, Now);
         var input = new ChatSnapshotInput(request, 1, new CrosstalkAiredScript([.. lines]), "America/Edmonton", 600, 400, [], []);
-        return new ChatSnapshotSource(new FixedPosture()).BuildAsync(input, CancellationToken.None)
+        return new ChatSnapshotSource(new FixedAudiencePosture()).BuildAsync(input, CancellationToken.None)
             .AsTask().GetAwaiter().GetResult();
     }
 }

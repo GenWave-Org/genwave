@@ -10,11 +10,6 @@ internal static class DjParity
 {
     static readonly DateTimeOffset Now = TalkSnapshots.DjLine(string.Empty).LocalNow;
 
-    sealed class FixedPosture : IAudiencePostureProvider
-    {
-        public AudiencePosture Current => AudiencePosture.Everyone;
-    }
-
     /// <summary>Whether <c>LlmCopyWriter.CheckTruthGate</c> rejects each case, then whether the rule flags it.</summary>
     public static (List<bool> Legacy, List<bool> Rule) Verdicts(IJudgingTalkRule rule, IReadOnlyList<DjParityCase> cases) =>
         ([.. cases.Select(LegacyRejects)], [.. cases.Select(c => rule.Judge(SnapshotOf(c)) is not null)]);
@@ -34,7 +29,7 @@ internal static class DjParity
         };
         var input = new DjLineSnapshotInput(
             request, 1, c.Copy, 7, "Flip", null, c.FactBlock, c.Owner, "America/Edmonton", [], [], []);
-        return new DjLineSnapshotSource(new FixedPosture()).BuildAsync(input, CancellationToken.None)
+        return new DjLineSnapshotSource(new FixedAudiencePosture()).BuildAsync(input, CancellationToken.None)
             .AsTask().GetAwaiter().GetResult();
     }
 }

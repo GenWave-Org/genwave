@@ -16,7 +16,7 @@ internal sealed class CrosstalkLineMemory(
     ILogger logger, ISentenceTrimmer? sentenceTrimmer = null)
 {
     /// <summary>How many of the speaker's newest non-template utterances a line is compared against (SPEC F218.11).</summary>
-    const int Window = 10;
+    internal const int Window = 10;
 
     /// <summary>The <c>segment_kind</c> every stored crosstalk line carries.</summary>
     public const string SegmentKind = "CrosstalkLine";
