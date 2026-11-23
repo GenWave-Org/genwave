@@ -149,9 +149,8 @@ public static class FeatureChatAndAdRulesMoved
         public void OnlyTheSpeakersOwnRealLinesCount() => Assert.Equal([true, false, false, true, false, false], ruleNamed.Select(named => named.Length > 0));
     }
 
-    // AC2 — a known difference from today: a chat speaker's own tagline is skipped too (PLAN T784 note: card phrases are always skipped;
-    // the chat check today passes no allowed phrases). The shadow report must explain it; if it shows, raise it with Dean.
-    public sealed class ScenarioTheSpeakersTaglineIsSkippedToo : IAsyncLifetime
+    // AC2 — parity: a chat speaker's own tagline is flagged when reused, as today's chat check does (chats have no tagline limiter; Dean 2026-11-23)
+    public sealed class ScenarioTheSpeakersTaglineIsChecked : IAsyncLifetime
     {
         private const string Tagline = "Stay golden my friends and keep going";
 
@@ -160,22 +159,31 @@ public static class FeatureChatAndAdRulesMoved
 
         private RuleFlag? ruleFlag;
         private string legacyNamed = string.Empty;
+        private string ruleNamed = string.Empty;
 
         public Task InitializeAsync()
         {
             var rule = new RepeatPhrasesRule(new RepetitionCheck());
             ruleFlag = rule.Judge(RepeatParity.ChatSnapshot(Case));
-            legacyNamed = RepeatParity.ChatVerdicts(rule, [Case]).Legacy[0];
+            var verdicts = RepeatParity.ChatVerdicts(rule, [Case]);
+            legacyNamed = verdicts.Legacy[0];
+            ruleNamed = verdicts.Rule[0];
             return Task.CompletedTask;
         }
 
         public Task DisposeAsync() => Task.CompletedTask;
 
         [Fact]
-        public void TheRuleDoesNotFlagTheTagline() => Assert.Null(ruleFlag);
+        public void TheRuleFlagsTheTagline() => Assert.NotNull(ruleFlag);
 
         [Fact]
-        public void TodaysChatCheckStillFlagsIt() => Assert.NotEqual(string.Empty, legacyNamed);
+        public void TheRuleNamesTheRun() => Assert.Contains("golden", ruleFlag?.Evidence, StringComparison.OrdinalIgnoreCase);
+
+        [Fact]
+        public void TodaysChatCheckFlagsItToo() => Assert.NotEqual(string.Empty, legacyNamed);
+
+        [Fact]
+        public void TheRuleNamesWhatTodaysChatCheckNames() => Assert.Equal(legacyNamed, ruleNamed);
     }
 
     // AC3 — talk longer than its time

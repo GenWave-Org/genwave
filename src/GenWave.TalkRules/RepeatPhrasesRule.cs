@@ -12,10 +12,10 @@ namespace GenWave.TalkRules;
 /// <list type="bullet">
 /// <item>Recent lines: the speaker's newest rows (<see cref="LlmCopyWriter.RepetitionWindow"/> for a DJ line,
 /// <see cref="CrosstalkLineMemory.Window"/> for a chat), then the template (fallback) rows dropped.</item>
-/// <item>Card phrases (tagline spans and raw quirk rule texts) are always skipped, as allowed phrases. Legacy skips tagline spans only,
+/// <item>On a DJ line, card phrases (tagline spans and raw quirk rule texts) are always skipped, as allowed phrases. Legacy skips tagline spans only,
 /// so a repeated quirk phrase is flagged today and not here (PLAN T784; the shadow report must explain it).</item>
-/// <item>Chat differs from today too: <c>CrosstalkLineMemory.FindRepeats</c> passes no allowed phrases, so today a chat line that reuses
-/// its speaker's own tagline (five words or more) is flagged, and here it is not. That is a deliberate verdict change the shadow report must explain.</item>
+/// <item>In a chat no card phrase is skipped, matching <c>CrosstalkLineMemory.FindRepeats</c>, which passes no allowed phrases: chats have no
+/// tagline limiter, so a speaker repeating their own tagline across recent chats is flagged, as today (Dean 2026-11-23).</item>
 /// <item>The spent-quirk and over-quota halves of the legacy check belong to <c>catchphrase-limits</c>, not here.</item>
 /// <item>A preview render is never judged: legacy runs the repeat check on air only.</item>
 /// </list>
@@ -30,7 +30,7 @@ public sealed class RepeatPhrasesRule(IRepetitionCheck sharedRun) : IJudgingTalk
 
     public TalkRuleDescription Describe() => new(
         "No repeated phrases.",
-        $"Flags a line that repeats a run of {RepetitionCheck.MinRunWords} or more words in a row from one of that speaker's last {LlmCopyWriter.RepetitionWindow} lines (a chat looks at their last {CrosstalkLineMemory.Window}). A line that was a stand-in template is not counted, and neither are the speaker's own catchphrases, the speaker's and station's names, or the track details.",
+        $"Flags a line that repeats a run of {RepetitionCheck.MinRunWords} or more words in a row from one of that speaker's last {LlmCopyWriter.RepetitionWindow} lines (a chat looks at their last {CrosstalkLineMemory.Window}). A line that was a stand-in template is not counted, and neither are the speaker's and station's names, or the track details. On a single-DJ line the speaker's own catchphrases are skipped too, but in a chat they are not.",
         "Hearing the same sentence again and again makes the station sound like a loop.",
         "The speaker said \"that was a really great song\" earlier, and the new line says it again.");
 
@@ -66,7 +66,7 @@ public sealed class RepeatPhrasesRule(IRepetitionCheck sharedRun) : IJudgingTalk
             recent, [], speaker.Name, after.Station.Name,
             track?.Title, track?.Artist, track?.Album, track?.Year,
             track?.Crossing?.Title, track?.Crossing?.Artist,
-            AllowedPhrases: [.. speaker.CardPhrases]);
+            AllowedPhrases: after.Kind == TalkKinds.Chat ? [] : [.. speaker.CardPhrases]);
         return sharedRun.Check(SoundTags.Strip(line.Text), context).Hits.Select(hit => hit.Phrase);
     }
 
