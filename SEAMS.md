@@ -233,7 +233,7 @@
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
-| `GenWave.Core.TalkRules.ITalkRule` | `GenWave.TalkRules.StationDetailsRule` | Singleton | also registered: `GenWave.TalkRules.CatchphraseLimitsRule` (GenWave.TalkRules), `GenWave.TalkRules.DayAndTimeRule` (GenWave.TalkRules), `GenWave.TalkRules.OfferedFactsRule` (GenWave.TalkRules), `GenWave.TalkRules.OwnerMessageRule` (GenWave.TalkRules), `GenWave.TalkRules.RepeatPhrasesRule` (GenWave.TalkRules) |
+| `GenWave.Core.TalkRules.ITalkRule` | `GenWave.TalkRules.StationDetailsRule` | Singleton | also registered: `GenWave.TalkRules.CatchphraseLimitsRule` (GenWave.TalkRules), `GenWave.TalkRules.CleanLanguageRule` (GenWave.TalkRules), `GenWave.TalkRules.DayAndTimeRule` (GenWave.TalkRules), `GenWave.TalkRules.FitsTimeRule` (GenWave.TalkRules), `GenWave.TalkRules.OfferedFactsRule` (GenWave.TalkRules), `GenWave.TalkRules.OtherBrandsRule` (GenWave.TalkRules), `GenWave.TalkRules.OwnerMessageRule` (GenWave.TalkRules), `GenWave.TalkRules.PhoneNumberRule` (GenWave.TalkRules), `GenWave.TalkRules.RepeatPhrasesRule` (GenWave.TalkRules) |
 | `GenWave.Core.TalkRules.ITalkRuleBook` | `GenWave.TalkRules.TalkRuleBook` | Singleton | — |
 | `GenWave.Core.TalkRules.ITalkRuleSwitches` | `GenWave.TalkRules.InMemoryTalkRuleSwitches` | Singleton | — |
 
