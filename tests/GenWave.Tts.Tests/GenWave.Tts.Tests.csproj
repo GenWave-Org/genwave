@@ -32,6 +32,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- STORY-567 golden prompts: compared byte for byte at run time (see Fakes/GoldenFiles.cs). -->
+    <None Include="Golden\**\*.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\tools\PatterBench\PatterBench.csproj" />
     <ProjectReference Include="..\GenWave.TestSupport\GenWave.TestSupport.csproj" />
   </ItemGroup>

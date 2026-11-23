@@ -142,9 +142,12 @@ public sealed class LlmCopyWriter(
     IMemoryRecallSource? memoryRecall = null,
     ILifeExtractor? lifeExtractor = null, // T704: absent means no life extraction, exactly the pre-extractor behaviour
     BreakCallbacks? callbacks = null, // T736: absent means no callback breaks, exactly the pre-callback behaviour
-    ISoundTagOfferProvider? soundTagOffers = null) // T760: absent means no sound tags in the prompt, exactly the pre-tag behaviour
+    ISoundTagOfferProvider? soundTagOffers = null, // T760: absent means no sound tags in the prompt, exactly the pre-tag behaviour
+    Random? selfNameRoll = null) // T787: the golden-prompt specs pin the self-name roll; absent means Random.Shared, as before
     : ISegmentCopyWriter, IPersonaPreviewWriter, IAnnouncementCopyWriter
 {
+    readonly Random selfNameRandom = selfNameRoll ?? Random.Shared;
+
     readonly IStationEventSink events = events ?? NoOpStationEventSink.Instance;
 
     /// <summary>How many of the persona's newest non-template utterances the repetition check compares against (SPEC F218.11).</summary>
@@ -1161,7 +1164,7 @@ public sealed class LlmCopyWriter(
             // Random.Shared — the source the builder's own SampleQuirks and Orchestration's
             // SystemRandomSource already standardize on. The builder enforces the persona gate
             // itself: with no persona section there is no line, however the roll lands.
-            var mentionOwnName = Random.Shared.NextDouble() < LlmPromptBuilder.SelfNameMentionProbability;
+            var mentionOwnName = selfNameRandom.NextDouble() < LlmPromptBuilder.SelfNameMentionProbability;
             // Captured once (SPEC F138.5, PLAN T331): BuildSystemPrompt's own clock guard line and
             // BuildUserContent's station clock line below must provably read the SAME instant — the
             // identical discipline CopyClaims.CheckClock's own remarks already require of its caller.

@@ -1,0 +1,11 @@
+Station: GenWave
+Local time: 2026-11-23 18:30
+Current date/time (station-local): Monday, November 23, 2026, 6:30 PM
+Segment: sign-off as you close out your shift on air.
+Handoff note: Rusty Strings is up next - you may name them as you sign off (e.g. "stick around, Rusty Strings is coming up"). Only use the name given here; never invent a show name, time, or event for them.
+Show note: you are closing out "Night Shift" and "Early Birds" is up next - you may name either or both as you sign off; never invent a show that doesn't exist.
+Title: Astral Plane
+Artist: Valerie June
+Album: The Moon and Stars
+Genre: Folk
+Year: 2013
