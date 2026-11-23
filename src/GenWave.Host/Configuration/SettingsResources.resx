@@ -428,6 +428,12 @@
   <data name="Admin:PlayHistoryCapacity.Help" xml:space="preserve">
     <value>How many recent plays the play-history ring keeps before the oldest entry is dropped.</value>
   </data>
+  <data name="TalkRules:CheckRetentionDays.Label" xml:space="preserve">
+    <value>Days to keep talk checks</value>
+  </data>
+  <data name="TalkRules:CheckRetentionDays.Help" xml:space="preserve">
+    <value>How long the station keeps its record of every check on what the hosts wrote. Older records are cleared as new ones are saved. Pick 1 to 90 days.</value>
+  </data>
   <data name="Library:ScanIntervalSeconds.Label" xml:space="preserve">
     <value>Library scan interval</value>
   </data>

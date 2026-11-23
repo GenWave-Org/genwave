@@ -104,6 +104,10 @@ static class StationSettingsHostingExtensions
         // Memory:UtteranceRetentionDays (default 28) swept at insert. Same lazy station_svc story.
         builder.Services.AddUtteranceStore(stationConnStr, builder.Configuration);
 
+        // Talk check log (SPEC F220.29, STORY-566, PLAN T779) — every written attempt, queued and written off the air path;
+        // TalkRules:CheckRetentionDays (default 28) swept at insert. Same lazy station_svc story.
+        builder.Services.AddTalkCheckLog(stationConnStr, builder.Configuration);
+
         // Quirk selector (SPEC F218.7, STORY-533, PLAN T686) — LlmCopyWriter resolves it optionally;
         // the spend ledger comes from AddPersonaMemoryStore above.
         builder.Services.AddSingleton<IQuirkSelector, QuirkSelector>();

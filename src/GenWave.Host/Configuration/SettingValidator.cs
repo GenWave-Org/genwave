@@ -232,6 +232,7 @@ public sealed partial class SettingValidator
             ["Tts:SoundTags:MaxPerBreak"] = v => IsIntInRange(v, Setting("Tts:SoundTags:MaxPerBreak")),
             ["Llm:MaxCopyChars"] = v => IsIntInRange(v, Setting("Llm:MaxCopyChars")),
             ["Admin:PlayHistoryCapacity"] = v => IsIntInRange(v, Setting("Admin:PlayHistoryCapacity")),
+            ["TalkRules:CheckRetentionDays"] = v => IsIntInRange(v, Setting("TalkRules:CheckRetentionDays")),
             ["Library:ScanIntervalSeconds"] = v => IsIntInRange(v, Setting("Library:ScanIntervalSeconds")),
             ["Library:EnrichmentConcurrency"] = v => IsIntInRange(v, Setting("Library:EnrichmentConcurrency")),
             ["Library:Scan:MissThreshold"] = v => IsIntInRange(v, Setting("Library:Scan:MissThreshold")),
@@ -1003,6 +1004,8 @@ public sealed partial class SettingValidator
             => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (characters).",
         var k when k.Equals("Admin:PlayHistoryCapacity", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (entries).",
+        var k when k.Equals("TalkRules:CheckRetentionDays", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (days).",
         var k when k.Equals("Library:ScanIntervalSeconds", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (seconds).",
         var k when k.Equals("Library:EnrichmentConcurrency", StringComparison.OrdinalIgnoreCase)

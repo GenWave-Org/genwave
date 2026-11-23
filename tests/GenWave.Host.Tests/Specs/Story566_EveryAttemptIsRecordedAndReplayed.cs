@@ -4,6 +4,10 @@
 
 namespace GenWave.Host.Tests.Specs;
 
+using System.Net;
+using System.Net.Http.Json;
+using GenWave.Core.TalkRules;
+
 public static class FeatureEveryAttemptIsRecordedAndReplayed
 {
     // AC3 — a stored row replayed with unchanged rules
@@ -31,12 +35,47 @@ public static class FeatureEveryAttemptIsRecordedAndReplayed
 
     // Sad path
     // AC7 — the record queue is full
-    public sealed class ScenarioTheRecordQueueIsFull
+    public sealed class ScenarioTheRecordQueueIsFull : EngineSettingScenario
     {
-        [Fact(Skip = "pending: T779")]
-        public void TheRowIsDropped() { }
+        // The factory removes every hosted service, so nothing drains the real queue: it fills, as in a database outage.
+        const int Attempts = 300;
 
-        [Fact(Skip = "pending: T779")]
+        readonly List<bool> accepted = [];
+
+        static TalkCheckRecord AnyRecord() =>
+            new(
+                1,
+                TalkCheckMode.Shadow,
+                "raw",
+                "cleaned",
+                new TalkSnapshot(
+                    TalkKinds.DjLine, "Banter", 1,
+                    new TalkList<TalkLine>([new TalkLine("Flip", "Hello.")]),
+                    new TalkList<TalkSpeaker>([new TalkSpeaker(1, "Flip", TalkList<string>.Empty)]),
+                    null, null, DateTimeOffset.UnixEpoch, "UTC", null, new TalkStation("GenWave", "friendly"),
+                    TalkList<TalkRecentLine>.Empty, null, TalkMemos.Empty),
+                TalkList<RuleVerdict>.Empty,
+                null,
+                TalkOutcome.Accepted);
+
+        public override async Task InitializeAsync()
+        {
+            await base.InitializeAsync();
+            var log = Service<ITalkCheckLog>();
+            for (var i = 0; i < Attempts; i++)
+            {
+                accepted.Add(log.TryRecord(AnyRecord()));
+            }
+        }
+
+        [Fact]
+        public void TheRowIsDropped() => Assert.False(accepted[^1]);
+
+        [Fact]
+        public void SomeRowsAreAccepted() => Assert.Contains(true, accepted);
+
+        // pending: T788 reason: there is no talk to air through the log until LlmCopyWriter calls TryRecord (T788's shadow hook).
+        [Fact(Skip = "pending: T788")]
         public void TheTalkStillAirs() { }
     }
 
@@ -50,12 +89,25 @@ public static class FeatureEveryAttemptIsRecordedAndReplayed
 
     // Sad path
     // AC9 — retention out of range
-    public sealed class ScenarioRetentionOutOfRange
+    public sealed class ScenarioRetentionRange : EngineSettingScenario
     {
-        [Fact(Skip = "pending: T779")]
-        public void ZeroDaysIsRejectedWith400() { }
+        Task<HttpResponseMessage> PutRetentionAsync(string days) =>
+            Client.PutAsJsonAsync("/api/settings", new[] { new { key = "TalkRules:CheckRetentionDays", value = days } });
 
-        [Fact(Skip = "pending: T779")]
-        public void NinetyOneDaysIsRejectedWith400() { }
+        [Fact]
+        public async Task ZeroDaysIsRejectedWith400() =>
+            Assert.Equal(HttpStatusCode.BadRequest, (await PutRetentionAsync("0")).StatusCode);
+
+        [Fact]
+        public async Task NinetyOneDaysIsRejectedWith400() =>
+            Assert.Equal(HttpStatusCode.BadRequest, (await PutRetentionAsync("91")).StatusCode);
+
+        [Fact]
+        public async Task OneDayIsAccepted() =>
+            Assert.Equal(HttpStatusCode.OK, (await PutRetentionAsync("1")).StatusCode);
+
+        [Fact]
+        public async Task NinetyDaysIsAccepted() =>
+            Assert.Equal(HttpStatusCode.OK, (await PutRetentionAsync("90")).StatusCode);
     }
 }

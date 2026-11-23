@@ -20,7 +20,8 @@ public static class TalkSnapshotJson
 
     private static JsonSerializerOptions BuildOptions()
     {
-        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        // A stored row missing a non-nullable field fails loudly on read instead of yielding a null a rule trips over.
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web) { RespectNullableAnnotations = true };
         options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.KebabCaseLower));
         // Reflection-based, no source-generated context: populate the default resolver so the instance can lock.
         options.MakeReadOnly(populateMissingResolver: true);

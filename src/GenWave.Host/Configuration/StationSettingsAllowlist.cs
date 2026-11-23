@@ -352,6 +352,8 @@ public static class StationSettingsAllowlist
         new("Tts:BlurbRetentionHours", SettingApplyMode.Live, SettingKind.Number, "hours", SettingGroup.Voice, Min: 1, Max: 8760),
         new("Llm:MaxCopyChars", SettingApplyMode.Live, SettingKind.Number, "chars", SettingGroup.Voice, Min: 1, Max: 10000),
         new("Admin:PlayHistoryCapacity", SettingApplyMode.Live, SettingKind.Number, "entries", SettingGroup.System, Min: 1, Max: 5000),
+        // F220.29 (T779): how long station.talk_check keeps rows; TalkCheckRepository reads it per insert, so a PUT applies to the next row.
+        new("TalkRules:CheckRetentionDays", SettingApplyMode.Live, SettingKind.Number, "days", SettingGroup.System, Min: 1, Max: 90),
         new("Library:ScanIntervalSeconds", SettingApplyMode.Live, SettingKind.Number, "seconds", SettingGroup.Library, Min: 1, Max: 86400),
         new("Library:EnrichmentConcurrency", SettingApplyMode.Live, SettingKind.Number, "workers", SettingGroup.Library, Min: 1, Max: 32),
 

@@ -76,11 +76,14 @@ public static class FeatureSnapshotRoundTrip
         private readonly string chat = TalkSnapshotJson.Serialize(Snapshot(TalkKinds.Chat, null, TalkMemos.Empty));
         private readonly string ad = TalkSnapshotJson.Serialize(Snapshot(TalkKinds.Ad, new TalkAdFields("Acme", "555-0100", 30, true), TalkMemos.Empty));
         private readonly string withMemo;
+        private readonly string withUnsortedMemo;
 
         public ScenarioTheStoredSpelling()
         {
             using var memo = JsonDocument.Parse("""{ "a": 1 }""");
             withMemo = TalkSnapshotJson.Serialize(Snapshot(TalkKinds.DjLine, null, TalkMemos.Empty.With("r", memo.RootElement)));
+            using var unsorted = JsonDocument.Parse("""{ "b": [ {"z": 1, "y": 2} ], "a": { "d": 1, "c": 2 } }""");
+            withUnsortedMemo = TalkSnapshotJson.Serialize(Snapshot(TalkKinds.DjLine, null, TalkMemos.Empty.With("r", unsorted.RootElement)));
         }
 
         [Fact]
@@ -97,5 +100,9 @@ public static class FeatureSnapshotRoundTrip
 
         [Fact]
         public void MemosAreStoredAsRealJsonKeyedByRuleId() => Assert.Contains("\"memos\":{\"r\":{\"a\":1}}", withMemo);
+
+        [Fact]
+        public void MemoKeysAreSortedAtEveryDepth() =>
+            Assert.Contains("\"memos\":{\"r\":{\"a\":{\"c\":2,\"d\":1},\"b\":[{\"y\":2,\"z\":1}]}}", withUnsortedMemo);
     }
 }
