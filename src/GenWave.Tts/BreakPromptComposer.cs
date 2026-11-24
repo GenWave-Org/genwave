@@ -10,8 +10,7 @@ internal static class BreakPromptComposer
     public static BreakPrompt Compose(BreakPromptInputs inputs)
     {
         var personaSection = inputs.Shaping is not null
-            ? LlmPromptBuilder.BuildShapedPersonaSection(
-                inputs.Persona, inputs.Card, inputs.MentionOwnName, inputs.Memory)
+            ? LlmPromptBuilder.BuildShapedPersonaSection(inputs.Persona, inputs.Card, inputs.MentionOwnName)
             : LlmPromptBuilder.BuildPersonaSection(
                 inputs.Persona, inputs.Card, inputs.MentionOwnName, inputs.Quirks, inputs.RecentLines, inputs.Taglines,
                 inputs.Memory);
@@ -28,7 +27,7 @@ internal static class BreakPromptComposer
             ? LlmPromptBuilder.BuildAnnouncementUserContent(inputs.Request, clockLine, message)
             : LlmPromptBuilder.BuildUserContent(
                 inputs.Request, clockLine, inputs.PreviouslyVoicedTasteNotes, inputs.PatterFact, inputs.ShowFlavor,
-                inputs.Callback);
+                inputs.Shaping is null ? inputs.Callback : null);
 
         return new BreakPrompt(system, user);
     }

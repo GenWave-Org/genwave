@@ -8,7 +8,9 @@ using GenWave.Core.Domain;
 using GenWave.Core.TalkRules;
 using GenWave.Memory;
 using GenWave.TalkRules.Tests.Fixtures;
+using GenWave.Tts;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace GenWave.TalkRules.Tests.Specs;
 
@@ -22,6 +24,12 @@ public static class FeatureARuleIsOneFileThatDescribesItself
         services.AddSingleton<IQuirkSelector>(new RecordingQuirkSelector(QuirkSelection.None));
         services.AddSingleton<ITaglineLedger, TaglineLedger>();
         services.AddSingleton<IPersonaCardByIdSource>(new OneCardSource(null));
+        services.AddSingleton<IPersonaStore>(new RosterPersonaStore());
+        services.AddSingleton<ILlmContextWindow>(new FixedContextWindow(MemoryBudget.Off));
+        services.AddSingleton<IMemoryRecallSource>(new RecordingMemoryRecall());
+        services.AddSingleton<IBreakCallbacks>(new BreakCallbacks(
+            new CallbackPlanner(new CallbackStoreOfOneMemory(null)), new FixedCallbackRate(0), new RosterPersonaStore(),
+            NullLogger<BreakCallbacks>.Instance));
         services.AddTalkRules(typeof(TalkRuleBook).Assembly, typeof(FactsFixtureRule).Assembly);
         return services.BuildServiceProvider().GetRequiredService<TalkRuleBook>();
     }

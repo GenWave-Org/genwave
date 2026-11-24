@@ -317,9 +317,10 @@ static class LlmPromptBuilder
     }
 
     /// <summary>
-    /// The persona section in its rules-mode form (SPEC F220.10, F220.21): the same soul, never-mention and name lines as
-    /// <see cref="BuildPersonaSection"/>, gated by the same <see cref="HasPersonaSection"/> test, but no quirks block and no
-    /// recent-lines block: the shapers (<c>catchphrase-limits</c>, <c>repeat-phrases</c>) own that text now. A shaper note never
+    /// The persona section in its rules-mode form (SPEC F220.10, F220.21): the same soul and name lines as
+    /// <see cref="BuildPersonaSection"/>, gated by the same <see cref="HasPersonaSection"/> test, but no quirks block, no
+    /// recent-lines block and no never-mention list: the shapers (<c>catchphrase-limits</c>, <c>repeat-phrases</c>,
+    /// <c>never-mention</c>) own that text now. A shaper note never
     /// creates this section; the "For this break" section is rendered apart from it by <see cref="BuildSystemPrompt"/>.
     ///
     /// <para>
@@ -331,13 +332,12 @@ static class LlmPromptBuilder
     /// <para>
     /// Accepted residual: whenever the selector picks no quirk this break (chance rolls, caps spent, untracked caps), a card
     /// with no soul has no legacy section, but the rules form counts <c>card.Quirks.Count &gt; 0</c>, so it gets the riders and
-    /// the persona opening. T800 must gate memory recall with
-    /// the same predicate as this rules-form gate (<c>LlmCopyWriter</c> currently uses
-    /// <c>HasPersonaSection(persona, card, quirkSelection)</c>).
+    /// the persona opening. The <c>never-mention</c> and <c>callbacks</c> shapers gate on the same predicate
+    /// (<c>HasPersonaSection(persona, card)</c>), where <c>LlmCopyWriter</c> uses <c>HasPersonaSection(persona, card, quirkSelection)</c>.
     /// </para>
     /// </summary>
     public static string? BuildShapedPersonaSection(
-        Persona? persona, PersonaCard? card, bool mentionOwnName = false, MemoryPacket? memory = null)
+        Persona? persona, PersonaCard? card, bool mentionOwnName = false)
     {
         var lines = new List<string>();
 
@@ -345,7 +345,7 @@ static class LlmPromptBuilder
         if (!string.IsNullOrEmpty(soul))
             lines.Add(soul);
 
-        AddSectionRiders(lines, HasPersonaSection(persona, card), persona, card, mentionOwnName, memory);
+        AddSectionRiders(lines, HasPersonaSection(persona, card), persona, card, mentionOwnName, memory: null);
 
         return lines.Count == 0 ? null : string.Join('\n', lines);
     }

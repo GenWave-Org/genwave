@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using GenWave.TalkRules;
 using GenWave.Core.Abstractions;
 using GenWave.Host.Announcements;
 using GenWave.Host.Options;
@@ -122,7 +123,8 @@ static class StationSettingsHostingExtensions
             .AddOptions<MemoryCallbackOptions>().BindConfiguration(MemoryCallbackOptions.Section).Services
             .AddSingleton<ICallbackRate, OptionsMonitorCallbackRate>()
             .AddSingleton<ICallbackPlanner, CallbackPlanner>()
-            .AddSingleton<BreakCallbacks>();
+            .AddSingleton<BreakCallbacks>()
+            .AddSingleton<IBreakCallbacks>(provider => provider.GetRequiredService<BreakCallbacks>()); // the strict door the callbacks rule takes (T797)
 
         // Repetition check (SPEC F218.11, STORY-534, PLAN T693) — pure; LlmCopyWriter resolves it
         // optionally and runs it after the truth gate, memory on or off.

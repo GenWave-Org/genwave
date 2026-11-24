@@ -1,5 +1,6 @@
 namespace GenWave.Tts.Tests.Fakes;
 
+using System.Text.Json;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Core.TalkRules;
@@ -44,21 +45,43 @@ static class GoldenPromptFixtures
     }
 
     /// <summary>
-    /// The same DJ-line fixtures, with the system prompt composed in its rules-mode form (F220.10): the real
-    /// <c>catchphrase-limits</c> and <c>repeat-phrases</c> shapers, run by the real rule book over a snapshot built from
-    /// the fixture's own stores, offer the text that the legacy prompt carries inline. Only the system prompt is
-    /// returned: the moved text is all in it, and the writer-only user parts (callback ask, facts) are not rebuilt here.
+    /// The same DJ-line fixtures, composed in their rules-mode form (F220.10): the real <c>catchphrase-limits</c>,
+    /// <c>repeat-phrases</c>, <c>callbacks</c> and <c>never-mention</c> shapers, run by the real rule book over a snapshot built
+    /// from the fixture's own stores, offer the text that the legacy prompt carries inline. The system prompt is the one that
+    /// matters: the moved text is all in it. The user prompt holds none of the writer-only parts (facts, flavor, taste notes).
     /// </summary>
-    public static async Task<IReadOnlyList<GoldenPrompt>> DjLineSystemsInRulesFormAsync()
+    public static async Task<IReadOnlyList<GoldenPrompt>> DjLinesInRulesFormAsync() =>
+        (await ComposeBothFormsAsync()).Select(c => new GoldenPrompt(c.Name, c.Rules.System, c.Rules.User)).ToList();
+
+    /// <summary>
+    /// The user prompt of each DJ-line fixture composed twice from the SAME inputs through <c>BreakPromptComposer</c>: once
+    /// as legacy (the callback ask rides in it) and once in rules form (the ask rides under "For this break").
+    /// </summary>
+    public static async Task<IReadOnlyList<(string Name, string LegacyUser, string RulesUser)>> DjLineUserPromptsInBothFormsAsync() =>
+        (await ComposeBothFormsAsync()).Select(c => (c.Name, c.Legacy.User, c.Rules.User)).ToList();
+
+    sealed record BothForms(string Name, BreakPrompt Legacy, BreakPrompt Rules);
+
+    static async Task<IReadOnlyList<BothForms>> ComposeBothFormsAsync()
     {
         var cards = new FakePersonaCardByIdSource();
         cards.Add(HostId, Card("DJ Nova"));
+        var gate = new MemoryBreakGate(new FakePersonaRoster("DJ Nova", "Rusty Strings"), cards, new FixedContextWindow(MemoryBudget.Standard));
+        var callbacks = new BreakCallbacks(
+            new CallbackPlanner(new RecordingCallbackStore("has a dog named Daisy"), new ZeroRandom()),
+            new FixedRate(6), new FakePersonaRoster("DJ Nova", "Rusty Strings"), NullLogger<BreakCallbacks>.Instance);
+        var callbacksRule = new CallbacksRule(callbacks, gate);
         var book = new TalkRuleBook(
-            [new CatchphraseLimitsRule(new RepetitionCheck(), new FixedQuirks(), new TaglineLedger(), cards), new RepeatPhrasesRule(new RepetitionCheck())],
+            [
+                new CatchphraseLimitsRule(new RepetitionCheck(), new FixedQuirks(), new TaglineLedger(), cards),
+                new RepeatPhrasesRule(new RepetitionCheck()),
+                callbacksRule,
+                new NeverMentionRule(new FixedMemoryRecall(), gate),
+            ],
             new InMemoryTalkRuleSwitches(), NullLogger<TalkRuleBook>.Instance);
         var recent = TalkRecentLines.Of(SeededStore().Seeded);
 
-        var prompts = new List<GoldenPrompt>();
+        var composed = new List<BothForms>();
         foreach (var fixture in DjLineFixtures())
         {
             var before = new TalkSnapshot(
@@ -67,20 +90,22 @@ static class GoldenPromptFixtures
                 null, null, Now, "America/Edmonton", null, new TalkStation("GenWave", "everyone"),
                 recent, null, TalkMemos.Empty, ShiftKey: fixture.Request.ShiftKeyText);
             var shaping = await book.ShapeAsync(before, CancellationToken.None);
+            var ask = (before with { Memos = shaping.Memos }).MemoOf(callbacksRule)
+                ?.Deserialize<CallbackOfferMemo>(TalkSnapshotJson.Options)?.Ask;
 
-            var composed = BreakPromptComposer.Compose(new BreakPromptInputs(
-                fixture.Request, null, Card("DJ Nova"), true, null, [], Llm.MaxCopyChars, Now, [])
+            BreakPromptInputs Inputs() => new(fixture.Request, null, Card("DJ Nova"), true, null, [], Llm.MaxCopyChars, Now, [])
             {
-                Shaping = shaping,
-                // The writer asks for the never-mention list on air only, and an announcement is not that.
-                Memory = fixture.Announcement is null ? new MemoryPacket(["the night the transmitter failed", "Daisy the dog"]) : null,
                 SoundTags = SoundTags,
                 AnnouncementMessage = fixture.Announcement,
-            });
-            prompts.Add(new GoldenPrompt(fixture.Name, composed.System, string.Empty));
+            };
+
+            composed.Add(new BothForms(
+                fixture.Name,
+                BreakPromptComposer.Compose(Inputs() with { Callback = ask }),
+                BreakPromptComposer.Compose(Inputs() with { Callback = ask, Shaping = shaping })));
         }
 
-        return prompts;
+        return composed;
     }
 
     public static async Task<GoldenPrompt> ChatAsync()

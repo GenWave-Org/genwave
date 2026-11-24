@@ -10,7 +10,7 @@ namespace GenWave.Tts;
 /// line (F12.4). The memory-on and on-air checks belong to the caller; this asks only the segment-kind question.
 /// </summary>
 public sealed class BreakCallbacks(
-    ICallbackPlanner planner, ICallbackRate rate, IPersonaStore personas, ILogger<BreakCallbacks> logger)
+    ICallbackPlanner planner, ICallbackRate rate, IPersonaStore personas, ILogger<BreakCallbacks> logger) : IBreakCallbacks
 {
     /// <summary>
     /// The ask for this break, or null when it is not a callback break or anything faulted. The offer row is written
@@ -18,17 +18,12 @@ public sealed class BreakCallbacks(
     /// </summary>
     public async Task<CallbackAsk?> AskAsync(SegmentRequest request, Persona? persona, PersonaCard? card, CancellationToken ct)
     {
-        if (!CallbackKinds.Carries(request.Kind) || request.PersonaId is not { } personaId)
+        if (request.PersonaId is not { } personaId)
             return null;
 
         try
         {
-            var perHour = rate.CallbacksPerHour;
-            if (perHour <= 0)
-                return null;
-
-            var exclusions = await ExclusionTextsAsync(request, persona, card, ct);
-            return await planner.PlanAsync(new CallbackRequest(personaId, request.Kind, perHour, exclusions), ct);
+            return await PlanStrictAsync(CallbackBreak.Of(request, personaId), persona, card, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -42,6 +37,30 @@ public sealed class BreakCallbacks(
     }
 
     /// <summary>
+    /// The ask for this break with no fail-open guard: a fault propagates, for a caller that reports it itself (the rule book,
+    /// F220.9). Null when the kind carries no callback or the setting is 0. <see cref="AskAsync"/> is this, kept fail-open.
+    /// </summary>
+    public async Task<CallbackAsk?> PlanStrictAsync(CallbackBreak callbackBreak, Persona? persona, PersonaCard? card, CancellationToken ct)
+    {
+        if (!CallbackKinds.Carries(callbackBreak.Kind))
+            return null;
+
+        var perHour = rate.CallbacksPerHour;
+        if (perHour <= 0)
+            return null;
+
+        var exclusions = await ExclusionTextsAsync(callbackBreak, persona, card, ct);
+        return await planner.PlanAsync(new CallbackRequest(callbackBreak.PersonaId, callbackBreak.Kind, perHour, exclusions), ct);
+    }
+
+    /// <summary>
+    /// Settles the offer with the line (F218.44) with no fail-open guard: a fault propagates, for a caller that reports it
+    /// itself (the rule book, F220.9). A fallback line, or one with no utterance id, settles unused.
+    /// </summary>
+    public Task SettleStrictAsync(CallbackAsk ask, long? utteranceId, string? line, bool fallback, CancellationToken ct) =>
+        planner.SettleAsync(ask, utteranceId, line, fallback, ct);
+
+    /// <summary>
     /// Settles the offer with the recorded line (F218.44). A fallback line, or one with no utterance id, settles unused.
     /// A fault is logged and leaves the offer unused.
     /// </summary>
@@ -49,7 +68,7 @@ public sealed class BreakCallbacks(
     {
         try
         {
-            await planner.SettleAsync(ask, utteranceId, line, fallback, ct);
+            await SettleStrictAsync(ask, utteranceId, line, fallback, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -66,9 +85,9 @@ public sealed class BreakCallbacks(
     /// text. Never lore: that is the memory itself.
     /// </summary>
     async Task<IReadOnlyList<string?>> ExclusionTextsAsync(
-        SegmentRequest request, Persona? persona, PersonaCard? card, CancellationToken ct)
+        CallbackBreak callbackBreak, Persona? persona, PersonaCard? card, CancellationToken ct)
     {
-        var texts = new List<string?> { request.StationName, request.Track?.Title, request.Track?.Artist, request.Track?.Album };
+        var texts = new List<string?> { callbackBreak.StationName, callbackBreak.Title, callbackBreak.Artist, callbackBreak.Album };
         texts.AddRange((await personas.GetAllAsync(ct)).Select(p => p.Name));
         if (persona is not null)
             texts.AddRange([persona.Name, persona.Style, persona.Backstory]);
