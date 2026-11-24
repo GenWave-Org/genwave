@@ -51,6 +51,24 @@ public sealed class ShadowWeekRig(
     /// <summary>The lengths of <see cref="ChatReply"/>'s three lines, as the parser measures them.</summary>
     public static readonly IReadOnlyList<int> ChatLineChars = [44, 26, 32];
 
+    /// <summary>The phone number the ad sponsor has on file.</summary>
+    public const string SponsorPhone = "812-555-0199";
+
+    /// <summary>An ad reply that says a number which is not the sponsor's, so the phone rewrite changes it.</summary>
+    public const string AdSayingAStrayNumber =
+        "ANNOUNCER: Cravin's Diner has the best pie in town. Call 406-555-0100 today.";
+
+    /// <summary>What <see cref="AdSayingAStrayNumber"/> airs once the phone rewrite put the sponsor's own number in.</summary>
+    public const string AdAired =
+        "ANNOUNCER: Cravin's Diner has the best pie in town. Call " + SponsorPhone + " today.";
+
+    /// <summary>An ad reply that says the sponsor's own number, so the phone rewrite leaves it alone.</summary>
+    public const string AdSayingTheSponsorsNumber =
+        "ANNOUNCER: Cravin's Diner has the best pie in town. Call " + SponsorPhone + " today.";
+
+    // Alberta keeps -06:00 all year, so a fixed-offset zone matches the local time (America/Edmonton would not in summer).
+    static readonly TimeZoneInfo StationZone = TimeZoneInfo.CreateCustomTimeZone("station-minus-6", TimeSpan.FromHours(-6), "Station UTC-6", "Station UTC-6");
+
     static readonly DateTimeOffset WrittenAt = new(2026, 11, 9, 20, 0, 0, TimeSpan.FromHours(-6));
 
     const long PersonaId = 7;
@@ -106,6 +124,9 @@ public sealed class ShadowWeekRig(
             services.AddSingleton<ITalkCheckLog>(CheckLog);
         }
 
+        services.RemoveAll<IStationClockProvider>();
+        services.AddSingleton<IStationClockProvider>(new FakeStationClockProvider(WrittenAt, StationZone));
+
         services.RemoveAll<ITalkRuleBook>();
         services.AddSingleton<ITalkRuleBook>(provider =>
             observedRuleBook = new ObservedRuleBook(provider.GetRequiredService<TalkRuleBook>(), ruleBookThrows));
@@ -135,6 +156,23 @@ public sealed class ShadowWeekRig(
         return result is CrosstalkWriteResult.Accepted accepted
             ? string.Join('\n', accepted.Script.Lines.Select(line => line.Text))
             : string.Empty;
+    }
+
+    /// <summary>
+    /// Writes one ad script through the host's real ad writer and returns the aired script, empty when nothing airs. The
+    /// sponsor has <see cref="SponsorPhone"/> on file; <paramref name="validatorRefuses"/> makes the caller's validator refuse
+    /// every draft, so the writer asks once more and then gives up.
+    /// </summary>
+    public async Task<string> WriteAdAsync(IServiceProvider services, bool validatorRefuses = false)
+    {
+        var request = new AdScriptWriteRequest(
+            "Cravin's Diner", null, null, 30, AudiencePosture.Everyone, 450, 0.4, Phone: SponsorPhone, IsPackOwned: false);
+        Func<string, AdScriptValidationOutcome> validate = _ => validatorRefuses
+            ? new AdScriptValidationOutcome.Refused("duration", "the script runs long")
+            : new AdScriptValidationOutcome.Accepted();
+
+        var result = await services.GetRequiredService<AdScriptWriter>().WriteAsync(request, validate, CancellationToken.None);
+        return result is AdScriptWriteResult.Success success ? success.Script : string.Empty;
     }
 
     static PersonaCard Card(string name) =>

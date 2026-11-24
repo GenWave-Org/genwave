@@ -58,6 +58,9 @@ using GenWave.Core.Domain;
 /// <param name="HouseTone">The sponsor's own default tone (<c>station.sponsor.tone</c>), verbatim, or
 /// <see langword="null"/> when the sponsor carries none — the brief's own <see cref="Tone"/> wins when
 /// both are present (SPEC F174.8, STORY-428 AC4).</param>
+/// <param name="IsPackOwned">Whether the sponsor belongs to a pack — the same fact the caller's validate delegate is built
+/// with. This writer never reads it; it rides along so the shadow check (T790) can build the validator-shaped request the
+/// ad rules judge against. Defaults <see langword="true"/>, the validator's own fail-closed default.</param>
 public sealed record AdScriptWriteRequest(
     string SponsorName,
     string? Premise,
@@ -71,4 +74,5 @@ public sealed record AdScriptWriteRequest(
     string? Phone = null,
     string? Address = null,
     string? Website = null,
-    string? HouseTone = null);
+    string? HouseTone = null,
+    bool IsPackOwned = true);

@@ -2,6 +2,7 @@ namespace GenWave.Tts;
 
 using System.Diagnostics;
 using System.Text.RegularExpressions;
+using GenWave.Core.TalkRules;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -76,7 +77,8 @@ public sealed partial class AdScriptWriter(
     LlmCallRecorder recorder,
     IDegradationModeReader degradationMode,
     ILogger<AdScriptWriter> logger,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    IAdShadowCheck? shadowCheck = null) // T790: absent means no shadow week, exactly the pre-shadow behaviour
 {
     /// <summary>Cap for a validator Reason before it reaches the re-ask prompt or the ring's
     /// <c>StatusDetail</c> (PLAN T400 review F7) — the <c>CrosstalkScriptParser.TruncateForEcho</c>/
@@ -144,7 +146,8 @@ public sealed partial class AdScriptWriter(
         using var firstBudget = new CancellationTokenSource(TimeSpan.FromSeconds(cfg.TimeoutSeconds), timeProvider);
         using var firstLinked = CancellationTokenSource.CreateLinkedTokenSource(ct, firstBudget.Token);
         var firstAttempt = await AttemptAsync(
-            http, requestUri, cfg, request, systemPrompt, userPrompt, maxTokens, validate, mode, ct, firstLinked.Token);
+            http, requestUri, cfg, request, systemPrompt, userPrompt, maxTokens, validate, mode, ct, firstLinked.Token,
+            shadow: true);
         if (firstAttempt is not AdScriptAttemptOutcome.ValidatorRefused refused)
             return ResultOf(firstAttempt); // Success, or a transport/generation fault — never re-asked (skip-only).
 
@@ -155,7 +158,8 @@ public sealed partial class AdScriptWriter(
         using var reaskBudget = new CancellationTokenSource(TimeSpan.FromSeconds(cfg.TimeoutSeconds), timeProvider);
         using var reaskLinked = CancellationTokenSource.CreateLinkedTokenSource(ct, reaskBudget.Token);
         var secondAttempt = await AttemptAsync(
-            http, requestUri, cfg, request, systemPrompt, reaskUserPrompt, maxTokens, validate, mode, ct, reaskLinked.Token);
+            http, requestUri, cfg, request, systemPrompt, reaskUserPrompt, maxTokens, validate, mode, ct, reaskLinked.Token,
+            shadow: false);
         return ResultOf(secondAttempt);
     }
 
@@ -166,10 +170,65 @@ public sealed partial class AdScriptWriter(
         _ => throw new UnreachableException($"Unhandled {nameof(AdScriptAttemptOutcome)} case."),
     };
 
+    /// <summary>
+    /// One attempt, then (attempt 1 only, T790) the shadow hand-off: the row is queued as soon as today's code has decided
+    /// the attempt and before <see cref="WriteAsync"/> spends any re-ask, so a failing re-ask still leaves it.
+    /// </summary>
     async Task<AdScriptAttemptOutcome> AttemptAsync(
         HttpClient http, Uri requestUri, LlmOptions cfg, AdScriptWriteRequest request, string systemPrompt,
         string userPrompt, int maxTokens, Func<string, AdScriptValidationOutcome> validate, DegradationMode mode,
-        CancellationToken ct, CancellationToken linkedCt)
+        CancellationToken ct, CancellationToken linkedCt, bool shadow)
+    {
+        var draft = new AttemptDraft();
+        var outcome = await DecideAsync(
+            http, requestUri, cfg, request, systemPrompt, userPrompt, maxTokens, validate, mode, ct, linkedCt, draft);
+        if (shadow)
+            await ShadowAttemptOneAsync(request, draft, outcome, ct);
+        return outcome;
+    }
+
+    /// <summary>
+    /// T790 (F220.19): hands attempt 1 to the shadow week once today's code has decided it. Judges only in shadow mode; a
+    /// fault inside logs a Warning and changes nothing. The legacy outcome is read off what really happened: an accepted
+    /// script is <see cref="TalkLegacyOutcome.Passed"/>, or <see cref="TalkLegacyOutcome.Trimmed"/> when the phone rewrite
+    /// changed it; a validator refusal is <see cref="TalkLegacyOutcome.ReAsked"/> (the writer always re-asks once); a fault,
+    /// a truncated or an emptied reply is <see cref="TalkLegacyOutcome.Dropped"/>. This writer never airs template copy.
+    /// </summary>
+    async ValueTask ShadowAttemptOneAsync(
+        AdScriptWriteRequest request, AttemptDraft draft, AdScriptAttemptOutcome outcome, CancellationToken ct)
+    {
+        if (shadowCheck is null || !shadowCheck.IsOn())
+            return;
+
+        var legacyOutcome = outcome switch
+        {
+            AdScriptAttemptOutcome.ValidatorRefused => TalkLegacyOutcome.ReAsked,
+            AdScriptAttemptOutcome.Resolved { Result: AdScriptWriteResult.Success } =>
+                draft.PhoneRewriteChangedIt ? TalkLegacyOutcome.Trimmed : TalkLegacyOutcome.Passed,
+            AdScriptAttemptOutcome.Resolved => TalkLegacyOutcome.Dropped,
+            _ => throw new UnreachableException($"Unhandled {nameof(AdScriptAttemptOutcome)} case."),
+        };
+        await shadowCheck.CheckAsync(request, draft.RawReply, draft.JudgedText, legacyOutcome, ct);
+    }
+
+    /// <summary>What attempt 1 saw, filled in by <see cref="DecideAsync"/> as it goes so the shadow hand-off can read it.</summary>
+    sealed class AttemptDraft
+    {
+        /// <summary>The model's reply as received; empty until a reply arrives.</summary>
+        public string RawReply { get; set; } = string.Empty;
+
+        /// <summary>The reply after line-aware clean-up and before the phone rewrite (what the rules judge); null until then,
+        /// and for a reply cut short by the token cap or left empty by clean-up.</summary>
+        public string? JudgedText { get; set; }
+
+        /// <summary>True when the phone rewrite changed the judged text.</summary>
+        public bool PhoneRewriteChangedIt { get; set; }
+    }
+
+    async Task<AdScriptAttemptOutcome> DecideAsync(
+        HttpClient http, Uri requestUri, LlmOptions cfg, AdScriptWriteRequest request, string systemPrompt,
+        string userPrompt, int maxTokens, Func<string, AdScriptValidationOutcome> validate, DegradationMode mode,
+        CancellationToken ct, CancellationToken linkedCt, AttemptDraft draft)
     {
         var startedAt = timeProvider.GetUtcNow();
 
@@ -177,6 +236,7 @@ public sealed partial class AdScriptWriter(
         {
             var reply = await LlmCopyWriter.PostChatCompletionAsync(
                 http, requestUri, cfg, systemPrompt, userPrompt, maxTokens, linkedCt);
+            draft.RawReply = reply.Content;
 
             // The SAME gh-#424-class check CrosstalkScriptWriter runs before its own parser ever sees
             // a reply — a completion cut short at its own max_tokens cap can still LOOK well-formed.
@@ -188,8 +248,10 @@ public sealed partial class AdScriptWriter(
                     cfg.Model, reply.Content));
             }
 
-            var cleaned = ApplyLineAwareHygiene(reply.Content);
-            cleaned = ApplyPhoneHygiene(cleaned, request.Phone);
+            var hygienic = ApplyLineAwareHygiene(reply.Content);
+            draft.JudgedText = hygienic.Length == 0 ? null : hygienic; // the rules judge what the model wrote, before the phone rewrite
+            var cleaned = ApplyPhoneHygiene(hygienic, request.Phone);
+            draft.PhoneRewriteChangedIt = !string.Equals(cleaned, hygienic, StringComparison.Ordinal);
             if (cleaned.Length == 0)
             {
                 return Resolved(Failed(
