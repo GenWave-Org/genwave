@@ -1,7 +1,7 @@
 // STORY-570 — One flow for flagged talk (SPEC F220 · PLAN F220)
 //
-// AC7 · F220.21 · T796, T797. The DJ-line prompts captured before any shaper moved (Golden/, STORY-567), re-rendered in
-// rules form with the real catchphrase-limits, repeat-phrases, callbacks and never-mention shapers. The one allowed difference is the same
+// AC7 · F220.21 · T796, T797, T798. The DJ-line prompts captured before any shaper moved (Golden/, STORY-567), re-rendered in
+// rules form with all eight real shapers (T796-T798). The one allowed difference is the same
 // instruction text moving into the "For this break" section, which follows the persona section. Wiring the writer to
 // this form is T800, which activates ScenarioTheGoldenPromptsAfterTheMove in Story570_OneFlowForFlaggedTalk.
 
@@ -30,6 +30,8 @@ public static class FeatureGoldenPromptsMoveUnderForThisBreak
 
         public Task DisposeAsync() => Task.CompletedTask;
 
+        static readonly string ClockGuard = LlmPromptBuilder.BuildClockGuardLine(GoldenPromptFixtures.Now);
+
         /// <summary>Each fixture's rules-form system lines, split at the heading: what stayed, and what sits under it.</summary>
         IEnumerable<(string Name, List<string> Kept, List<string> Moved, List<string> Legacy)> Parts() =>
             rules.Select(prompt =>
@@ -38,8 +40,18 @@ public static class FeatureGoldenPromptsMoveUnderForThisBreak
                 var heading = lines.IndexOf(TalkShaping.ForThisBreakHeading);
                 var kept = heading < 0 ? lines : lines[..heading];
                 var moved = heading < 0 ? [] : lines[(heading + 1)..];
-                return (prompt.Name, kept, moved, legacy.Single(g => g.Name == prompt.Name).System.Split('\n').ToList());
+                // The clock guard rides the end of the legacy scaffold line; in rules form it is its own line under the heading
+                var legacySystem = legacy.Single(g => g.Name == prompt.Name).System.Replace(" " + ClockGuard, "", StringComparison.Ordinal);
+                return (prompt.Name, kept, moved, legacySystem.Split('\n').ToList());
             });
+
+        static bool IsShowNote(string line) => line.StartsWith("Show note: this break is airing during", StringComparison.Ordinal);
+
+        /// <summary>Legacy user lines with the taste repeat sentence cut off the end of the taste line (it is its own note in rules form).</summary>
+        static List<string> WithoutRepeatSuffix(IEnumerable<string> lines) =>
+            lines.Select(l => l.EndsWith(" " + LlmPromptBuilder.TasteRepeatNote, StringComparison.Ordinal)
+                ? l[..^(LlmPromptBuilder.TasteRepeatNote.Length + 1)]
+                : l).ToList();
 
         /// <summary>The lines the legacy user prompt carries for the callback ask, and what rules form's user prompt holds of them.</summary>
         List<string> AskLinesOf(string name) => AskLinesIn(legacyUsers[name]);
@@ -72,21 +84,29 @@ public static class FeatureGoldenPromptsMoveUnderForThisBreak
 
         /// <summary>
         /// The section the moved text must make, in rule-id order (the rule book's order): the callbacks ask, the catchphrase-limits
-        /// quirks block, the never-mention list, the repeat-phrases recent lines. Each block keeps its legacy line order; the legacy
-        /// lines that did not stay are cut into blocks at the shared headings.
+        /// quirks block, the clock guard, the never-mention list, the repeat-phrases recent lines, the name line, the show note and
+        /// the taste repeat sentence. Each block keeps its legacy line order; the legacy system lines that did not stay are cut into
+        /// blocks at the shared headings, and the user-prompt texts come from the legacy user prompt.
         /// </summary>
         List<string> ExpectedSection((string Name, List<string> Kept, List<string> Moved, List<string> Legacy) p)
         {
             var left = Without(p.Legacy, p.Kept);
+            var nameLines = left.Where(l => l.StartsWith("Name note: ", StringComparison.Ordinal)).ToList();
+            left = Without(left, nameLines);
             var recent = left.IndexOf(LlmPromptBuilder.RecentLinesHeading);
             var never = left.IndexOf(LlmPromptBuilder.NeverMentionHeading);
             var recentEnd = never < 0 ? left.Count : never;
+            var repeatNote = legacyUsers[p.Name].Any(l => l.EndsWith(" " + LlmPromptBuilder.TasteRepeatNote, StringComparison.Ordinal));
             var blocks = new (string RuleId, IEnumerable<string> Lines)[]
             {
                 ("callbacks", AskLinesOf(p.Name)),
                 ("catchphrase-limits", left.Take(recent < 0 ? recentEnd : recent)),
+                ("day-and-time", [ClockGuard]),
                 ("never-mention", never < 0 ? [] : left.Skip(never)),
                 ("repeat-phrases", recent < 0 ? [] : left.Skip(recent).Take(recentEnd - recent)),
+                ("self-name", nameLines),
+                ("show-flavour", legacyUsers[p.Name].Where(IsShowNote)),
+                ("vary-taste", repeatNote ? [LlmPromptBuilder.TasteRepeatNote] : []),
             };
             return blocks.OrderBy(b => b.RuleId, StringComparer.Ordinal).SelectMany(b => b.Lines).ToList();
         }
@@ -96,9 +116,10 @@ public static class FeatureGoldenPromptsMoveUnderForThisBreak
             Assert.Equal("", string.Join(", ", Parts().Where(p => !ExpectedSection(p).SequenceEqual(p.Moved)).Select(p => p.Name)));
 
         [Fact]
-        public void TheRulesFormUserPromptIsTheLegacyOneLessTheAsk() =>
+        public void TheRulesFormUserPromptIsTheLegacyOneLessEveryMovedLine() =>
             Assert.Equal("", string.Join(", ", userPrompts
-                .Where(u => !Without(u.LegacyUser.Split('\n').ToList(), AskLinesIn(u.LegacyUser.Split('\n'))).SequenceEqual(u.RulesUser.Split('\n')))
+                .Where(u => !Without(WithoutRepeatSuffix(u.LegacyUser.Split('\n')), AskLinesIn(u.LegacyUser.Split('\n')).Concat(u.LegacyUser.Split('\n').Where(IsShowNote)).ToList())
+                    .SequenceEqual(u.RulesUser.Split('\n')))
                 .Select(u => u.Name)));
 
         [Fact]
@@ -150,6 +171,22 @@ public static class FeatureGoldenPromptsMoveUnderForThisBreak
         [Fact]
         public void TheCallbackAskIsUnderForThisBreakExactlyAsLegacyAskedForIt() =>
             Assert.Equal("", string.Join(", ", Asks().Where(a => !a.Ask.SequenceEqual(a.Moved.Where(a.Ask.Contains))).Select(a => a.Name)));
+
+        [Fact]
+        public void EveryFixtureCarriesTheClockGuardUnderForThisBreak() =>
+            Assert.Equal("", string.Join(", ", Parts().Where(p => !p.Moved.Contains(ClockGuard)).Select(p => p.Name)));
+
+        [Fact]
+        public void SomeFixtureCarriesTheNameLine() =>
+            Assert.Contains(Parts(), p => p.Moved.Any(l => l.StartsWith("Name note: ", StringComparison.Ordinal)));
+
+        [Fact]
+        public void SomeFixtureCarriesTheShowNote() =>
+            Assert.Contains(Parts(), p => p.Moved.Any(IsShowNote));
+
+        [Fact]
+        public void SomeFixtureCarriesTheTasteRepeatNote() =>
+            Assert.Contains(Parts(), p => p.Moved.Contains(LlmPromptBuilder.TasteRepeatNote));
 
         [Fact]
         public void SomeFixtureCarriesTheCallbackAsk() => Assert.Contains(Asks(), a => a.Ask.Count == 2);

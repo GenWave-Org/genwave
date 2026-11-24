@@ -20,7 +20,7 @@ static class GoldenPromptFixtures
     const long NeighborId = 8;
     const string Reply = "Coming up next a classic from the vault.";
     const string SecondReply = "Here is something warm to keep the evening moving along.";
-    static readonly DateTimeOffset Now = new(2026, 11, 23, 18, 30, 0, TimeSpan.FromHours(-6));
+    public static readonly DateTimeOffset Now = new(2026, 11, 23, 18, 30, 0, TimeSpan.FromHours(-6));
     static readonly LlmOptions Llm = new() { Endpoint = "http://fake-llm.local", Model = "m", TimeoutSeconds = 5, MaxCopyChars = 450 };
 
     static readonly MediaItem Track = new(
@@ -45,10 +45,11 @@ static class GoldenPromptFixtures
     }
 
     /// <summary>
-    /// The same DJ-line fixtures, composed in their rules-mode form (F220.10): the real <c>catchphrase-limits</c>,
-    /// <c>repeat-phrases</c>, <c>callbacks</c> and <c>never-mention</c> shapers, run by the real rule book over a snapshot built
-    /// from the fixture's own stores, offer the text that the legacy prompt carries inline. The system prompt is the one that
-    /// matters: the moved text is all in it. The user prompt holds none of the writer-only parts (facts, flavor, taste notes).
+    /// The same DJ-line fixtures, composed in their rules-mode form (F220.10): all eight real shapers (<c>callbacks</c>,
+    /// <c>catchphrase-limits</c>, <c>day-and-time</c>, <c>never-mention</c>, <c>repeat-phrases</c>, <c>self-name</c>,
+    /// <c>show-flavour</c> and <c>vary-taste</c>), run by the real rule book over a snapshot built from the fixture's own stores,
+    /// offer the text that the legacy prompt carries inline. The rolls are fixed the same way for both forms: the name roll
+    /// always lands (as the writer's zero random does) and the show source is loaded with the fixture's flavor.
     /// </summary>
     public static async Task<IReadOnlyList<GoldenPrompt>> DjLinesInRulesFormAsync() =>
         (await ComposeBothFormsAsync()).Select(c => new GoldenPrompt(c.Name, c.Rules.System, c.Rules.User)).ToList();
@@ -62,6 +63,11 @@ static class GoldenPromptFixtures
 
     sealed record BothForms(string Name, BreakPrompt Legacy, BreakPrompt Rules);
 
+    sealed class AlwaysRolls : ISelfNameRoll
+    {
+        public bool Rolls() => true;
+    }
+
     static async Task<IReadOnlyList<BothForms>> ComposeBothFormsAsync()
     {
         var cards = new FakePersonaCardByIdSource();
@@ -71,30 +77,47 @@ static class GoldenPromptFixtures
             new CallbackPlanner(new RecordingCallbackStore("has a dog named Daisy"), new ZeroRandom()),
             new FixedRate(6), new FakePersonaRoster("DJ Nova", "Rusty Strings"), NullLogger<BreakCallbacks>.Instance);
         var callbacksRule = new CallbacksRule(callbacks, gate);
-        var book = new TalkRuleBook(
-            [
-                new CatchphraseLimitsRule(new RepetitionCheck(), new FixedQuirks(), new TaglineLedger(), cards),
-                new RepeatPhrasesRule(new RepetitionCheck()),
-                callbacksRule,
-                new NeverMentionRule(new FixedMemoryRecall(), gate),
-            ],
-            new InMemoryTalkRuleSwitches(), NullLogger<TalkRuleBook>.Instance);
+        var roster = new FakePersonaRoster("DJ Nova", "Rusty Strings");
         var recent = TalkRecentLines.Of(SeededStore().Seeded);
 
         var composed = new List<BothForms>();
         foreach (var fixture in DjLineFixtures())
         {
+            var flavors = new FakeShowFlavorLineSource();
+            if (fixture.Flavor is { } flavor)
+                flavors.Enqueue(flavor);
+            var book = new TalkRuleBook(
+                [
+                    new CatchphraseLimitsRule(new RepetitionCheck(), new FixedQuirks(), new TaglineLedger(), cards),
+                    new RepeatPhrasesRule(new RepetitionCheck()),
+                    callbacksRule,
+                    new NeverMentionRule(new FixedMemoryRecall(), gate),
+                    new DayAndTimeRule(),
+                    new SelfNameRule(new AlwaysRolls(), roster, cards),
+                    new ShowFlavourRule(flavors),
+                    new VaryTasteRule(),
+                ],
+                new InMemoryTalkRuleSwitches(), NullLogger<TalkRuleBook>.Instance);
+            var tasteNotes = fixture.Request.Track?.PersonaPick is { } pick
+                ? new TalkList<string>(LlmPromptBuilder.DescribeFiredRules(pick.FiredRules))
+                : TalkList<string>.Empty;
             var before = new TalkSnapshot(
                 TalkKinds.DjLine, fixture.Request.Kind.ToString(), 1, TalkList<TalkLine>.Empty,
                 new TalkList<TalkSpeaker>([new TalkSpeaker(HostId, "DJ Nova", TalkList<string>.Empty)]),
                 null, null, Now, "America/Edmonton", null, new TalkStation("GenWave", "everyone"),
-                recent, null, TalkMemos.Empty, ShiftKey: fixture.Request.ShiftKeyText);
+                recent, null, TalkMemos.Empty, ShiftKey: fixture.Request.ShiftKeyText,
+                TasteNotes: tasteNotes, ExtraLineTaken: fixture.Fact is not null,
+                PreviousTasteNotes: fixture.CapturesSecondBreak ? tasteNotes : null); // the earlier break the writer airs first
             var shaping = await book.ShapeAsync(before, CancellationToken.None);
             var ask = (before with { Memos = shaping.Memos }).MemoOf(callbacksRule)
                 ?.Deserialize<CallbackOfferMemo>(TalkSnapshotJson.Options)?.Ask;
 
-            BreakPromptInputs Inputs() => new(fixture.Request, null, Card("DJ Nova"), true, null, [], Llm.MaxCopyChars, Now, [])
+            BreakPromptInputs Inputs() => new(
+                fixture.Request, null, Card("DJ Nova"), true, null, [], Llm.MaxCopyChars, Now,
+                fixture.CapturesSecondBreak ? tasteNotes : [])
             {
+                PatterFact = fixture.Fact?.Fact,
+                ShowFlavor = fixture.Flavor,
                 SoundTags = SoundTags,
                 AnnouncementMessage = fixture.Announcement,
             };

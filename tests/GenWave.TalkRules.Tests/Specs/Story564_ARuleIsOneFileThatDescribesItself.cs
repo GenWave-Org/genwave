@@ -27,6 +27,7 @@ public static class FeatureARuleIsOneFileThatDescribesItself
         services.AddSingleton<IPersonaStore>(new RosterPersonaStore());
         services.AddSingleton<ILlmContextWindow>(new FixedContextWindow(MemoryBudget.Off));
         services.AddSingleton<IMemoryRecallSource>(new RecordingMemoryRecall());
+        services.AddSingleton<IShowFlavorLineSource>(new CountingShowFlavorSource(null));
         services.AddSingleton<IBreakCallbacks>(new BreakCallbacks(
             new CallbackPlanner(new CallbackStoreOfOneMemory(null)), new FixedCallbackRate(0), new RosterPersonaStore(),
             NullLogger<BreakCallbacks>.Instance));

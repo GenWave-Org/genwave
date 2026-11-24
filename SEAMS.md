@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **179 seams across 10 projects.**
+> **180 seams across 10 projects.**
 
 ## GenWave.Ads (4 seams)
 
@@ -230,15 +230,16 @@
 | `GenWave.Orchestration.IRandomSource` | `GenWave.Orchestration.SystemRandomSource` | Singleton | — |
 | `GenWave.Orchestration.IRequestFulfillmentSource` | `GenWave.Orchestration.RequestFulfillmentProvider` | Singleton | also registered: `GenWave.Orchestration.NoOpRequestFulfillmentSource` (GenWave.Orchestration) |
 
-## GenWave.TalkRules (5 seams)
+## GenWave.TalkRules (6 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
-| `GenWave.Core.TalkRules.ITalkRule` | `GenWave.TalkRules.StationDetailsRule` | Singleton | also registered: `GenWave.TalkRules.CallbacksRule` (GenWave.TalkRules), `GenWave.TalkRules.CatchphraseLimitsRule` (GenWave.TalkRules), `GenWave.TalkRules.CleanLanguageRule` (GenWave.TalkRules), `GenWave.TalkRules.DayAndTimeRule` (GenWave.TalkRules), `GenWave.TalkRules.FitsTimeRule` (GenWave.TalkRules), `GenWave.TalkRules.NeverMentionRule` (GenWave.TalkRules), `GenWave.TalkRules.OfferedFactsRule` (GenWave.TalkRules), `GenWave.TalkRules.OtherBrandsRule` (GenWave.TalkRules), `GenWave.TalkRules.OwnerMessageRule` (GenWave.TalkRules), `GenWave.TalkRules.PhoneNumberRule` (GenWave.TalkRules), `GenWave.TalkRules.RepeatPhrasesRule` (GenWave.TalkRules) |
+| `GenWave.Core.TalkRules.ITalkRule` | `GenWave.TalkRules.VaryTasteRule` | Singleton | also registered: `GenWave.TalkRules.CallbacksRule` (GenWave.TalkRules), `GenWave.TalkRules.CatchphraseLimitsRule` (GenWave.TalkRules), `GenWave.TalkRules.CleanLanguageRule` (GenWave.TalkRules), `GenWave.TalkRules.DayAndTimeRule` (GenWave.TalkRules), `GenWave.TalkRules.FitsTimeRule` (GenWave.TalkRules), `GenWave.TalkRules.NeverMentionRule` (GenWave.TalkRules), `GenWave.TalkRules.OfferedFactsRule` (GenWave.TalkRules), `GenWave.TalkRules.OtherBrandsRule` (GenWave.TalkRules), `GenWave.TalkRules.OwnerMessageRule` (GenWave.TalkRules), `GenWave.TalkRules.PhoneNumberRule` (GenWave.TalkRules), `GenWave.TalkRules.RepeatPhrasesRule` (GenWave.TalkRules), `GenWave.TalkRules.SelfNameRule` (GenWave.TalkRules), `GenWave.TalkRules.ShowFlavourRule` (GenWave.TalkRules), `GenWave.TalkRules.StationDetailsRule` (GenWave.TalkRules) |
 | `GenWave.Core.TalkRules.ITalkRuleBook` | `GenWave.TalkRules.TalkRuleBook` | Singleton | — |
 | `GenWave.Core.TalkRules.ITalkRuleReplay` | `GenWave.TalkRules.TalkRuleReplay` | Singleton | — |
 | `GenWave.Core.TalkRules.ITalkRuleSwitches` | `GenWave.TalkRules.InMemoryTalkRuleSwitches` | Singleton | — |
 | `GenWave.TalkRules.IMemoryBreakGate` | `GenWave.TalkRules.MemoryBreakGate` | Singleton | — |
+| `GenWave.TalkRules.ISelfNameRoll` | `GenWave.TalkRules.SelfNameRoll` | Singleton | — |
 
 ## GenWave.Tts (30 seams)
 
