@@ -148,7 +148,7 @@ public static class FeatureDjsCanLaugh
             new RepetitionCheck(), utteranceStore: null, new RecordingStationEventSink(), NullLogger.Instance);
 
         readonly CrosstalkLineMemory.SpeakerHistory history =
-            new(CrosstalkSpeaker.Host, 7, "Nova", [Recent]);
+            new(CrosstalkSpeaker.Host, 7, "Nova", [Recent], []);
 
         readonly ClaimCheckResult gate = LlmCopyWriter.CheckTruthGate(
             "The show [sigh] starts at nine tonight.", factBlock: null,

@@ -512,6 +512,26 @@ public static class FeatureBoothWritesForTwo
         }
 
         [Fact]
+        public async Task The_first_over_budget_line_owns_the_reason_whatever_follows_it()
+        {
+            const string firstLine = "A line intentionally longer than the tiny per-line budget.";
+            mock.ReplyContent = string.Join('\n', new[]
+            {
+                $"{CrosstalkScriptParser.HostTag}: {firstLine}",
+                $"{CrosstalkScriptParser.NeighborTag}: Another line that is also well over the tiny budget.",
+                "A line with no speaker tag at all.",
+            });
+            var writer = BuildWriter(mock.BaseUri.ToString(), maxCopyChars: 15);
+
+            var result = await writer.WriteExchangeAsync(Request(), CancellationToken.None);
+
+            var discarded = Assert.IsType<CrosstalkWriteResult.Discarded>(result);
+            Assert.Equal(
+                $"a {CrosstalkScriptParser.HostTag} line ({firstLine.Length} chars) exceeded the 15-char per-line budget — no line is ever trimmed (SPEC F127.4)",
+                discarded.Reason);
+        }
+
+        [Fact]
         public async Task An_over_duration_script_rejects_whole()
         {
             mock.ReplyContent = string.Join('\n', new[]

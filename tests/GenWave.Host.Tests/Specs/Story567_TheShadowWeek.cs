@@ -122,10 +122,140 @@ public static class FeatureTheShadowWeek
     }
 
     // AC5 — mode shadow, a written chat
-    public sealed class ScenarioAChatIsWrittenInShadow
+    public sealed class ScenarioAChatIsWrittenInShadow : EngineSettingScenario
     {
-        [Fact(Skip = "pending: T789")]
-        public void AChatRowIsStored() { }
+        readonly ShadowWeekRig rig = new(startingMode: "shadow", reply: ShadowWeekRig.ChatReply);
+
+        protected override void ConfigureServices(IServiceCollection services) => rig.Configure(services);
+
+        public override async Task InitializeAsync()
+        {
+            await base.InitializeAsync();
+            await rig.WriteChatAsync(Service<IServiceProvider>());
+        }
+
+        [Fact]
+        public void AChatRowIsStored() => Assert.Equal(TalkKinds.Chat, Assert.Single(rig.Rows).Snapshot.Kind);
+
+        [Fact]
+        public void TheRowStoresTheLegacyOutcome() =>
+            Assert.Equal(TalkLegacyOutcome.Passed, Assert.Single(rig.Rows).LegacyOutcome);
+
+        [Fact]
+        public void TheRowStoresTheRuleVerdicts() => Assert.NotEmpty(Assert.Single(rig.Rows).Verdicts);
+
+        [Fact]
+        public void TheRowDescribesTheLinesLegacyMeasured() =>
+            Assert.Equal(ShadowWeekRig.ChatLineChars, ChatFieldsOf(Assert.Single(rig.Rows)).LineChars.ToList());
+    }
+
+    // T789 (F220.19) — the same exchange in legacy and then in shadow
+    public sealed class ScenarioTheSameChatInLegacyAndShadow : EngineSettingScenario
+    {
+        readonly ShadowWeekRig rig = new(reply: ShadowWeekRig.ChatReply);
+        string airedInLegacy = string.Empty;
+        string airedInShadow = string.Empty;
+
+        protected override void ConfigureServices(IServiceCollection services) => rig.Configure(services);
+
+        public override async Task InitializeAsync()
+        {
+            await base.InitializeAsync();
+            airedInLegacy = await rig.WriteChatAsync(Service<IServiceProvider>());
+            await PutModeAsync(Client, "shadow");
+            airedInShadow = await rig.WriteChatAsync(Service<IServiceProvider>());
+        }
+
+        [Fact]
+        public void TheAiredTextIsTheScriptedReply() => Assert.Equal(ShadowWeekRig.ChatAired, airedInShadow);
+
+        [Fact]
+        public void TheAiredTextIsIdentical() => Assert.Equal(airedInLegacy, airedInShadow);
+
+        [Fact]
+        public void OnlyTheShadowTalkStoredARow() => Assert.Single(rig.Rows);
+    }
+
+    // T789 (F220.19) — a reply that never parses is dropped by today's code, and the row says so
+    public sealed class ScenarioAChatReplyNeverParses : EngineSettingScenario
+    {
+        readonly ShadowWeekRig rig = new(startingMode: "shadow", reply: "Nothing in the agreed shape.");
+
+        protected override void ConfigureServices(IServiceCollection services) => rig.Configure(services);
+
+        public override async Task InitializeAsync()
+        {
+            await base.InitializeAsync();
+            await rig.WriteChatAsync(Service<IServiceProvider>());
+        }
+
+        [Fact]
+        public void TheRowStoresTheLegacyOutcomeDropped() =>
+            Assert.Equal(TalkLegacyOutcome.Dropped, Assert.Single(rig.Rows).LegacyOutcome);
+    }
+
+    // T789 (F220.19) — a chat the truth gate drops is still judged by the rule book
+    public sealed class ScenarioAChatTheTruthGateDrops : EngineSettingScenario
+    {
+        readonly ShadowWeekRig rig = new(startingMode: "shadow", reply: ShadowWeekRig.ChatNamingAFrequency);
+
+        protected override void ConfigureServices(IServiceCollection services) => rig.Configure(services);
+
+        public override async Task InitializeAsync()
+        {
+            await base.InitializeAsync();
+            await rig.WriteChatAsync(Service<IServiceProvider>());
+        }
+
+        [Fact]
+        public void TheRowStoresTheLegacyOutcomeDropped() =>
+            Assert.Equal(TalkLegacyOutcome.Dropped, Assert.Single(rig.Rows).LegacyOutcome);
+
+        [Fact]
+        public void TheRowStoresTheRuleVerdicts() => Assert.NotEmpty(Assert.Single(rig.Rows).Verdicts);
+
+        [Fact]
+        public void TheStationDetailsRuleFlagsTheFrequency() =>
+            Assert.NotNull(Assert.Single(Assert.Single(rig.Rows).Verdicts, v => v.RuleId == "station-details").Flag);
+    }
+
+    // T789 (F220.19) — a repeated sentence that a trim saves
+    public sealed class ScenarioAChatARepeatTrimSaves : EngineSettingScenario
+    {
+        readonly ShadowWeekRig rig = new(startingMode: "shadow", reply: ShadowWeekRig.ChatRepeatingOneSentence, hostSaidTheEarlierLine: true);
+
+        protected override void ConfigureServices(IServiceCollection services) => rig.Configure(services);
+
+        public override async Task InitializeAsync()
+        {
+            await base.InitializeAsync();
+            await rig.WriteChatAsync(Service<IServiceProvider>());
+        }
+
+        [Fact]
+        public void TheRowStoresTheLegacyOutcomeTrimmed() =>
+            Assert.Equal(TalkLegacyOutcome.Trimmed, Assert.Single(rig.Rows).LegacyOutcome);
+    }
+
+    // T789 (F220.19) — a wholly repeated line makes today's code ask again
+    public sealed class ScenarioAChatARepeatMakesTheWriterAskAgain : EngineSettingScenario
+    {
+        readonly ShadowWeekRig rig = new(startingMode: "shadow", reply: ShadowWeekRig.ChatRepeatingAWholeLine, hostSaidTheEarlierLine: true);
+
+        protected override void ConfigureServices(IServiceCollection services) => rig.Configure(services);
+
+        public override async Task InitializeAsync()
+        {
+            await base.InitializeAsync();
+            await rig.WriteChatAsync(Service<IServiceProvider>());
+        }
+
+        [Fact]
+        public void TheRowStoresTheLegacyOutcomeReAsked() =>
+            Assert.Equal(TalkLegacyOutcome.ReAsked, Assert.Single(rig.Rows).LegacyOutcome);
+
+        [Fact]
+        public void TheWriterAskedAgain() => Assert.Equal(2, rig.LlmCalls);
     }
 
     // AC5 — mode shadow, a written ad
@@ -166,6 +296,28 @@ public static class FeatureTheShadowWeek
     }
 
     // Sad path
+    // T789 — the rule book throws while a chat is written in shadow
+    public sealed class ScenarioTheRuleBookThrowsOnAChat : EngineSettingScenario
+    {
+        readonly ShadowWeekRig rig = new(ruleBookThrows: true, startingMode: "shadow", reply: ShadowWeekRig.ChatReply);
+        string aired = string.Empty;
+
+        protected override void ConfigureServices(IServiceCollection services) => rig.Configure(services);
+
+        public override async Task InitializeAsync()
+        {
+            await base.InitializeAsync();
+            aired = await rig.WriteChatAsync(Service<IServiceProvider>());
+        }
+
+        [Fact]
+        public void TheChatAirsAsTodaysCodeDecided() => Assert.Equal(ShadowWeekRig.ChatAired, aired);
+
+        [Fact]
+        public void AWarningIsLogged() => Assert.True(rig.LoggedWarningContaining("Shadow talk check failed"));
+    }
+
+    // Sad path
     // AC8 — the rule book throws in shadow
     public sealed class ScenarioTheRuleBookThrowsInShadow : EngineSettingScenario
     {
@@ -186,6 +338,9 @@ public static class FeatureTheShadowWeek
         [Fact]
         public void AWarningIsLogged() => Assert.True(rig.LoggedWarningContaining("Shadow talk check failed"));
     }
+
+    static TalkChatFields ChatFieldsOf(TalkCheckRecord row) =>
+        row.Snapshot.Chat ?? throw new InvalidOperationException("The row's snapshot carries no chat fields.");
 
     static Task<HttpResponseMessage> PutModeAsync(HttpClient client, string mode) =>
         client.PutAsJsonAsync("/api/settings", new[] { new { key = "TalkRules:Mode", value = mode } });

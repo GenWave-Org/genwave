@@ -122,13 +122,15 @@ static partial class CrosstalkScriptParser
         }
 
         var lines = new List<CrosstalkAiredLine>(rawLines.Count);
+        // T789: the FIRST over-length line owns the reason, but the loop finishes so the shadow week can judge the script.
+        CrosstalkWriteResult.Discarded? overLength = null;
         foreach (var rawLine in rawLines)
         {
             if (!TryParseLine(rawLine, out var speaker, out var isInterjection, out var rawText))
             {
                 // SPEC F139.1 (T330 review round 1 amendment): an unrecognized speaker tag is a
                 // malformed SHAPE, not empty content.
-                return Discarded(
+                return overLength ?? Discarded(
                     $"line does not match the '{HostTag}:'/'{NeighborTag}:' speaker-tag format: " +
                     $"\"{TruncateForEcho(rawLine)}\"", LlmCallCause.MalformedResponse);
             }
@@ -140,11 +142,11 @@ static partial class CrosstalkScriptParser
                 // EmptyCompletion — the tag matched correctly (the SHAPE was fine), only the text
                 // after it was empty. See LlmCallCause's own remarks for why this is the deliberate
                 // holdout among the parser's reject branches.
-                return Discarded($"a {DescribeSpeaker(speaker)} line was empty after cleanup", LlmCallCause.EmptyCompletion);
+                return overLength ?? Discarded($"a {DescribeSpeaker(speaker)} line was empty after cleanup", LlmCallCause.EmptyCompletion);
             }
             if (cleaned.Length > maxLineChars)
             {
-                return Discarded(
+                overLength ??= Discarded(
                     $"a {DescribeSpeaker(speaker)} line ({cleaned.Length} chars) exceeded the " +
                     $"{maxLineChars}-char per-line budget — no line is ever trimmed (SPEC F127.4)", LlmCallCause.OverLength);
             }
@@ -152,11 +154,15 @@ static partial class CrosstalkScriptParser
             lines.Add(new CrosstalkAiredLine(speaker, cleaned, isInterjection));
         }
 
+        var script = new CrosstalkAiredScript(lines);
+        if (overLength is not null)
+            return overLength with { Parsed = script };
+
         // SPEC F139.1 (T330 review round 1 amendment): a missing HOST/NEIGHBOR turn is a malformed
         // SHAPE too — every line matched the speaker-tag format individually, but the exchange as a
         // whole never took the required two-voice shape.
         if (MissingSpeakerReason(lines) is { } missingSpeaker)
-            return Discarded(missingSpeaker, LlmCallCause.MalformedResponse);
+            return Discarded(missingSpeaker, LlmCallCause.MalformedResponse, script);
 
         for (var i = 1; i < lines.Count; i++)
         {
@@ -173,7 +179,7 @@ static partial class CrosstalkScriptParser
                 // full rationale.
                 return Discarded(
                     $"speaker alternation broken at line {i + 1} (mark an overlapping line as " +
-                    $"'{InterjectionMarker}' instead)", LlmCallCause.MalformedResponse);
+                    $"'{InterjectionMarker}' instead)", LlmCallCause.MalformedResponse, script);
             }
         }
 
@@ -201,7 +207,7 @@ static partial class CrosstalkScriptParser
             {
                 return Discarded(
                     $"the script named {description} (\"{match.Value}\") — " +
-                    "SPEC F138.6 forbids real-world verifiables in banter", LlmCallCause.TruthGateReject);
+                    "SPEC F138.6 forbids real-world verifiables in banter", LlmCallCause.TruthGateReject, script);
             }
         }
 
@@ -211,7 +217,7 @@ static partial class CrosstalkScriptParser
             var violation = clockResult.Violations[0];
             return Discarded(
                 $"the script claimed \"{violation.Token}\" but the station clock reads " +
-                $"{violation.Expected} — SPEC F138.6/F138.3 clock violation", LlmCallCause.TruthGateReject);
+                $"{violation.Expected} — SPEC F138.6/F138.3 clock violation", LlmCallCause.TruthGateReject, script);
         }
 
         var totalChars = lines.Sum(line => line.Text.Length);
@@ -220,10 +226,10 @@ static partial class CrosstalkScriptParser
         {
             return Discarded(
                 $"estimated {estimatedSeconds:F1}s exceeds the {durationTargetSeconds}s " +
-                $"{nameof(CrosstalkOptions.DurationTargetSeconds)} target", LlmCallCause.OverLength);
+                $"{nameof(CrosstalkOptions.DurationTargetSeconds)} target", LlmCallCause.OverLength, script);
         }
 
-        return new CrosstalkWriteResult.Accepted(new CrosstalkAiredScript(lines));
+        return new CrosstalkWriteResult.Accepted(script);
     }
 
     /// <summary>
@@ -285,7 +291,13 @@ static partial class CrosstalkScriptParser
     static string TruncateForEcho(string text) =>
         text.Length <= MaxEchoedLineChars ? text : text[..MaxEchoedLineChars] + "…";
 
-    static CrosstalkWriteResult.Discarded Discarded(string reason, LlmCallCause cause) => new(reason, cause);
+    /// <summary>One line in the tag form the parser read it from, interjection marker included (T789 shadow row text).</summary>
+    internal static string DescribeLine(CrosstalkAiredLine line) =>
+        $"{DescribeSpeaker(line.Speaker)}{(line.IsInterjection ? " " + InterjectionMarker : "")}: {line.Text}";
+
+    /// <param name="parsed">T789: the fully parsed script when the discard came after parsing; null when no whole script was built (line count, bad tag, empty line).</param>
+    static CrosstalkWriteResult.Discarded Discarded(string reason, LlmCallCause cause, CrosstalkAiredScript? parsed = null) =>
+        new(reason, cause) { Parsed = parsed };
 
     /// <summary>
     /// The F138.6 truth-shape table (PLAN T333 review advisory A3) — one entry per mechanical shape

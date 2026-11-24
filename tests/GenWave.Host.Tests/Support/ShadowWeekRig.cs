@@ -18,15 +18,43 @@ namespace GenWave.Host.Tests.Support;
 /// container: <see cref="ISegmentCopyWriter"/> to <see cref="LlmCopyWriter"/> to the shadow hook. A scenario creates the rig in a
 /// field initializer (the base fixture builds the host in its constructor) and passes its services through <see cref="Configure"/>.
 /// </summary>
-public sealed class ShadowWeekRig(bool recordRowsInMemory = true, bool ruleBookThrows = false, string? startingMode = null, string? reply = null)
+public sealed class ShadowWeekRig(
+    bool recordRowsInMemory = true, bool ruleBookThrows = false, string? startingMode = null, string? reply = null,
+    bool hostSaidTheEarlierLine = false)
 {
     /// <summary>A line the rules flag as a repeat that today's code never sees: the row sits only in the hour-window read.</summary>
     public const string RepeatedLine = "Settle in for a golden hour groove from the vault, folks.";
 
+    /// <summary>A three-line exchange that parses cleanly and repeats nothing the speakers said before.</summary>
+    public const string ChatReply =
+        "HOST: Good evening, and welcome to the late shift.\nNEIGHBOR: Evening, the kettle is on.\nHOST: Then the night is in good hands.";
+
+    /// <summary>A chat whose truth gate drops it under today's code: the host names a real-world frequency.</summary>
+    public const string ChatNamingAFrequency =
+        "HOST: Good evening, you are tuned to 98.7 FM.\nNEIGHBOR: Evening, the kettle is on.\nHOST: Then the night is in good hands.";
+
+    /// <summary>A chat whose first host line repeats <see cref="EarlierHostLine"/> and keeps a fresh sentence, so a trim saves it.</summary>
+    public const string ChatRepeatingOneSentence =
+        "HOST: " + EarlierHostLine + " Welcome to the late shift.\nNEIGHBOR: Evening, the kettle is on.\nHOST: Then the night is in good hands.";
+
+    /// <summary>A chat whose first host line is wholly the earlier line, so a trim empties it and the writer re-asks.</summary>
+    public const string ChatRepeatingAWholeLine =
+        "HOST: " + EarlierHostLine + "\nNEIGHBOR: Evening, the kettle is on.\nHOST: Then the night is in good hands.";
+
+    /// <summary>The line the host is seeded as having said before, when <c>hostSaidTheEarlierLine</c> is set.</summary>
+    public const string EarlierHostLine = "Here comes a golden hour groove from the vault tonight.";
+
+    /// <summary>What <see cref="ChatReply"/> airs: its lines without the speaker tags, joined as <see cref="WriteChatAsync"/> joins them.</summary>
+    public const string ChatAired =
+        "Good evening, and welcome to the late shift.\nEvening, the kettle is on.\nThen the night is in good hands.";
+
+    /// <summary>The lengths of <see cref="ChatReply"/>'s three lines, as the parser measures them.</summary>
+    public static readonly IReadOnlyList<int> ChatLineChars = [44, 26, 32];
+
     static readonly DateTimeOffset WrittenAt = new(2026, 11, 9, 20, 0, 0, TimeSpan.FromHours(-6));
 
     const long PersonaId = 7;
-    const string EarlierLine = "Here comes a golden hour groove from the vault tonight.";
+    const string EarlierLine = EarlierHostLine;
 
     readonly FakeHttpMessageHandler llm = new((_, _) =>
         Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
@@ -70,7 +98,7 @@ public sealed class ShadowWeekRig(bool recordRowsInMemory = true, bool ruleBookT
             1, PersonaId, null, UtteranceKind.Patter, "LeadIn", ShiftKey.Unscheduled(PersonaId, new DateOnly(2026, 11, 9)),
             EarlierLine, false, DateTimeOffset.UnixEpoch, null);
         services.RemoveAll<IUtteranceStore>();
-        services.AddSingleton<IUtteranceStore>(new SeededUtteranceStore(recent: [], inWindow: [earlier]));
+        services.AddSingleton<IUtteranceStore>(new SeededUtteranceStore(recent: hostSaidTheEarlierLine ? [earlier] : [], inWindow: [earlier]));
 
         if (recordRowsInMemory)
         {
@@ -95,6 +123,22 @@ public sealed class ShadowWeekRig(bool recordRowsInMemory = true, bool ruleBookT
         var copy = await services.GetRequiredService<ISegmentCopyWriter>().WriteAsync(request, CancellationToken.None);
         return copy.Text;
     }
+
+    /// <summary>Writes one crosstalk exchange through the host's real script writer and returns the aired lines joined, empty when it is discarded.</summary>
+    public async Task<string> WriteChatAsync(IServiceProvider services)
+    {
+        var request = new CrosstalkExchangeRequest(
+            Card("Flip"), Card("Tony"), "GenWave", ShowName: null, Daypart: null, WrittenAt,
+            HostPersonaId: PersonaId, NeighborPersonaId: PersonaId + 1);
+
+        var result = await services.GetRequiredService<CrosstalkScriptWriter>().WriteExchangeAsync(request, CancellationToken.None);
+        return result is CrosstalkWriteResult.Accepted accepted
+            ? string.Join('\n', accepted.Script.Lines.Select(line => line.Text))
+            : string.Empty;
+    }
+
+    static PersonaCard Card(string name) =>
+        new(PersonaCard.CurrentSchemaVersion, name, "", "Soul line.", [], new VoiceSpec("kokoro", "af_heart", 1.0, "en"), 0.0, [], []);
 
     /// <summary>Writes one on-air lead-in through the host's real copy writer and returns what airs.</summary>
     public async Task<string> WriteLeadInAsync(IServiceProvider services)
