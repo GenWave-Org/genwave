@@ -16,6 +16,14 @@ sealed class TalkCheckRepository(Lazy<NpgsqlDataSource> dataSource, IOptionsMoni
     const string SweepSql =
         "delete from station.talk_check where checked_at < now() - make_interval(days => @RetentionDays)";
 
+    const string SelectColumns =
+        """
+        select id, checked_at, persona_id::bigint as persona_id, mode, raw_reply, cleaned,
+               snapshot::text as snapshot, verdicts::text as verdicts, legacy_outcome, outcome
+        from station.talk_check
+
+        """;
+
     public async Task AppendAsync(TalkCheckRecord record, CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
@@ -58,14 +66,27 @@ sealed class TalkCheckRepository(Lazy<NpgsqlDataSource> dataSource, IOptionsMoni
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
         var rows = await conn.QueryAsync<TalkCheckRow>(new CommandDefinition(
-            """
-            select id, checked_at, persona_id::bigint as persona_id, mode, raw_reply, cleaned,
-                   snapshot::text as snapshot, verdicts::text as verdicts, legacy_outcome, outcome
-            from station.talk_check
+            SelectColumns + """
             where checked_at >= @Since
             order by checked_at, id
             """,
             new { Since = since },
+            cancellationToken: ct));
+
+        return rows.Select(r => r.ToEntry()).ToList();
+    }
+
+    public async Task<IReadOnlyList<TalkCheckEntry>> ReadPageAsync(
+        DateTimeOffset since, long afterId, int limit, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var rows = await conn.QueryAsync<TalkCheckRow>(new CommandDefinition(
+            SelectColumns + """
+            where checked_at >= @Since and id > @AfterId
+            order by id
+            limit @Limit
+            """,
+            new { Since = since, AfterId = afterId, Limit = Math.Clamp(limit, 1, ITalkCheckStore.MaxPageSize) },
             cancellationToken: ct));
 
         return rows.Select(r => r.ToEntry()).ToList();

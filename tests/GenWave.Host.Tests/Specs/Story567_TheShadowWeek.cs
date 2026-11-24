@@ -111,14 +111,32 @@ public static class FeatureTheShadowWeek
         public void TheNextWrittenTalkUsesItWithNoRestart() => Assert.Single(rig.Rows);
     }
 
-    // AC4 — POST /api/talk-rules/replay {days: 7, compare: legacy}
-    public sealed class ScenarioTheShadowReportIsRequested
+    // AC4 — POST /api/talk-rules/replay {days: 7, compare: legacy}. One row the real writer recorded (legacy passed, the rules flag
+    // the repeat), and a copy of it as if today's code had trimmed it instead (a line a trim saved that a rule would still flag).
+    public sealed class ScenarioTheShadowReportIsRequested : EngineSettingScenario
     {
-        [Fact(Skip = "pending: T791")]
-        public void EachRuleListsTheLinesWhereTheVerdictsDiffer() { }
+        readonly ShadowWeekRig rig = new(startingMode: "shadow");
+        ReplayBody body = new([], [], 0);
 
-        [Fact(Skip = "pending: T791")]
-        public void TheLinesATrimSavedAreCounted() { }
+        protected override void ConfigureServices(IServiceCollection services) => rig.Configure(services);
+
+        public override async Task InitializeAsync()
+        {
+            await base.InitializeAsync();
+            await rig.WriteLeadInAsync(Service<IServiceProvider>());
+            rig.CheckStore.Add(Assert.Single(rig.Rows) with { LegacyOutcome = TalkLegacyOutcome.Trimmed });
+
+            body = await ReplayClient.ReplayAsync(Client, new { days = 7, compare = "legacy" });
+        }
+
+        [Fact]
+        public void EachRuleListsTheLinesWhereTheVerdictsDiffer() =>
+            Assert.Equal(
+                [(1L, "repeat-phrases", "passed")],
+                body.Changes.Select(c => (c.CheckId, c.RuleId, c.LegacyOutcome)));
+
+        [Fact]
+        public void TheLinesATrimSavedAreCounted() => Assert.Equal(1, body.TrimSavedLines);
     }
 
     // AC5 — mode shadow, a written chat

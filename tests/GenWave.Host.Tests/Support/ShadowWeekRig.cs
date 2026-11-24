@@ -84,6 +84,11 @@ public sealed class ShadowWeekRig(
 
     internal RecordingTalkCheckLog CheckLog { get; } = new();
 
+    LogBackedTalkCheckStore? checkStore;
+
+    /// <summary>The check store the host reads through when rows are kept in memory: the rows the shadow hook queued, plus any a spec adds.</summary>
+    internal LogBackedTalkCheckStore CheckStore => checkStore ??= new LogBackedTalkCheckStore(CheckLog);
+
     ObservedRuleBook? observedRuleBook;
 
     /// <summary>How many times the rule book was asked to judge.</summary>
@@ -122,6 +127,8 @@ public sealed class ShadowWeekRig(
         {
             services.RemoveAll<ITalkCheckLog>();
             services.AddSingleton<ITalkCheckLog>(CheckLog);
+            services.RemoveAll<ITalkCheckStore>();
+            services.AddSingleton<ITalkCheckStore>(CheckStore);
         }
 
         services.RemoveAll<IStationClockProvider>();

@@ -216,4 +216,49 @@ public static class FeatureTalkCheckRecords
         [Fact]
         public void ARowTwentySevenDaysOldIsKept() => Assert.Equal([1L, 2L], ids);
     }
+
+    // T791 (F220.26) — five rows, read in pages of two: the replay never reads a wide window in one go
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioTheLogIsReadInPages(DatabaseFixture db) : IAsyncLifetime
+    {
+        IReadOnlyList<TalkCheckEntry>? first;
+        IReadOnlyList<TalkCheckEntry>? second;
+        IReadOnlyList<TalkCheckEntry>? last;
+        IReadOnlyList<TalkCheckEntry>? oversized;
+
+        public async Task InitializeAsync()
+        {
+            await ResetAsync(db);
+            var repo = Repository(db);
+            for (var i = 0; i < 5; i++)
+            {
+                await repo.AppendAsync(Record(personaId: 1), CancellationToken.None);
+            }
+
+            var since = DateTimeOffset.UtcNow.AddMinutes(-5);
+            first = await repo.ReadPageAsync(since, 0, 2, CancellationToken.None);
+            second = await repo.ReadPageAsync(since, first[^1].Id, 2, CancellationToken.None);
+            last = await repo.ReadPageAsync(since, second[^1].Id, 2, CancellationToken.None);
+            oversized = await repo.ReadPageAsync(since, 0, 100_000, CancellationToken.None);
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void TheFirstPageHoldsTheFirstTwoRows() => Assert.Equal([1L, 2L], first?.Select(e => e.Id));
+
+        [Fact]
+        public void TheSecondPageResumesAfterTheLastId() => Assert.Equal([3L, 4L], second?.Select(e => e.Id));
+
+        [Fact]
+        public void TheLastPageHoldsTheRest() => Assert.Equal([5L], last?.Select(e => e.Id));
+
+        [Fact]
+        public void APageHoldsTheRecordTheWriterStored() => Assert.Equal("RAW reply text", first?[0].Record.RawReply);
+
+        // Sad path
+        [Fact]
+        public void AnOversizedLimitStillReturnsTheRows() => Assert.Equal(5, oversized?.Count);
+    }
 }

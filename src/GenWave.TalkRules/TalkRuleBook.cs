@@ -17,7 +17,7 @@ public sealed class TalkRuleBook(
     /// <summary>The reason on the flag of a judge that threw.</summary>
     public const string CouldNotCheck = "Could not check";
 
-    private const string CouldNotCheckAsk = "Write it again, keeping to every rule.";
+    internal const string CouldNotCheckAsk = "Write it again, keeping to every rule.";
 
     private readonly IReadOnlyList<ITalkRule> rules =
         rules.OrderBy(rule => rule.Id, StringComparer.Ordinal).ToList();

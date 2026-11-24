@@ -43,6 +43,9 @@ public static class FeatureTalkCheckDrain
 
         public Task<IReadOnlyList<TalkCheckEntry>> ReadSinceAsync(DateTimeOffset since, CancellationToken ct) =>
             throw new NotSupportedException();
+
+        public Task<IReadOnlyList<TalkCheckEntry>> ReadPageAsync(DateTimeOffset since, long afterId, int limit, CancellationToken ct) =>
+            throw new NotSupportedException();
     }
 
     // Sad path — a write fails
