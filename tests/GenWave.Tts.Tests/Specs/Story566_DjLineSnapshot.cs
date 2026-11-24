@@ -162,6 +162,20 @@ public static class FeatureDjLineSnapshot
         public void TheLedgerWasGivenTheCard() => Assert.Equal(Card().Quirks, ledger.SeenCard?.Quirks);
     }
 
+    // Feature: with no ledger registered the card carries no tagline spans (T713 convention; T780 carried note)
+    public sealed class ScenarioNoLedgerMeansNoTaglineSpans
+    {
+        readonly TalkSnapshot snapshot =
+            new DjLineSnapshotSource(new PostureProbe(AudiencePosture.Mature)).BuildAsync(Input(), CancellationToken.None)
+                .AsTask().GetAwaiter().GetResult();
+
+        [Fact]
+        public void TheSpeakerCarriesOnlyTheRawQuirkRuleTexts() =>
+            Assert.Equal(
+                new TalkList<string>(["Says \"stay golden\" now and then", "Greets the weather"]),
+                Assert.Single(snapshot.Speakers).CardPhrases);
+    }
+
     // Feature: recent lines hold every row the writer read, so each rule picks its own window
     public sealed class ScenarioRecentLinesHoldEveryRowTheWriterRead
     {
@@ -248,5 +262,110 @@ public static class FeatureDjLineSnapshot
         [Fact]
         public void ItEqualsTheOriginalAfterTheJsonCodec() =>
             Assert.Equal(snapshot, TalkSnapshotJson.Deserialize(TalkSnapshotJson.Serialize(snapshot)));
+    }
+
+    sealed class UnusedSnapshotSource : ITalkSnapshotSource<DjLineSnapshotInput>
+    {
+        public ValueTask<TalkSnapshot> BuildAsync(DjLineSnapshotInput input, CancellationToken ct) =>
+            throw new InvalidOperationException("The snapshot source is never reached when the input cannot be built.");
+    }
+
+    sealed class UnusedRuleBook : ITalkRuleBook
+    {
+        public ValueTask<TalkShaping> ShapeAsync(TalkSnapshot before, CancellationToken ct) => throw new InvalidOperationException();
+
+        public ValueTask<TalkList<RuleVerdict>> JudgeAsync(TalkSnapshot after, CancellationToken ct) => throw new InvalidOperationException();
+
+        public ValueTask AcceptedAsync(TalkSnapshot accepted, CancellationToken ct) => throw new InvalidOperationException();
+    }
+
+    sealed class SilentCheckLog : ITalkCheckLog
+    {
+        public bool TryRecord(TalkCheckRecord record) => true;
+    }
+
+    // Feature: building the shadow input is inside the fault boundary (T788, F220.19)
+    public sealed class ScenarioTheInputCannotBeBuilt
+    {
+        [Fact]
+        public async Task TheCheckDoesNotThrow()
+        {
+            var check = new DjLineShadowCheck(
+                new GenWave.Tts.Tests.Fakes.TestOptionsMonitor<TalkRulesOptions>(new TalkRulesOptions { Mode = "shadow" }),
+                new UnusedSnapshotSource(), new UnusedRuleBook(), new SilentCheckLog(),
+                new GenWave.Tts.Tests.Fakes.CapturingLogger<DjLineShadowCheck>());
+            var request = new SegmentRequest(SegmentKind.LeadIn, "af_heart", "GenWave", Track: null, Now, "test-station");
+
+            var thrown = await Record.ExceptionAsync(async () => await check.CheckAsync(
+                request, () => throw new InvalidOperationException("input"), "raw", "cleaned", TalkLegacyOutcome.Passed, CancellationToken.None));
+
+            Assert.Null(thrown);
+        }
+    }
+
+    sealed class RecordingCheckLog : ITalkCheckLog
+    {
+        public List<TalkCheckRecord> Records { get; } = [];
+
+        public bool TryRecord(TalkCheckRecord record)
+        {
+            Records.Add(record);
+            return true;
+        }
+    }
+
+    sealed class EmptyRuleBook : ITalkRuleBook
+    {
+        public ValueTask<TalkShaping> ShapeAsync(TalkSnapshot before, CancellationToken ct) => throw new InvalidOperationException();
+
+        public ValueTask<TalkList<RuleVerdict>> JudgeAsync(TalkSnapshot after, CancellationToken ct) =>
+            ValueTask.FromResult(TalkList<RuleVerdict>.Empty);
+
+        public ValueTask AcceptedAsync(TalkSnapshot accepted, CancellationToken ct) => ValueTask.CompletedTask;
+    }
+
+    // Feature: a rejected preview is recorded as what it was, a dropped line (T788, F220.19). WritePreviewAsync never templates.
+    public sealed class ScenarioARejectedPreviewIsRecordedAsDropped : IAsyncLifetime
+    {
+        readonly RecordingCheckLog checkLog = new();
+
+        public async Task InitializeAsync()
+        {
+            var handler = new GenWave.Tts.Tests.Fakes.FakeHttpMessageHandler((_, _) => Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    JsonSerializer.Serialize(new { choices = new[] { new { message = new { content = "" } } } }),
+                    System.Text.Encoding.UTF8, "application/json"),
+            }));
+            var check = new DjLineShadowCheck(
+                new GenWave.Tts.Tests.Fakes.TestOptionsMonitor<TalkRulesOptions>(new TalkRulesOptions { Mode = "shadow" }),
+                new DjLineSnapshotSource(new PostureProbe(AudiencePosture.Mature)), new EmptyRuleBook(), checkLog,
+                new GenWave.Tts.Tests.Fakes.CapturingLogger<DjLineShadowCheck>());
+            var writer = new LlmCopyWriter(
+                new TemplateCopyWriter(new PatterTemplateRenderer()),
+                new GenWave.Tts.Tests.Fakes.SingleHandlerHttpClientFactory(handler),
+                new GenWave.Tts.Tests.Fakes.TestOptionsMonitor<LlmOptions>(new LlmOptions
+                {
+                    Endpoint = "http://fake-llm.local", Model = "test-model", TimeoutSeconds = 5, MaxCopyChars = 450,
+                }),
+                new LlmCopyStatusHolder(),
+                new GenWave.Tts.Tests.Fakes.FakeActivePersonaAccessor(),
+                new GenWave.Tts.Tests.Fakes.CapturingLogger<LlmCopyWriter>(),
+                TimeProvider.System,
+                new LlmCallRecorder(
+                    new LlmCallRing(new GenWave.Tts.Tests.Fakes.TestOptionsMonitor<LlmOptions>(new LlmOptions())),
+                    new LlmCallCauseCounters(TimeProvider.System)),
+                new GenWave.Tts.Tests.Fakes.FakeDegradationModeReader(),
+                shadowCheck: check);
+            var request = new SegmentRequest(SegmentKind.LeadIn, "af_heart", "GenWave", Track: null, Now, "test-station");
+
+            await writer.WritePreviewAsync(request, personaOverride: null, CancellationToken.None);
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void ExactlyOneRowIsWrittenAndItIsDropped() =>
+            Assert.Equal(TalkLegacyOutcome.Dropped, Assert.Single(checkLog.Records).LegacyOutcome);
     }
 }

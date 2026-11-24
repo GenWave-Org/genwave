@@ -114,6 +114,13 @@ public static class TtsServiceCollectionExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        // F220.18: TalkRules:Mode, read per written talk through the monitor so a live PUT applies to the next one.
+        services
+            .AddOptions<TalkRulesOptions>()
+            .Bind(configuration.GetSection(TalkRulesOptions.Section))
+            .Validate(options => TalkRulesModes.IsValid(options.Mode), "TalkRules:Mode must be legacy, shadow or rules.")
+            .ValidateOnStart();
+
         // gh-#253: the live Llm:MaxCopyChars seam the patter-duration estimator's cold tier reads
         // (ICopyBoundsProvider lives in GenWave.Abstractions; LlmOptions lives HERE, so this project
         // owns the adapter). TryAdd so a host or test that binds its own bounds source wins.
@@ -318,6 +325,9 @@ public static class TtsServiceCollectionExtensions
             // DJ-line snapshot source (SPEC F220.7, PLAN T780): builds the talk-rule snapshot from the writer's inputs.
             // Not wired into the writer yet.
             .AddSingleton<ITalkSnapshotSource<DjLineSnapshotInput>, DjLineSnapshotSource>()
+            // Shadow hook (SPEC F220.18-F220.19, PLAN T788): LlmCopyWriter resolves it optionally; it judges only while the
+            // live TalkRules:Mode is shadow.
+            .AddSingleton<DjLineShadowCheck>()
             // Chat snapshot source (SPEC F220.7, PLAN T781): same shape for crosstalk. Not wired into the writer yet.
             .AddSingleton<ITalkSnapshotSource<ChatSnapshotInput>, ChatSnapshotSource>()
             // The life extractor's own completion seam (SPEC F218.17, PLAN T704): same endpoint/key/timeout, called

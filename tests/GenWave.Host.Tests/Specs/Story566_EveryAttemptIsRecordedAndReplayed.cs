@@ -7,6 +7,8 @@ namespace GenWave.Host.Tests.Specs;
 using System.Net;
 using System.Net.Http.Json;
 using GenWave.Core.TalkRules;
+using GenWave.Host.Tests.Support;
+using Microsoft.Extensions.DependencyInjection;
 
 public static class FeatureEveryAttemptIsRecordedAndReplayed
 {
@@ -41,6 +43,10 @@ public static class FeatureEveryAttemptIsRecordedAndReplayed
         const int Attempts = 300;
 
         readonly List<bool> accepted = [];
+        readonly ShadowWeekRig rig = new(recordRowsInMemory: false, startingMode: "shadow");
+        string aired = string.Empty;
+
+        protected override void ConfigureServices(IServiceCollection services) => rig.Configure(services);
 
         static TalkCheckRecord AnyRecord() =>
             new(
@@ -66,6 +72,8 @@ public static class FeatureEveryAttemptIsRecordedAndReplayed
             {
                 accepted.Add(log.TryRecord(AnyRecord()));
             }
+
+            aired = await rig.WriteLeadInAsync(Service<IServiceProvider>()); // a shadow talk against the full queue
         }
 
         [Fact]
@@ -74,9 +82,8 @@ public static class FeatureEveryAttemptIsRecordedAndReplayed
         [Fact]
         public void SomeRowsAreAccepted() => Assert.Contains(true, accepted);
 
-        // pending: T788 reason: there is no talk to air through the log until LlmCopyWriter calls TryRecord (T788's shadow hook).
-        [Fact(Skip = "pending: T788")]
-        public void TheTalkStillAirs() { }
+        [Fact]
+        public void TheTalkStillAirs() => Assert.Equal(ShadowWeekRig.RepeatedLine, aired);
     }
 
     // Sad path

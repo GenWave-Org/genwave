@@ -275,6 +275,7 @@ public sealed partial class SettingValidator
             // omit), case-insensitive like the pin above; blank is refused (the posture is always
             // named — "send nothing" is spelled "omit").
             ["Llm:ReasoningEffort"] = GenWave.Core.Llm.ReasoningEffort.IsValid,
+            ["TalkRules:Mode"] = GenWave.Core.TalkRules.TalkRulesModes.IsValid,
 
             // Station-default segment envelope (SPEC F80.1, F81.1, STORY-212). Genres is a JSON
             // array of non-blank strings; empty ("[]" or blank) is legal — no genre constraint.
@@ -1034,6 +1035,8 @@ public sealed partial class SettingValidator
                "or a same-origin root-relative path starting with a single '/' (not '//'); no '\"', '<', '>', '\\', control characters, or whitespace.",
         var k when k.Equals("Llm:DegradationPin", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be one of: auto, normal, soft, hard.",
+        var k when k.Equals("TalkRules:Mode", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be one of: {string.Join(", ", GenWave.Core.TalkRules.TalkRulesModes.Accepted)}.",
         var k when k.Equals("Llm:ReasoningEffort", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be one of: {string.Join(", ", GenWave.Core.Llm.ReasoningEffort.Accepted)}.",
         var k when k.Equals("Station:Envelope:Genres", StringComparison.OrdinalIgnoreCase)

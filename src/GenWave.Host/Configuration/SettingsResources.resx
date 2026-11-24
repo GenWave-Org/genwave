@@ -434,6 +434,21 @@
   <data name="TalkRules:CheckRetentionDays.Help" xml:space="preserve">
     <value>How long the station keeps its record of every check on what the hosts wrote. Older records are cleared as new ones are saved. Pick 1 to 90 days.</value>
   </data>
+  <data name="TalkRules:Mode.Label" xml:space="preserve">
+    <value>How the hosts' lines are checked</value>
+  </data>
+  <data name="TalkRules:Mode.Help" xml:space="preserve">
+    <value>Who decides whether a line a host wrote is good enough to air. "Today's checks" is the way it has always worked. "Watch only" keeps today's checks in charge and quietly runs the new rule book alongside them, saving both opinions so you can compare them before switching. "New rule book" is accepted but does not decide anything yet: lines air as with today's checks. Changes apply to the next line written.</value>
+  </data>
+  <data name="Choice.TalkRules:Mode.legacy" xml:space="preserve">
+    <value>Today's checks</value>
+  </data>
+  <data name="Choice.TalkRules:Mode.shadow" xml:space="preserve">
+    <value>Watch only — today's checks decide, the new rule book is recorded</value>
+  </data>
+  <data name="Choice.TalkRules:Mode.rules" xml:space="preserve">
+    <value>New rule book (not active yet — behaves like today's checks)</value>
+  </data>
   <data name="Library:ScanIntervalSeconds.Label" xml:space="preserve">
     <value>Library scan interval</value>
   </data>

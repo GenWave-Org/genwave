@@ -4,36 +4,111 @@
 
 namespace GenWave.Host.Tests.Specs;
 
+using System.Net;
+using System.Net.Http.Json;
+using GenWave.Core.TalkRules;
+using GenWave.Host.Tests.Support;
+using Microsoft.Extensions.DependencyInjection;
+
+file sealed record ModeRow(string Key, string Value);
+
 public static class FeatureTheShadowWeek
 {
     // AC1 — a fresh station
-    public sealed class ScenarioAFreshStation
+    public sealed class ScenarioAFreshStation : EngineSettingScenario
     {
-        [Fact(Skip = "pending: T788")]
-        public void TheModeIsLegacy() { }
+        readonly ShadowWeekRig rig = new();
+        string aired = string.Empty;
 
-        [Fact(Skip = "pending: T788")]
-        public void TheRuleBookIsNotCalled() { }
+        protected override void ConfigureServices(IServiceCollection services) => rig.Configure(services);
+
+        public override async Task InitializeAsync()
+        {
+            await base.InitializeAsync();
+            aired = await rig.WriteLeadInAsync(Service<IServiceProvider>());
+        }
+
+        [Fact]
+        public async Task TheModeIsLegacy()
+        {
+            var rows = await Client.GetFromJsonAsync<List<ModeRow>>("/api/settings");
+
+            Assert.NotNull(rows);
+            Assert.Equal("legacy", Assert.Single(rows, r => r.Key == "TalkRules:Mode").Value);
+        }
+
+        [Fact]
+        public void TheRuleBookIsNotCalled() => Assert.Equal(0, rig.JudgeCalls);
+
+        [Fact]
+        public void TheTalkStillAirs() => Assert.Equal(ShadowWeekRig.RepeatedLine, aired);
     }
 
     // AC2 — mode shadow, a reply the rules flag but today's code passes
-    public sealed class ScenarioShadowAirsTodaysVerdict
+    public sealed class ScenarioShadowAirsTodaysVerdict : EngineSettingScenario
     {
-        [Fact(Skip = "pending: T788")]
-        public void TheReplyAirs() { }
+        readonly ShadowWeekRig rig = new(startingMode: "shadow");
+        string aired = string.Empty;
 
-        [Fact(Skip = "pending: T788")]
-        public void TheRowStoresTheRuleVerdicts() { }
+        protected override void ConfigureServices(IServiceCollection services) => rig.Configure(services);
 
-        [Fact(Skip = "pending: T788")]
-        public void TheRowStoresTheLegacyOutcome() { }
+        public override async Task InitializeAsync()
+        {
+            await base.InitializeAsync();
+            aired = await rig.WriteLeadInAsync(Service<IServiceProvider>());
+        }
+
+        [Fact]
+        public void TheReplyAirs() => Assert.Equal(ShadowWeekRig.RepeatedLine, aired);
+
+        [Fact]
+        public void TheRowStoresTheRuleVerdicts() =>
+            Assert.NotNull(Assert.Single(
+                Assert.Single(rig.Rows).Verdicts, verdict => verdict.RuleId == "repeat-phrases" && verdict.SwitchedOn).Flag);
+
+        [Fact]
+        public void TheRowStoresTheLegacyOutcome() =>
+            Assert.Equal(TalkLegacyOutcome.Passed, Assert.Single(rig.Rows).LegacyOutcome);
+    }
+
+    // AC2 — the same scripted reply in legacy and then in shadow, with the mode changed through the settings endpoint
+    public sealed class ScenarioTheSameReplyInLegacyAndShadow : EngineSettingScenario
+    {
+        readonly ShadowWeekRig rig = new();
+        string airedInLegacy = string.Empty;
+        string airedInShadow = string.Empty;
+
+        protected override void ConfigureServices(IServiceCollection services) => rig.Configure(services);
+
+        public override async Task InitializeAsync()
+        {
+            await base.InitializeAsync();
+            airedInLegacy = await rig.WriteLeadInAsync(Service<IServiceProvider>());
+            await PutModeAsync(Client, "shadow");
+            airedInShadow = await rig.WriteLeadInAsync(Service<IServiceProvider>());
+        }
+
+        [Fact]
+        public void TheAiredTextIsIdentical() => Assert.Equal(airedInLegacy, airedInShadow);
     }
 
     // AC3 — the mode changes
-    public sealed class ScenarioTheModeChanges
+    public sealed class ScenarioTheModeChanges : EngineSettingScenario
     {
-        [Fact(Skip = "pending: T788")]
-        public void TheNextWrittenTalkUsesItWithNoRestart() { }
+        readonly ShadowWeekRig rig = new();
+
+        protected override void ConfigureServices(IServiceCollection services) => rig.Configure(services);
+
+        public override async Task InitializeAsync()
+        {
+            await base.InitializeAsync();
+            await rig.WriteLeadInAsync(Service<IServiceProvider>()); // legacy: no row
+            await PutModeAsync(Client, "shadow");
+            await rig.WriteLeadInAsync(Service<IServiceProvider>()); // the very next talk, same running host
+        }
+
+        [Fact]
+        public void TheNextWrittenTalkUsesItWithNoRestart() => Assert.Single(rig.Rows);
     }
 
     // AC4 — POST /api/talk-rules/replay {days: 7, compare: legacy}
@@ -63,22 +138,55 @@ public static class FeatureTheShadowWeek
         public void TheRulesSawTheTextBeforeThePhoneRewrite() { }
     }
 
+    // T788 (F220.19) — a context segment whose reply is empty is dropped by today's code, and the row says so
+    public sealed class ScenarioAContextSegmentGetsNoReply : EngineSettingScenario
+    {
+        readonly ShadowWeekRig rig = new(startingMode: "shadow", reply: "");
+
+        protected override void ConfigureServices(IServiceCollection services) => rig.Configure(services);
+
+        public override async Task InitializeAsync()
+        {
+            await base.InitializeAsync();
+            await rig.WriteContextSegmentAsync(Service<IServiceProvider>());
+        }
+
+        [Fact]
+        public void TheRowStoresTheLegacyOutcomeDropped() =>
+            Assert.Equal(TalkLegacyOutcome.Dropped, Assert.Single(rig.Rows).LegacyOutcome);
+    }
+
     // Sad path
     // AC7 — PUT TalkRules:Mode nope
-    public sealed class ScenarioABadMode
+    public sealed class ScenarioABadMode : EngineSettingScenario
     {
-        [Fact(Skip = "pending: T788")]
-        public void ItIsRejectedWith400() { }
+        [Fact]
+        public async Task ItIsRejectedWith400() =>
+            Assert.Equal(HttpStatusCode.BadRequest, (await PutModeAsync(Client, "nope")).StatusCode);
     }
 
     // Sad path
     // AC8 — the rule book throws in shadow
-    public sealed class ScenarioTheRuleBookThrowsInShadow
+    public sealed class ScenarioTheRuleBookThrowsInShadow : EngineSettingScenario
     {
-        [Fact(Skip = "pending: T788")]
-        public void TheTalkAirsAsTodaysCodeDecided() { }
+        readonly ShadowWeekRig rig = new(ruleBookThrows: true, startingMode: "shadow");
+        string aired = string.Empty;
 
-        [Fact(Skip = "pending: T788")]
-        public void AWarningIsLogged() { }
+        protected override void ConfigureServices(IServiceCollection services) => rig.Configure(services);
+
+        public override async Task InitializeAsync()
+        {
+            await base.InitializeAsync();
+            aired = await rig.WriteLeadInAsync(Service<IServiceProvider>());
+        }
+
+        [Fact]
+        public void TheTalkAirsAsTodaysCodeDecided() => Assert.Equal(ShadowWeekRig.RepeatedLine, aired);
+
+        [Fact]
+        public void AWarningIsLogged() => Assert.True(rig.LoggedWarningContaining("Shadow talk check failed"));
     }
+
+    static Task<HttpResponseMessage> PutModeAsync(HttpClient client, string mode) =>
+        client.PutAsJsonAsync("/api/settings", new[] { new { key = "TalkRules:Mode", value = mode } });
 }
