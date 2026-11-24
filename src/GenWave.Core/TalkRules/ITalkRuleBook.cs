@@ -8,5 +8,6 @@ public interface ITalkRuleBook
     /// <summary>Every rule's verdict, switched-off ones included and marked off; reads the live switches each pass.</summary>
     ValueTask<TalkList<RuleVerdict>> JudgeAsync(TalkSnapshot after, CancellationToken ct);
 
-    ValueTask AcceptedAsync(TalkSnapshot accepted, CancellationToken ct);
+    /// <summary>Tells every switched-on recording rule about accepted talk; returns the ids of recorders that threw.</summary>
+    ValueTask<TalkList<string>> AcceptedAsync(TalkSnapshot accepted, CancellationToken ct);
 }

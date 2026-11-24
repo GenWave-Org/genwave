@@ -21,5 +21,5 @@ sealed class ObservedRuleBook(ITalkRuleBook inner, bool throwOnJudge) : ITalkRul
             : inner.JudgeAsync(after, ct);
     }
 
-    public ValueTask AcceptedAsync(TalkSnapshot accepted, CancellationToken ct) => inner.AcceptedAsync(accepted, ct);
+    public ValueTask<TalkList<string>> AcceptedAsync(TalkSnapshot accepted, CancellationToken ct) => inner.AcceptedAsync(accepted, ct);
 }

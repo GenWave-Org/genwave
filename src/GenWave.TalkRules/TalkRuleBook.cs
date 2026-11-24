@@ -6,8 +6,9 @@ namespace GenWave.TalkRules;
 /// <summary>
 /// Runs the rules for one kind of talk, all over the same snapshot (F220.7). Judging records a verdict for every
 /// judge that covers the kind, switched-off ones included (their verdicts are recorded, not used). A rule that
-/// throws never stops the others: a judge becomes a flag "Could not check" (F220.9), a shaper or recorder is
-/// skipped (until T795 records it as "Could not shape" / "Could not record", SPEC F220.9); each is logged at Warning with the rule id.
+/// throws never stops the others: a judge becomes a flag "Could not check" (F220.9); a shaper or recorder that
+/// throws is reported by id ("Could not shape" / "Could not record") and never changes the outcome. Each is
+/// logged at Warning with the rule id. Only the caller's own cancellation escapes.
 /// </summary>
 public sealed class TalkRuleBook(
     IEnumerable<ITalkRule> rules,
@@ -16,6 +17,12 @@ public sealed class TalkRuleBook(
 {
     /// <summary>The reason on the flag of a judge that threw.</summary>
     public const string CouldNotCheck = "Could not check";
+
+    /// <summary>What a shaper that threw is reported as (recorded on its verdict by the rules-mode flow, T800–T802).</summary>
+    public const string CouldNotShape = "Could not shape";
+
+    /// <summary>What a recorder that threw is reported as (recorded on its verdict by the rules-mode flow, T800–T802).</summary>
+    public const string CouldNotRecord = "Could not record";
 
     internal const string CouldNotCheckAsk = "Write it again, keeping to every rule.";
 
@@ -42,9 +49,15 @@ public sealed class TalkRuleBook(
         var results = await Task.WhenAll(shapers.Select(rule => ShapeSafelyAsync(rule, before, ct)));
 
         var notes = new List<string>();
+        var failed = new List<string>();
         var memos = before.Memos;
-        foreach (var (rule, shaping) in results.OrderBy(r => r.Rule.Id, StringComparer.Ordinal))
+        foreach (var (rule, shaping, threw) in results.OrderBy(r => r.Rule.Id, StringComparer.Ordinal))
         {
+            if (threw)
+            {
+                failed.Add(rule.Id);
+            }
+
             if (!string.IsNullOrWhiteSpace(shaping?.PromptNote))
             {
                 notes.Add(shaping.PromptNote);
@@ -56,13 +69,14 @@ public sealed class TalkRuleBook(
             }
         }
 
-        return new TalkShaping(new TalkList<string>(notes), memos);
+        return new TalkShaping(new TalkList<string>(notes), memos, new TalkList<string>(failed));
     }
 
-    public async ValueTask AcceptedAsync(TalkSnapshot accepted, CancellationToken ct)
+    public async ValueTask<TalkList<string>> AcceptedAsync(TalkSnapshot accepted, CancellationToken ct)
     {
         var recorders = await SwitchedOnAsync<IRecordingTalkRule>(accepted.Kind, ct);
-        await Task.WhenAll(recorders.Select(rule => RecordSafelyAsync(rule, accepted, ct)));
+        var failed = await Task.WhenAll(recorders.Select(rule => RecordSafelyAsync(rule, accepted, ct)));
+        return new TalkList<string>(failed.OfType<string>().Order(StringComparer.Ordinal));
     }
 
     private static bool IsSwitchedOn(ITalkRule rule, TalkKinds kind, IReadOnlyDictionary<string, bool> stored) =>
@@ -92,29 +106,35 @@ public sealed class TalkRuleBook(
         }
     }
 
-    private async Task<(ITalkRule Rule, RuleShaping? Shaping)> ShapeSafelyAsync(
+    private static bool IsRuleFailure(Exception ex, CancellationToken ct) =>
+        !(ex is OperationCanceledException && ct.IsCancellationRequested);
+
+    private async Task<(ITalkRule Rule, RuleShaping? Shaping, bool Threw)> ShapeSafelyAsync(
         IShapingTalkRule rule, TalkSnapshot before, CancellationToken ct)
     {
         try
         {
-            return (rule, await rule.ShapeAsync(before, ct));
+            return (rule, await rule.ShapeAsync(before, ct), false);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (IsRuleFailure(ex, ct))
         {
-            logger.LogWarning(ex, "Talk rule {RuleId} threw while shaping; skipped", rule.Id);
-            return (rule, null);
+            logger.LogWarning(ex, "Talk rule {RuleId} threw while shaping; no note, outcome unchanged", rule.Id);
+            return (rule, null, true);
         }
     }
 
-    private async Task RecordSafelyAsync(IRecordingTalkRule rule, TalkSnapshot accepted, CancellationToken ct)
+    /// <summary>The rule's id when it threw, else null.</summary>
+    private async Task<string?> RecordSafelyAsync(IRecordingTalkRule rule, TalkSnapshot accepted, CancellationToken ct)
     {
         try
         {
             await rule.AcceptedAsync(accepted, ct);
+            return null;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (IsRuleFailure(ex, ct))
         {
-            logger.LogWarning(ex, "Talk rule {RuleId} threw while recording accepted talk; skipped", rule.Id);
+            logger.LogWarning(ex, "Talk rule {RuleId} threw while recording accepted talk; outcome unchanged", rule.Id);
+            return rule.Id;
         }
     }
 }
