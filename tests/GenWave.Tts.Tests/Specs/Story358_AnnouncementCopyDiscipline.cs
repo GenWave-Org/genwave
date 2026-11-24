@@ -104,6 +104,28 @@ public static class FeatureAnnouncementCopyDiscipline
         return "";
     }
 
+    // T788: a blank owner message is no fact block; the writer refuses it before any LLM call (the caller airs plain copy).
+    public sealed class ScenarioABlankMessageIsRefused : IAsyncLifetime
+    {
+        string? result;
+        List<string> bodies = [];
+
+        public async Task InitializeAsync()
+        {
+            var built = BuildWriter((_, _) => Ok(Message));
+            bodies = built.RequestBodies;
+            result = await built.Writer.WriteAnnouncementAsync(AnnouncementRequest(), "   ", CancellationToken.None);
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void NothingIsWritten() => Assert.Null(result);
+
+        [Fact]
+        public void TheModelIsNotCalled() => Assert.Empty(bodies);
+    }
+
     public sealed class ScenarioFlavoredCopyCarriesTheCore
     {
         [Fact]

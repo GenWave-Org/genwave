@@ -1,0 +1,36 @@
+using System.Reflection;
+using GenWave.Core.Abstractions;
+using GenWave.Core.TalkRules;
+using GenWave.Memory;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+
+namespace GenWave.TalkRules;
+
+public static class TalkRuleServiceCollectionExtensions
+{
+    /// <summary>Registers every <see cref="ITalkRule"/> in GenWave.TalkRules, the rule book, the replay, the shared-run <see cref="IRepetitionCheck"/> the repeat judge takes (TryAdd), and the in-memory switch stand-in (registered with TryAdd: an earlier <see cref="ITalkRuleSwitches"/> registration wins; a later one must use Replace). A new rule is one file, no edit here (F220.2).</summary>
+    public static IServiceCollection AddTalkRules(this IServiceCollection services) =>
+        services.AddTalkRules(typeof(TalkRuleBook).Assembly);
+
+    /// <summary>As <see cref="AddTalkRules(IServiceCollection)"/>, scanning <paramref name="assemblies"/> for rules.</summary>
+    public static IServiceCollection AddTalkRules(this IServiceCollection services, params Assembly[] assemblies)
+    {
+        foreach (var type in assemblies.SelectMany(assembly => assembly.GetTypes()).Where(IsRule))
+        {
+            services.TryAddEnumerable(ServiceDescriptor.Singleton(typeof(ITalkRule), type));
+        }
+
+        services.TryAddSingleton<IRepetitionCheck, RepetitionCheck>(); // the pure shared-run check the repeat-phrases judge takes
+        services.TryAddSingleton<ITalkRuleSwitches, InMemoryTalkRuleSwitches>();
+        services.TryAddSingleton<TalkRuleBook>();
+        services.TryAddSingleton<ITalkRuleBook>(provider => provider.GetRequiredService<TalkRuleBook>());
+        services.TryAddSingleton<ITalkRuleReplay, TalkRuleReplay>(); // reads the check log through ITalkCheckStore, which the host registers
+        return services;
+    }
+
+    /// <summary>The scan's predicate: what <see cref="AddTalkRules(IServiceCollection, Assembly[])"/> registers as a rule. Shared so the architecture laws check exactly what production runs.</summary>
+    public static bool IsRule(Type type) =>
+        type is { IsClass: true, IsAbstract: false, IsGenericTypeDefinition: false }
+        && typeof(ITalkRule).IsAssignableFrom(type);
+}

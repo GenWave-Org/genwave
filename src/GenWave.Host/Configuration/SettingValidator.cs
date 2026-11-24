@@ -232,6 +232,7 @@ public sealed partial class SettingValidator
             ["Tts:SoundTags:MaxPerBreak"] = v => IsIntInRange(v, Setting("Tts:SoundTags:MaxPerBreak")),
             ["Llm:MaxCopyChars"] = v => IsIntInRange(v, Setting("Llm:MaxCopyChars")),
             ["Admin:PlayHistoryCapacity"] = v => IsIntInRange(v, Setting("Admin:PlayHistoryCapacity")),
+            ["TalkRules:CheckRetentionDays"] = v => IsIntInRange(v, Setting("TalkRules:CheckRetentionDays")),
             ["Library:ScanIntervalSeconds"] = v => IsIntInRange(v, Setting("Library:ScanIntervalSeconds")),
             ["Library:EnrichmentConcurrency"] = v => IsIntInRange(v, Setting("Library:EnrichmentConcurrency")),
             ["Library:Scan:MissThreshold"] = v => IsIntInRange(v, Setting("Library:Scan:MissThreshold")),
@@ -274,6 +275,7 @@ public sealed partial class SettingValidator
             // omit), case-insensitive like the pin above; blank is refused (the posture is always
             // named — "send nothing" is spelled "omit").
             ["Llm:ReasoningEffort"] = GenWave.Core.Llm.ReasoningEffort.IsValid,
+            ["TalkRules:Mode"] = GenWave.Core.TalkRules.TalkRulesModes.IsValid,
 
             // Station-default segment envelope (SPEC F80.1, F81.1, STORY-212). Genres is a JSON
             // array of non-blank strings; empty ("[]" or blank) is legal — no genre constraint.
@@ -1003,6 +1005,8 @@ public sealed partial class SettingValidator
             => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (characters).",
         var k when k.Equals("Admin:PlayHistoryCapacity", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (entries).",
+        var k when k.Equals("TalkRules:CheckRetentionDays", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (days).",
         var k when k.Equals("Library:ScanIntervalSeconds", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an integer between {Setting(key).Min} and {Setting(key).Max} (seconds).",
         var k when k.Equals("Library:EnrichmentConcurrency", StringComparison.OrdinalIgnoreCase)
@@ -1031,6 +1035,8 @@ public sealed partial class SettingValidator
                "or a same-origin root-relative path starting with a single '/' (not '//'); no '\"', '<', '>', '\\', control characters, or whitespace.",
         var k when k.Equals("Llm:DegradationPin", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be one of: auto, normal, soft, hard.",
+        var k when k.Equals("TalkRules:Mode", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be one of: {string.Join(", ", GenWave.Core.TalkRules.TalkRulesModes.Accepted)}.",
         var k when k.Equals("Llm:ReasoningEffort", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be one of: {string.Join(", ", GenWave.Core.Llm.ReasoningEffort.Accepted)}.",
         var k when k.Equals("Station:Envelope:Genres", StringComparison.OrdinalIgnoreCase)

@@ -9,3 +9,6 @@
 *.ico binary
 *.woff2 binary
 *.mp3 binary
+
+# Golden prompts are compared byte for byte (STORY-567): git must never normalise their line endings.
+tests/GenWave.Tts.Tests/Golden/** -text

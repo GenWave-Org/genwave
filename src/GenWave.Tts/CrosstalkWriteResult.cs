@@ -49,5 +49,15 @@ public abstract record CrosstalkWriteResult
     /// takes (<c>GenWave.Host.Crosstalk.CrosstalkStockPacing</c>) reads this to decide whether an
     /// elapsed time is worth blending into its rolling estimate at all.
     /// </param>
-    public sealed record Discarded(string Reason, LlmCallCause Cause, bool GenerationAttempted = true) : CrosstalkWriteResult;
+    public sealed record Discarded(string Reason, LlmCallCause Cause, bool GenerationAttempted = true) : CrosstalkWriteResult
+    {
+        /// <summary>
+        /// T789 (F220.19): the script the parser had fully built when it rejected the reply (truth, clock, duration,
+        /// per-line budget, alternation, missing speaker), so the shadow week can judge what legacy measured. Null for a
+        /// shape failure with no whole script: wrong line count, bad tag, empty line, a length-truncated reply, or an
+        /// over-length line followed by a later bad tag or empty line.
+        /// Not part of the discard's meaning: the writer never forwards it.
+        /// </summary>
+        public CrosstalkAiredScript? Parsed { get; init; }
+    }
 }

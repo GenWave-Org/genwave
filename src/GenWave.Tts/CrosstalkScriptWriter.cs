@@ -4,6 +4,7 @@ using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Core.Events;
 using GenWave.Core.Logging;
+using GenWave.Core.TalkRules;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -64,7 +65,9 @@ public sealed class CrosstalkScriptWriter(
     IUtteranceStore? utteranceStore = null, // T694: absent means no stored lines
     IStationEventSink? events = null, // T694: absent means no repeat-caught rows
     ISentenceTrimmer? sentenceTrimmer = null, // T715: absent means a repeated line always re-asks, then drops
-    ISoundTagOfferProvider? soundTagOffers = null) // T760: absent means no sound tags in the prompt
+    ISoundTagOfferProvider? soundTagOffers = null, // T760: absent means no sound tags in the prompt
+    ChatShadowCheck? shadowCheck = null, // T789: absent means no shadow week, exactly the pre-shadow behaviour
+    IStationClockProvider? stationClock = null) // T789: the snapshot's timezone id; absent means the process zone
 {
     readonly CrosstalkLineMemory memory = new(
         repetitionCheck, utteranceStore, events ?? NoOpStationEventSink.Instance, logger, sentenceTrimmer);
@@ -176,6 +179,13 @@ public sealed class CrosstalkScriptWriter(
                 if (trimmedFirst is not null)
                     memory.PublishFirstPass(hits, trimmedFirst);
 
+                // T789: attempt 1 is decided; record it before any re-ask call so a failing re-ask still leaves the row.
+                await ShadowAttemptOneAsync(
+                    request, raw, first.Script,
+                    hits.Count == 0 ? TalkLegacyOutcome.Passed
+                        : trimmedFirst is { Emptied: 0 } ? TalkLegacyOutcome.Trimmed : TalkLegacyOutcome.ReAsked,
+                    histories, cfg, durationTargetSeconds, ct);
+
                 if (trimmedFirst is { Emptied: 0 })
                 {
                     // SPEC F218.36: every repeated line kept a fresh sentence, so no second call is made.
@@ -198,6 +208,13 @@ public sealed class CrosstalkScriptWriter(
                     if (result is CrosstalkWriteResult.Accepted reasked)
                         result = DropStillRepeating(reasked, request, histories);
                 }
+            }
+
+            else if (result is CrosstalkWriteResult.Discarded dropped)
+            {
+                // T789: today's code drops the exchange; the rule book still judges the script the parser built (null on a shape failure).
+                await ShadowAttemptOneAsync(
+                    request, raw, dropped.Parsed, TalkLegacyOutcome.Dropped, histories, cfg, durationTargetSeconds, ct);
             }
 
             switch (result)
@@ -244,6 +261,34 @@ public sealed class CrosstalkScriptWriter(
             return new CrosstalkWriteResult.Discarded(detail, cause, generationAttempted);
         }
     }
+
+    /// <summary>
+    /// T789 (F220.19): hands attempt 1 to the shadow week once today's code has decided it. Judges only in shadow mode; a
+    /// fault inside logs a Warning and changes nothing. <paramref name="judged"/> is the script the parser accepted, before
+    /// any repeat trim or line drop (null only on a shape failure that left no whole script); the rows are the ones the writer already read.
+    /// </summary>
+    async ValueTask ShadowAttemptOneAsync(
+        CrosstalkExchangeRequest request, string raw, CrosstalkAiredScript? judged, TalkLegacyOutcome legacyOutcome,
+        IReadOnlyList<CrosstalkLineMemory.SpeakerHistory> histories, LlmOptions cfg, int durationTargetSeconds, CancellationToken ct)
+    {
+        if (shadowCheck is null || !shadowCheck.IsOn())
+            return;
+
+        // Built inside the check's fault boundary: a throw while shaping the input must never reach the writer.
+        ChatSnapshotInput BuildInput() => new(
+            request, 1, judged ?? new CrosstalkAiredScript([]), (stationClock?.Zone ?? timeProvider.LocalTimeZone).Id,
+            durationTargetSeconds, cfg.MaxCopyChars,
+            RowsOf(histories, CrosstalkSpeaker.Host), RowsOf(histories, CrosstalkSpeaker.Neighbor));
+
+        var cleaned = judged is null
+            ? null
+            : string.Join('\n', judged.Lines.Select(CrosstalkScriptParser.DescribeLine));
+        await shadowCheck.CheckAsync(request, BuildInput, raw, cleaned, legacyOutcome, ct);
+    }
+
+    static IReadOnlyList<UtteranceEntry> RowsOf(
+        IReadOnlyList<CrosstalkLineMemory.SpeakerHistory> histories, CrosstalkSpeaker speaker) =>
+        histories.FirstOrDefault(h => h.Speaker == speaker)?.Rows ?? [];
 
     CrosstalkWriteResult.Accepted CapSoundTags(CrosstalkWriteResult.Accepted accepted)
     {

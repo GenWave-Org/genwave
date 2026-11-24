@@ -60,6 +60,12 @@ public static class StationSettingsAllowlist
             .Select(value => new SettingChoice(value, value, value == GenWave.Core.Llm.ReasoningEffort.Default))
             .ToList();
 
+    /// <summary><c>TalkRules:Mode</c>'s choices (F220.18): legacy, shadow, rules, in <see cref="GenWave.Core.TalkRules.TalkRulesModes.Accepted"/>'s order with the default flagged.</summary>
+    static readonly IReadOnlyList<SettingChoice> TalkRulesModeChoices =
+        GenWave.Core.TalkRules.TalkRulesModes.Accepted
+            .Select(value => new SettingChoice(value, value, value == GenWave.Core.TalkRules.TalkRulesModes.Default))
+            .ToList();
+
     static readonly IReadOnlyList<SettingChoice> ShippedThemeChoices =
         ThemeCatalog.LoadShipped().All
             .Select(theme => new SettingChoice(theme.Slug, theme.Name, theme.Slug == ThemeCatalog.ShippedDefaultSlug))
@@ -352,6 +358,10 @@ public static class StationSettingsAllowlist
         new("Tts:BlurbRetentionHours", SettingApplyMode.Live, SettingKind.Number, "hours", SettingGroup.Voice, Min: 1, Max: 8760),
         new("Llm:MaxCopyChars", SettingApplyMode.Live, SettingKind.Number, "chars", SettingGroup.Voice, Min: 1, Max: 10000),
         new("Admin:PlayHistoryCapacity", SettingApplyMode.Live, SettingKind.Number, "entries", SettingGroup.System, Min: 1, Max: 5000),
+        // F220.29 (T779): how long station.talk_check keeps rows; TalkCheckRepository reads it per insert, so a PUT applies to the next row.
+        new("TalkRules:CheckRetentionDays", SettingApplyMode.Live, SettingKind.Number, "days", SettingGroup.System, Min: 1, Max: 90),
+        // F220.18 (T788): who decides a written talk. DjLineShadowCheck reads it per talk, so a PUT applies to the next one.
+        new("TalkRules:Mode", SettingApplyMode.Live, SettingKind.Choice, "", SettingGroup.System, TalkRulesModeChoices),
         new("Library:ScanIntervalSeconds", SettingApplyMode.Live, SettingKind.Number, "seconds", SettingGroup.Library, Min: 1, Max: 86400),
         new("Library:EnrichmentConcurrency", SettingApplyMode.Live, SettingKind.Number, "workers", SettingGroup.Library, Min: 1, Max: 32),
 

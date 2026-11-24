@@ -30,6 +30,7 @@
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="GenWave.Ads.Tests" />
+    <InternalsVisibleTo Include="GenWave.TalkRules" />
   </ItemGroup>
   <ItemGroup>
     <!-- PLAN T399: AdBrandBlocklist/AdProfanityList (SPEC F160.3) — "the list ships embedded in

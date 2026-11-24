@@ -16,13 +16,14 @@ internal sealed class CrosstalkLineMemory(
     ILogger logger, ISentenceTrimmer? sentenceTrimmer = null)
 {
     /// <summary>How many of the speaker's newest non-template utterances a line is compared against (SPEC F218.11).</summary>
-    const int Window = 10;
+    internal const int Window = 10;
 
     /// <summary>The <c>segment_kind</c> every stored crosstalk line carries.</summary>
     public const string SegmentKind = "CrosstalkLine";
 
-    /// <summary>One speaker's own non-template recent texts, newest first.</summary>
-    public sealed record SpeakerHistory(CrosstalkSpeaker Speaker, long PersonaId, string PersonaName, IReadOnlyList<string> Texts);
+    /// <summary>One speaker's own non-template recent texts, newest first, and the rows as read (fallbacks included) for the shadow week.</summary>
+    public sealed record SpeakerHistory(
+        CrosstalkSpeaker Speaker, long PersonaId, string PersonaName, IReadOnlyList<string> Texts, IReadOnlyList<UtteranceEntry> Rows);
 
     /// <summary>A line that repeats its own speaker's history: its index in the script and the phrases that hit.</summary>
     public sealed record LineHit(int LineIndex, long PersonaId, IReadOnlyList<string> Phrases);
@@ -181,7 +182,7 @@ internal sealed class CrosstalkLineMemory(
         try
         {
             var recent = await store.RecentAsync(personaId, Window, ct);
-            return new SpeakerHistory(speaker, personaId, personaName, recent.Where(e => !e.Fallback).Select(e => e.Text).ToList());
+            return new SpeakerHistory(speaker, personaId, personaName, recent.Where(e => !e.Fallback).Select(e => e.Text).ToList(), recent);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -190,7 +191,7 @@ internal sealed class CrosstalkLineMemory(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Recent-lines read failed for crosstalk persona {PersonaId}; its lines go unchecked", personaId);
-            return new SpeakerHistory(speaker, personaId, personaName, []);
+            return new SpeakerHistory(speaker, personaId, personaName, [], []);
         }
     }
 }

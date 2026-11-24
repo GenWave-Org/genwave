@@ -37,6 +37,7 @@ public sealed class FeatureNamespaceCycleFreedom
         "GenWave.Memory",
         "GenWave.Orchestration",
         "GenWave.Plugins",
+        "GenWave.TalkRules",
         "GenWave.Tts",
     ];
 

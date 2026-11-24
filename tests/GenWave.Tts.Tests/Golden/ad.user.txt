@@ -1,0 +1,9 @@
+Sponsor: Cravin's Diner
+Tagline: Pie at midnight
+About: Family run since 1974, open all night.
+Phone: 555-0142
+Address: 12 Main Street
+Website: cravins.example
+Premise: A retro diner with a twist
+Tone: warm and playful
+Write the spot now.

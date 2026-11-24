@@ -42,16 +42,22 @@ internal static class AdScriptRequests
         var writeRequest = new AdScriptWriteRequest(
             sponsor.Name, premise, tone, spotSeconds, posture, maxLineChars, toleranceRatio,
             Tagline: sponsor.Tagline, About: sponsor.About, Phone: sponsor.Phone, Address: sponsor.Address,
-            Website: sponsor.Website, HouseTone: sponsor.Tone);
+            Website: sponsor.Website, HouseTone: sponsor.Tone, IsPackOwned: sponsor.PackSlug is not null);
 
-        // The owner-sponsor skips (SPEC F172.5, PLAN T438 ruling): IsPackOwned answers "does the
-        // SPONSOR belong to a pack" — it reads sponsor.PackSlug, never brief.PackSlug.
-        var validationRequest = new AdScriptValidationRequest(
-            posture, maxLineChars, spotSeconds, toleranceRatio,
-            SponsorName: sponsor.Name, SponsorPhone: sponsor.Phone, IsPackOwned: sponsor.PackSlug is not null);
+        var validationRequest = ValidationRequestFor(writeRequest);
 
         return (writeRequest, BuildValidateDelegate(validationRequest, durationEstimator));
     }
+
+    /// <summary>
+    /// The validator's own request for one write request — the single mapping both the validate delegate and the shadow
+    /// check (<see cref="AdShadowCheck"/>) use, so the rules judge exactly what the validator judges. The owner-sponsor
+    /// skips (SPEC F172.5, PLAN T438 ruling): <see cref="AdScriptWriteRequest.IsPackOwned"/> answers "does the SPONSOR
+    /// belong to a pack" — it reads sponsor.PackSlug, never brief.PackSlug.
+    /// </summary>
+    internal static AdScriptValidationRequest ValidationRequestFor(AdScriptWriteRequest request) => new(
+        request.Posture, request.MaxLineChars, request.SpotSeconds, request.ToleranceRatio,
+        SponsorName: request.SponsorName, SponsorPhone: request.Phone, IsPackOwned: request.IsPackOwned);
 
     static Func<string, AdScriptValidationOutcome> BuildValidateDelegate(
         AdScriptValidationRequest validationRequest, IPatterDurationEstimator durationEstimator) =>

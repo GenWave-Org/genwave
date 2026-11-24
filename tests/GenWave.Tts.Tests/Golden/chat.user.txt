@@ -1,0 +1,5 @@
+Station: GenWave
+Current date/time (station-local): Monday, November 23, 2026, 6:30 PM
+Show: Night Shift
+Time of day: late night
+Write the exchange now.

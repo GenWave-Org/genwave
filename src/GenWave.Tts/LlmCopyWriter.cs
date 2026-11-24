@@ -11,6 +11,7 @@ using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Core.Events;
 using GenWave.Core.Llm;
+using GenWave.Core.TalkRules;
 
 /// <summary>
 /// LLM-backed <see cref="ISegmentCopyWriter"/> (SPEC F34.2-F34.5, F92.2, F92.5, F107.3): authors
@@ -142,13 +143,17 @@ public sealed class LlmCopyWriter(
     IMemoryRecallSource? memoryRecall = null,
     ILifeExtractor? lifeExtractor = null, // T704: absent means no life extraction, exactly the pre-extractor behaviour
     BreakCallbacks? callbacks = null, // T736: absent means no callback breaks, exactly the pre-callback behaviour
-    ISoundTagOfferProvider? soundTagOffers = null) // T760: absent means no sound tags in the prompt, exactly the pre-tag behaviour
+    ISoundTagOfferProvider? soundTagOffers = null, // T760: absent means no sound tags in the prompt, exactly the pre-tag behaviour
+    DjLineShadowCheck? shadowCheck = null, // T788: absent means no shadow week, exactly the pre-shadow behaviour
+    Random? selfNameRoll = null) // T787: the golden-prompt specs pin the self-name roll; absent means Random.Shared, as before
     : ISegmentCopyWriter, IPersonaPreviewWriter, IAnnouncementCopyWriter
 {
+    readonly Random selfNameRandom = selfNameRoll ?? Random.Shared;
+
     readonly IStationEventSink events = events ?? NoOpStationEventSink.Instance;
 
     /// <summary>How many of the persona's newest non-template utterances the repetition check compares against (SPEC F218.11).</summary>
-    const int RepetitionWindow = 10;
+    internal const int RepetitionWindow = 10;
 
     /// <summary>Name of the <see cref="IHttpClientFactory"/> client this writer resolves (registered in Program.cs).</summary>
     public const string HttpClientName = "Llm";
@@ -690,6 +695,11 @@ public sealed class LlmCopyWriter(
         if (degradationMode.CurrentMode == DegradationMode.Hard)
             return null;
 
+        // T788: a blank owner message is no fact block. Refusing it here keeps legacy's CheckFacts (which would read it as a
+        // blank block) and the DJ snapshot (which carries no facts for it) agreeing; the caller airs the plain copy, as for any null.
+        if (string.IsNullOrWhiteSpace(message))
+            return null;
+
         var attemptedAt = DateTimeOffset.UtcNow;
         LlmOptions? cfg = null;
         Persona? persona = null;
@@ -1004,11 +1014,17 @@ public sealed class LlmCopyWriter(
     /// </summary>
     IReadOnlyList<string> FindRepeats(
         string copy, SegmentRequest request, string? personaName, IReadOnlyList<UtteranceEntry> recent,
-        PersonaCard? card, QuirkSelection? quirkSelection, IReadOnlyList<TaglineStatus> taglines)
-    {
-        if (repetitionCheck is null)
-            return [];
+        PersonaCard? card, QuirkSelection? quirkSelection, IReadOnlyList<TaglineStatus> taglines) =>
+        repetitionCheck is null
+            ? []
+            : FindRepeats(repetitionCheck, copy, request, personaName, recent, card, quirkSelection, taglines);
 
+    /// <summary>The check itself, static so the <c>repeat-phrases</c> parity specs run the real legacy path without building a writer.</summary>
+    internal static IReadOnlyList<string> FindRepeats(
+        IRepetitionCheck repetitionCheck, string copy, SegmentRequest request, string? personaName,
+        IReadOnlyList<UtteranceEntry> recent, PersonaCard? card, QuirkSelection? quirkSelection,
+        IReadOnlyList<TaglineStatus> taglines)
+    {
         var recentTexts = recent.Where(e => !e.Fallback).Take(RepetitionWindow).Select(e => e.Text).ToList();
         var result = repetitionCheck.Check(
             SoundTags.Strip(copy), // SPEC F219.18
@@ -1027,7 +1043,7 @@ public sealed class LlmCopyWriter(
     /// the cap (no spend recorded). Shared by the repeat check and the tagline ledger so they cannot disagree:
     /// the selector already wrote THIS break's spend row, so a rule it just selected must stay available.
     /// </summary>
-    static IReadOnlyList<string> CappedNotSelectedRules(PersonaCard? card, QuirkSelection? quirkSelection) =>
+    internal static IReadOnlyList<string> CappedNotSelectedRules(PersonaCard? card, QuirkSelection? quirkSelection) =>
         quirkSelection is null
             ? []
             : (card?.QuirkRules ?? [])
@@ -1155,7 +1171,7 @@ public sealed class LlmCopyWriter(
             // Random.Shared — the source the builder's own SampleQuirks and Orchestration's
             // SystemRandomSource already standardize on. The builder enforces the persona gate
             // itself: with no persona section there is no line, however the roll lands.
-            var mentionOwnName = Random.Shared.NextDouble() < LlmPromptBuilder.SelfNameMentionProbability;
+            var mentionOwnName = selfNameRandom.NextDouble() < LlmPromptBuilder.SelfNameMentionProbability;
             // Captured once (SPEC F138.5, PLAN T331): BuildSystemPrompt's own clock guard line and
             // BuildUserContent's station clock line below must provably read the SAME instant — the
             // identical discipline CopyClaims.CheckClock's own remarks already require of its caller.
@@ -1169,8 +1185,8 @@ public sealed class LlmCopyWriter(
             var checkRepeats = repetitionCheck is not null && spendQuirks;
             var useTaglines = spendQuirks && taglineLedger is not null;
             var recentEntries = await ReadRecentEntriesAsync(request, checkRepeats || useTaglines, ct);
-            var taglines = EvaluateTaglines(
-                card, quirkSelection, await ReadTaglineEntriesAsync(request, recentEntries, useTaglines, ct), onAir: spendQuirks);
+            var taglineEntries = await ReadTaglineEntriesAsync(request, recentEntries, useTaglines, ct);
+            var taglines = EvaluateTaglines(card, quirkSelection, taglineEntries, onAir: spendQuirks);
             // T701/T736 (F218.19, F218.40): on-air only, inside the critical section. The prompt carries the never-mention
             // list and, for a callback break, the one asked-for memory; the offer row is written before the render.
             var onAirBreak = spendQuirks && requiredCore is null;
@@ -1317,7 +1333,39 @@ public sealed class LlmCopyWriter(
             recorder.Record(
                 personaName, systemPrompt, userPrompt, text, startedAt, ElapsedMs(startedAt),
                 ringOutcome, statusDetail: null, mode, cause, cfg.Model, callKind);
+            // T788: attempt 1 passed the gate or never reached it; today's code aired or templated it as is.
+            // No usable text, three cases. A preview (!spendQuirks) never templates: WritePreviewAsync turns the null
+            // reply into PersonaPreviewResult.Failed and nothing airs or shows, so Dropped whatever the kind. Else kinds
+            // that never air template copy are dropped (TemplateCopyPolicy, the same rule TtsSegmentSource drops by),
+            // the rest fall to the template rung. Announcement is the exception: a null return airs the owner's plain
+            // copy (BreakRenderer), so something does air from fallback, i.e. Template.
+            await ShadowAttemptOneAsync(
+                TextOf(cleanup) is null
+                    ? (!spendQuirks
+                        || (request.Kind != SegmentKind.Announcement && TemplateCopyPolicy.NeverAirsTemplateCopy(request.Kind))
+                        ? TalkLegacyOutcome.Dropped
+                        : TalkLegacyOutcome.Template)
+                    : cleanup is LlmCopyCleanupResult.Trimmed ? TalkLegacyOutcome.Trimmed
+                    : TalkLegacyOutcome.Passed);
             return cleanup;
+
+            // T788 (F220.19): after today's code decided attempt 1, hand the same reply to the shadow week. Judges only in
+            // shadow mode; a fault inside logs a Warning and changes nothing. Rows are what legacy read: the writer's own lists.
+            async Task ShadowAttemptOneAsync(TalkLegacyOutcome legacyOutcome)
+            {
+                if (shadowCheck is null || !shadowCheck.IsOn())
+                    return;
+
+                var cleanedText = TextOf(cleanup);
+                // Built inside the check's fault boundary: a throw while shaping the input must never reach the writer.
+                DjLineSnapshotInput BuildInput() => new(
+                    request, 1, cleanedText ?? string.Empty, request.PersonaId ?? persona?.Id ?? 0, personaName ?? string.Empty,
+                    card, factBlock, requiredCore, (stationClock?.Zone ?? timeProvider.LocalTimeZone).Id,
+                    recentEntries, taglineEntries, [], // the tagline window already holds the last hour's rows
+                    quirkSelection is null ? null : LegacyCatchphraseResult.From(card, quirkSelection, taglines),
+                    Preview: !spendQuirks);
+                await shadowCheck.CheckAsync(request, BuildInput, text, cleanedText, legacyOutcome, ct);
+            }
 
             // SPEC F138.4 (STORY-350, PLAN T331) — one truth-gate ladder run: gate
             // firstCandidate against check; a repeat-only hit first tries the F218.35 sentence trim
@@ -1364,6 +1412,7 @@ public sealed class LlmCopyWriter(
                     recorder.Record(
                         personaName, systemPrompt, userPrompt, firstRawText, startedAt, ElapsedMs(startedAt),
                         trimOutcome, statusDetail: null, mode, trimCause, cfg.Model, callKind);
+                    await ShadowAttemptOneAsync(TalkLegacyOutcome.Trimmed);
                     return new LlmCopyCleanupResult.Fits(trimmed);
                 }
 
@@ -1375,6 +1424,8 @@ public sealed class LlmCopyWriter(
                 recorder.Record(
                     personaName, systemPrompt, userPrompt, firstRawText, startedAt, ElapsedMs(startedAt),
                     LlmCallOutcome.Ok, statusDetail: null, mode, gateResult.RejectCause, cfg.Model, callKind);
+                // T788: attempt 1 is decided (re-ask); record it before the re-ask call so a failing re-ask still leaves the row.
+                await ShadowAttemptOneAsync(TalkLegacyOutcome.ReAsked);
 
                 // Exactly ONE re-ask (F138.4), naming the violation. userPrompt AND startedAt are both
                 // REASSIGNED (never shadowed by a new local) so a fault raised by THIS call — timeout,

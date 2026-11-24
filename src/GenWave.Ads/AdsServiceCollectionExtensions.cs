@@ -3,6 +3,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using GenWave.Core.Abstractions;
+using GenWave.Core.TalkRules;
+using GenWave.Tts;
 
 namespace GenWave.Ads;
 
@@ -83,6 +85,12 @@ public static class AdsServiceCollectionExtensions
         // preview job (below) share ONE stamping implementation rather than the worker's own copy
         // diverging from a second, hand-kept-in-sync one.
         services.AddSingleton<AdSpotStamper>();
+
+        // The talk-rule snapshot source for ad attempts (SPEC F220.7; PLAN T782).
+        services.AddSingleton<ITalkSnapshotSource<AdSnapshotInput>, AdSnapshotSource>();
+        // The ad shadow hook (SPEC F220.18-F220.19; PLAN T790): AdScriptWriter resolves it optionally through
+        // IAdShadowCheck; it judges only while the live TalkRules:Mode is shadow.
+        services.AddSingleton<IAdShadowCheck, AdShadowCheck>();
 
         // The off-air-clock tick loop + its stuck-rendering guardian (SPEC F159.3, F159.4, F161.1;
         // STORY-389, STORY-391; PLAN T402) — both live in THIS project (unlike CrosstalkStockWorker/

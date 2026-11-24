@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
+using GenWave.Core.TalkRules;
 using GenWave.Loudness;
 
 namespace GenWave.Tts;
@@ -111,6 +112,13 @@ public static class TtsServiceCollectionExtensions
             .AddOptions<LlmOptions>()
             .Bind(configuration.GetSection(LlmOptions.Section))
             .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        // F220.18: TalkRules:Mode, read per written talk through the monitor so a live PUT applies to the next one.
+        services
+            .AddOptions<TalkRulesOptions>()
+            .Bind(configuration.GetSection(TalkRulesOptions.Section))
+            .Validate(options => TalkRulesModes.IsValid(options.Mode), "TalkRules:Mode must be legacy, shadow or rules.")
             .ValidateOnStart();
 
         // gh-#253: the live Llm:MaxCopyChars seam the patter-duration estimator's cold tier reads
@@ -314,6 +322,17 @@ public static class TtsServiceCollectionExtensions
             // F35.6/T7) — so the persona preview endpoint reuses the exact same prompt-building/
             // hygiene instance the feeder does, never a second parallel writer.
             .AddSingleton<LlmCopyWriter>()
+            // DJ-line snapshot source (SPEC F220.7, PLAN T780): builds the talk-rule snapshot from the writer's inputs.
+            // Not wired into the writer yet.
+            .AddSingleton<ITalkSnapshotSource<DjLineSnapshotInput>, DjLineSnapshotSource>()
+            // Shadow hook (SPEC F220.18-F220.19, PLAN T788): LlmCopyWriter resolves it optionally; it judges only while the
+            // live TalkRules:Mode is shadow.
+            .AddSingleton<DjLineShadowCheck>()
+            // Chat snapshot source (SPEC F220.7, PLAN T781): same shape for crosstalk.
+            .AddSingleton<ITalkSnapshotSource<ChatSnapshotInput>, ChatSnapshotSource>()
+            // Chat shadow hook (SPEC F220.18-F220.19, PLAN T789): CrosstalkScriptWriter resolves it optionally; it judges only
+            // while the live TalkRules:Mode is shadow.
+            .AddSingleton<ChatShadowCheck>()
             // The life extractor's own completion seam (SPEC F218.17, PLAN T704): same endpoint/key/timeout, called
             // only from the background LifeExtractionService, never from the render path.
             .AddSingleton<ILifeClaimLlm, LifeClaimLlm>()

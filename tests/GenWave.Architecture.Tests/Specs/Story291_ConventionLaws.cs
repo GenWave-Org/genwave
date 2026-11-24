@@ -173,17 +173,23 @@ public sealed class FeatureConventionLaws
             DependencyLawAssert.AssertNone(violations, ExemptionBaseline.Entries);
         }
 
+        // ARCHITECTURE "DJ-line rules" (SPEC F220): GenWave.TalkRules is declared as -> Core, Tts, Memory, Ads, so it
+        // is the one project besides Host allowed to reference Memory. The scan reads compiled assembly
+        // references (the compiler drops an unused project reference), so the allowance is made in advance of
+        // the first rule that uses Memory rather than being exercised today.
         [Fact]
-        public void OnlyHostReferencesMemoryAmongProductionProjects()
+        public void OnlyHostAndTalkRulesReferenceMemoryAmongProductionProjects()
         {
             var violations = ProductionAssemblies.AllProductionAssemblies()
-                .Where(assembly => assembly != ProductionAssemblies.Memory && assembly != ProductionAssemblies.Host)
+                .Where(assembly => assembly != ProductionAssemblies.Memory
+                    && assembly != ProductionAssemblies.Host
+                    && assembly != ProductionAssemblies.TalkRules)
                 .SelectMany(assembly => AssemblyReferenceScan
                     .ForbiddenReferences(assembly.Location, name => name == "GenWave.Memory")
                     .Select(reference => new LawViolation(
                         LawId.L6,
                         assembly.GetName().Name ?? assembly.FullName ?? "unknown assembly",
-                        $"references \"{reference}\" — only the composition root (GenWave.Host) wires Memory; " +
+                        $"references \"{reference}\" — only the composition root (GenWave.Host) and GenWave.TalkRules wire Memory; " +
                         "everything else consumes its ports through GenWave.Core")))
                 .ToList();
 

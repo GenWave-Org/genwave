@@ -66,7 +66,7 @@ public static partial class AdScriptValidator
 {
     /// <summary>The house spoken-rate constant (chars/second) — see <see cref="CheckDuration"/>'s own
     /// remarks and this class's own "duration is text-driven" summary above.</summary>
-    const double CharsPerSecond = 15.0;
+    internal const double CharsPerSecond = 15.0;
 
     public static AdScriptValidationResult Validate(
         string rawScript, AdScriptValidationRequest request, IPatterDurationEstimator durationEstimator)
@@ -118,21 +118,19 @@ public static partial class AdScriptValidator
         var totalSeconds = 0.0;
         foreach (var line in script.Lines)
         {
-            var textSeconds = line.Text.Length / CharsPerSecond;
             var estimate = durationEstimator.Estimate(SegmentKind.Ad, line.Tag, line.Tag);
 
             // The text estimate is the floor for every line; a tier the estimator itself flags as
             // grounded in a real observation may only push a line's estimate UP, never down (PLAN
             // T399 review F1) — an untested Heuristic answer never overrides the text-based floor.
-            totalSeconds += estimate.Confidence == PatterEstimateConfidence.Heuristic
-                ? textSeconds
-                : Math.Max(textSeconds, estimate.Duration.TotalSeconds);
+            var observedSeconds = estimate.Confidence == PatterEstimateConfidence.Heuristic ? 0 : estimate.Duration.TotalSeconds;
+            totalSeconds += LineSeconds(line.Text.Length, CharsPerSecond, observedSeconds);
         }
 
         // SPEC F160.3's literal rule is "refuse over" only — an under-length script is never refused
         // here, even though the tolerance is framed as "±" (the ratified spec text wins over the
         // broader "±" framing).
-        var ceilingSeconds = request.SpotSeconds * (1 + request.ToleranceRatio);
+        var ceilingSeconds = CeilingSeconds(request.SpotSeconds, request.ToleranceRatio);
         if (totalSeconds <= ceilingSeconds)
             return null;
 
@@ -142,19 +140,35 @@ public static partial class AdScriptValidator
             $"(+{request.ToleranceRatio:P0} tolerance, {ceilingSeconds:F1}s ceiling)");
     }
 
+    /// <summary>One line's estimated seconds: its text length at <paramref name="charsPerSecond"/> is the floor, and a
+    /// measurement-grounded <paramref name="observedSeconds"/> (0 when there is none) may only raise it. The one body
+    /// <see cref="CheckDuration"/> and the fits-time talk rule share.</summary>
+    internal static double LineSeconds(int textChars, double charsPerSecond, double observedSeconds) =>
+        Math.Max(textChars / charsPerSecond, observedSeconds);
+
+    /// <summary>The longest estimate a spot may run to before it is refused.</summary>
+    internal static double CeilingSeconds(int spotSeconds, double toleranceRatio) => spotSeconds * (1 + toleranceRatio);
+
     static AdScriptViolation? CheckBrandCollision(IReadOnlyList<string> foldedVariants, AdScriptValidationRequest request)
+    {
+        if (FirstBlocklistedBrand(foldedVariants, request.IsPackOwned, request.SponsorName) is not { } brand)
+            return null;
+
+        return new AdScriptViolation(AdScriptRuleIds.BrandCollision, $"the script named a blocklisted brand (\"{brand}\")");
+    }
+
+    /// <summary>The first blocklisted brand named in <paramref name="foldedVariants"/>, or null: the one body
+    /// <see cref="CheckBrandCollision"/> and the other-brands talk rule share.</summary>
+    internal static string? FirstBlocklistedBrand(IReadOnlyList<string> foldedVariants, bool isPackOwned, string? sponsorName)
     {
         // The owner-sponsor name skip (SPEC F172.5, PLAN T438 ruling): a pack-owned sponsor, or an
         // owner sponsor with no name on file, checks the variants unchanged — everything below is
         // identical to before this member existed.
-        var variants = request is { IsPackOwned: false, SponsorName: { } sponsorName } && !string.IsNullOrWhiteSpace(sponsorName)
+        var variants = !isPackOwned && !string.IsNullOrWhiteSpace(sponsorName)
             ? StripLiteral(foldedVariants, AdCopyFold.Fold(sponsorName))
             : foldedVariants;
 
-        if (FoldedWordListMatcher.FirstMatch(variants, AdBrandBlocklist.FoldedEntries) is not { } brand)
-            return null;
-
-        return new AdScriptViolation(AdScriptRuleIds.BrandCollision, $"the script named a blocklisted brand (\"{brand}\")");
+        return FoldedWordListMatcher.FirstMatch(variants, AdBrandBlocklist.FoldedEntries);
     }
 
     /// <summary>Removes every word-boundary occurrence of <paramref name="foldedLiteral"/> from EACH
@@ -269,9 +283,14 @@ public static partial class AdScriptValidator
     [GeneratedRegex(@"\([^()\n]*[A-Za-z][^()\n]*\)|\[[^\[\]\n]*[A-Za-z][^\[\]\n]*\]|\*[^*\n]*[A-Za-z][^*\n]*\*")]
     private static partial Regex StageDirectionResiduePattern();
 
+    /// <summary>The first listed word in <paramref name="foldedVariants"/>, or null: the one body
+    /// <see cref="CheckAudiencePosture"/> and the clean-language talk rule share (the list itself stays inside this project).</summary>
+    internal static string? FirstProfaneWord(IReadOnlyList<string> foldedVariants) =>
+        FoldedWordListMatcher.FirstMatch(foldedVariants, AdProfanityList.FoldedEntries);
+
     static AdScriptViolation? CheckAudiencePosture(IReadOnlyList<string> foldedVariants)
     {
-        if (FoldedWordListMatcher.FirstMatch(foldedVariants, AdProfanityList.FoldedEntries) is null)
+        if (FirstProfaneWord(foldedVariants) is null)
             return null;
 
         // Never echoes the matched word itself into the reason — the reason is logged/surfaced
