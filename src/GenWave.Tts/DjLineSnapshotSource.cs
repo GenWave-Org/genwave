@@ -36,7 +36,8 @@ public sealed class DjLineSnapshotSource(
             TalkRecentLines.Of(input.NewestRows.Concat(input.TaglineWindowRows).Concat(input.LastHourRows)),
             null,
             MemosOf(input.Legacy),
-            Preview: input.Preview));
+            Preview: input.Preview,
+            ShiftKey: request.ShiftKeyText));
     }
 
     TalkList<string> CardPhrasesOf(DjLineSnapshotInput input) =>
@@ -67,9 +68,8 @@ public sealed class DjLineSnapshotSource(
         if (legacy is null)
             return TalkMemos.Empty;
 
-        var memo = new CatchphraseLimitsMemo(legacy.Quirks.Lines, legacy.Allowed, legacy.Unavailable, legacy.Spent);
         return TalkMemos.Empty.With(
             CatchphraseLimitsMemo.RuleId,
-            JsonSerializer.SerializeToElement(memo, TalkSnapshotJson.Options));
+            JsonSerializer.SerializeToElement(CatchphraseLimitsMemo.Of(legacy), TalkSnapshotJson.Options));
     }
 }

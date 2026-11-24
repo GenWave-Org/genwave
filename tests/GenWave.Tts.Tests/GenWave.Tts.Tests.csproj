@@ -29,6 +29,8 @@
     <ProjectReference Include="..\..\src\GenWave.Tts\GenWave.Tts.csproj" />
     <ProjectReference Include="..\..\src\GenWave.Loudness\GenWave.Loudness.csproj" />
     <ProjectReference Include="..\..\src\GenWave.Memory\GenWave.Memory.csproj" />
+    <!-- STORY-570 AC7: the golden prompts are re-rendered through the real shapers. -->
+    <ProjectReference Include="..\..\src\GenWave.TalkRules\GenWave.TalkRules.csproj" />
   </ItemGroup>
 
   <ItemGroup>

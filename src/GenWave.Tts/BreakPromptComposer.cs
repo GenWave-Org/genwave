@@ -9,13 +9,19 @@ internal static class BreakPromptComposer
 {
     public static BreakPrompt Compose(BreakPromptInputs inputs)
     {
-        var system = LlmPromptBuilder.BuildSystemPrompt(
-            LlmPromptBuilder.BuildPersonaSection(
+        var personaSection = inputs.Shaping is not null
+            ? LlmPromptBuilder.BuildShapedPersonaSection(
+                inputs.Persona, inputs.Card, inputs.MentionOwnName, inputs.Memory)
+            : LlmPromptBuilder.BuildPersonaSection(
                 inputs.Persona, inputs.Card, inputs.MentionOwnName, inputs.Quirks, inputs.RecentLines, inputs.Taglines,
-                inputs.Memory),
+                inputs.Memory);
+        var system = LlmPromptBuilder.BuildSystemPrompt(
+            personaSection,
             inputs.MaxCopyChars,
             inputs.StationLocalNow,
-            inputs.SoundTags);
+            inputs.SoundTags,
+            inputs.Shaping?.ForThisBreak(),
+            inputs.Shaping is null ? null : LlmPromptBuilder.HasPersonaSection(inputs.Persona, inputs.Card));
 
         var clockLine = LlmPromptBuilder.BuildStationClockLine(inputs.StationLocalNow);
         var user = inputs.AnnouncementMessage is { } message

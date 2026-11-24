@@ -2,7 +2,9 @@ namespace GenWave.Tts.Tests.Fakes;
 
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.Core.TalkRules;
 using GenWave.Memory;
+using GenWave.TalkRules;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 
@@ -38,6 +40,46 @@ static class GoldenPromptFixtures
         var prompts = new List<GoldenPrompt>();
         foreach (var fixture in DjLineFixtures())
             prompts.Add(await CaptureDjLineAsync(fixture));
+        return prompts;
+    }
+
+    /// <summary>
+    /// The same DJ-line fixtures, with the system prompt composed in its rules-mode form (F220.10): the real
+    /// <c>catchphrase-limits</c> and <c>repeat-phrases</c> shapers, run by the real rule book over a snapshot built from
+    /// the fixture's own stores, offer the text that the legacy prompt carries inline. Only the system prompt is
+    /// returned: the moved text is all in it, and the writer-only user parts (callback ask, facts) are not rebuilt here.
+    /// </summary>
+    public static async Task<IReadOnlyList<GoldenPrompt>> DjLineSystemsInRulesFormAsync()
+    {
+        var cards = new FakePersonaCardByIdSource();
+        cards.Add(HostId, Card("DJ Nova"));
+        var book = new TalkRuleBook(
+            [new CatchphraseLimitsRule(new RepetitionCheck(), new FixedQuirks(), new TaglineLedger(), cards), new RepeatPhrasesRule(new RepetitionCheck())],
+            new InMemoryTalkRuleSwitches(), NullLogger<TalkRuleBook>.Instance);
+        var recent = TalkRecentLines.Of(SeededStore().Seeded);
+
+        var prompts = new List<GoldenPrompt>();
+        foreach (var fixture in DjLineFixtures())
+        {
+            var before = new TalkSnapshot(
+                TalkKinds.DjLine, fixture.Request.Kind.ToString(), 1, TalkList<TalkLine>.Empty,
+                new TalkList<TalkSpeaker>([new TalkSpeaker(HostId, "DJ Nova", TalkList<string>.Empty)]),
+                null, null, Now, "America/Edmonton", null, new TalkStation("GenWave", "everyone"),
+                recent, null, TalkMemos.Empty, ShiftKey: fixture.Request.ShiftKeyText);
+            var shaping = await book.ShapeAsync(before, CancellationToken.None);
+
+            var composed = BreakPromptComposer.Compose(new BreakPromptInputs(
+                fixture.Request, null, Card("DJ Nova"), true, null, [], Llm.MaxCopyChars, Now, [])
+            {
+                Shaping = shaping,
+                // The writer asks for the never-mention list on air only, and an announcement is not that.
+                Memory = fixture.Announcement is null ? new MemoryPacket(["the night the transmitter failed", "Daisy the dog"]) : null,
+                SoundTags = SoundTags,
+                AnnouncementMessage = fixture.Announcement,
+            });
+            prompts.Add(new GoldenPrompt(fixture.Name, composed.System, string.Empty));
+        }
+
         return prompts;
     }
 

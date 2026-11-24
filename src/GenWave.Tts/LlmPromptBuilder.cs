@@ -2,6 +2,7 @@ namespace GenWave.Tts;
 
 using System.Globalization;
 using GenWave.Core.Domain;
+using GenWave.Core.TalkRules;
 
 /// <summary>
 /// Pure, stateless prompt composition for <see cref="LlmCopyWriter"/> (SPEC F34.3, F35.2, F35.3,
@@ -90,8 +91,13 @@ static class LlmPromptBuilder
     /// </para>
     /// </summary>
     public static string BuildSystemPrompt(
-        string? personaSection, int maxCopyChars, DateTimeOffset? stationLocalNow = null, SoundTagOffer? soundTags = null)
+        string? personaSection, int maxCopyChars, DateTimeOffset? stationLocalNow = null, SoundTagOffer? soundTags = null,
+        string? forThisBreak = null, bool? personaExists = null)
     {
+        // Rules form passes personaExists (a persona section exists per HasPersonaSection even when its own lines are empty,
+        // the quirks living under "For this break"); legacy leaves it null and the section text decides, as always.
+        var hasPersona = personaExists ?? !string.IsNullOrEmpty(personaSection);
+
         // gh-#152: "personality-neutral" and a persona section's "Style: bubbly, energetic,
         // expressive" cancelled each other inside the SAME prompt. The neutral framing now applies
         // ONLY when there is no persona section; with one, the opening line points the model at
@@ -153,9 +159,14 @@ static class LlmPromptBuilder
         if (stationLocalNow is { } now)
             scaffoldBody += " " + BuildClockGuardLine(now);
 
-        return string.IsNullOrEmpty(personaSection)
-            ? $"{NeutralOpening} {scaffoldBody}"
-            : $"{PersonaOpening} {scaffoldBody}\n\n{personaSection}";
+        var system = (hasPersona ? $"{PersonaOpening} {scaffoldBody}" : $"{NeutralOpening} {scaffoldBody}")
+            + (string.IsNullOrEmpty(personaSection) ? "" : $"\n\n{personaSection}");
+
+        // SPEC F220.10: rules mode only. A section of its own, right after the persona section when there is one (one line break,
+        // as the moved text sat), else alone after the scaffold. It never decides the opening.
+        return string.IsNullOrEmpty(forThisBreak)
+            ? system
+            : system + (string.IsNullOrEmpty(personaSection) ? "\n\n" : "\n") + forThisBreak;
     }
 
     /// <summary>
@@ -298,17 +309,62 @@ static class LlmPromptBuilder
         if (recentLines is { Count: > 0 } && lines.Count > 0)
             lines.AddRange(BuildRecentLinesBlock(recentLines));
 
-        // T701 (F218.22/F218.19): memory blocks ride the persona section too; an empty packet adds nothing.
-        if (memory is not null && lines.Count > 0)
-            lines.AddRange(BuildMemoryBlocks(memory));
-
-        // gh-#150: the name line is a rider on an actual persona section, never a section by
-        // itself — a persona with no soul and no quirks stays on the neutral scaffold (the
-        // "neutral otherwise" half of F35.2 above) even on a rolled-true break.
-        if (mentionOwnName && lines.Count > 0 && ResolveName(persona, card) is { } name)
-            lines.Add(BuildSelfNameMentionLine(name));
+        // T701 + gh-#150: never-mention list and name line are riders on an actual persona section, never a section by
+        // themselves - a persona with no soul and no quirks stays on the neutral scaffold even on a rolled-true break.
+        AddSectionRiders(lines, lines.Count > 0, persona, card, mentionOwnName, memory);
 
         return lines.Count == 0 ? null : string.Join('\n', lines);
+    }
+
+    /// <summary>
+    /// The persona section in its rules-mode form (SPEC F220.10, F220.21): the same soul, never-mention and name lines as
+    /// <see cref="BuildPersonaSection"/>, gated by the same <see cref="HasPersonaSection"/> test, but no quirks block and no
+    /// recent-lines block: the shapers (<c>catchphrase-limits</c>, <c>repeat-phrases</c>) own that text now. A shaper note never
+    /// creates this section; the "For this break" section is rendered apart from it by <see cref="BuildSystemPrompt"/>.
+    ///
+    /// <para>
+    /// The section's existence is <see cref="HasPersonaSection"/>(persona, card), not whether this returns text: a card with
+    /// quirks but no soul, memory or name line has a persona section whose lines are all under "For this break", so this
+    /// returns null while the composer still passes <c>personaExists: true</c> for the persona opening.
+    /// </para>
+    ///
+    /// <para>
+    /// Accepted residual: whenever the selector picks no quirk this break (chance rolls, caps spent, untracked caps), a card
+    /// with no soul has no legacy section, but the rules form counts <c>card.Quirks.Count &gt; 0</c>, so it gets the riders and
+    /// the persona opening. T800 must gate memory recall with
+    /// the same predicate as this rules-form gate (<c>LlmCopyWriter</c> currently uses
+    /// <c>HasPersonaSection(persona, card, quirkSelection)</c>).
+    /// </para>
+    /// </summary>
+    public static string? BuildShapedPersonaSection(
+        Persona? persona, PersonaCard? card, bool mentionOwnName = false, MemoryPacket? memory = null)
+    {
+        var lines = new List<string>();
+
+        var soul = BuildSoul(persona, card);
+        if (!string.IsNullOrEmpty(soul))
+            lines.Add(soul);
+
+        AddSectionRiders(lines, HasPersonaSection(persona, card), persona, card, mentionOwnName, memory);
+
+        return lines.Count == 0 ? null : string.Join('\n', lines);
+    }
+
+    /// <summary>
+    /// The riders that ride only on an actual persona section, in their one order: never-mention list (T701, F218.19), then the
+    /// say-your-own-name line (gh-#150). Shared by the legacy and rules-mode section builders so their gating cannot drift.
+    /// </summary>
+    static void AddSectionRiders(
+        List<string> lines, bool hasSection, Persona? persona, PersonaCard? card, bool mentionOwnName, MemoryPacket? memory)
+    {
+        if (!hasSection)
+            return;
+
+        if (memory is not null)
+            lines.AddRange(BuildMemoryBlocks(memory));
+
+        if (mentionOwnName && ResolveName(persona, card) is { } name)
+            lines.Add(BuildSelfNameMentionLine(name));
     }
 
     /// <summary>SPEC F218.19 - heading of the never-mention list.</summary>

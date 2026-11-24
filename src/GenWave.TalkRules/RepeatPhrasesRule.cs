@@ -19,8 +19,12 @@ namespace GenWave.TalkRules;
 /// <item>The spent-quirk and over-quota halves of the legacy check belong to <c>catchphrase-limits</c>, not here.</item>
 /// <item>A preview render is never judged: legacy runs the repeat check on air only.</item>
 /// </list>
+/// The shaping half (T796) offers a DJ line's writer the speaker's newest <see cref="LlmPromptBuilder.RecentLinesInPrompt"/> lines, templates
+/// included, as <see cref="LlmPromptBuilder.BuildRecentLinesBlock"/> builds them for the legacy prompt too. A preview gets the block as well
+/// (F218.37). A chat prompt has no such block today, so a chat gets no note. The "Said lately" skip list is not here: it comes from the
+/// tagline ledger and the quirks picked, so it belongs to <c>catchphrase-limits</c>, and this rule never reads that rule's memo.
 /// </summary>
-public sealed class RepeatPhrasesRule(IRepetitionCheck sharedRun) : IJudgingTalkRule
+public sealed class RepeatPhrasesRule(IRepetitionCheck sharedRun) : IJudgingTalkRule, IShapingTalkRule
 {
     public string Id => "repeat-phrases";
 
@@ -33,6 +37,20 @@ public sealed class RepeatPhrasesRule(IRepetitionCheck sharedRun) : IJudgingTalk
         $"Flags a line that repeats a run of {RepetitionCheck.MinRunWords} or more words in a row from one of that speaker's last {LlmCopyWriter.RepetitionWindow} lines (a chat looks at their last {CrosstalkLineMemory.Window}). A line that was a stand-in template is not counted, and neither are the speaker's and station's names, or the track details. On a single-DJ line the speaker's own catchphrases are skipped too, but in a chat they are not.",
         "Hearing the same sentence again and again makes the station sound like a loop.",
         "The speaker said \"that was a really great song\" earlier, and the new line says it again.");
+
+    public ValueTask<RuleShaping?> ShapeAsync(TalkSnapshot before, CancellationToken ct)
+    {
+        if (before.Kind != TalkKinds.DjLine || before.Speakers.FirstOrDefault() is not { } speaker)
+            return ValueTask.FromResult<RuleShaping?>(null);
+
+        var newest = before.RecentLines
+            .Where(row => row.PersonaId == speaker.PersonaId)
+            .Take(LlmPromptBuilder.RecentLinesInPrompt)
+            .Select(row => row.Text)
+            .ToList();
+        return ValueTask.FromResult<RuleShaping?>(
+            newest.Count == 0 ? null : new RuleShaping(string.Join('\n', LlmPromptBuilder.BuildRecentLinesBlock(newest)), null));
+    }
 
     public RuleFlag? Judge(TalkSnapshot after)
     {

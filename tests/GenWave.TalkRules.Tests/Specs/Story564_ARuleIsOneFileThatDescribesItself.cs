@@ -3,7 +3,10 @@
 // BDD specification — xUnit. Facts run over fixture rules in this test assembly, scanned the way the
 // host scans GenWave.TalkRules, so they stay meaningful before and after real rules ship.
 
+using GenWave.Core.Abstractions;
+using GenWave.Core.Domain;
 using GenWave.Core.TalkRules;
+using GenWave.Memory;
 using GenWave.TalkRules.Tests.Fixtures;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -15,6 +18,10 @@ public static class FeatureARuleIsOneFileThatDescribesItself
     {
         var services = new ServiceCollection();
         services.AddLogging();
+        // The collaborators a shipped shaping rule takes (the host registers the real ones).
+        services.AddSingleton<IQuirkSelector>(new RecordingQuirkSelector(QuirkSelection.None));
+        services.AddSingleton<ITaglineLedger, TaglineLedger>();
+        services.AddSingleton<IPersonaCardByIdSource>(new OneCardSource(null));
         services.AddTalkRules(typeof(TalkRuleBook).Assembly, typeof(FactsFixtureRule).Assembly);
         return services.BuildServiceProvider().GetRequiredService<TalkRuleBook>();
     }

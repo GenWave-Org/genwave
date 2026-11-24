@@ -1,6 +1,7 @@
 namespace GenWave.Tts;
 
 using GenWave.Core.Domain;
+using GenWave.Core.TalkRules;
 
 /// <summary>
 /// Everything <see cref="BreakPromptComposer"/> needs to compose one break's prompt (SPEC F218.27).
@@ -38,4 +39,11 @@ internal sealed record BreakPromptInputs(
 
     /// <summary>The one memory this lead-in or back-announce is asked to work in (F218.40); null adds no ask.</summary>
     public CallbackAsk? Callback { get; init; }
+
+    /// <summary>
+    /// The rules-mode form (SPEC F220.10, F220.21): when set, the quirks block and the recent-lines block are not composed
+    /// here, because the shapers already produced them; their notes ride in the "For this break" section instead.
+    /// <see cref="Quirks"/>, <see cref="RecentLines"/> and <see cref="Taglines"/> are then ignored. Null is today's composition.
+    /// </summary>
+    public TalkShaping? Shaping { get; init; }
 }
