@@ -91,4 +91,22 @@ public static class FeatureRuleFlaggedBoothRow
         public void TheSummaryEndsWithDropped() =>
             Assert.Equal("No repeated phrases flagged DJ Nova's chat — dropped", row.Summary);
     }
+
+    public sealed class ScenarioAFailedAd : IAsyncLifetime
+    {
+        BoothLogAppendRequest row = null!;
+
+        public async Task InitializeAsync() =>
+            row = await PublishAndCaptureAsync(
+                new RuleFlagged(null, "The right phone number", "Cravin's Diner", RuleFlagOutcome.Failed) { Talk = RuleFlagTalk.Ad });
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void TheSummaryNamesTheRuleTheSponsorAndTheAd() =>
+            Assert.Equal("The right phone number flagged Cravin's Diner's ad — failed", row.Summary);
+
+        [Fact]
+        public void TheRowIsKeyedOnNoPersona() => Assert.Null(row.PersonaId);
+    }
 }

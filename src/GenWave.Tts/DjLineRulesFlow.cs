@@ -133,8 +133,14 @@ public sealed class DjLineRulesFlow(
         TalkOutcome outcome) =>
         support.Write(request.PersonaId, raw, cleaned, snapshot, verdicts, outcome);
 
-    private void PublishFlags(DjLineRulesRender render, IReadOnlyList<FlaggedRule> flags, RuleFlagOutcome outcome) =>
+    private void PublishFlags(DjLineRulesRender render, IReadOnlyList<FlaggedRule> flags, RuleFlagOutcome outcome)
+    {
+        // No persona, no row to key it on.
+        if (render.Input.Request.PersonaId is null)
+            return;
+
         support.PublishFlags(render.Input.Request.PersonaId, render.Input.PersonaName, RuleFlagTalk.Line, flags, outcome);
+    }
 
     private static TalkSnapshot Carry(TalkSnapshot snapshot, DjLineRulesRender render, TalkMemos memos) =>
         snapshot with

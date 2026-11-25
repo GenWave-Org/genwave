@@ -44,15 +44,16 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **181 seams across 10 projects.**
+> **182 seams across 10 projects.**
 
-## GenWave.Ads (4 seams)
+## GenWave.Ads (5 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
 | `GenWave.Core.Abstractions.IAdSpotSource` | `GenWave.Ads.LibraryAdSpotSource` | Singleton | — |
 | `GenWave.Core.Abstractions.IAdSpotVend` | `GenWave.Ads.AdSpotPipeline` | Singleton | also registered: `GenWave.Core.Abstractions.NoOpAdSpotVend` (GenWave.Core) |
 | `GenWave.Core.TalkRules.ITalkSnapshotSource<GenWave.Ads.AdSnapshotInput>` | `GenWave.Ads.AdSnapshotSource` | Singleton | — |
+| `GenWave.Tts.IAdRulesFlow` | `GenWave.Ads.AdRulesFlow` | Singleton | — |
 | `GenWave.Tts.IAdShadowCheck` | `GenWave.Ads.AdShadowCheck` | Singleton | — |
 
 ## GenWave.Context (2 seams)

@@ -20,6 +20,10 @@ internal sealed class RulesFlowSupport(ITalkRuleBook ruleBook, ITalkCheckLog che
         .Select(v => new FlaggedRule(v, v.Flag ?? throw new InvalidOperationException("Flagged verdict without a flag.")))
         .ToList();
 
+    /// <summary>The reason a failed or dropped re-ask gives when it was flagged again, naming every flagged rule (F220.14).</summary>
+    public static string FlaggedAgainReason(IEnumerable<string> ruleNames) =>
+        $"the re-ask was flagged again ({string.Join(", ", ruleNames)})";
+
     /// <summary>
     /// A shaper or recorder that threw is recorded on its rule's verdict as <see cref="RuleVerdict.Broken"/> (F220.9), never as a
     /// flag: it must not change the outcome, nor a replay of the row (F220.30). A rule with no verdict of its own gets one.
@@ -71,15 +75,15 @@ internal sealed class RulesFlowSupport(ITalkRuleBook ruleBook, ITalkCheckLog che
         Write(personaId, raw, cleaned, snapshot, verdicts, TalkOutcome.Accepted);
     }
 
-    /// <summary>One <c>rule-flagged</c> booth row per flagging rule (F220.16); none when the talk has no persona to key the row on.</summary>
+    /// <summary>
+    /// One <c>rule-flagged</c> booth row per flagging rule (F220.16), keyed on <paramref name="personaId"/> (null for an ad, which
+    /// names its sponsor as <paramref name="speaker"/>). A caller whose talk needs a persona to key the row on guards before calling.
+    /// </summary>
     public void PublishFlags(
         long? personaId, string speaker, RuleFlagTalk talk, IReadOnlyList<FlaggedRule> flags, RuleFlagOutcome outcome)
     {
-        if (personaId is not { } id)
-            return;
-
         foreach (var flagged in flags)
-            events.Publish(new RuleFlagged(id, NameOf(flagged.Verdict.RuleId), speaker, outcome) { Talk = talk });
+            events.Publish(new RuleFlagged(personaId, NameOf(flagged.Verdict.RuleId), speaker, outcome) { Talk = talk });
     }
 
     /// <summary>The rule's plain name without its closing full stop, as the booth row words it; the id when the rule is unknown.</summary>

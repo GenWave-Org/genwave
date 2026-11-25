@@ -112,11 +112,12 @@ internal static class AdSpotWorkerHarness
     /// <param name="appVersion">Defaults to <see cref="HarnessAppVersion"/> — a scenario proving the
     /// re-render marker's own display-form spelling (STORY-483, PLAN T589) passes its own
     /// <see cref="AppVersion.From(string?)"/> build instead.</param>
+    /// <param name="rulesFlow">Hands the writer a rules-mode flow (PLAN T802); absent is legacy.</param>
     public static Harness Build(
         DateTimeOffset now, IReadOnlyDictionary<string, string?>? stationSettings = null,
         int renderBudgetSeconds = 300, double durationToleranceRatio = 0.4, FakeHttpMessageHandler? llmHandler = null,
         ILogger<AdSpotWorker>? workerLogger = null, ILogger<AdSpotStamper>? stamperLogger = null,
-        IAppVersion? appVersion = null, string engine = VoiceEngineProfiles.KokoroName)
+        IAppVersion? appVersion = null, string engine = VoiceEngineProfiles.KokoroName, IAdRulesFlow? rulesFlow = null)
     {
         var timeProvider = new FakeTimeProvider(now);
         var adminLookup = new FakeAdminMediaLookup();
@@ -184,7 +185,7 @@ internal static class AdSpotWorkerHarness
         var recorder = new LlmCallRecorder(new LlmCallRing(llmOptions), new LlmCallCauseCounters(timeProvider));
         var scriptWriter = new AdScriptWriter(
             new SingleHandlerHttpClientFactory(handler), llmOptions, recorder, new FakeDegradationModeReader(),
-            new NoOpLogger<AdScriptWriter>(), timeProvider);
+            new NoOpLogger<AdScriptWriter>(), timeProvider, rulesFlow: rulesFlow);
 
         var boothLog = new FakeBoothLogAppender();
         var worker = new AdSpotWorker(

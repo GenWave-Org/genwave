@@ -78,7 +78,8 @@ public sealed partial class AdScriptWriter(
     IDegradationModeReader degradationMode,
     ILogger<AdScriptWriter> logger,
     TimeProvider timeProvider,
-    IAdShadowCheck? shadowCheck = null) // T790: absent means no shadow week, exactly the pre-shadow behaviour
+    IAdShadowCheck? shadowCheck = null, // T790: absent means no shadow week, exactly the pre-shadow behaviour
+    IAdRulesFlow? rulesFlow = null) // T802: absent means no rules mode, exactly the legacy behaviour
 {
     /// <summary>Cap for a validator Reason before it reaches the re-ask prompt or the ring's
     /// <c>StatusDetail</c> (PLAN T400 review F7) — the <c>CrosstalkScriptParser.TruncateForEcho</c>/
@@ -133,6 +134,8 @@ public sealed partial class AdScriptWriter(
         var systemPrompt = AdScriptPromptBuilder.BuildSystemPrompt(request);
         var userPrompt = AdScriptPromptBuilder.BuildUserContent(request);
 
+        var rulesMode = rulesFlow?.IsOn() ?? false; // T802: read once per ad
+
         // EACH attempt gets its OWN Llm:TimeoutSeconds budget (gh-#696 — see the class remarks: this
         // writer is off the air clock, so the on-air writers' shared-budget shape starved the re-ask).
         // The client/URI/generation cap are still resolved ONCE: both attempts target the same
@@ -140,6 +143,11 @@ public sealed partial class AdScriptWriter(
         var http = httpClientFactory.CreateClient(LlmCopyWriter.HttpClientName);
         var requestUri = EndpointUri.Combine(cfg.Endpoint, "/v1/chat/completions");
         var maxTokens = DeriveScriptGenerationCap(request);
+
+        // T802 (F220.10): in rules mode the validator ladder below (the phone rewrite, the validate delegate, its re-ask and the
+        // shadow hook) is replaced by the rules flow; the endpoint check and the prompts above are shared.
+        if (rulesFlow is not null && rulesMode)
+            return await WriteWithRulesAsync(rulesFlow, http, requestUri, cfg, request, systemPrompt, userPrompt, maxTokens, mode, ct);
 
         // The budget rides the injected TimeProvider (STORY-442, gh-#723) so a fake clock can fire it;
         // CancelAfter has no TimeProvider overload, so this mirrors DependencyHealthProber.ProbeOneAsync.

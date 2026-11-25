@@ -450,8 +450,8 @@ public sealed class AdSpotWorker(
                 break;
 
             case AdScriptWriteResult.Failed { RuleId: not null } failed:
-                // STORY-390 AC3: a script that never passed the validator (the ONE re-ask already
-                // spent) is still recorded — visible, never silent (SPEC F159.1). Script stays null:
+                // STORY-390 AC3: a script that never passed the validator, or in rules mode an ad still
+                // flagged after its one re-ask (F220.14, AdRulesResult.StillFlagged.FailedRuleId), is still recorded — visible, never silent (SPEC F159.1). Script stays null:
                 // AdScriptWriteResult.Failed never carries the raw rejected text.
                 await spotStore.CreateAsync(
                     new NewAdSpot(

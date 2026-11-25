@@ -5,9 +5,10 @@ namespace GenWave.Core.Events;
 /// STORY-570, PLAN T800, T801). <paramref name="RuleName"/> is the rule's plain name, <paramref name="Speaker"/> the
 /// DJ's name (a chat names its host). Published once per flagging rule: <see cref="RuleFlagOutcome.ReAsked"/> after the
 /// first attempt, <see cref="RuleFlagOutcome.Template"/> or <see cref="RuleFlagOutcome.Dropped"/> when the re-ask was
-/// flagged again.
+/// flagged again, or <see cref="RuleFlagOutcome.Failed"/> for an ad (PLAN T802). An ad has no DJ: <paramref name="PersonaId"/> is
+/// null and <paramref name="Speaker"/> is the sponsor.
 /// </summary>
-public sealed record RuleFlagged(long PersonaId, string RuleName, string Speaker, RuleFlagOutcome Outcome) : StationEvent
+public sealed record RuleFlagged(long? PersonaId, string RuleName, string Speaker, RuleFlagOutcome Outcome) : StationEvent
 {
     /// <summary>Whether the flagged talk was a line or a chat; a line unless a chat says otherwise.</summary>
     public RuleFlagTalk Talk { get; init; } = RuleFlagTalk.Line;

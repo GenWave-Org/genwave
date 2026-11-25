@@ -11,4 +11,7 @@ public enum RuleFlagOutcome
 
     /// <summary>The rewrite was flagged again and template copy never airs here; the talk is dropped.</summary>
     Dropped,
+
+    /// <summary>The rewrite was flagged again and an ad never airs flagged: the spot is failed.</summary>
+    Failed,
 }

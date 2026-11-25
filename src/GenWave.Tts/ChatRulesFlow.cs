@@ -63,7 +63,7 @@ public sealed class ChatRulesFlow(
         var names = second.Flags.Select(f => support.NameOf(f.Verdict.RuleId));
         return new ChatRulesResult(
             second.Raw,
-            new CrosstalkWriteResult.Discarded($"the re-ask was flagged again ({string.Join(", ", names)})", LlmCallCause.RuleFlagged),
+            new CrosstalkWriteResult.Discarded(RulesFlowSupport.FlaggedAgainReason(names), LlmCallCause.RuleFlagged),
             null);
     }
 
@@ -116,8 +116,14 @@ public sealed class ChatRulesFlow(
         (await snapshots.BuildAsync(input with { Attempt = attempt, Script = script }, ct)) with { Memos = shaping.Memos };
 
     /// <summary>A chat names its host: the flags' evidence is free text, so no flagged line can be told from it.</summary>
-    private void PublishFlags(ChatSnapshotInput input, IReadOnlyList<FlaggedRule> flags, RuleFlagOutcome outcome) =>
+    private void PublishFlags(ChatSnapshotInput input, IReadOnlyList<FlaggedRule> flags, RuleFlagOutcome outcome)
+    {
+        // No persona, no row to key it on.
+        if (input.Request.HostPersonaId is null)
+            return;
+
         support.PublishFlags(input.Request.HostPersonaId, input.Request.HostCard.Name, RuleFlagTalk.Chat, flags, outcome);
+    }
 
     private sealed record Attempt(ChatRulesResult? Result, IReadOnlyList<FlaggedRule> Flags, string Raw);
 }

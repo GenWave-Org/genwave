@@ -1886,7 +1886,7 @@ public sealed class LlmCopyWriter(
         LlmCopyCleanupResult.RepeatRejected repeat =>
             $"the re-ask repeated again ({string.Join(", ", repeat.Phrases)})",
         LlmCopyCleanupResult.RuleRejected rules =>
-            $"the re-ask was flagged again ({string.Join(", ", rules.RuleNames)})",
+            RulesFlowSupport.FlaggedAgainReason(rules.RuleNames),
         _ => throw new UnreachableException(
             $"{nameof(TextOf)} already returns non-null text for any other {nameof(LlmCopyCleanupResult)} case."),
     };

@@ -205,13 +205,21 @@ sealed class BoothLogWriter(
         };
 
     static string Summarize(RuleFlagged f) =>
-        $"{f.RuleName} flagged {f.Speaker}'s {(f.Talk == RuleFlagTalk.Chat ? "chat" : "line")} — " + f.Outcome switch
+        $"{f.RuleName} flagged {f.Speaker}'s {TalkWord(f.Talk)} — " + f.Outcome switch
         {
             RuleFlagOutcome.ReAsked => "re-asked",
             RuleFlagOutcome.Template => "template",
             RuleFlagOutcome.Dropped => "dropped",
+            RuleFlagOutcome.Failed => "failed",
             _ => "handled",
         };
+
+    static string TalkWord(RuleFlagTalk talk) => talk switch
+    {
+        RuleFlagTalk.Chat => "chat",
+        RuleFlagTalk.Ad => "ad",
+        _ => "line",
+    };
 
     static string Summarize(VoiceMissing v) => $"Voice missing: {v.Speaker} has no voice for the active engine — talk dropped";
 

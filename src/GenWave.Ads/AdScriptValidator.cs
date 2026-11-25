@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.RegularExpressions;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
@@ -107,6 +108,19 @@ public static partial class AdScriptValidator
 
         return new AdScriptValidationResult.Accepted(script);
     }
+
+    /// <summary>
+    /// The fixed shape checks alone (SPEC F220.11): the parse (format) and the stage-direction rule, in the order
+    /// <see cref="Validate"/> runs them, and nothing else. Rules mode runs only these; duration, brand, phone and posture are the
+    /// fits-time, other-brands, phone-number and clean-language rules there. Null when the script has the shape.
+    /// </summary>
+    internal static AdScriptViolation? CheckShape(string rawScript, int maxLineChars) =>
+        AdScriptParser.Parse(rawScript, maxLineChars) switch
+        {
+            AdScriptValidationResult.Accepted(var script) => CheckStageDirection(script),
+            AdScriptValidationResult.Refused refused => refused.Violation,
+            _ => throw new UnreachableException($"Unhandled {nameof(AdScriptValidationResult)} case."),
+        };
 
     static string JoinLineText(AdScript script) => string.Join(' ', script.Lines.Select(line => line.Text));
 
