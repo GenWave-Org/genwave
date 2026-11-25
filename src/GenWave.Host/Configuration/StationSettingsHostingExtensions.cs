@@ -109,6 +109,10 @@ static class StationSettingsHostingExtensions
         // TalkRules:CheckRetentionDays (default 28) swept at insert. Same lazy station_svc story.
         builder.Services.AddTalkCheckLog(stationConnStr, builder.Configuration);
 
+        // Talk-rule switch store (SPEC F220.22, F220.23, PLAN T799) — Postgres over the in-memory stand-in AddTalkRules
+        // would register; Replace wins on either side of that call. Same lazy station_svc story.
+        builder.Services.AddTalkRuleSwitchStore(stationConnStr);
+
         // Quirk selector (SPEC F218.7, STORY-533, PLAN T686) — LlmCopyWriter resolves it optionally;
         // the spend ledger comes from AddPersonaMemoryStore above.
         builder.Services.AddSingleton<IQuirkSelector, QuirkSelector>();

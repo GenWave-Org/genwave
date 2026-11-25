@@ -6,7 +6,8 @@ namespace GenWave.TalkRules;
 /// <summary>
 /// Switches held in process memory: a rule with no entry runs at its <c>OnByDefault</c>. The stand-in
 /// <see cref="TalkRuleServiceCollectionExtensions.AddTalkRules(Microsoft.Extensions.DependencyInjection.IServiceCollection)"/>
-/// registers until the Postgres-backed store replaces it (PLAN T799); changes here do not survive a restart.
+/// registers with TryAdd: the default for tests and for hosts without the Postgres store (the host replaces it
+/// with <c>AddTalkRuleSwitchStore</c>); changes here do not survive a restart.
 /// </summary>
 public sealed class InMemoryTalkRuleSwitches : ITalkRuleSwitches
 {

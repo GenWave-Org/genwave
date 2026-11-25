@@ -2,6 +2,13 @@
 //
 // BDD specification — xUnit. Pending: each fact is activated by the task its Skip names.
 
+using GenWave.Core.TalkRules;
+using GenWave.Host.Tests.Support;
+using GenWave.MediaLibrary.Station;
+using GenWave.TalkRules;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+
 namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureSwitchARulePerKindOfTalk
@@ -35,10 +42,63 @@ public static class FeatureSwitchARulePerKindOfTalk
     }
 
     // AC2 — no switch row
-    public sealed class ScenarioNoSwitchRow
+    // The host's registration extension (AddTalkRuleSwitchStore) over a bare ServiceCollection, not the composed host, on a real station database: the Postgres store, no row, the rule book.
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioNoSwitchRow : IAsyncLifetime
     {
-        [Fact(Skip = "pending: T799")]
-        public void TheSwitchShowsTheRulesDefault() { }
+        EphemeralStationDatabase? database;
+        TalkList<RuleVerdict> verdicts = TalkList<RuleVerdict>.Empty;
+
+        public async Task InitializeAsync()
+        {
+            database = await Story571Database.StartAsync();
+            var services = new ServiceCollection().AddTalkRuleSwitchStore(database.StationConnectionString);
+            await using var provider = services.BuildServiceProvider();
+            var book = new TalkRuleBook(
+                [new DefaultsOnlyForChatRule()], provider.GetRequiredService<ITalkRuleSwitches>(), NullLogger<TalkRuleBook>.Instance);
+            verdicts = await book.JudgeAsync(ChatSnapshot(), CancellationToken.None);
+        }
+
+        public async Task DisposeAsync()
+        {
+            if (database is not null)
+            {
+                await database.DisposeAsync();
+            }
+        }
+
+        [Fact]
+        public void TheSwitchShowsTheRulesDefault() => Assert.True(Assert.Single(verdicts).SwitchedOn);
+    }
+
+    static TalkSnapshot ChatSnapshot() =>
+        new(
+            TalkKinds.Chat,
+            "Crosstalk",
+            1,
+            new TalkList<TalkLine>([new TalkLine("HOST", "Hello.")]),
+            new TalkList<TalkSpeaker>([new TalkSpeaker(1, "Flip", TalkList<string>.Empty)]),
+            null,
+            null,
+            new DateTimeOffset(2026, 11, 22, 12, 0, 0, TimeSpan.FromHours(-6)),
+            "America/Edmonton",
+            null,
+            new TalkStation("GenWave", "friendly"),
+            TalkList<TalkRecentLine>.Empty,
+            null,
+            TalkMemos.Empty);
+
+    sealed class DefaultsOnlyForChatRule : IJudgingTalkRule
+    {
+        public string Id => "defaults-only-for-chat";
+
+        public TalkKinds CanCover => TalkKinds.DjLine | TalkKinds.Chat;
+
+        public TalkKinds OnByDefault => TalkKinds.Chat;
+
+        public TalkRuleDescription Describe() => new("Defaults", "Never flags.", "A fixture.", "Any line.");
+
+        public RuleFlag? Judge(TalkSnapshot after) => null;
     }
 
     // AC3, AC4 — PUT /api/talk-rules/repeat-phrases/chat {enabled: false}
@@ -99,5 +159,54 @@ public static class FeatureSwitchARulePerKindOfTalk
 
         [Fact(Skip = "pending: T803")]
         public void TheFlagsReturn401() { }
+    }
+
+    // Wiring — the Postgres store beats the in-memory stand-in in the host's real order (Program.cs: store first, then
+    // AddTalkRules). The repository is internal to MediaLibrary, so the resolved type is pinned by its assembly.
+    public abstract class ScenarioTheStoreBeatsTheStandIn : IDisposable
+    {
+        readonly ServiceProvider provider;
+        readonly int descriptors;
+
+        protected ScenarioTheStoreBeatsTheStandIn(Func<IServiceCollection, IServiceCollection> register)
+        {
+            var services = register(new ServiceCollection());
+            descriptors = services.Count(descriptor => descriptor.ServiceType == typeof(ITalkRuleSwitches));
+            provider = services.BuildServiceProvider();
+        }
+
+        public void Dispose() => provider.Dispose();
+
+        [Fact]
+        public void TheStoreIsWhatResolves() =>
+            Assert.Same(
+                typeof(TalkRuleSwitchServiceCollectionExtensions).Assembly,
+                provider.GetRequiredService<ITalkRuleSwitches>().GetType().Assembly);
+
+        [Fact]
+        public void ExactlyOneRegistrationRemains() => Assert.Equal(1, descriptors);
+    }
+
+    public sealed class ScenarioTheStoreIsRegisteredFirst() : ScenarioTheStoreBeatsTheStandIn(
+        services => services.AddTalkRuleSwitchStore("Host=localhost").AddTalkRules());
+
+    public sealed class ScenarioTheStoreIsRegisteredAfter() : ScenarioTheStoreBeatsTheStandIn(
+        services => services.AddTalkRules().AddTalkRuleSwitchStore("Host=localhost"));
+}
+
+/// <summary>This file's own thin subclass of the shared <see cref="EphemeralStationDatabase"/> harness.</summary>
+file sealed class Story571Database : EphemeralStationDatabase
+{
+    Story571Database(string project, string composeFile, string libraryConnectionString, string stationConnectionString)
+        : base(project, composeFile, libraryConnectionString, stationConnectionString)
+    {
+    }
+
+    public static async Task<Story571Database> StartAsync()
+    {
+        var (project, composeFile, library, station) = Provision("genwave-t799");
+        var db = new Story571Database(project, composeFile, library, station);
+        await db.WaitForSchemaAsync();
+        return db;
     }
 }

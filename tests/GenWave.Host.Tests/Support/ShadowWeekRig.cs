@@ -134,6 +134,10 @@ public sealed class ShadowWeekRig(
         services.RemoveAll<IStationClockProvider>();
         services.AddSingleton<IStationClockProvider>(new FakeStationClockProvider(WrittenAt, StationZone));
 
+        // No station database here: every rule runs at its default, as the in-memory stand-in gives.
+        services.RemoveAll<ITalkRuleSwitches>();
+        services.AddSingleton<ITalkRuleSwitches, InMemoryTalkRuleSwitches>();
+
         services.RemoveAll<ITalkRuleBook>();
         services.AddSingleton<ITalkRuleBook>(provider =>
             observedRuleBook = new ObservedRuleBook(provider.GetRequiredService<TalkRuleBook>(), ruleBookThrows));
