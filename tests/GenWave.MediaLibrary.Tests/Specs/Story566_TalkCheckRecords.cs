@@ -187,6 +187,54 @@ public static class FeatureTalkCheckRecords
         public void ItsFlagIsKept() => Assert.Equal("42", off.GetProperty("flag").GetProperty("evidence").GetString());
     }
 
+    // F220.9 (T800) — a shaper or recorder that threw is stored apart from the flag, as an extra key that is absent otherwise
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioABrokenRuleIsRecorded(DatabaseFixture db) : IAsyncLifetime
+    {
+        JsonDocument? verdicts;
+        TalkCheckEntry? read;
+
+        JsonElement Stored(string ruleId) =>
+            (verdicts ?? throw new InvalidOperationException("InitializeAsync did not run.")).RootElement.GetProperty(ruleId);
+
+        public async Task InitializeAsync()
+        {
+            await ResetAsync(db);
+            var repo = Repository(db);
+            var record = Record(personaId: null) with
+            {
+                Verdicts = new TalkList<RuleVerdict>(
+                [
+                    new RuleVerdict("no-repeats", SwitchedOn: true, Flag: null),
+                    new RuleVerdict("on-topic", SwitchedOn: true, Flag: null, Broken: TalkRuleReasons.CouldNotShape),
+                ]),
+            };
+            await repo.AppendAsync(record, CancellationToken.None);
+            verdicts = JsonDocument.Parse((await OnlyRowAsync(db)).Verdicts);
+            read = (await repo.ReadPageAsync(DateTimeOffset.UtcNow.AddDays(-1), 0, 10, CancellationToken.None)).Single();
+        }
+
+        public Task DisposeAsync()
+        {
+            verdicts?.Dispose();
+            return Task.CompletedTask;
+        }
+
+        [Fact]
+        public void TheBreakageIsAnExtraKey() => Assert.Equal(TalkRuleReasons.CouldNotShape, Stored("on-topic").GetProperty("broken").GetString());
+
+        [Fact]
+        public void TheBreakageIsNotAFlag() => Assert.Equal(JsonValueKind.Null, Stored("on-topic").GetProperty("flag").ValueKind);
+
+        [Fact]
+        public void ARuleThatDidNotBreakHasNoSuchKey() => Assert.False(Stored("no-repeats").TryGetProperty("broken", out _));
+
+        [Fact]
+        public void TheBreakageReadsBack() =>
+            Assert.Equal(TalkRuleReasons.CouldNotShape, read?.Record.Verdicts.Single(v => v.RuleId == "on-topic").Broken);
+    }
+
     // AC6 — retention 28 days, a row 29 days old, one insert
     [Collection(DatabaseCollection.Name)]
     [Trait("Category", "Integration")]

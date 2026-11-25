@@ -1,0 +1,61 @@
+// STORY-570 AC8 (booth-log half) — a flag that changes the outcome is a rule-flagged row (SPEC F220.16, PLAN T800)
+//
+// No database: stops at the in-memory channel BoothLogWriter.Publish writes into, like Story534_RepeatCaughtBoothRow.cs.
+
+using System.Threading.Channels;
+using GenWave.Core.Abstractions;
+using GenWave.Core.Domain;
+using GenWave.Core.Events;
+using GenWave.MediaLibrary.Station;
+using Microsoft.Extensions.Logging.Abstractions;
+
+namespace GenWave.MediaLibrary.Tests.Specs;
+
+public static class FeatureRuleFlaggedBoothRow
+{
+    sealed class NullPersonaAccessor : IActivePersonaAccessor
+    {
+        public Task<Persona?> ResolveAsync(CancellationToken ct) => Task.FromResult<Persona?>(null);
+    }
+
+    static async Task<BoothLogAppendRequest> PublishAndCaptureAsync(StationEvent evt)
+    {
+        var channel = Channel.CreateBounded<BoothLogAppendRequest>(1);
+        new BoothLogWriter(channel.Writer, new NullPersonaAccessor(), NullLogger<BoothLogWriter>.Instance).Publish(evt);
+        return await channel.Reader.ReadAsync();
+    }
+
+    public sealed class ScenarioAFlagReAsksTheLine : IAsyncLifetime
+    {
+        BoothLogAppendRequest row = null!;
+
+        public async Task InitializeAsync() =>
+            row = await PublishAndCaptureAsync(new RuleFlagged(7, "No repeated phrases", "DJ Nova", RuleFlagOutcome.ReAsked));
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void TheRowKindIsRuleFlagged() => Assert.Equal("rule-flagged", row.Kind);
+
+        [Fact]
+        public void TheRowNamesThePersona() => Assert.Equal(7L, row.PersonaId);
+
+        [Fact]
+        public void TheSummaryNamesTheRuleTheDjAndTheOutcome() =>
+            Assert.Equal("No repeated phrases flagged DJ Nova's line — re-asked", row.Summary);
+    }
+
+    public sealed class ScenarioTheRowEndsWithTheOutcome
+    {
+        [Theory]
+        [InlineData(RuleFlagOutcome.ReAsked, "No repeated phrases flagged DJ Nova's line — re-asked")]
+        [InlineData(RuleFlagOutcome.Template, "No repeated phrases flagged DJ Nova's line — template")]
+        [InlineData(RuleFlagOutcome.Dropped, "No repeated phrases flagged DJ Nova's line — dropped")]
+        public async Task TheSummaryEndsWithTheOutcome(RuleFlagOutcome outcome, string expected)
+        {
+            var row = await PublishAndCaptureAsync(new RuleFlagged(7, "No repeated phrases", "DJ Nova", outcome));
+
+            Assert.Equal(expected, row.Summary);
+        }
+    }
+}

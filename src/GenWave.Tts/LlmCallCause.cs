@@ -117,4 +117,11 @@ public enum LlmCallCause
     /// and on a re-ask that repeated again (the template airs instead).
     /// </summary>
     Repeat,
+
+    /// <summary>
+    /// SPEC F220.12 (STORY-570, PLAN T800): in rules mode a switched-on talk rule flagged the copy, so the
+    /// writer re-asked once. Stamped on the call whose copy was flagged, and on a re-ask that was flagged
+    /// again (template copy airs, or the talk is dropped).
+    /// </summary>
+    RuleFlagged,
 }

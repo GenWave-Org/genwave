@@ -93,6 +93,34 @@ public static class FeatureTheReplayJudgesStoredRows
         public void NoVerdictChanges() => Assert.Empty(report.Changes);
     }
 
+    // F220.30 — a row whose only breakage is a shaper that threw (T800): the breakage is not a flag, so replay sees no change
+    public sealed class ScenarioARowWhoseOnlyBreakageIsCouldNotShape : IAsyncLifetime
+    {
+        private TalkReplayReport report = new(TalkList<TalkRuleReplayCount>.Empty, TalkList<TalkVerdictChange>.Empty, 0);
+
+        public async Task InitializeAsync()
+        {
+            var entry = Entry(1, TalkSnapshots.DjLine(Clean), null, ("fixture-any-repeats", null));
+            var broken = entry with
+            {
+                Record = entry.Record with
+                {
+                    Verdicts = new TalkList<RuleVerdict>(
+                    [
+                        new RuleVerdict("fixture-any-repeats", true, null),
+                        new RuleVerdict("fixture-repeats", true, null, TalkRuleReasons.CouldNotShape),
+                    ]),
+                },
+            };
+            (report, _) = await ReplayAsync([broken]);
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void ReplayWithUnchangedRulesReportsNoChange() => Assert.Empty(report.Changes);
+    }
+
     // F220.20 — legacy against the rules
     public sealed class ScenarioLegacyIsComparedWithTheRules : IAsyncLifetime
     {

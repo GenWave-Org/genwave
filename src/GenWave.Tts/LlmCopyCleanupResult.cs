@@ -69,4 +69,11 @@ internal abstract record LlmCopyCleanupResult
     /// caller degrades to the template rung like any other reject.
     /// </summary>
     public sealed record RepeatRejected(IReadOnlyList<string> Phrases) : LlmCopyCleanupResult;
+
+    /// <summary>
+    /// The floor of the rules-mode flow (SPEC F220.12, PLAN T800): the re-ask was flagged again, by the rules named in
+    /// <see cref="RuleNames"/> (plain names, in rule-id order). Never airs; the caller degrades to the template rung like any
+    /// other reject, and the model answered fine, so it is no LLM failure.
+    /// </summary>
+    public sealed record RuleRejected(IReadOnlyList<string> RuleNames) : LlmCopyCleanupResult;
 }

@@ -398,6 +398,9 @@ static class LlmPromptBuilder
     /// <summary>
     /// SPEC F218.42 - the ask's memory text for the truth gate's fact block, so the gate cannot reject the very
     /// callback the prompt asked for.
+    /// <para>Rules mode leaves the callback memory out of the facts: the callbacks rule offers the ask in the prompt but there is no
+    /// fact block to extend. That is fine today because callbacks ride only on LeadIn and BackAnnounce (F218.40), which have no
+    /// fact block; the day a callback kind gets one, rules mode must join this text to it.</para>
     /// </summary>
     public static string CallbackFacts(CallbackAsk ask) => MemoryLine(ask.Memory.Content);
 
@@ -438,6 +441,16 @@ static class LlmPromptBuilder
     /// </summary>
     public static string BuildRepeatReAsk(string originalUserPrompt, IReadOnlyList<string> phrases) =>
         $"{originalUserPrompt}\n\ndo not say: {string.Join(", ", phrases.Select(p => $"\"{p}\""))}";
+
+    /// <summary>The line that opens a rules-mode re-ask's list of asks (SPEC F220.12).</summary>
+    public const string RuleReAskHeading = "Rewrite it. Fix all of these:";
+
+    /// <summary>
+    /// The rules-mode re-ask (SPEC F220.12): the original user prompt, then <see cref="RuleReAskHeading"/>, then each flagged
+    /// rule's ask, one per line, in the order given (the caller sorts them by rule id).
+    /// </summary>
+    public static string BuildRuleReAsk(string originalUserPrompt, IEnumerable<string> asks) =>
+        $"{originalUserPrompt}\n\n{RuleReAskHeading}\n{string.Join('\n', asks)}";
 
     /// <summary>
     /// The quirks block of the persona section, owned here so a spec asserts the exact lines the

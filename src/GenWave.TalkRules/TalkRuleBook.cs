@@ -16,26 +16,26 @@ public sealed class TalkRuleBook(
     ILogger<TalkRuleBook> logger) : ITalkRuleBook
 {
     /// <summary>The reason on the flag of a judge that threw.</summary>
-    public const string CouldNotCheck = "Could not check";
+    public const string CouldNotCheck = TalkRuleReasons.CouldNotCheck;
 
-    /// <summary>What a shaper that threw is reported as (recorded on its verdict by the rules-mode flow, T800–T802).</summary>
-    public const string CouldNotShape = "Could not shape";
+    /// <summary>What a shaper that threw is reported as (the rules-mode flow records it on that rule's verdict).</summary>
+    public const string CouldNotShape = TalkRuleReasons.CouldNotShape;
 
-    /// <summary>What a recorder that threw is reported as (recorded on its verdict by the rules-mode flow, T800–T802).</summary>
-    public const string CouldNotRecord = "Could not record";
+    /// <summary>What a recorder that threw is reported as (the rules-mode flow records it on that rule's verdict).</summary>
+    public const string CouldNotRecord = TalkRuleReasons.CouldNotRecord;
 
     internal const string CouldNotCheckAsk = "Write it again, keeping to every rule.";
 
     private readonly IReadOnlyList<ITalkRule> rules =
         rules.OrderBy(rule => rule.Id, StringComparer.Ordinal).ToList();
 
-    /// <summary>Every rule the book knows, sorted by id; what the rules API lists.</summary>
+    /// <summary>Every rule the book knows, sorted by id; what the rules API lists and the rules-mode flow names flags by.</summary>
     public IReadOnlyList<ITalkRule> Rules => rules;
 
     public async ValueTask<TalkList<RuleVerdict>> JudgeAsync(TalkSnapshot after, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        var stored = await switches.GetAllAsync(after.Kind, ct);
+        var stored = await ReadSwitchesAsync(after.Kind, ct);
         var verdicts = rules
             .OfType<IJudgingTalkRule>()
             .Where(rule => rule.CanCover.HasFlag(after.Kind))
@@ -51,7 +51,7 @@ public sealed class TalkRuleBook(
         var notes = new List<string>();
         var failed = new List<string>();
         var memos = before.Memos;
-        foreach (var (rule, shaping, threw) in results.OrderBy(r => r.Rule.Id, StringComparer.Ordinal))
+        foreach (var (rule, shaping, threw) in results)
         {
             if (threw)
             {
@@ -76,7 +76,24 @@ public sealed class TalkRuleBook(
     {
         var recorders = await SwitchedOnAsync<IRecordingTalkRule>(accepted.Kind, ct);
         var failed = await Task.WhenAll(recorders.Select(rule => RecordSafelyAsync(rule, accepted, ct)));
-        return new TalkList<string>(failed.OfType<string>().Order(StringComparer.Ordinal));
+        return new TalkList<string>(failed.OfType<string>());
+    }
+
+    /// <summary>
+    /// The stored switches for the kind. A failed read (the store is down) is not a failure of the talk: every
+    /// rule falls back to its own default (an empty map), logged at Warning. Only the caller's cancellation escapes.
+    /// </summary>
+    private async ValueTask<IReadOnlyDictionary<string, bool>> ReadSwitchesAsync(TalkKinds kind, CancellationToken ct)
+    {
+        try
+        {
+            return await switches.GetAllAsync(kind, ct);
+        }
+        catch (Exception ex) when (IsRuleFailure(ex, ct))
+        {
+            logger.LogWarning(ex, "Could not read the talk rule switches for {Kind}; every rule is at its default", kind);
+            return new Dictionary<string, bool>();
+        }
     }
 
     private static bool IsSwitchedOn(ITalkRule rule, TalkKinds kind, IReadOnlyDictionary<string, bool> stored) =>
@@ -85,7 +102,7 @@ public sealed class TalkRuleBook(
     private async ValueTask<List<T>> SwitchedOnAsync<T>(TalkKinds kind, CancellationToken ct)
         where T : class, ITalkRule
     {
-        var stored = await switches.GetAllAsync(kind, ct);
+        var stored = await ReadSwitchesAsync(kind, ct);
         return rules
             .OfType<T>()
             .Where(rule => rule.CanCover.HasFlag(kind) && IsSwitchedOn(rule, kind, stored))

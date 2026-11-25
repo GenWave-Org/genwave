@@ -9,6 +9,8 @@ sealed class ObservedRuleBook(ITalkRuleBook inner, bool throwOnJudge) : ITalkRul
 {
     int judgeCalls;
 
+    public IReadOnlyList<ITalkRule> Rules => inner.Rules;
+
     public int JudgeCalls => Volatile.Read(ref judgeCalls);
 
     public ValueTask<TalkShaping> ShapeAsync(TalkSnapshot before, CancellationToken ct) => inner.ShapeAsync(before, ct);

@@ -272,6 +272,8 @@ public static class FeatureDjLineSnapshot
 
     sealed class UnusedRuleBook : ITalkRuleBook
     {
+        public IReadOnlyList<ITalkRule> Rules => [];
+
         public ValueTask<TalkShaping> ShapeAsync(TalkSnapshot before, CancellationToken ct) => throw new InvalidOperationException();
 
         public ValueTask<TalkList<RuleVerdict>> JudgeAsync(TalkSnapshot after, CancellationToken ct) => throw new InvalidOperationException();
@@ -316,6 +318,8 @@ public static class FeatureDjLineSnapshot
 
     sealed class EmptyRuleBook : ITalkRuleBook
     {
+        public IReadOnlyList<ITalkRule> Rules => [];
+
         public ValueTask<TalkShaping> ShapeAsync(TalkSnapshot before, CancellationToken ct) => throw new InvalidOperationException();
 
         public ValueTask<TalkList<RuleVerdict>> JudgeAsync(TalkSnapshot after, CancellationToken ct) =>

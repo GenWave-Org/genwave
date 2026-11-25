@@ -20,7 +20,7 @@ namespace GenWave.Host.Tests.Support;
 /// </summary>
 public sealed class ShadowWeekRig(
     bool recordRowsInMemory = true, bool ruleBookThrows = false, string? startingMode = null, string? reply = null,
-    bool hostSaidTheEarlierLine = false)
+    bool hostSaidTheEarlierLine = false, string[]? replies = null)
 {
     /// <summary>A line the rules flag as a repeat that today's code never sees: the row sits only in the hour-window read.</summary>
     public const string RepeatedLine = "Settle in for a golden hour groove from the vault, folks.";
@@ -74,11 +74,19 @@ public sealed class ShadowWeekRig(
     const long PersonaId = 7;
     const string EarlierLine = EarlierHostLine;
 
-    readonly FakeHttpMessageHandler llm = new((_, _) =>
-        Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+    FakeHttpMessageHandler? llmHandler;
+
+    /// <summary>The LLM HTTP edge: answers the Nth completion with <c>replies</c>[N] (the last repeats), else the one <c>reply</c>.</summary>
+    FakeHttpMessageHandler llm => llmHandler ??= new((_, _) =>
+    {
+        var content = replies is { Length: > 0 }
+            ? replies[Math.Min(llmHandler?.Requests.Count ?? 1, replies.Length) - 1]
+            : reply ?? RepeatedLine;
+        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = JsonContent.Create(new { choices = new[] { new { message = new { content = reply ?? RepeatedLine } } } }),
-        }));
+            Content = JsonContent.Create(new { choices = new[] { new { message = new { content } } } }),
+        });
+    });
 
     internal CapturingLoggerProvider Logs { get; } = new();
 

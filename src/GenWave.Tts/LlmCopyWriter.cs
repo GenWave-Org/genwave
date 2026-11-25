@@ -145,6 +145,7 @@ public sealed class LlmCopyWriter(
     BreakCallbacks? callbacks = null, // T736: absent means no callback breaks, exactly the pre-callback behaviour
     ISoundTagOfferProvider? soundTagOffers = null, // T760: absent means no sound tags in the prompt, exactly the pre-tag behaviour
     DjLineShadowCheck? shadowCheck = null, // T788: absent means no shadow week, exactly the pre-shadow behaviour
+    DjLineRulesFlow? rulesFlow = null, // T800: absent means no rules mode, exactly the legacy behaviour
     Random? selfNameRoll = null) // T787: the golden-prompt specs pin the self-name roll; absent means Random.Shared, as before
     : ISegmentCopyWriter, IPersonaPreviewWriter, IAnnouncementCopyWriter
 {
@@ -397,7 +398,9 @@ public sealed class LlmCopyWriter(
         Persona? persona = null;
         // T736: the break's callback ask is planned inside the single-flight section and settled below, wherever
         // the line ends up recorded - the model's copy or the template that replaced it.
-        var callbackSlot = new CallbackSlot();
+        var handoff = new RenderHandoff();
+        // T800: the mode is read once per talk, here, and handed down to every use (it is live, so a second read could disagree).
+        var rulesMode = rulesFlow?.IsOn() ?? false;
         try
         {
             // CurrentValue is read INSIDE the try (T3 review finding): a live edit that leaves
@@ -406,7 +409,7 @@ public sealed class LlmCopyWriter(
             // (F12.4), not escape past the fallback ladder toward the caller.
             cfg = optionsMonitor.CurrentValue;
             if (string.IsNullOrEmpty(cfg.Endpoint))
-                return await FallbackAndRecordAsync(request, callbackSlot.Ask, ct);
+                return await FallbackAndRecordAsync(request, handoff.Ask, ct);
 
             // Resolved ONLY on this LLM path (F35.2) — templated kinds and the disabled writer
             // never call the accessor at all, so a persona plays no part in copy they never touch.
@@ -435,7 +438,9 @@ public sealed class LlmCopyWriter(
             // consulted when patterFact above is null; see TakeDueShowFlavorLineForOnAirRender's own
             // remarks for why "never even ask" (not "ask and discard") is what keeps a lost slot from
             // spending the show's own cadence window.
-            var showFlavorFact = patterFact is null
+            // T800: in rules mode the show-flavour rule takes that line itself while it shapes, so the writer never does
+            // (the take consumes the show's cadence window).
+            var showFlavorFact = patterFact is null && !rulesMode
                 ? TakeDueShowFlavorLineForOnAirRender(request.Kind, request.CrosstalkAiredThisBreak)
                 : null;
             // updateTasteMemory: true — this is an on-air call, so previousBreakTasteNotes is both
@@ -444,7 +449,7 @@ public sealed class LlmCopyWriter(
             // why the field can no longer be touched out here.
             var cleanup = await RequestCleanedCompletionAsync(
                 cfg, request, persona, card, updateTasteMemory: true, spendQuirks: true, patterFact, showFlavorFact,
-                queueWaitBudget: null, announcementMessage: null, callbackSlot, ct);
+                queueWaitBudget: null, announcementMessage: null, handoff, rulesMode, ct);
             var cleaned = TextOf(cleanup);
             if (cleaned is null)
             {
@@ -453,7 +458,9 @@ public sealed class LlmCopyWriter(
                 // into Soft mode; the template still airs below (fallback=true) either way. Recording Ok
                 // also clears any existing failure streak, which is deliberate: the endpoint answered.
                 statusHolder.Record(
-                    cleanup is LlmCopyCleanupResult.RepeatRejected ? LlmAttemptOutcome.Ok : LlmAttemptOutcome.Failed,
+                    cleanup is LlmCopyCleanupResult.RepeatRejected or LlmCopyCleanupResult.RuleRejected
+                        ? LlmAttemptOutcome.Ok
+                        : LlmAttemptOutcome.Failed,
                     attemptedAt);
                 // The reason NAMES the real cause (T331 review finding F3) — a truth-gate exhaustion
                 // is not "empty or exceeded Llm:MaxCopyChars": that wrong-lever WARN sent an operator
@@ -466,12 +473,19 @@ public sealed class LlmCopyWriter(
                         "Re-ask repeated for {PersonaName}; airing the template",
                         (persona?.Name ?? "none").ReplaceLineEndings(" "));
                 }
+                else if (cleanup is LlmCopyCleanupResult.RuleRejected ruleRejected)
+                {
+                    // Not an LLM failure either (F220.14): the model answered, the rules flagged it twice.
+                    logger.LogInformation(
+                        "Re-ask flagged again by {Rules} for {PersonaName}; airing the template",
+                        string.Join(", ", ruleRejected.RuleNames), (persona?.Name ?? "none").ReplaceLineEndings(" "));
+                }
                 else
                 {
                     LogFailure(request, persona, cfg.Model, attemptedAt, exception: null,
                         reason: DescribeNullTextReason(cleanup, cfg.ReasoningEffort));
                 }
-                return await FallbackAndRecordAsync(request, callbackSlot.Ask, ct);
+                return await FallbackAndRecordAsync(request, handoff.Ask, ct);
             }
 
             // A sentence-boundary salvage (SPEC F123.2-F123.4, STORY-319, PLAN T263) is a SUCCESS at
@@ -490,9 +504,13 @@ public sealed class LlmCopyWriter(
             // awaited, so the render is not held for it; a fallback copy returned above never reaches here.
             if (persona is not null)
                 lifeExtractor?.Enqueue(new AcceptedCopy(persona.Id, persona.Name, cleaned));
-            return await RecordAsync(
+            var recorded = await RecordAsync(
                 request, new SegmentCopy(cleaned, FreshPerAiring: true) { FactRead = factRead }, fallbackCopy: false,
-                callbackSlot.Ask, ct);
+                handoff.Ask, ct);
+            // T800 (F220.13): rules mode tells the recording rules about accepted talk, once the utterance has its id.
+            if (rulesFlow is not null && handoff.AcceptedTalk is { } acceptedTalk)
+                await rulesFlow.AcceptedAsync(acceptedTalk, recorded.UtteranceId, ct);
+            return recorded;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -508,7 +526,7 @@ public sealed class LlmCopyWriter(
             // carrying the exception type/status plus call context (F69.7).
             statusHolder.Record(LlmAttemptOutcome.Failed, attemptedAt);
             LogFailure(request, persona, cfg?.Model, attemptedAt, ex, reason: null);
-            return await FallbackAndRecordAsync(request, callbackSlot.Ask, ct);
+            return await FallbackAndRecordAsync(request, handoff.Ask, ct);
         }
     }
 
@@ -561,7 +579,7 @@ public sealed class LlmCopyWriter(
             var cleanup = await RequestCleanedCompletionAsync(
                 cfg, request, personaOverride, card: null, updateTasteMemory: false, spendQuirks: false, patterFact: null,
                 showFlavorFact: null, queueWaitBudget: TimeSpan.FromSeconds(cfg.PreviewQueueWaitSeconds),
-                announcementMessage: null, callbackSlot: null, ct);
+                announcementMessage: null, handoff: null, rulesMode: rulesFlow?.IsOn() ?? false, ct);
             var cleaned = TextOf(cleanup);
             // DescribeNullTextReason (review round-2 finding F2, PLAN T332): the SAME reason
             // WriteAsync's own failure WARN already names, reused here rather than a second, hardcoded
@@ -703,6 +721,8 @@ public sealed class LlmCopyWriter(
         var attemptedAt = DateTimeOffset.UtcNow;
         LlmOptions? cfg = null;
         Persona? persona = null;
+        var handoff = new RenderHandoff(); // T800: rules mode parks the accepted attempt here; no callback rides an announcement
+        var rulesMode = rulesFlow?.IsOn() ?? false; // read once per talk
         try
         {
             cfg = optionsMonitor.CurrentValue;
@@ -716,7 +736,7 @@ public sealed class LlmCopyWriter(
 
             var cleanup = await RequestCleanedCompletionAsync(
                 cfg, request, persona, card, updateTasteMemory: false, spendQuirks: true, patterFact: null, showFlavorFact: null,
-                queueWaitBudget: null, announcementMessage: message, callbackSlot: null, ct);
+                queueWaitBudget: null, announcementMessage: message, handoff, rulesMode, ct);
             var cleaned = TextOf(cleanup);
             if (cleaned is null)
             {
@@ -728,6 +748,9 @@ public sealed class LlmCopyWriter(
                     reason: DescribeNullTextReason(cleanup, cfg.ReasoningEffort), outcomeKind: LogFailureOutcome.FallingBackToVerbatimRead);
             }
 
+            // T800 (F220.13): an accepted announcement has no utterance, so the recording rules hear of it with a null id.
+            if (cleaned is not null && rulesFlow is not null && handoff.AcceptedTalk is { } acceptedTalk)
+                await rulesFlow.AcceptedAsync(acceptedTalk, utteranceId: null, ct);
             return cleaned;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -927,7 +950,7 @@ public sealed class LlmCopyWriter(
     /// parked in <paramref name="slot"/> so the recording caller settles it, fallback line included.
     /// </summary>
     async Task<CallbackAsk?> PlanCallbackAsync(
-        SegmentRequest request, Persona? persona, PersonaCard? card, bool hasPersonaSection, CallbackSlot? slot, CancellationToken ct)
+        SegmentRequest request, Persona? persona, PersonaCard? card, bool hasPersonaSection, RenderHandoff? slot, CancellationToken ct)
     {
         if (callbacks is null || slot is null || !CallbackKinds.Carries(request.Kind)
             || !MemoryOnAir(request, onAir: true, hasPersonaSection, out _, out _))
@@ -1078,10 +1101,43 @@ public sealed class LlmCopyWriter(
                 sentenceTrimmer, candidate, verdict.RepeatedPhrases, request.Track?.Title, request.Track?.Artist,
                 text => check(text).Passed);
 
+    /// <summary>
+    /// T800: the writer-side inputs of one rules-mode render (SPEC F220.7, F220.21): the rows the judges read, the taste notes the
+    /// vary-taste rule compares, and whether the break's one extra line is spoken for. Recent lines are shown to the shapers only
+    /// where legacy offers them, a persona with a soul or quirks (Dean 11-25). Runs inside the single-flight section.
+    /// </summary>
+    async Task<DjLineRulesRender> BuildRulesRenderAsync(
+        SegmentRequest request, Persona? persona, PersonaCard? card, string? personaName, string? factBlock,
+        string? ownerMessageCore, ContextPatterFact? patterFact, bool updateTasteMemory, bool spendQuirks, CancellationToken ct)
+    {
+        var recentEntries = await ReadRecentEntriesAsync(request, needHistory: spendQuirks, ct);
+        var taglineEntries = await ReadTaglineEntriesAsync(request, recentEntries, spendQuirks && taglineLedger is not null, ct);
+        var input = new DjLineSnapshotInput(
+            request, 1, string.Empty, request.PersonaId ?? persona?.Id ?? 0, personaName ?? string.Empty,
+            card, factBlock, ownerMessageCore, (stationClock?.Zone ?? timeProvider.LocalTimeZone).Id,
+            recentEntries, taglineEntries, [], // the tagline window already holds the last hour's rows
+            Preview: !spendQuirks);
+
+        // The taste line's own conditions (LlmPromptBuilder.BuildTasteLine): a pick that is not an exploration, with notes to say.
+        var notes = request.Track?.PersonaPick is { IsExploration: false } pick
+            ? LlmPromptBuilder.DescribeFiredRules(pick.FiredRules)
+            : [];
+        return new DjLineRulesRender(
+            input,
+            notes.Count == 0 ? null : new TalkList<string>(notes),
+            updateTasteMemory && previousBreakTasteNotes.Count > 0 ? new TalkList<string>(previousBreakTasteNotes) : null,
+            ExtraLineTaken: patterFact is not null || request.CrosstalkAiredThisBreak,
+            // Dean 11-25: allowed - a card with quirks but no soul whose quirk selection comes back empty still counts as having a
+            // persona section here (no selection is passed), so rules mode may offer it recent lines. No code hides that.
+            OffersRecentLines: LlmPromptBuilder.HasPersonaSection(persona, card));
+    }
+
+    // handoff null = a preview, which never airs: in rules mode its accepted row is written and no recorder runs
+    // (RecordUnaired). Any future off-air caller passing null gets the same: no recorder settles anything.
     async Task<LlmCopyCleanupResult> RequestCleanedCompletionAsync(
         LlmOptions cfg, SegmentRequest request, Persona? persona, PersonaCard? card,
         bool updateTasteMemory, bool spendQuirks, ContextPatterFact? patterFact, ShowFlavorFact? showFlavorFact,
-        TimeSpan? queueWaitBudget, string? announcementMessage, CallbackSlot? callbackSlot, CancellationToken ct)
+        TimeSpan? queueWaitBudget, string? announcementMessage, RenderHandoff? handoff, bool rulesMode, CancellationToken ct)
     {
         // LOW-5 (PLAN T342 round 2, parameter-shape finding): announcementMessage carries FOUR
         // distinct meanings through the rest of this method — which LlmCallKind to stamp, which
@@ -1176,6 +1232,69 @@ public sealed class LlmCopyWriter(
             // BuildUserContent's station clock line below must provably read the SAME instant — the
             // identical discipline CopyClaims.CheckClock's own remarks already require of its caller.
             var stationLocalNow = StationLocalNow();
+
+            // T800 (F220.10): in rules mode the whole render below this line (quirks, taglines, memory, callback, the gate
+            // ladder, the repeat trim) is replaced by DjLineRulesFlow. Everything above and the single-flight gate are shared.
+            if (rulesFlow is not null && rulesMode)
+            {
+                var render = await BuildRulesRenderAsync(
+                    request, persona, card, personaName, contextFactBlock, requiredCore, patterFact, updateTasteMemory,
+                    spendQuirks, ct);
+                var rulesResult = await rulesFlow.RunAsync(
+                    render,
+                    shaping =>
+                    {
+                        var rulesPrompt = BreakPromptComposer.Compose(new BreakPromptInputs(
+                            request, persona, card, MentionOwnName: false, Quirks: null, RecentLines: [], cfg.MaxCopyChars,
+                            stationLocalNow, PreviouslyVoicedTasteNotes: [])
+                        {
+                            SoundTags = soundTagOffers?.Current,
+                            AnnouncementMessage = requiredCore,
+                            PatterFact = patterFact?.Fact,
+                            Shaping = shaping,
+                        });
+                        systemPrompt = rulesPrompt.System;
+                        userPrompt = rulesPrompt.User;
+                        return rulesPrompt;
+                    },
+                    new DjLineRulesCalls(AskAsync, RecordCall),
+                    timeoutCts.Token);
+                if (handoff is not null)
+                    handoff.AcceptedTalk = rulesResult.Accepted;
+                else if (rulesResult.Accepted is { } unaired)
+                    rulesFlow.RecordUnaired(unaired); // a preview never airs: its row is written, no recorder settles anything
+                return rulesResult.Cleanup;
+
+                // One completion call and its fixed clean-up. userPrompt AND startedAt are reassigned, as the ladder's re-ask does,
+                // so a fault is attributed to the call that raised it; timeoutCts.Token keeps the whole flow inside Llm:TimeoutSeconds.
+                async Task<DjLineReply> AskAsync(int attempt, string prompt)
+                {
+                    userPrompt = prompt;
+                    if (attempt > 1)
+                        startedAt = timeProvider.GetUtcNow();
+
+                    var rulesReply = await PostChatCompletionAsync(
+                        http, EndpointUri.Combine(cfg.Endpoint, "/v1/chat/completions"), cfg, systemPrompt ?? string.Empty,
+                        prompt, DeriveMaxTokens(cfg.MaxCopyChars), timeoutCts.Token);
+                    if (attempt == 1 && updateTasteMemory)
+                        previousBreakTasteNotes = LlmPromptBuilder.DescribeFiredRules(request.Track?.PersonaPick?.FiredRules ?? []);
+
+                    var rulesCleanup = CleanupOf(rulesReply, cfg.MaxCopyChars, personaName, soundTagOffers?.Current?.Tags);
+                    LogIfTrimmed(request, personaName, rulesCleanup);
+                    return new DjLineReply(rulesReply.Content, rulesCleanup);
+                }
+
+                void RecordCall(DjLineReply rulesReply, bool flagged)
+                {
+                    var (rulesOutcome, rulesCause) = flagged
+                        ? (LlmCallOutcome.Ok, LlmCallCause.RuleFlagged)
+                        : ClassifyCleanup(rulesReply.Cleanup);
+                    recorder.Record(
+                        personaName, systemPrompt, userPrompt, rulesReply.Raw, startedAt, ElapsedMs(startedAt),
+                        rulesOutcome, statusDetail: null, mode, rulesCause, cfg.Model, callKind);
+                }
+            }
+
             // T686 (F218.7): quirks are chosen HERE, inside the critical section, so a maxPerShift
             // spend row is written before this render is dispatched. spendQuirks is true for every
             // on-air path (segments and announcements) and false only for the preview; an on-air
@@ -1193,7 +1312,7 @@ public sealed class LlmCopyWriter(
             var hasPersonaSection = LlmPromptBuilder.HasPersonaSection(persona, card, quirkSelection);
             var memory = await RecallMemoryAsync(request, onAirBreak, hasPersonaSection, ct);
             var callbackAsk = await PlanCallbackAsync(
-                request, persona, card, hasPersonaSection, onAirBreak ? callbackSlot : null, ct);
+                request, persona, card, hasPersonaSection, onAirBreak ? handoff : null, ct);
             // F218.42/F218.23: the asked-for memory joins the facts only where a fact check already runs. Callbacks ride
             // LeadIn/BackAnnounce only (F218.40), which have no fact block, so today this arm is inert: memory must not
             // switch the digit/condition-word check on for ordinary patter.
@@ -1334,17 +1453,10 @@ public sealed class LlmCopyWriter(
                 personaName, systemPrompt, userPrompt, text, startedAt, ElapsedMs(startedAt),
                 ringOutcome, statusDetail: null, mode, cause, cfg.Model, callKind);
             // T788: attempt 1 passed the gate or never reached it; today's code aired or templated it as is.
-            // No usable text, three cases. A preview (!spendQuirks) never templates: WritePreviewAsync turns the null
-            // reply into PersonaPreviewResult.Failed and nothing airs or shows, so Dropped whatever the kind. Else kinds
-            // that never air template copy are dropped (TemplateCopyPolicy, the same rule TtsSegmentSource drops by),
-            // the rest fall to the template rung. Announcement is the exception: a null return airs the owner's plain
-            // copy (BreakRenderer), so something does air from fallback, i.e. Template.
+            // No usable text: ShadowCheckSupport.NoTextOutcome says whether it is dropped or falls to the template rung.
             await ShadowAttemptOneAsync(
                 TextOf(cleanup) is null
-                    ? (!spendQuirks
-                        || (request.Kind != SegmentKind.Announcement && TemplateCopyPolicy.NeverAirsTemplateCopy(request.Kind))
-                        ? TalkLegacyOutcome.Dropped
-                        : TalkLegacyOutcome.Template)
+                    ? ShadowCheckSupport.NoTextOutcome(request, preview: !spendQuirks)
                     : cleanup is LlmCopyCleanupResult.Trimmed ? TalkLegacyOutcome.Trimmed
                     : TalkLegacyOutcome.Passed);
             return cleanup;
@@ -1729,6 +1841,7 @@ public sealed class LlmCopyWriter(
         LlmCopyCleanupResult.ReasoningOnly => null,
         LlmCopyCleanupResult.TruthGateRejected => null,
         LlmCopyCleanupResult.RepeatRejected => null,
+        LlmCopyCleanupResult.RuleRejected => null,
         _ => throw new UnreachableException($"Unhandled {nameof(LlmCopyCleanupResult)} case."),
     };
 
@@ -1772,6 +1885,8 @@ public sealed class LlmCopyWriter(
             $"{string.Join(" and ", truthGate.Violations.Select(DescribeViolationForLog).Distinct(StringComparer.OrdinalIgnoreCase))})",
         LlmCopyCleanupResult.RepeatRejected repeat =>
             $"the re-ask repeated again ({string.Join(", ", repeat.Phrases)})",
+        LlmCopyCleanupResult.RuleRejected rules =>
+            $"the re-ask was flagged again ({string.Join(", ", rules.RuleNames)})",
         _ => throw new UnreachableException(
             $"{nameof(TextOf)} already returns non-null text for any other {nameof(LlmCopyCleanupResult)} case."),
     };
@@ -1820,6 +1935,8 @@ public sealed class LlmCopyWriter(
         // gh-#620: the F139 taxonomy is unchanged — a reasoning-only reply IS an empty completion to
         // the ring and the tile; the WARN (DescribeNullTextReason) is where the finer cause is named.
         LlmCopyCleanupResult.ReasoningOnly => (LlmCallOutcome.Ok, LlmCallCause.EmptyCompletion),
+        // T800: present because the switch must be exhaustive: the flow's floor result is never classified per call (each attempt records its own cause).
+        LlmCopyCleanupResult.RuleRejected => (LlmCallOutcome.Ok, LlmCallCause.RuleFlagged),
         _ => throw new UnreachableException($"Unhandled {nameof(LlmCopyCleanupResult)} case."),
     };
 
