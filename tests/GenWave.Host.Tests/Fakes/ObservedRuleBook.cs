@@ -11,6 +11,8 @@ sealed class ObservedRuleBook(ITalkRuleBook inner, bool throwOnJudge) : ITalkRul
 
     public IReadOnlyList<ITalkRule> Rules => inner.Rules;
 
+    public ValueTask<IReadOnlyDictionary<string, bool>> SwitchesAsync(TalkKinds kind, CancellationToken ct) => inner.SwitchesAsync(kind, ct);
+
     public int JudgeCalls => Volatile.Read(ref judgeCalls);
 
     public ValueTask<TalkShaping> ShapeAsync(TalkSnapshot before, CancellationToken ct) => inner.ShapeAsync(before, ct);

@@ -11,7 +11,7 @@ namespace GenWave.MediaLibrary.Station;
 /// transaction as the insert, window read live from <see cref="TalkCheckOptions"/>.
 /// </summary>
 sealed class TalkCheckRepository(Lazy<NpgsqlDataSource> dataSource, IOptionsMonitor<TalkCheckOptions> options)
-    : ITalkCheckStore
+    : ITalkCheckStore, ITalkFlagReader
 {
     const string SweepSql =
         "delete from station.talk_check where checked_at < now() - make_interval(days => @RetentionDays)";
@@ -22,6 +22,34 @@ sealed class TalkCheckRepository(Lazy<NpgsqlDataSource> dataSource, IOptionsMoni
                snapshot::text as snapshot, verdicts::text as verdicts, legacy_outcome, outcome
         from station.talk_check
 
+        """;
+
+    // A flag = the verdict is on and holds a flag object whose reason is not "Could not check" (TalkRuleReasons.CouldNotCheck), the
+    // same test as db/55's view. A broken shaper/recorder is stored apart from the flag, so it needs no exclusion.
+    const string CountFlagsSql =
+        """
+        select v.key as rule_id, c.talk_kind, count(*)::int as flags
+        from station.talk_check c
+        cross join lateral jsonb_each(c.verdicts) v
+        where c.checked_at >= @Since
+          and v.value ->> 'on' = 'true'
+          and jsonb_typeof(v.value -> 'flag') = 'object'
+          and v.value -> 'flag' ->> 'reason' <> @CouldNotCheck
+        group by v.key, c.talk_kind
+        """;
+
+    const string LatestFlagsSql =
+        """
+        select c.id, c.checked_at, coalesce(p.name, nullif(c.snapshot -> 'ad' ->> 'sponsorName', '')) as dj, c.talk_kind,
+               c.verdicts -> @RuleId::text -> 'flag' ->> 'evidence' as words, c.outcome
+        from station.talk_check c
+        left join station.persona p on p.id = c.persona_id
+        where c.checked_at >= @Since
+          and c.verdicts -> @RuleId::text ->> 'on' = 'true'
+          and jsonb_typeof(c.verdicts -> @RuleId::text -> 'flag') = 'object'
+          and c.verdicts -> @RuleId::text -> 'flag' ->> 'reason' <> @CouldNotCheck
+        order by c.checked_at desc, c.id desc
+        limit @Limit
         """;
 
     public async Task AppendAsync(TalkCheckRecord record, CancellationToken ct)
@@ -91,6 +119,40 @@ sealed class TalkCheckRepository(Lazy<NpgsqlDataSource> dataSource, IOptionsMoni
 
         return rows.Select(r => r.ToEntry()).ToList();
     }
+
+    public async Task<IReadOnlyList<TalkRuleFlagCount>> CountFlagsAsync(DateTimeOffset since, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var rows = await conn.QueryAsync<FlagCountRow>(new CommandDefinition(
+            CountFlagsSql,
+            new { Since = since, CouldNotCheck = TalkRuleReasons.CouldNotCheck },
+            cancellationToken: ct));
+
+        return rows.Select(r => new TalkRuleFlagCount(r.RuleId, TalkStoredTokens.Parse<TalkKinds>(r.TalkKind), r.Flags)).ToList();
+    }
+
+    public async Task<IReadOnlyList<TalkFlaggedAttempt>> LatestFlagsAsync(string ruleId, DateTimeOffset since, int limit, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var rows = await conn.QueryAsync<FlaggedAttemptRow>(new CommandDefinition(
+            LatestFlagsSql,
+            new { RuleId = ruleId, Since = since, CouldNotCheck = TalkRuleReasons.CouldNotCheck, Limit = Math.Clamp(limit, 1, 100) },
+            cancellationToken: ct));
+
+        return rows
+            .Select(r => new TalkFlaggedAttempt(
+                r.Id,
+                new DateTimeOffset(DateTime.SpecifyKind(r.CheckedAt, DateTimeKind.Utc)),
+                r.Dj,
+                TalkStoredTokens.Parse<TalkKinds>(r.TalkKind),
+                r.Words ?? string.Empty,
+                TalkStoredTokens.Parse<TalkOutcome>(r.Outcome)))
+            .ToList();
+    }
+
+    sealed record FlagCountRow(string RuleId, string TalkKind, int Flags);
+
+    sealed record FlaggedAttemptRow(long Id, DateTime CheckedAt, string? Dj, string TalkKind, string? Words, string Outcome);
 
     /// <summary>Dapper projection: <c>timestamptz</c> reads back as <see cref="DateTime"/> (UTC), converted at the boundary.</summary>
     sealed record TalkCheckRow(

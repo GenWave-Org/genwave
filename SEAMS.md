@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **182 seams across 10 projects.**
+> **183 seams across 10 projects.**
 
 ## GenWave.Ads (5 seams)
 
@@ -125,7 +125,7 @@
 | `GenWave.Core.Abstractions.IEnergyAnalyzer` | `GenWave.Loudness.FfmpegEnergyAnalyzer` | Singleton | — |
 | `GenWave.Core.Abstractions.ILoudnessAnalyzer` | `GenWave.Loudness.FfmpegLoudnessAnalyzer` | Singleton | — |
 
-## GenWave.MediaLibrary (75 seams)
+## GenWave.MediaLibrary (76 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -203,6 +203,7 @@
 | `GenWave.Core.Abstractions.IYearLookup` | `GenWave.MediaLibrary.YearLookup.MusicBrainzYearLookup` | Singleton | — |
 | `GenWave.Core.TalkRules.ITalkCheckLog` | `GenWave.MediaLibrary.Station.TalkCheckLog` | Singleton | — |
 | `GenWave.Core.TalkRules.ITalkCheckStore` | `GenWave.MediaLibrary.Station.TalkCheckRepository` | Singleton | — |
+| `GenWave.Core.TalkRules.ITalkFlagReader` | `GenWave.MediaLibrary.Station.TalkCheckRepository` | Singleton | — |
 | `GenWave.Core.TalkRules.ITalkRuleSwitches` | `GenWave.MediaLibrary.Station.TalkRuleSwitchRepository` | Singleton | — |
 
 ## GenWave.Memory (7 seams)

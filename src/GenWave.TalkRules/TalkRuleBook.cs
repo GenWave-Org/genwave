@@ -43,6 +43,14 @@ public sealed class TalkRuleBook(
         return new TalkList<RuleVerdict>(verdicts);
     }
 
+    public async ValueTask<IReadOnlyDictionary<string, bool>> SwitchesAsync(TalkKinds kind, CancellationToken ct)
+    {
+        var stored = await ReadSwitchesAsync(kind, ct);
+        return rules
+            .Where(rule => rule.CanCover.HasFlag(kind))
+            .ToDictionary(rule => rule.Id, rule => IsSwitchedOn(rule, kind, stored), StringComparer.Ordinal);
+    }
+
     public async ValueTask<TalkShaping> ShapeAsync(TalkSnapshot before, CancellationToken ct)
     {
         var shapers = await SwitchedOnAsync<IShapingTalkRule>(before.Kind, ct);

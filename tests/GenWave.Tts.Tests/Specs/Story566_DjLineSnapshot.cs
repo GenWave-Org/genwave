@@ -274,6 +274,9 @@ public static class FeatureDjLineSnapshot
     {
         public IReadOnlyList<ITalkRule> Rules => [];
 
+        public ValueTask<IReadOnlyDictionary<string, bool>> SwitchesAsync(TalkKinds kind, CancellationToken ct) =>
+            ValueTask.FromResult<IReadOnlyDictionary<string, bool>>(new Dictionary<string, bool>());
+
         public ValueTask<TalkShaping> ShapeAsync(TalkSnapshot before, CancellationToken ct) => throw new InvalidOperationException();
 
         public ValueTask<TalkList<RuleVerdict>> JudgeAsync(TalkSnapshot after, CancellationToken ct) => throw new InvalidOperationException();
@@ -319,6 +322,9 @@ public static class FeatureDjLineSnapshot
     sealed class EmptyRuleBook : ITalkRuleBook
     {
         public IReadOnlyList<ITalkRule> Rules => [];
+
+        public ValueTask<IReadOnlyDictionary<string, bool>> SwitchesAsync(TalkKinds kind, CancellationToken ct) =>
+            ValueTask.FromResult<IReadOnlyDictionary<string, bool>>(new Dictionary<string, bool>());
 
         public ValueTask<TalkShaping> ShapeAsync(TalkSnapshot before, CancellationToken ct) => throw new InvalidOperationException();
 

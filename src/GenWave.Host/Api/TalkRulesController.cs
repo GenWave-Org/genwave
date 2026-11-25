@@ -6,18 +6,112 @@ using Microsoft.AspNetCore.Mvc;
 namespace GenWave.Host.Api;
 
 /// <summary>
-/// Admin API for the DJ-line rules (SPEC F220.28: every route needs admin auth, as Settings). Today only the replay.
+/// Admin API for the DJ-line rules (SPEC F220.22-F220.28: every route needs admin auth, as Settings): the list, a switch, the flagged attempts and the replay.
 /// </summary>
 [ApiController]
 [Route("api/talk-rules")]
 [AdminSurface]
 [Authorize(Policy = AuthorizationPolicies.Settings)]
-public sealed class TalkRulesController(ITalkRuleReplay replay, TimeProvider timeProvider) : ControllerBase
+public sealed class TalkRulesController(
+    ITalkRuleReplay replay,
+    ITalkRuleBook book,
+    ITalkRuleSwitchboard switchboard,
+    ITalkFlagReader flags,
+    TimeProvider timeProvider) : ControllerBase
 {
     /// <summary>The widest window a replay may ask for, matching the longest <c>TalkRules:CheckRetentionDays</c>.</summary>
     public const int MaxDays = 90;
 
+    /// <summary>How many flagged attempts <c>GET {id}/flags</c> returns.</summary>
+    public const int FlagsPageSize = 20;
+
     private const string CompareLegacy = "legacy";
+    private const int ListFlagsDays = 7;
+
+    /// <summary>GET /api/talk-rules — every rule: how it explains itself, each kind's switch (defaults applied) and last week's flags per kind (F220.24).</summary>
+    [HttpGet]
+    public async Task<ActionResult<IReadOnlyList<TalkRuleDto>>> List(CancellationToken ct)
+    {
+        var switchesByKind = new Dictionary<TalkKinds, IReadOnlyDictionary<string, bool>>();
+        foreach (var kind in TalkKindSlugs.All)
+        {
+            switchesByKind[kind] = await book.SwitchesAsync(kind, ct);
+        }
+
+        var since = timeProvider.GetUtcNow().AddDays(-ListFlagsDays);
+        var counts = (await flags.CountFlagsAsync(since, ct)).ToDictionary(count => (count.RuleId, count.Kind), count => count.Count);
+
+        var rules = book.Rules.Select(rule =>
+        {
+            var covered = TalkKindSlugs.All.Where(kind => rule.CanCover.HasFlag(kind)).ToList();
+            var description = rule.Describe();
+            return new TalkRuleDto(
+                rule.Id,
+                description.Name,
+                description.WhatItDoes,
+                description.Why,
+                description.Example,
+                covered.Select(TalkKindSlugs.Of).ToList(),
+                covered.ToDictionary(
+                    TalkKindSlugs.Of,
+                    kind => switchesByKind[kind][rule.Id]),
+                covered.ToDictionary(TalkKindSlugs.Of, kind => counts.GetValueOrDefault((rule.Id, kind))));
+        }).ToList();
+
+        return Ok(rules);
+    }
+
+    /// <summary>
+    /// PUT /api/talk-rules/{id}/{kind} <c>{ "enabled": bool }</c> — switches one rule for one kind of talk, live (F220.22, F220.23).
+    /// 404 for an unknown rule, 400 for an unknown kind or a kind the rule cannot cover; the switchboard makes both rule checks.
+    /// </summary>
+    [HttpPut("{id}/{kind}")]
+    [Consumes("application/json")]
+    public async Task<IActionResult> Switch(string id, string kind, [FromBody] TalkRuleSwitchRequest request, CancellationToken ct)
+    {
+        if (request.Enabled is not { } enabled)
+        {
+            return Invalid("enabled must be true or false.");
+        }
+
+        if (!TalkKindSlugs.TryParse(kind, out var talkKind))
+        {
+            return Invalid("kind must be \"dj-line\", \"chat\" or \"ad\".");
+        }
+
+        return await switchboard.SwitchAsync(id, talkKind, enabled, ct) switch
+        {
+            TalkRuleSwitchResult.Stored => Ok(new TalkRuleSwitchResponse(id, TalkKindSlugs.Of(talkKind), enabled)),
+            TalkRuleSwitchResult.UnknownRule => NotFound(),
+            TalkRuleSwitchResult.KindNotCovered => Invalid("That rule cannot cover that kind of talk."),
+            var other => throw new InvalidOperationException($"Unhandled switch result {other}."),
+        };
+    }
+
+    /// <summary>GET /api/talk-rules/{id}/flags?days=7 — the latest 20 attempts the rule flagged, newest first (F220.25).</summary>
+    [HttpGet("{id}/flags")]
+    public async Task<ActionResult<IReadOnlyList<TalkFlaggedAttemptDto>>> Flags(string id, [FromQuery] int days = ListFlagsDays, CancellationToken ct = default)
+    {
+        if (days is < 1 or > MaxDays)
+        {
+            return Invalid($"days must be between 1 and {MaxDays}.");
+        }
+
+        if (!book.Rules.Any(rule => string.Equals(rule.Id, id, StringComparison.Ordinal)))
+        {
+            return NotFound();
+        }
+
+        var since = timeProvider.GetUtcNow().AddDays(-days);
+        var attempts = await flags.LatestFlagsAsync(id, since, FlagsPageSize, ct);
+        return Ok(attempts.Select(attempt => new TalkFlaggedAttemptDto(
+            attempt.CheckId,
+            attempt.CheckedAt,
+            attempt.Dj,
+            TalkKindSlugs.Of(attempt.Kind),
+            attempt.Words,
+            OutcomeToken(attempt.Outcome))).ToList());
+    }
 
     /// <summary>
     /// POST /api/talk-rules/replay — re-judges the stored snapshots of the last <c>days</c> with today's rules (F220.26) and,
@@ -61,13 +155,12 @@ public sealed class TalkRulesController(ITalkRuleReplay replay, TimeProvider tim
         kinds = TalkKinds.None;
         foreach (var token in requested)
         {
-            switch (token)
+            if (!TalkKindSlugs.TryParse(token, out var kind))
             {
-                case "dj-line": kinds |= TalkKinds.DjLine; break;
-                case "chat": kinds |= TalkKinds.Chat; break;
-                case "ad": kinds |= TalkKinds.Ad; break;
-                default: return false;
+                return false;
             }
+
+            kinds |= kind;
         }
 
         return true;
@@ -79,7 +172,11 @@ public sealed class TalkRulesController(ITalkRuleReplay replay, TimeProvider tim
             change.RuleId,
             ToDto(change.Stored),
             ToDto(change.Replayed),
-            change.LegacyOutcome is { } outcome ? JsonNamingPolicy.KebabCaseLower.ConvertName(outcome.ToString()) : null);
+            change.LegacyOutcome is { } outcome ? OutcomeToken(outcome) : null);
+
+    private static string OutcomeToken<TOutcome>(TOutcome outcome)
+        where TOutcome : struct, Enum =>
+        JsonNamingPolicy.KebabCaseLower.ConvertName(outcome.ToString());
 
     private static TalkRuleFlagDto? ToDto(RuleFlag? flag) =>
         flag is null ? null : new TalkRuleFlagDto(flag.Reason, flag.Ask, flag.Evidence);

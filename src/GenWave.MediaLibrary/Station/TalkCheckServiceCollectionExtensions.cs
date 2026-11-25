@@ -31,10 +31,13 @@ public static class TalkCheckServiceCollectionExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
-        services.AddSingleton<ITalkCheckStore>(sp =>
+        // One repository behind both seams: the write/replay store and the rules API's flag reader.
+        services.AddSingleton(sp =>
             new TalkCheckRepository(
                 new Lazy<NpgsqlDataSource>(() => new NpgsqlDataSourceBuilder(connectionString).Build()),
                 sp.GetRequiredService<IOptionsMonitor<TalkCheckOptions>>()));
+        services.AddSingleton<ITalkCheckStore>(sp => sp.GetRequiredService<TalkCheckRepository>());
+        services.AddSingleton<ITalkFlagReader>(sp => sp.GetRequiredService<TalkCheckRepository>());
 
         services.AddSingleton(Channel.CreateBounded<TalkCheckRecord>(
             new BoundedChannelOptions(QueueCapacity) { SingleReader = true, FullMode = BoundedChannelFullMode.Wait }));
