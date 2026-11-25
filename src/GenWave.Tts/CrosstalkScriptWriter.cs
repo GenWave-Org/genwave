@@ -67,7 +67,8 @@ public sealed class CrosstalkScriptWriter(
     ISentenceTrimmer? sentenceTrimmer = null, // T715: absent means a repeated line always re-asks, then drops
     ISoundTagOfferProvider? soundTagOffers = null, // T760: absent means no sound tags in the prompt
     ChatShadowCheck? shadowCheck = null, // T789: absent means no shadow week, exactly the pre-shadow behaviour
-    IStationClockProvider? stationClock = null) // T789: the snapshot's timezone id; absent means the process zone
+    IStationClockProvider? stationClock = null, // T789: the snapshot's timezone id; absent means the process zone
+    ChatRulesFlow? rulesFlow = null) // T801: absent means no rules mode, exactly the legacy behaviour
 {
     readonly CrosstalkLineMemory memory = new(
         repetitionCheck, utteranceStore, events ?? NoOpStationEventSink.Instance, logger, sentenceTrimmer);
@@ -139,10 +140,13 @@ public sealed class CrosstalkScriptWriter(
         }
 
         var durationTargetSeconds = crosstalkOptions.CurrentValue.DurationTargetSeconds;
+        var rulesMode = rulesFlow?.IsOn() ?? false; // T801: read once per chat
 
         var hostQuirks = await SelectQuirksAsync(request.HostCard, ct);
         var neighborQuirks = await SelectQuirksAsync(request.NeighborCard, ct);
 
+        // Built unshaped here, as ever. Rules mode replaces it with the shaped one (F220.10) when the call asks; until then it is the
+        // best the ring can say should the shapers fault first, never an empty prompt.
         var systemPrompt = CrosstalkPromptBuilder.BuildSystemPrompt(
             request.HostCard, request.NeighborCard, durationTargetSeconds, request.StationLocalNow,
             hostQuirks, neighborQuirks, soundTagOffers?.Current);
@@ -169,10 +173,28 @@ public sealed class CrosstalkScriptWriter(
             // remarks). Still reuses LlmCopyWriter.DeriveMaxTokens's chars-to-tokens shape
             // (divisor/floor/ceiling) rather than a second, independently-tuned formula.
             var cap = DeriveScriptGenerationCap(durationTargetSeconds);
-            var (raw, result) = await PostAndParseAsync(
-                http, requestUri, cfg, systemPrompt, userPrompt, cap, request, durationTargetSeconds, timeoutCts.Token);
+            // T801 (F220.10): in rules mode the whole legacy ladder below (the repeat trim, the re-ask, the line drop and the
+            // shadow hook) is replaced by ChatRulesFlow; everything above and the ring and the stored lines below are shared.
+            ChatRulesResult? rulesResult = null;
+            if (rulesFlow is not null && rulesMode)
+            {
+                rulesResult = await rulesFlow.RunAsync(
+                    SnapshotInputOf(request, new CrosstalkAiredScript([]), histories, cfg, durationTargetSeconds),
+                    shaping => new BreakPrompt(
+                        CrosstalkPromptBuilder.BuildSystemPrompt(
+                            request.HostCard, request.NeighborCard, durationTargetSeconds, request.StationLocalNow,
+                            hostQuirks, neighborQuirks, soundTagOffers?.Current, shaping),
+                        userPrompt),
+                    new ChatRulesCalls(AskAsync, RecordCaught),
+                    timeoutCts.Token);
+            }
 
-            if (result is CrosstalkWriteResult.Accepted first)
+            var (raw, result) = rulesResult is null
+                ? await PostAndParseAsync(
+                    http, requestUri, cfg, systemPrompt, userPrompt, cap, request, durationTargetSeconds, timeoutCts.Token)
+                : (rulesResult.Raw, rulesResult.Result);
+
+            if (rulesResult is null && result is CrosstalkWriteResult.Accepted first)
             {
                 var hits = memory.FindRepeats(first.Script, request.StationName, histories);
                 var trimmedFirst = hits.Count > 0 ? memory.Trim(first.Script, hits) : null;
@@ -210,12 +232,32 @@ public sealed class CrosstalkScriptWriter(
                 }
             }
 
-            else if (result is CrosstalkWriteResult.Discarded dropped)
+            else if (rulesResult is null && result is CrosstalkWriteResult.Discarded dropped)
             {
                 // T789: today's code drops the exchange; the rule book still judges the script the parser built (null on a shape failure).
                 await ShadowAttemptOneAsync(
                     request, raw, dropped.Parsed, TalkLegacyOutcome.Dropped, histories, cfg, durationTargetSeconds, ct);
             }
+
+            // One completion call and its parse, for the rules flow. The prompts AND startedAt are reassigned, as the legacy re-ask does,
+            // so a fault is attributed to the call that raised it; timeoutCts.Token keeps the whole flow inside Llm:TimeoutSeconds.
+            async Task<ChatReply> AskAsync(int attempt, BreakPrompt prompt)
+            {
+                systemPrompt = prompt.System;
+                userPrompt = prompt.User;
+                if (attempt > 1)
+                    startedAt = timeProvider.GetUtcNow();
+                var (askedRaw, asked) = await PostAndParseAsync(
+                    http, requestUri, cfg, prompt.System, prompt.User, cap, request, durationTargetSeconds, timeoutCts.Token,
+                    judgedByRules: true);
+                return new ChatReply(askedRaw, asked);
+            }
+
+            // The caught first call gets its own honest ring entry BEFORE the re-ask fires (legacy's own order).
+            void RecordCaught(string caughtRaw) =>
+                recorder.Record(
+                    personaName, systemPrompt, userPrompt, caughtRaw, startedAt, ElapsedMs(startedAt),
+                    LlmCallOutcome.Ok, statusDetail: null, mode, LlmCallCause.RuleFlagged, cfg.Model, LlmCallKind.Crosstalk);
 
             switch (result)
             {
@@ -224,6 +266,9 @@ public sealed class CrosstalkScriptWriter(
                     // stored script is capped here in one ordered pass (first tags win); the per-line render gate stays the engine filter.
                     var accepted = CapSoundTags(uncapped);
                     await memory.StoreAsync(request, accepted.Script, ct);
+                    // T801 (F220.15): the recording rules hear of accepted talk only, then its row is written (after them, F220.9).
+                    if (rulesFlow is not null && rulesResult?.Accepted is { } acceptedTalk)
+                        await rulesFlow.AcceptedAsync(acceptedTalk, ct);
                     return Accept(accepted, personaName, systemPrompt, userPrompt, raw, startedAt, mode, cfg.Model);
                 // discarded.Cause was decided once, at the source (SPEC F139.1) — never re-derived from its text.
                 case CrosstalkWriteResult.Discarded discarded:
@@ -275,16 +320,21 @@ public sealed class CrosstalkScriptWriter(
             return;
 
         // Built inside the check's fault boundary: a throw while shaping the input must never reach the writer.
-        ChatSnapshotInput BuildInput() => new(
-            request, 1, judged ?? new CrosstalkAiredScript([]), (stationClock?.Zone ?? timeProvider.LocalTimeZone).Id,
-            durationTargetSeconds, cfg.MaxCopyChars,
-            RowsOf(histories, CrosstalkSpeaker.Host), RowsOf(histories, CrosstalkSpeaker.Neighbor));
+        ChatSnapshotInput BuildInput() => SnapshotInputOf(
+            request, judged ?? new CrosstalkAiredScript([]), histories, cfg, durationTargetSeconds);
 
         var cleaned = judged is null
             ? null
             : string.Join('\n', judged.Lines.Select(CrosstalkScriptParser.DescribeLine));
         await shadowCheck.CheckAsync(request, BuildInput, raw, cleaned, legacyOutcome, ct);
     }
+
+    /// <summary>The snapshot input for attempt 1 of <paramref name="script"/>: the shadow hook's and the rules flow's alike (T789, T801).</summary>
+    ChatSnapshotInput SnapshotInputOf(
+        CrosstalkExchangeRequest request, CrosstalkAiredScript script,
+        IReadOnlyList<CrosstalkLineMemory.SpeakerHistory> histories, LlmOptions cfg, int durationTargetSeconds) => new(
+        request, 1, script, (stationClock?.Zone ?? timeProvider.LocalTimeZone).Id, durationTargetSeconds, cfg.MaxCopyChars,
+        RowsOf(histories, CrosstalkSpeaker.Host), RowsOf(histories, CrosstalkSpeaker.Neighbor));
 
     static IReadOnlyList<UtteranceEntry> RowsOf(
         IReadOnlyList<CrosstalkLineMemory.SpeakerHistory> histories, CrosstalkSpeaker speaker) =>
@@ -307,7 +357,7 @@ public sealed class CrosstalkScriptWriter(
     /// </summary>
     async Task<(string Raw, CrosstalkWriteResult Result)> PostAndParseAsync(
         HttpClient http, Uri requestUri, LlmOptions cfg, string systemPrompt, string userPrompt, int cap,
-        CrosstalkExchangeRequest request, int durationTargetSeconds, CancellationToken ct)
+        CrosstalkExchangeRequest request, int durationTargetSeconds, CancellationToken ct, bool judgedByRules = false)
     {
         // The wire call is LlmCopyWriter.PostChatCompletionAsync, the ONE seam this writer and AdScriptWriter share.
         var reply = await LlmCopyWriter.PostChatCompletionAsync(http, requestUri, cfg, systemPrompt, userPrompt, cap, ct);
@@ -321,7 +371,7 @@ public sealed class CrosstalkScriptWriter(
 
         return (raw, CrosstalkScriptParser.Parse(
             raw, cfg.MaxCopyChars, durationTargetSeconds, request.StationLocalNow, request.StationName,
-            soundTagOffers?.Current?.Tags));
+            soundTagOffers?.Current?.Tags, judgedByRules));
     }
 
     /// <summary>

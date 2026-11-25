@@ -1,6 +1,7 @@
 namespace GenWave.Tts;
 
 using GenWave.Core.Domain;
+using GenWave.Core.TalkRules;
 
 /// <summary>
 /// Pure, stateless prompt composition for <see cref="CrosstalkScriptWriter"/> (SPEC F127.3, STORY-326)
@@ -92,10 +93,17 @@ static class CrosstalkPromptBuilder
     /// <c>IQuirkSelector</c> pick; null keeps the builder's own plain sampling (a writer built
     /// without a selector).
     /// </para>
+    ///
+    /// <para>
+    /// <paramref name="shaping"/> (SPEC F220.10, PLAN T801) is the rules-mode form: null is the legacy prompt, byte for byte. With
+    /// it, the clock guard line leaves the scaffold and rides, with every other shaper's note, in a "For this break" section after
+    /// both personas (no section when there are no notes). Nothing else differs.
+    /// </para>
     /// </summary>
     public static string BuildSystemPrompt(
         PersonaCard hostCard, PersonaCard neighborCard, int durationTargetSeconds, DateTimeOffset stationLocalNow,
-        QuirkSelection? hostQuirks = null, QuirkSelection? neighborQuirks = null, SoundTagOffer? soundTags = null)
+        QuirkSelection? hostQuirks = null, QuirkSelection? neighborQuirks = null, SoundTagOffer? soundTags = null,
+        TalkShaping? shaping = null)
     {
         // Same spoken-rate estimate CrosstalkScriptParser.Parse applies to an accepted script — the
         // STATED word budget asks for what the duration gate will accept, no headroom added (unlike
@@ -117,7 +125,9 @@ static class CrosstalkPromptBuilder
             "no stage directions, no emoji, no markdown formatting. " +
             // SPEC F219.16: tags are listed only when offered; null keeps today's bytes.
             (soundTags is null ? "" : soundTags.ExchangePromptLine + " ") +
-            AntiFabricationClause + " " + LlmPromptBuilder.BuildClockGuardLine(stationLocalNow) + " " +
+            AntiFabricationClause + " " +
+            // SPEC F220.10: in rules form the clock guard rides under "For this break" instead
+            (shaping is null ? LlmPromptBuilder.BuildClockGuardLine(stationLocalNow) + " " : "") +
             $"To have one speaker briefly cut in over the other's line, tag that one line " +
             $"\"{CrosstalkScriptParser.HostTag} {CrosstalkScriptParser.InterjectionMarker}: <line>\" " +
             $"or \"{CrosstalkScriptParser.NeighborTag} {CrosstalkScriptParser.InterjectionMarker}: " +
@@ -131,6 +141,10 @@ static class CrosstalkPromptBuilder
         var lines = new List<string> { scaffold };
         lines.Add($"{CrosstalkScriptParser.HostTag} persona:\n{hostSection ?? "(no defined persona)"}");
         lines.Add($"{CrosstalkScriptParser.NeighborTag} persona:\n{neighborSection ?? "(no defined persona)"}");
+
+        // SPEC F220.10 (PLAN T801): rules mode only; the section the shapers' notes make, after both personas.
+        if (shaping?.ForThisBreak() is { Length: > 0 } forThisBreak)
+            lines.Add(forThisBreak);
 
         return string.Join("\n\n", lines);
     }

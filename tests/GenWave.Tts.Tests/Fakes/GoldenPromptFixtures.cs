@@ -143,7 +143,15 @@ static class GoldenPromptFixtures
         return composed;
     }
 
-    public static async Task<GoldenPrompt> ChatAsync()
+    public static Task<GoldenPrompt> ChatAsync() => CaptureChatAsync(rulesMode: false);
+
+    /// <summary>
+    /// The chat fixture captured from the writer itself with <c>TalkRules:Mode</c> = <c>rules</c> (T801): the prompts the model is
+    /// really sent. <c>day-and-time</c> is the one real rule that shapes a chat, so the clock guard is the moved text.
+    /// </summary>
+    public static Task<GoldenPrompt> ChatFromTheRulesWriterAsync() => CaptureChatAsync(rulesMode: true);
+
+    static async Task<GoldenPrompt> CaptureChatAsync(bool rulesMode)
     {
         var users = new List<string>();
         var systems = new List<string>();
@@ -155,7 +163,8 @@ static class GoldenPromptFixtures
             QuirkSpecHarness.NewRecorder(), new FakeDegradationModeReader(),
             NullLogger<CrosstalkScriptWriter>.Instance, TimeProvider.System,
             quirkSelector: new FixedQuirks(), repetitionCheck: new RepetitionCheck(), utteranceStore: store,
-            soundTagOffers: new FixedSoundTags());
+            soundTagOffers: new FixedSoundTags(),
+            rulesFlow: rulesMode ? ChatRulesFlowOverTheRealShapers() : null);
 
         await writer.WriteExchangeAsync(
             new CrosstalkExchangeRequest(
@@ -164,6 +173,17 @@ static class GoldenPromptFixtures
             CancellationToken.None);
 
         return new GoldenPrompt("chat", systems[0], users[0]);
+    }
+
+    static ChatRulesFlow ChatRulesFlowOverTheRealShapers() =>
+        new(new TestOptionsMonitor<TalkRulesOptions>(new TalkRulesOptions { Mode = "rules" }),
+            new ChatSnapshotSource(new Everyone()),
+            new TalkRuleBook([new DayAndTimeRule()], new InMemoryTalkRuleSwitches(), NullLogger<TalkRuleBook>.Instance),
+            new RecordingTalkCheckLog(), new RecordingStationEventSink(), NullLogger<ChatRulesFlow>.Instance);
+
+    sealed class Everyone : IAudiencePostureProvider
+    {
+        public AudiencePosture Current => AudiencePosture.Everyone;
     }
 
     public static async Task<GoldenPrompt> AdAsync()

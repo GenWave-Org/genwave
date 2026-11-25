@@ -1,6 +1,6 @@
 // STORY-570 — One flow for flagged talk (SPEC F220 · PLAN F220)
 //
-// BDD specification — xUnit. T800 activated the DJ-line facts; the chat facts (AC4) stay pending for T801.
+// BDD specification — xUnit. T800 activated the DJ-line facts; T801 activated the chat fact (AC4) and the chat facts live in Story570_OneFlowForFlaggedChat.cs.
 
 namespace GenWave.Tts.Tests.Specs;
 
@@ -172,13 +172,26 @@ public static class FeatureOneFlowForFlaggedTalk
     }
 
     // AC4 — a chat still flagged after the re-ask
-    public sealed class ScenarioAChatIsStillFlagged
+    public sealed class ScenarioAChatIsStillFlagged : IAsyncLifetime
     {
-        [Fact(Skip = "pending: T801")]
-        public void TheChatIsDropped() { }
+        ChatRulesSpecHarness harness = null!;
+        CrosstalkWriteResult result = null!;
 
-        [Fact(Skip = "pending: T801")]
-        public void OnlyOneReAskWasMade() { }
+        public async Task InitializeAsync()
+        {
+            harness = new ChatRulesSpecHarness(
+                [ChatRulesSpecHarness.Clean, ChatRulesSpecHarness.CleanAgain],
+                [new ScriptedJudgingRule("a-rule", "Alpha rule.", s => Always("Ask.", s), TalkKinds.Chat)]);
+            result = await harness.WriteAsync();
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void TheChatIsDropped() => Assert.IsType<CrosstalkWriteResult.Discarded>(result);
+
+        [Fact]
+        public void OnlyOneReAskWasMade() => Assert.Equal(2, harness.UserPrompts.Count);
     }
 
     // AC7 — the golden prompts after the shapers moved: the prompts the writer really posts in rules mode are the rules form

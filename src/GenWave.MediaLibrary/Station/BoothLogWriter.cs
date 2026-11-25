@@ -205,7 +205,7 @@ sealed class BoothLogWriter(
         };
 
     static string Summarize(RuleFlagged f) =>
-        $"{f.RuleName} flagged {f.Speaker}'s line — " + f.Outcome switch
+        $"{f.RuleName} flagged {f.Speaker}'s {(f.Talk == RuleFlagTalk.Chat ? "chat" : "line")} — " + f.Outcome switch
         {
             RuleFlagOutcome.ReAsked => "re-asked",
             RuleFlagOutcome.Template => "template",

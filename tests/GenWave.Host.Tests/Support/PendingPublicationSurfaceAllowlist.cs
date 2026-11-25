@@ -4,7 +4,7 @@ namespace GenWave.Host.Tests.Support;
 /// SPEC F218.5 / PLAN T683 (the T524 precedent): <c>QuirkRule</c> and
 /// <c>PersonaCard.QuirkRules</c> (and, PLAN T684, the init-only <c>PersonaId</c>/<c>ShowId</c>/<c>ShiftKeyText</c>/
 /// <c>UtteranceId</c>/<c>Text</c> members on <c>SegmentRequest</c>/<c>SegmentCopy</c>/<c>SegmentGenerated</c>; and, PLAN T685,
-/// the new <c>TrackProvenAired</c> event published beside <c>TrackAired</c>; and, PLAN T693/T714, the new <c>RepeatCaught</c> event and its <c>RepeatOutcome</c>; and, PLAN T800, the new <c>RuleFlagged</c> event and its <c>RuleFlagOutcome</c>; and, PLAN T709, <c>QuirkRule.MaxPerHour</c>/<c>MinBreaksApart</c>; and, PLAN T702, <c>CrosstalkParticipant</c>/<c>FactReadOnAir</c> and the init-only <c>Host</c>/<c>Neighbor</c>/<c>FactRead</c> members; and, PLAN T702a, <c>SegmentRequest.ContextProviderKey</c>; and, PLAN T751, <c>PersonaCard.Voices</c>/<c>VoicesByEngine</c>/<c>WithVoice</c>; and, PLAN T726, <c>HandoffParticipants</c> and the init-only <c>Handoff</c> members on <c>SegmentRequest</c>/<c>MediaItem</c>/<c>TrackAired</c>) are an additive contract change that landed in
+/// the new <c>TrackProvenAired</c> event published beside <c>TrackAired</c>; and, PLAN T693/T714, the new <c>RepeatCaught</c> event and its <c>RepeatOutcome</c>; and, PLAN T800, the new <c>RuleFlagged</c> event and its <c>RuleFlagOutcome</c>; and, PLAN T801, <c>RuleFlagTalk</c> and the init-only <c>RuleFlagged.Talk</c>; and, PLAN T709, <c>QuirkRule.MaxPerHour</c>/<c>MinBreaksApart</c>; and, PLAN T702, <c>CrosstalkParticipant</c>/<c>FactReadOnAir</c> and the init-only <c>Host</c>/<c>Neighbor</c>/<c>FactRead</c> members; and, PLAN T702a, <c>SegmentRequest.ContextProviderKey</c>; and, PLAN T751, <c>PersonaCard.Voices</c>/<c>VoicesByEngine</c>/<c>WithVoice</c>; and, PLAN T726, <c>HandoffParticipants</c> and the init-only <c>Handoff</c> members on <c>SegmentRequest</c>/<c>MediaItem</c>/<c>TrackAired</c>) are an additive contract change that landed in
 /// <c>src/GenWave.Abstractions</c> BEFORE the package that carries it is published. The committed
 /// baseline fixture stays byte-identical to the published surface (never hand-edited); the gap is
 /// tolerated only by passing these EXACT added lines — named line by line, no wildcard — to
@@ -49,6 +49,12 @@ public static class PendingPublicationSurfaceAllowlist
         "GenWave.Core.Events.RuleFlagOutcome::FIELD static GenWave.Core.Events.RuleFlagOutcome ReAsked const = 0",
         "GenWave.Core.Events.RuleFlagOutcome::FIELD static GenWave.Core.Events.RuleFlagOutcome Template const = 1",
         "GenWave.Core.Events.RuleFlagOutcome::TYPE enum : none [System.IComparable,System.IConvertible,System.IFormattable,System.ISpanFormattable]",
+        // PLAN T801: RuleFlagTalk and RuleFlagged.Talk, so the rule-flagged row can say "chat" for a two-DJ chat.
+        "GenWave.Core.Events.RuleFlagTalk::FIELD System.Int32 value__",
+        "GenWave.Core.Events.RuleFlagTalk::FIELD static GenWave.Core.Events.RuleFlagTalk Chat const = 1",
+        "GenWave.Core.Events.RuleFlagTalk::FIELD static GenWave.Core.Events.RuleFlagTalk Line const = 0",
+        "GenWave.Core.Events.RuleFlagTalk::TYPE enum : none [System.IComparable,System.IConvertible,System.IFormattable,System.ISpanFormattable]",
+        "GenWave.Core.Events.RuleFlagged::PROPERTY GenWave.Core.Events.RuleFlagTalk Talk { public get; public init; }",
         "GenWave.Core.Events.RuleFlagged::CTOR (System.Int64 PersonaId, System.String RuleName, System.String Speaker, GenWave.Core.Events.RuleFlagOutcome Outcome)",
         "GenWave.Core.Events.RuleFlagged::PROPERTY GenWave.Core.Events.RuleFlagOutcome Outcome { public get; public init; }",
         "GenWave.Core.Events.RuleFlagged::PROPERTY System.Int64 PersonaId { public get; public init; }",

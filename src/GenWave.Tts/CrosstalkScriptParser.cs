@@ -104,7 +104,7 @@ static partial class CrosstalkScriptParser
     /// </summary>
     public static CrosstalkWriteResult Parse(
         string rawResponse, int maxLineChars, int durationTargetSeconds, DateTimeOffset stationLocalNow,
-        string? stationName = null, IReadOnlyList<string>? keepTags = null)
+        string? stationName = null, IReadOnlyList<string>? keepTags = null, bool judgedByRules = false)
     {
         var rawLines = rawResponse
             .Split('\n')
@@ -182,6 +182,11 @@ static partial class CrosstalkScriptParser
                     $"'{InterjectionMarker}' instead)", LlmCallCause.MalformedResponse, script);
             }
         }
+
+        // SPEC F220.11 (PLAN T801): in rules mode the truth, clock and duration checks below are rules the rule book judges, so the
+        // fixed clean-up ends here: the script is well-formed, and the judges decide whether it airs.
+        if (judgedByRules)
+            return new CrosstalkWriteResult.Accepted(script);
 
         // SPEC F138.6 (PLAN T333): the truth discard reasons — checked ONCE against the WHOLE
         // script's cleaned text (never per line): every violation discards the WHOLE exchange

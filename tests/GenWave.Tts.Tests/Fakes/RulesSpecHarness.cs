@@ -21,15 +21,15 @@ public sealed class RecordingTalkCheckLog : ITalkCheckLog
 }
 
 /// <summary>A judging rule whose flag is scripted per snapshot; it also keeps the snapshots it judged.</summary>
-public sealed class ScriptedJudgingRule(string id, string name, Func<TalkSnapshot, RuleFlag?> judge) : IJudgingTalkRule
+public sealed class ScriptedJudgingRule(string id, string name, Func<TalkSnapshot, RuleFlag?> judge, TalkKinds covers = TalkKinds.DjLine) : IJudgingTalkRule
 {
     public List<TalkSnapshot> Judged { get; } = [];
 
     public string Id => id;
 
-    public TalkKinds CanCover => TalkKinds.DjLine;
+    public TalkKinds CanCover => covers;
 
-    public TalkKinds OnByDefault => TalkKinds.DjLine;
+    public TalkKinds OnByDefault => covers;
 
     public TalkRuleDescription Describe() => new(name, "-", "-", "-");
 
@@ -41,7 +41,8 @@ public sealed class ScriptedJudgingRule(string id, string name, Func<TalkSnapsho
 }
 
 /// <summary>A shaping and recording rule that keeps what it sees, and can be told to throw.</summary>
-public sealed class ScriptedShapingRule(string id, string name, string? note = null, bool shapeThrows = false, bool recordThrows = false)
+public sealed class ScriptedShapingRule(
+    string id, string name, string? note = null, bool shapeThrows = false, bool recordThrows = false, TalkKinds covers = TalkKinds.DjLine)
     : IShapingTalkRule, IRecordingTalkRule
 {
     public List<TalkSnapshot> Shaped { get; } = [];
@@ -50,9 +51,9 @@ public sealed class ScriptedShapingRule(string id, string name, string? note = n
 
     public string Id => id;
 
-    public TalkKinds CanCover => TalkKinds.DjLine;
+    public TalkKinds CanCover => covers;
 
-    public TalkKinds OnByDefault => TalkKinds.DjLine;
+    public TalkKinds OnByDefault => covers;
 
     public TalkRuleDescription Describe() => new(name, "-", "-", "-");
 

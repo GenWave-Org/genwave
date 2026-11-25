@@ -30,6 +30,8 @@ public sealed class DjLineRulesFlow(
     IStationEventSink events,
     ILogger<DjLineRulesFlow> logger)
 {
+    readonly RulesFlowSupport support = new(ruleBook, checkLog, events, logger);
+
     /// <summary>True when the live mode is rules (F220.10); see <see cref="ShadowCheckSupport.IsRules"/>. Never throws.</summary>
     public bool IsOn() => ShadowCheckSupport.IsRules(options, logger);
 
@@ -55,7 +57,7 @@ public sealed class DjLineRulesFlow(
         var outcome = ShadowCheckSupport.NoTextOutcome(render.Input.Request, render.Input.Preview);
         PublishFlags(render, second.Flags, outcome == TalkLegacyOutcome.Dropped ? RuleFlagOutcome.Dropped : RuleFlagOutcome.Template);
         return new DjLineRulesResult(
-            new LlmCopyCleanupResult.RuleRejected(second.Flags.Select(f => NameOf(f.Verdict.RuleId)).ToList()), null);
+            new LlmCopyCleanupResult.RuleRejected(second.Flags.Select(f => support.NameOf(f.Verdict.RuleId)).ToList()), null);
     }
 
     /// <summary>
@@ -67,21 +69,8 @@ public sealed class DjLineRulesFlow(
     internal async ValueTask AcceptedAsync(DjLineAcceptedTalk accepted, long? utteranceId, CancellationToken ct)
     {
         var snapshot = accepted.Snapshot with { UtteranceId = utteranceId };
-        var verdicts = accepted.Verdicts;
-        try
-        {
-            verdicts = Mark(verdicts, await ruleBook.AcceptedAsync(snapshot, ct), TalkRuleReasons.CouldNotRecord);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Recording accepted {Kind} talk failed; the talk airs as accepted", snapshot.SegmentKind);
-        }
-
-        Write(accepted.Request, accepted.Raw, accepted.Cleaned, snapshot, verdicts, TalkOutcome.Accepted);
+        await support.RecordAcceptedAsync(
+            accepted.Request.PersonaId, accepted.Raw, accepted.Cleaned, snapshot, accepted.Verdicts, ct);
     }
 
     /// <summary>
@@ -121,12 +110,8 @@ public sealed class DjLineRulesFlow(
             return new Attempt(new DjLineRulesResult(reply.Cleanup, null), []);
         }
 
-        var verdicts = Mark(await ruleBook.JudgeAsync(snapshot, ct), shaping.CouldNotShape, TalkRuleReasons.CouldNotShape);
-        var flags = verdicts
-            .Where(v => v.SwitchedOn && v.Flag is not null)
-            .OrderBy(v => v.RuleId, StringComparer.Ordinal)
-            .Select(v => new Flagged(v, v.Flag ?? throw new InvalidOperationException("Flagged verdict without a flag.")))
-            .ToList();
+        var verdicts = RulesFlowSupport.Mark(await ruleBook.JudgeAsync(snapshot, ct), shaping.CouldNotShape, TalkRuleReasons.CouldNotShape);
+        var flags = RulesFlowSupport.FlagsOf(verdicts);
         if (flags.Count == 0)
         {
             // The row waits for AcceptedAsync, so the recorders' breakage can be on it.
@@ -146,21 +131,10 @@ public sealed class DjLineRulesFlow(
     private void Write(
         SegmentRequest request, string raw, string? cleaned, TalkSnapshot snapshot, TalkList<RuleVerdict> verdicts,
         TalkOutcome outcome) =>
-        checkLog.TryRecord(new TalkCheckRecord(
-            request.PersonaId, TalkCheckMode.Rules, raw, cleaned, snapshot, verdicts, null, outcome));
+        support.Write(request.PersonaId, raw, cleaned, snapshot, verdicts, outcome);
 
-    private void PublishFlags(DjLineRulesRender render, IReadOnlyList<Flagged> flags, RuleFlagOutcome outcome)
-    {
-        if (render.Input.Request.PersonaId is not { } personaId)
-            return;
-
-        foreach (var flagged in flags)
-            events.Publish(new RuleFlagged(personaId, NameOf(flagged.Verdict.RuleId), render.Input.PersonaName, outcome));
-    }
-
-    /// <summary>The rule's plain name without its closing full stop, as the booth row words it; the id when the rule is unknown.</summary>
-    private string NameOf(string ruleId) =>
-        ruleBook.Rules.FirstOrDefault(rule => rule.Id == ruleId)?.Describe().Name.TrimEnd('.') ?? ruleId;
+    private void PublishFlags(DjLineRulesRender render, IReadOnlyList<FlaggedRule> flags, RuleFlagOutcome outcome) =>
+        support.PublishFlags(render.Input.Request.PersonaId, render.Input.PersonaName, RuleFlagTalk.Line, flags, outcome);
 
     private static TalkSnapshot Carry(TalkSnapshot snapshot, DjLineRulesRender render, TalkMemos memos) =>
         snapshot with
@@ -171,29 +145,5 @@ public sealed class DjLineRulesFlow(
             ExtraLineTaken = render.ExtraLineTaken,
         };
 
-    /// <summary>
-    /// A shaper or recorder that threw is recorded on its rule's verdict as <see cref="RuleVerdict.Broken"/> (F220.9), never as a
-    /// flag: it must not change the outcome, nor a replay of the row (F220.30). A rule with no verdict of its own gets one.
-    /// </summary>
-    private static TalkList<RuleVerdict> Mark(TalkList<RuleVerdict> verdicts, TalkList<string> brokenRuleIds, string reason)
-    {
-        if (brokenRuleIds.Count == 0)
-            return verdicts;
-
-        var marked = verdicts.ToList();
-        foreach (var ruleId in brokenRuleIds)
-        {
-            var index = marked.FindIndex(v => v.RuleId == ruleId);
-            if (index < 0)
-                marked.Add(new RuleVerdict(ruleId, true, null, reason));
-            else
-                marked[index] = marked[index] with { Broken = marked[index].Broken is { } earlier ? $"{earlier}, {reason}" : reason };
-        }
-
-        return new TalkList<RuleVerdict>(marked.OrderBy(v => v.RuleId, StringComparer.Ordinal));
-    }
-
-    private sealed record Flagged(RuleVerdict Verdict, RuleFlag Flag);
-
-    private sealed record Attempt(DjLineRulesResult? Result, IReadOnlyList<Flagged> Flags);
+    private sealed record Attempt(DjLineRulesResult? Result, IReadOnlyList<FlaggedRule> Flags);
 }

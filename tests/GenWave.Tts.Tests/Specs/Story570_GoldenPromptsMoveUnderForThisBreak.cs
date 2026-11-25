@@ -264,4 +264,38 @@ public static class FeatureGoldenPromptsMoveUnderForThisBreak
         public void TheOpeningStaysNeutral() =>
             Assert.StartsWith("You are a personality-neutral radio DJ", lines[0], StringComparison.Ordinal);
     }
+
+    // T801 — the chat prompt pair: legacy form against the rules form the writer really posts
+    public sealed class ScenarioTheChatPromptInRulesForm : IAsyncLifetime
+    {
+        GoldenPrompt legacy = null!;
+        GoldenPrompt rules = null!;
+
+        public async Task InitializeAsync()
+        {
+            legacy = await GoldenPromptFixtures.ChatAsync();
+            rules = await GoldenPromptFixtures.ChatFromTheRulesWriterAsync();
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        static readonly string ClockGuard = LlmPromptBuilder.BuildClockGuardLine(GoldenPromptFixtures.Now);
+
+        [Fact]
+        public void TheUserPromptIsUnchanged() => Assert.Equal(legacy.User, rules.User);
+
+        [Fact]
+        public void TheOnlySystemDifferenceIsTheClockGuardMovedUnderForThisBreak() =>
+            Assert.Equal(
+                legacy.System.Replace(" " + ClockGuard, "", StringComparison.Ordinal)
+                    + "\n\n" + TalkShaping.ForThisBreakHeading + "\n" + ClockGuard,
+                rules.System);
+
+        [Fact]
+        public void TheLegacyFormStillCarriesTheGuardInTheScaffold() =>
+            Assert.Contains(" " + ClockGuard, legacy.System, StringComparison.Ordinal);
+
+        [Fact]
+        public void TheLegacyFormIsTheFrozenGolden() => Assert.Empty(GoldenFiles.Mismatches([("chat.system.txt", legacy.System)]));
+    }
 }

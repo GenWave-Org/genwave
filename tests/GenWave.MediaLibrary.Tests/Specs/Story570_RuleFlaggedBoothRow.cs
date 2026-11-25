@@ -1,4 +1,4 @@
-// STORY-570 AC8 (booth-log half) — a flag that changes the outcome is a rule-flagged row (SPEC F220.16, PLAN T800)
+// STORY-570 AC8 (booth-log half) — a flag that changes the outcome is a rule-flagged row (SPEC F220.16, PLAN T800, T801)
 //
 // No database: stops at the in-memory channel BoothLogWriter.Publish writes into, like Story534_RepeatCaughtBoothRow.cs.
 
@@ -57,5 +57,38 @@ public static class FeatureRuleFlaggedBoothRow
 
             Assert.Equal(expected, row.Summary);
         }
+    }
+
+    public sealed class ScenarioAFlagReAsksTheChat : IAsyncLifetime
+    {
+        BoothLogAppendRequest row = null!;
+
+        public async Task InitializeAsync() =>
+            row = await PublishAndCaptureAsync(
+                new RuleFlagged(7, "No repeated phrases", "DJ Nova", RuleFlagOutcome.ReAsked) { Talk = RuleFlagTalk.Chat });
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void TheSummaryNamesTheRuleTheHostAndTheChat() =>
+            Assert.Equal("No repeated phrases flagged DJ Nova's chat — re-asked", row.Summary);
+
+        [Fact]
+        public void TheRowKindIsRuleFlagged() => Assert.Equal("rule-flagged", row.Kind);
+    }
+
+    public sealed class ScenarioADroppedChat : IAsyncLifetime
+    {
+        BoothLogAppendRequest row = null!;
+
+        public async Task InitializeAsync() =>
+            row = await PublishAndCaptureAsync(
+                new RuleFlagged(7, "No repeated phrases", "DJ Nova", RuleFlagOutcome.Dropped) { Talk = RuleFlagTalk.Chat });
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void TheSummaryEndsWithDropped() =>
+            Assert.Equal("No repeated phrases flagged DJ Nova's chat — dropped", row.Summary);
     }
 }
