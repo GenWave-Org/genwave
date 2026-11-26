@@ -9,20 +9,26 @@ internal static class BreakPromptComposer
 {
     public static BreakPrompt Compose(BreakPromptInputs inputs)
     {
-        var system = LlmPromptBuilder.BuildSystemPrompt(
-            LlmPromptBuilder.BuildPersonaSection(
+        var shaped = inputs.Shaping is not null;
+        var personaSection = shaped
+            ? LlmPromptBuilder.BuildShapedPersonaSection(inputs.Persona, inputs.Card)
+            : LlmPromptBuilder.BuildPersonaSection(
                 inputs.Persona, inputs.Card, inputs.MentionOwnName, inputs.Quirks, inputs.RecentLines, inputs.Taglines,
-                inputs.Memory),
+                inputs.Memory);
+        var system = LlmPromptBuilder.BuildSystemPrompt(
+            personaSection,
             inputs.MaxCopyChars,
-            inputs.StationLocalNow,
-            inputs.SoundTags);
+            shaped ? null : inputs.StationLocalNow, // the clock guard line rides under "For this break" in rules form
+            inputs.SoundTags,
+            inputs.Shaping?.ForThisBreak(),
+            shaped ? LlmPromptBuilder.HasPersonaSection(inputs.Persona, inputs.Card) : null);
 
         var clockLine = LlmPromptBuilder.BuildStationClockLine(inputs.StationLocalNow);
         var user = inputs.AnnouncementMessage is { } message
             ? LlmPromptBuilder.BuildAnnouncementUserContent(inputs.Request, clockLine, message)
             : LlmPromptBuilder.BuildUserContent(
-                inputs.Request, clockLine, inputs.PreviouslyVoicedTasteNotes, inputs.PatterFact, inputs.ShowFlavor,
-                inputs.Callback);
+                inputs.Request, clockLine, shaped ? [] : inputs.PreviouslyVoicedTasteNotes, inputs.PatterFact,
+                shaped ? null : inputs.ShowFlavor, shaped ? null : inputs.Callback);
 
         return new BreakPrompt(system, user);
     }

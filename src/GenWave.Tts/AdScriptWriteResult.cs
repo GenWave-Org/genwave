@@ -31,7 +31,9 @@ public abstract record AdScriptWriteResult
     /// transport/generation fault (disabled endpoint, timeout, a truncated or empty completion at
     /// either attempt: SPEC F160.1's own skip-only floor, never re-asked), non-null ONLY when the
     /// SECOND validator refusal (the ONE re-ask already spent) is what failed the spot — the value a
-    /// caller stores verbatim as <c>ad_spot.fail_reason</c> (SPEC F160.3).</param>
+    /// caller stores verbatim as <c>ad_spot.fail_reason</c> (SPEC F160.3). In rules mode (SPEC F220.11, F220.14) it is
+    /// non-null when the fixed shape checks refused the reply (that check's <c>AdScriptRuleIds</c> token) and
+    /// <c>AdRulesResult.StillFlagged.FailedRuleId</c> when the re-ask was flagged again; a call fault stays null.</param>
     /// <param name="Cause">SPEC F139.1's cause taxonomy this failure stamps into <see cref="LlmCallRing"/>
     /// under <see cref="LlmCallKind.AdScript"/> — decided once at the source that already knows why,
     /// never re-derived downstream from <paramref name="Reason"/>'s text.</param>

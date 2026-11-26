@@ -140,7 +140,8 @@ public sealed class DatabaseFixture : IAsyncLifetime
     /// For specs that simulate a pre-migration database by dropping <c>station.utterance</c>,
     /// <c>station.persona_memory</c> or <c>station.persona.definition</c>: first drops the F218 objects
     /// that depend on them (db/51 views, db/52 <c>memory_offer</c> + <c>callback_rate</c>) so the drop
-    /// is not refused (2BP01). Explicit, not CASCADE, so nothing else is stripped silently. Pair with
+    /// is not refused (2BP01). The db/51 <c>v_repeat_catches_7d</c> view also reads <c>station.talk_check</c> since db/55 (it counts
+    /// rules-mode catches), so dropping the view here is what lets a spec drop <c>talk_check</c> too. Explicit, not CASCADE, so nothing else is stripped silently. Pair with
     /// <see cref="ReplayMigrations"/> in a <c>finally</c> once the spec has finished.
     /// </summary>
     public async Task DropMemoryDependentsAsync()

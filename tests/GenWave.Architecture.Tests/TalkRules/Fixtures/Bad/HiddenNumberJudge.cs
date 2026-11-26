@@ -13,7 +13,7 @@ public sealed class HiddenNumberJudge : IJudgingTalkRule
 
     public TalkKinds OnByDefault => TalkKinds.Chat;
 
-    public TalkRuleDescription Describe() => new("Hidden number.", "Flags a line that is too long.", "A test.", "None.");
+    public TalkRuleDescription Describe() => new("Hidden number", "Flags a line that is too long.", "A test.", "None.");
 
     public RuleFlag? Judge(TalkSnapshot after) => null;
 }

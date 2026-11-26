@@ -169,7 +169,7 @@ builder.Services
     // ran above. See AddGenWaveContextHost's own remarks for the full ordering rationale.
     .AddGenWaveContextHost(cfg)
     // DJ-line rules (SPEC F220): every ITalkRule found by scan, the rule book, and the in-memory switch
-    // stand-in (TryAdd) until the Postgres store (PLAN T799) swaps in its own ITalkRuleSwitches with Replace after this call.
+    // stand-in (TryAdd); the Postgres store (AddTalkRuleSwitchStore, PLAN T799) replaces it.
     .AddTalkRules()
     // Playout chain: engine control → feeder → feeder service → PlayoutSupervisor (hosted).
     .AddGenWavePlayout()

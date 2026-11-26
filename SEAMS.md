@@ -44,15 +44,16 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **177 seams across 10 projects.**
+> **183 seams across 10 projects.**
 
-## GenWave.Ads (4 seams)
+## GenWave.Ads (5 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
 | `GenWave.Core.Abstractions.IAdSpotSource` | `GenWave.Ads.LibraryAdSpotSource` | Singleton | — |
 | `GenWave.Core.Abstractions.IAdSpotVend` | `GenWave.Ads.AdSpotPipeline` | Singleton | also registered: `GenWave.Core.Abstractions.NoOpAdSpotVend` (GenWave.Core) |
 | `GenWave.Core.TalkRules.ITalkSnapshotSource<GenWave.Ads.AdSnapshotInput>` | `GenWave.Ads.AdSnapshotSource` | Singleton | — |
+| `GenWave.Tts.IAdRulesFlow` | `GenWave.Ads.AdRulesFlow` | Singleton | — |
 | `GenWave.Tts.IAdShadowCheck` | `GenWave.Ads.AdShadowCheck` | Singleton | — |
 
 ## GenWave.Context (2 seams)
@@ -124,7 +125,7 @@
 | `GenWave.Core.Abstractions.IEnergyAnalyzer` | `GenWave.Loudness.FfmpegEnergyAnalyzer` | Singleton | — |
 | `GenWave.Core.Abstractions.ILoudnessAnalyzer` | `GenWave.Loudness.FfmpegLoudnessAnalyzer` | Singleton | — |
 
-## GenWave.MediaLibrary (74 seams)
+## GenWave.MediaLibrary (76 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -202,6 +203,8 @@
 | `GenWave.Core.Abstractions.IYearLookup` | `GenWave.MediaLibrary.YearLookup.MusicBrainzYearLookup` | Singleton | — |
 | `GenWave.Core.TalkRules.ITalkCheckLog` | `GenWave.MediaLibrary.Station.TalkCheckLog` | Singleton | — |
 | `GenWave.Core.TalkRules.ITalkCheckStore` | `GenWave.MediaLibrary.Station.TalkCheckRepository` | Singleton | — |
+| `GenWave.Core.TalkRules.ITalkFlagReader` | `GenWave.MediaLibrary.Station.TalkCheckRepository` | Singleton | — |
+| `GenWave.Core.TalkRules.ITalkRuleSwitches` | `GenWave.MediaLibrary.Station.TalkRuleSwitchRepository` | Singleton | — |
 
 ## GenWave.Memory (7 seams)
 
@@ -230,16 +233,18 @@
 | `GenWave.Orchestration.IRandomSource` | `GenWave.Orchestration.SystemRandomSource` | Singleton | — |
 | `GenWave.Orchestration.IRequestFulfillmentSource` | `GenWave.Orchestration.RequestFulfillmentProvider` | Singleton | also registered: `GenWave.Orchestration.NoOpRequestFulfillmentSource` (GenWave.Orchestration) |
 
-## GenWave.TalkRules (4 seams)
+## GenWave.TalkRules (6 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
-| `GenWave.Core.TalkRules.ITalkRule` | `GenWave.TalkRules.StationDetailsRule` | Singleton | also registered: `GenWave.TalkRules.CatchphraseLimitsRule` (GenWave.TalkRules), `GenWave.TalkRules.CleanLanguageRule` (GenWave.TalkRules), `GenWave.TalkRules.DayAndTimeRule` (GenWave.TalkRules), `GenWave.TalkRules.FitsTimeRule` (GenWave.TalkRules), `GenWave.TalkRules.OfferedFactsRule` (GenWave.TalkRules), `GenWave.TalkRules.OtherBrandsRule` (GenWave.TalkRules), `GenWave.TalkRules.OwnerMessageRule` (GenWave.TalkRules), `GenWave.TalkRules.PhoneNumberRule` (GenWave.TalkRules), `GenWave.TalkRules.RepeatPhrasesRule` (GenWave.TalkRules) |
+| `GenWave.Core.TalkRules.ITalkRule` | `GenWave.TalkRules.VaryTasteRule` | Singleton | also registered: `GenWave.TalkRules.CallbacksRule` (GenWave.TalkRules), `GenWave.TalkRules.CatchphraseLimitsRule` (GenWave.TalkRules), `GenWave.TalkRules.CleanLanguageRule` (GenWave.TalkRules), `GenWave.TalkRules.DayAndTimeRule` (GenWave.TalkRules), `GenWave.TalkRules.FitsTimeRule` (GenWave.TalkRules), `GenWave.TalkRules.NeverMentionRule` (GenWave.TalkRules), `GenWave.TalkRules.OfferedFactsRule` (GenWave.TalkRules), `GenWave.TalkRules.OtherBrandsRule` (GenWave.TalkRules), `GenWave.TalkRules.OwnerMessageRule` (GenWave.TalkRules), `GenWave.TalkRules.PhoneNumberRule` (GenWave.TalkRules), `GenWave.TalkRules.RepeatPhrasesRule` (GenWave.TalkRules), `GenWave.TalkRules.SelfNameRule` (GenWave.TalkRules), `GenWave.TalkRules.ShowFlavourRule` (GenWave.TalkRules), `GenWave.TalkRules.StationDetailsRule` (GenWave.TalkRules) |
 | `GenWave.Core.TalkRules.ITalkRuleBook` | `GenWave.TalkRules.TalkRuleBook` | Singleton | — |
 | `GenWave.Core.TalkRules.ITalkRuleReplay` | `GenWave.TalkRules.TalkRuleReplay` | Singleton | — |
-| `GenWave.Core.TalkRules.ITalkRuleSwitches` | `GenWave.TalkRules.InMemoryTalkRuleSwitches` | Singleton | — |
+| `GenWave.Core.TalkRules.ITalkRuleSwitchboard` | `GenWave.TalkRules.TalkRuleSwitchboard` | Singleton | — |
+| `GenWave.TalkRules.IMemoryBreakGate` | `GenWave.TalkRules.MemoryBreakGate` | Singleton | — |
+| `GenWave.TalkRules.ISelfNameRoll` | `GenWave.TalkRules.SelfNameRoll` | Singleton | — |
 
-## GenWave.Tts (29 seams)
+## GenWave.Tts (30 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -258,6 +263,7 @@
 | `GenWave.Core.TalkRules.ITalkSnapshotSource<GenWave.Tts.ChatSnapshotInput>` | `GenWave.Tts.ChatSnapshotSource` | Singleton | — |
 | `GenWave.Core.TalkRules.ITalkSnapshotSource<GenWave.Tts.DjLineSnapshotInput>` | `GenWave.Tts.DjLineSnapshotSource` | Singleton | — |
 | `GenWave.Tts.IActiveVoiceEngine` | `GenWave.Tts.RoutedActiveVoiceEngine` | Singleton | wraps: `GenWave.Tts.ActiveVoiceEngine` (GenWave.Tts) |
+| `GenWave.Tts.IBreakCallbacks` | `GenWave.Tts.BreakCallbacks` | Singleton | — |
 | `GenWave.Tts.ICastSegmentAuthor` | `GenWave.Tts.CastSegmentAuthor` | Singleton | — |
 | `GenWave.Tts.IDegradationModeReader` | `GenWave.Tts.DegradationController` | Singleton | — |
 | `GenWave.Tts.IDependencyHealth` | `GenWave.Tts.DependencyHealthStore` | Singleton | — |

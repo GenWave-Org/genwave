@@ -14,7 +14,7 @@ public sealed class SwitchPeekingJudge(ITalkRuleSwitches switches) : IJudgingTal
 
     public TalkKinds OnByDefault => CanCover;
 
-    public TalkRuleDescription Describe() => new("Switch peeking.", "Flags when a sibling is off.", "A test.", "None.");
+    public TalkRuleDescription Describe() => new("Switch peeking", "Flags when a sibling is off.", "A test.", "None.");
 
     public RuleFlag? Judge(TalkSnapshot after)
     {

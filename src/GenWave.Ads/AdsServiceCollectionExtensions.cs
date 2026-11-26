@@ -91,6 +91,9 @@ public static class AdsServiceCollectionExtensions
         // The ad shadow hook (SPEC F220.18-F220.19; PLAN T790): AdScriptWriter resolves it optionally through
         // IAdShadowCheck; it judges only while the live TalkRules:Mode is shadow.
         services.AddSingleton<IAdShadowCheck, AdShadowCheck>();
+        // The ad rules-mode flow (SPEC F220.10-F220.16; PLAN T802): AdScriptWriter resolves it optionally through IAdRulesFlow and
+        // hands the whole ad over while the live TalkRules:Mode is rules.
+        services.AddSingleton<IAdRulesFlow, AdRulesFlow>();
 
         // The off-air-clock tick loop + its stuck-rendering guardian (SPEC F159.3, F159.4, F161.1;
         // STORY-389, STORY-391; PLAN T402) — both live in THIS project (unlike CrosstalkStockWorker/

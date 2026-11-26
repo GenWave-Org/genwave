@@ -27,7 +27,7 @@ public static class FeatureDescribesItselfLaw
         public void HasAUniqueKebabId() => Assert.Empty(RuleDescribesItselfLaw.IdViolations(rules));
 
         [Fact]
-        public void NameStartsWithACapitalAndEndsWithAFullStop() => Assert.Empty(RuleDescribesItselfLaw.NameViolations(rules));
+        public void NameStartsWithACapitalAndHasNoFullStop() => Assert.Empty(RuleDescribesItselfLaw.NameViolations(rules));
 
         [Fact]
         public void WhatItDoesStartsWithACapitalAndEndsWithAFullStop() => Assert.Empty(RuleDescribesItselfLaw.WhatItDoesViolations(rules));
@@ -135,7 +135,10 @@ public static class FeatureDescribesItselfLaw
         public void ANonKebabIdFailsTheLaw() => Assert.NotEmpty(RuleDescribesItselfLaw.IdViolations(rules));
 
         [Fact]
-        public void ANameWithoutCapitalOrFullStopFailsTheLaw() => Assert.NotEmpty(RuleDescribesItselfLaw.NameViolations(rules));
+        public void ALowerCaseNameFailsTheLaw() => Assert.NotEmpty(RuleDescribesItselfLaw.NameViolations(rules));
+
+        [Fact]
+        public void ANameWithAFullStopFailsTheLaw() => Assert.NotEmpty(RuleDescribesItselfLaw.NameViolations([new FullStopNameJudge()]));
 
         [Fact]
         public void WhatItDoesWithoutCapitalOrFullStopFailsTheLaw() => Assert.NotEmpty(RuleDescribesItselfLaw.WhatItDoesViolations(rules));

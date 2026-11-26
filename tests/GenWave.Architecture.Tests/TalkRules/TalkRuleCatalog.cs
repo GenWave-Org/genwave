@@ -29,7 +29,7 @@ public static class TalkRuleCatalog
     /// </summary>
     public static IReadOnlyList<ITalkRule> Build(IEnumerable<Type> types)
     {
-        using var provider = new ServiceCollection().AddLogging().AddTalkRules().BuildServiceProvider();
+        using var provider = new ServiceCollection().AddLogging().AddTalkRules().AddStandInsForUnsuppliedCollaborators().BuildServiceProvider();
         var withStandIns = new CollaboratorFallbackProvider(provider);
         return types
             .Select(type => (ITalkRule)ActivatorUtilities.CreateInstance(withStandIns, type))

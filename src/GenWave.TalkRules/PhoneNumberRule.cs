@@ -22,7 +22,7 @@ public sealed class PhoneNumberRule : IJudgingTalkRule
     public TalkKinds OnByDefault => TalkKinds.Ad;
 
     public TalkRuleDescription Describe() => new(
-        "The right phone number.",
+        "The right phone number",
         "Flags an ad that says a phone number that is not the sponsor's. When the sponsor has a phone number, any other number in the ad is flagged, even one with 555 in it. When the sponsor has none, or is from a pack of made-up sponsors, a number is flagged unless it has 555 in it. Each line is read on its own. The ad's words are never changed.",
         "A made-up or wrong number could send a listener to a real person who never asked for the call.",
         "An ad for a diner that says to call 222-0199 when the diner's number is 222-0100.");

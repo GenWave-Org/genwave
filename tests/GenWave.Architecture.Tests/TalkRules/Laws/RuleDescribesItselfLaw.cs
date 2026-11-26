@@ -41,7 +41,10 @@ public static partial class RuleDescribesItselfLaw
     }
 
     public static IReadOnlyList<string> NameViolations(IReadOnlyList<ITalkRule> rules) =>
-        Sentences(rules, "Name", rule => rule.Describe().Name);
+        rules
+            .Where(rule => !IsName(rule.Describe().Name))
+            .Select(rule => $"R6 {rule.GetType().Name}: Name \"{rule.Describe().Name}\" must start with a capital and must not end with a full stop.")
+            .ToList();
 
     public static IReadOnlyList<string> WhatItDoesViolations(IReadOnlyList<ITalkRule> rules) =>
         Sentences(rules, "WhatItDoes", rule => rule.Describe().WhatItDoes);
@@ -70,6 +73,9 @@ public static partial class RuleDescribesItselfLaw
             .Where(rule => !IsSentence(text(rule)))
             .Select(rule => $"R6 {rule.GetType().Name}: {field} \"{text(rule)}\" must start with a capital and end with a full stop.")
             .ToList();
+
+    private static bool IsName(string text) =>
+        text.Length > 1 && char.IsUpper(text[0]) && text[^1] != '.';
 
     private static bool IsSentence(string text) =>
         text.Length > 1 && char.IsUpper(text[0]) && text[^1] == '.';

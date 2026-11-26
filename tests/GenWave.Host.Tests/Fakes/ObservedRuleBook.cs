@@ -9,6 +9,10 @@ sealed class ObservedRuleBook(ITalkRuleBook inner, bool throwOnJudge) : ITalkRul
 {
     int judgeCalls;
 
+    public IReadOnlyList<ITalkRule> Rules => inner.Rules;
+
+    public ValueTask<IReadOnlyDictionary<string, bool>> SwitchesAsync(TalkKinds kind, CancellationToken ct) => inner.SwitchesAsync(kind, ct);
+
     public int JudgeCalls => Volatile.Read(ref judgeCalls);
 
     public ValueTask<TalkShaping> ShapeAsync(TalkSnapshot before, CancellationToken ct) => inner.ShapeAsync(before, ct);
@@ -21,5 +25,5 @@ sealed class ObservedRuleBook(ITalkRuleBook inner, bool throwOnJudge) : ITalkRul
             : inner.JudgeAsync(after, ct);
     }
 
-    public ValueTask AcceptedAsync(TalkSnapshot accepted, CancellationToken ct) => inner.AcceptedAsync(accepted, ct);
+    public ValueTask<TalkList<string>> AcceptedAsync(TalkSnapshot accepted, CancellationToken ct) => inner.AcceptedAsync(accepted, ct);
 }

@@ -13,7 +13,7 @@ public static class RuleKnowsNoOtherLaw
 {
     private static readonly Type[] Forbidden =
     [
-        typeof(ITalkRule), typeof(ITalkRuleBook), typeof(ITalkRuleSwitches), typeof(TalkRuleBook), typeof(InMemoryTalkRuleSwitches),
+        typeof(ITalkRule), typeof(ITalkRuleBook), typeof(ITalkRuleSwitches), typeof(ITalkRuleSwitchboard), typeof(TalkRuleBook), typeof(InMemoryTalkRuleSwitches),
         typeof(IServiceProvider), typeof(IServiceScopeFactory),
     ];
 

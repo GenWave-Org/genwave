@@ -46,6 +46,8 @@ public static class FeatureTalkCheckMirror
         {
             // Given a database as db/53 left it: neither table present,
             await using var conn = await db.StationDataSource.OpenConnectionAsync();
+            // (db/55's view reads talk_check, so the dependents go first, as the F218 objects do for utterance),
+            await db.DropMemoryDependentsAsync();
             await conn.ExecuteAsync("drop table if exists station.talk_check; drop table if exists station.talk_rule_switch;");
 
             // When db/54 runs twice (RunFileInContainer throws on a nonzero exit),
@@ -56,7 +58,12 @@ public static class FeatureTalkCheckMirror
             tables = await conn.QuerySingleAsync<int>(TablesSql);
         }
 
-        public Task DisposeAsync() => Task.CompletedTask;
+        // The views and memory_offer dropped above come back for the specs that follow.
+        public Task DisposeAsync()
+        {
+            db.ReplayMigrations();
+            return Task.CompletedTask;
+        }
 
         [Fact]
         public void TheMigrationRunsTwiceCleanlyAndCreatesBothTables() => Assert.Equal(2, tables);

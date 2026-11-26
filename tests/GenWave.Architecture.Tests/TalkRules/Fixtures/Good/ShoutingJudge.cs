@@ -14,7 +14,7 @@ public sealed class ShoutingJudge : IJudgingTalkRule
     public TalkKinds OnByDefault => TalkKinds.DjLine | TalkKinds.Chat;
 
     public TalkRuleDescription Describe() => new(
-        "No shouting.",
+        "No shouting",
         "Flags a line with more than 2 words in capitals.",
         "Capitals read as shouting on air.",
         "WHAT A SONG THAT WAS FOLKS is flagged.");

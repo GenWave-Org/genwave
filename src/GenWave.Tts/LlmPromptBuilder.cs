@@ -2,6 +2,7 @@ namespace GenWave.Tts;
 
 using System.Globalization;
 using GenWave.Core.Domain;
+using GenWave.Core.TalkRules;
 
 /// <summary>
 /// Pure, stateless prompt composition for <see cref="LlmCopyWriter"/> (SPEC F34.3, F35.2, F35.3,
@@ -90,8 +91,13 @@ static class LlmPromptBuilder
     /// </para>
     /// </summary>
     public static string BuildSystemPrompt(
-        string? personaSection, int maxCopyChars, DateTimeOffset? stationLocalNow = null, SoundTagOffer? soundTags = null)
+        string? personaSection, int maxCopyChars, DateTimeOffset? stationLocalNow = null, SoundTagOffer? soundTags = null,
+        string? forThisBreak = null, bool? personaExists = null)
     {
+        // Rules form passes personaExists (a persona section exists per HasPersonaSection even when its own lines are empty,
+        // the quirks living under "For this break"); legacy leaves it null and the section text decides, as always.
+        var hasPersona = personaExists ?? !string.IsNullOrEmpty(personaSection);
+
         // gh-#152: "personality-neutral" and a persona section's "Style: bubbly, energetic,
         // expressive" cancelled each other inside the SAME prompt. The neutral framing now applies
         // ONLY when there is no persona section; with one, the opening line points the model at
@@ -153,9 +159,14 @@ static class LlmPromptBuilder
         if (stationLocalNow is { } now)
             scaffoldBody += " " + BuildClockGuardLine(now);
 
-        return string.IsNullOrEmpty(personaSection)
-            ? $"{NeutralOpening} {scaffoldBody}"
-            : $"{PersonaOpening} {scaffoldBody}\n\n{personaSection}";
+        var system = (hasPersona ? $"{PersonaOpening} {scaffoldBody}" : $"{NeutralOpening} {scaffoldBody}")
+            + (string.IsNullOrEmpty(personaSection) ? "" : $"\n\n{personaSection}");
+
+        // SPEC F220.10: rules mode only. A section of its own, right after the persona section when there is one (one line break,
+        // as the moved text sat), else alone after the scaffold. It never decides the opening.
+        return string.IsNullOrEmpty(forThisBreak)
+            ? system
+            : system + (string.IsNullOrEmpty(personaSection) ? "\n\n" : "\n") + forThisBreak;
     }
 
     /// <summary>
@@ -298,17 +309,53 @@ static class LlmPromptBuilder
         if (recentLines is { Count: > 0 } && lines.Count > 0)
             lines.AddRange(BuildRecentLinesBlock(recentLines));
 
-        // T701 (F218.22/F218.19): memory blocks ride the persona section too; an empty packet adds nothing.
-        if (memory is not null && lines.Count > 0)
-            lines.AddRange(BuildMemoryBlocks(memory));
-
-        // gh-#150: the name line is a rider on an actual persona section, never a section by
-        // itself — a persona with no soul and no quirks stays on the neutral scaffold (the
-        // "neutral otherwise" half of F35.2 above) even on a rolled-true break.
-        if (mentionOwnName && lines.Count > 0 && ResolveName(persona, card) is { } name)
-            lines.Add(BuildSelfNameMentionLine(name));
+        // T701 + gh-#150: never-mention list and name line are riders on an actual persona section, never a section by
+        // themselves - a persona with no soul and no quirks stays on the neutral scaffold even on a rolled-true break.
+        AddSectionRiders(lines, lines.Count > 0, persona, card, mentionOwnName, memory);
 
         return lines.Count == 0 ? null : string.Join('\n', lines);
+    }
+
+    /// <summary>
+    /// The persona section in its rules-mode form (SPEC F220.10, F220.21): the soul of <see cref="BuildPersonaSection"/> and
+    /// nothing else: no quirks block, no recent-lines block, no never-mention list and no name line, because the shapers
+    /// (<c>catchphrase-limits</c>, <c>repeat-phrases</c>, <c>never-mention</c>, <c>self-name</c>) own that text now. A shaper note never
+    /// creates this section; the "For this break" section is rendered apart from it by <see cref="BuildSystemPrompt"/>.
+    ///
+    /// <para>
+    /// The section's existence is <see cref="HasPersonaSection"/>(persona, card), not whether this returns text: a card with
+    /// quirks but no soul has a persona section whose lines are all under "For this break", so this
+    /// returns null while the composer still passes <c>personaExists: true</c> for the persona opening.
+    /// </para>
+    ///
+    /// <para>
+    /// Accepted residual: whenever the selector picks no quirk this break (chance rolls, caps spent, untracked caps), a card
+    /// with no soul has no legacy section, but the rules form counts <c>card.Quirks.Count &gt; 0</c>, so it gets the persona opening and
+    /// the riders' shapers. The <c>never-mention</c>, <c>callbacks</c> and <c>self-name</c> shapers gate on the same predicate
+    /// (<c>HasPersonaSection(persona, card)</c>), where <c>LlmCopyWriter</c> uses <c>HasPersonaSection(persona, card, quirkSelection)</c>.
+    /// </para>
+    /// </summary>
+    public static string? BuildShapedPersonaSection(Persona? persona, PersonaCard? card)
+    {
+        var soul = BuildSoul(persona, card);
+        return string.IsNullOrEmpty(soul) ? null : soul;
+    }
+
+    /// <summary>
+    /// The riders that ride only on an actual persona section, in their one order: never-mention list (T701, F218.19), then the
+    /// say-your-own-name line (gh-#150). The legacy section builder's alone now: the rules form moved both riders to the <c>never-mention</c> and <c>self-name</c> shapers.
+    /// </summary>
+    static void AddSectionRiders(
+        List<string> lines, bool hasSection, Persona? persona, PersonaCard? card, bool mentionOwnName, MemoryPacket? memory)
+    {
+        if (!hasSection)
+            return;
+
+        if (memory is not null)
+            lines.AddRange(BuildMemoryBlocks(memory));
+
+        if (mentionOwnName && ResolveName(persona, card) is { } name)
+            lines.Add(BuildSelfNameMentionLine(name));
     }
 
     /// <summary>SPEC F218.19 - heading of the never-mention list.</summary>
@@ -351,6 +398,9 @@ static class LlmPromptBuilder
     /// <summary>
     /// SPEC F218.42 - the ask's memory text for the truth gate's fact block, so the gate cannot reject the very
     /// callback the prompt asked for.
+    /// <para>Rules mode leaves the callback memory out of the facts: the callbacks rule offers the ask in the prompt but there is no
+    /// fact block to extend. That is fine today because callbacks ride only on LeadIn and BackAnnounce (F218.40), which have no
+    /// fact block; the day a callback kind gets one, rules mode must join this text to it.</para>
     /// </summary>
     public static string CallbackFacts(CallbackAsk ask) => MemoryLine(ask.Memory.Content);
 
@@ -391,6 +441,16 @@ static class LlmPromptBuilder
     /// </summary>
     public static string BuildRepeatReAsk(string originalUserPrompt, IReadOnlyList<string> phrases) =>
         $"{originalUserPrompt}\n\ndo not say: {string.Join(", ", phrases.Select(p => $"\"{p}\""))}";
+
+    /// <summary>The line that opens a rules-mode re-ask's list of asks (SPEC F220.12).</summary>
+    public const string RuleReAskHeading = "Rewrite it. Fix all of these:";
+
+    /// <summary>
+    /// The rules-mode re-ask (SPEC F220.12): the original user prompt, then <see cref="RuleReAskHeading"/>, then each flagged
+    /// rule's ask, one per line, in the order given (the caller sorts them by rule id).
+    /// </summary>
+    public static string BuildRuleReAsk(string originalUserPrompt, IEnumerable<string> asks) =>
+        $"{originalUserPrompt}\n\n{RuleReAskHeading}\n{string.Join('\n', asks)}";
 
     /// <summary>
     /// The quirks block of the persona section, owned here so a spec asserts the exact lines the
@@ -449,7 +509,7 @@ static class LlmPromptBuilder
     /// prompt, so it gets the house cap exactly like <see cref="BuildHandoffLine"/>'s
     /// counterpart name (T123 review finding).
     /// </summary>
-    static string BuildSelfNameMentionLine(string name)
+    public static string BuildSelfNameMentionLine(string name)
     {
         var djName = Truncate(name, MaxSoulChars);
         return $"Name note: your on-air name is {djName} - briefly work your own name into this " +
@@ -823,7 +883,7 @@ static class LlmPromptBuilder
     /// constraint so that task starts from an honest premise.
     /// </para>
     /// </summary>
-    static string? BuildShowFlavorPatterLine(ShowFlavorFact? fact)
+    public static string? BuildShowFlavorPatterLine(ShowFlavorFact? fact)
     {
         // Blank-field guard (mirrors BuildHandoffLine/BuildShowLine's own "is { Length: > 0 }"
         // discipline): ShowFlavorLineGate never hands out a fact with blank ShowName/Flavor today,
@@ -1126,10 +1186,15 @@ static class LlmPromptBuilder
             $"Taste note: this pick matches the persona's taste for {summary} - you may mention this " +
             "if it fits naturally; it's color, not a requirement.";
 
-        return recentlyVoiced
-            ? line + " You voiced this same taste note on the last break too - vary the phrasing, or leave it out this time."
-            : line;
+        return recentlyVoiced ? line + " " + TasteRepeatNote : line;
     }
+
+    /// <summary>
+    /// The sentence added to the taste line when this break's taste notes overlap the last break's (F83.1). One copy: the
+    /// legacy user prompt appends it to the taste line, and the <c>vary-taste</c> rule offers it under "For this break".
+    /// </summary>
+    public const string TasteRepeatNote =
+        "You voiced this same taste note on the last break too - vary the phrasing, or leave it out this time.";
 
     /// <summary>
     /// One short, spoken-friendly phrase per fired LIKE <see cref="TasteRule"/> (artist over genre

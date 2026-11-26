@@ -85,6 +85,8 @@ sealed class BoothLogWriter(
             TalkDroppedLate l => new BoothLogAppendRequest("talk-dropped-late", Summarize(l), PersonaId: null),
             VoiceMissing v => new BoothLogAppendRequest("voice-missing", Summarize(v), PersonaId: v.PersonaId),
             RepeatCaught r => new BoothLogAppendRequest("repeat-caught", Summarize(r), PersonaId: r.PersonaId),
+            RuleFlagged f => new BoothLogAppendRequest("rule-flagged", Summarize(f), PersonaId: f.PersonaId),
+            RuleBroken b => new BoothLogAppendRequest("rule-broken", Summarize(b), PersonaId: b.PersonaId),
             RequestReceived => new BoothLogAppendRequest("request-received", "Request received", PersonaId: null),
             RequestEvicted => new BoothLogAppendRequest("request-evicted", "Request evicted (pending cap)", PersonaId: null),
             RequestExpired => new BoothLogAppendRequest("request-expired", "Request expired", PersonaId: null),
@@ -202,6 +204,26 @@ sealed class BoothLogWriter(
             RepeatOutcome.Dropped => " — dropped",
             _ => "",
         };
+
+    static string Summarize(RuleFlagged f) =>
+        $"{f.RuleName} flagged {f.Speaker}'s {TalkWord(f.Talk)} — " + f.Outcome switch
+        {
+            RuleFlagOutcome.ReAsked => "re-asked",
+            RuleFlagOutcome.Template => "template",
+            RuleFlagOutcome.Dropped => "dropped",
+            RuleFlagOutcome.Failed => "failed",
+            _ => "handled",
+        };
+
+    static string Summarize(RuleBroken b) =>
+        $"{b.RuleName} could not {(b.Step == RuleBrokenStep.Record ? "save" : "prepare")} {b.Speaker}'s {TalkWord(b.Talk)}";
+
+    static string TalkWord(RuleFlagTalk talk) => talk switch
+    {
+        RuleFlagTalk.Chat => "chat",
+        RuleFlagTalk.Ad => "ad",
+        _ => "line",
+    };
 
     static string Summarize(VoiceMissing v) => $"Voice missing: {v.Speaker} has no voice for the active engine — talk dropped";
 

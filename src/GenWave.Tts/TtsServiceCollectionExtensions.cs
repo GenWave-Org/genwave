@@ -328,11 +328,17 @@ public static class TtsServiceCollectionExtensions
             // Shadow hook (SPEC F220.18-F220.19, PLAN T788): LlmCopyWriter resolves it optionally; it judges only while the
             // live TalkRules:Mode is shadow.
             .AddSingleton<DjLineShadowCheck>()
+            // DJ-line rules-mode flow (SPEC F220.10-F220.16, PLAN T800): LlmCopyWriter resolves it optionally and hands the
+            // whole render over while the live TalkRules:Mode is rules.
+            .AddSingleton<DjLineRulesFlow>()
             // Chat snapshot source (SPEC F220.7, PLAN T781): same shape for crosstalk.
             .AddSingleton<ITalkSnapshotSource<ChatSnapshotInput>, ChatSnapshotSource>()
             // Chat shadow hook (SPEC F220.18-F220.19, PLAN T789): CrosstalkScriptWriter resolves it optionally; it judges only
             // while the live TalkRules:Mode is shadow.
             .AddSingleton<ChatShadowCheck>()
+            // Chat rules-mode flow (SPEC F220.10-F220.16, PLAN T801): CrosstalkScriptWriter resolves it optionally and hands the
+            // whole chat over while the live TalkRules:Mode is rules.
+            .AddSingleton<ChatRulesFlow>()
             // The life extractor's own completion seam (SPEC F218.17, PLAN T704): same endpoint/key/timeout, called
             // only from the background LifeExtractionService, never from the render path.
             .AddSingleton<ILifeClaimLlm, LifeClaimLlm>()

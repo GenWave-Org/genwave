@@ -65,6 +65,28 @@ internal sealed class RepeatViewsDatabase : EphemeralStationDatabase
         await cmd.ExecuteNonQueryAsync();
     }
 
+    /// <summary>
+    /// Writes a <c>talk_check</c> row. <paramref name="repeatPhrases"/> is that rule's stored verdict
+    /// (<c>{"on":true,"flag":{...}}</c>); null stores no verdict for it, as a rules-mode check with the rule absent would.
+    /// </summary>
+    public async Task AddTalkCheckAsync(int personaId, string mode, string? repeatPhrases, TimeSpan? age = null)
+    {
+        await using var conn = await OpenAsync();
+        await using var cmd = new NpgsqlCommand(
+            """
+            insert into station.talk_check (checked_at, talk_kind, persona_id, attempt, mode, raw_reply, snapshot, verdicts, outcome)
+            values (now() - @age, 'dj-line', @persona, 1, @mode, 'raw', '{}'::jsonb,
+                    case when @verdict::text is null then '{}'::jsonb
+                         else jsonb_build_object('repeat-phrases', @verdict::jsonb) end,
+                    'accepted')
+            """, conn);
+        cmd.Parameters.AddWithValue("persona", personaId);
+        cmd.Parameters.AddWithValue("mode", mode);
+        cmd.Parameters.AddWithValue("age", age ?? TimeSpan.Zero);
+        cmd.Parameters.Add(new NpgsqlParameter("verdict", NpgsqlTypes.NpgsqlDbType.Text) { Value = (object?)repeatPhrases ?? DBNull.Value });
+        await cmd.ExecuteNonQueryAsync();
+    }
+
     /// <summary>Rows of <c>station.v_catchphrase_per_shift</c> for one persona, ordered by shift key.</summary>
     public async Task<IReadOnlyList<(string ShiftKey, string Phrase, int Occurrences)>> CatchphrasesAsync(int personaId)
     {

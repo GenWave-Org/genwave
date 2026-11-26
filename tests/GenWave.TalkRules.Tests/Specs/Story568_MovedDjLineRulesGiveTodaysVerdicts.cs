@@ -471,7 +471,7 @@ public static class FeatureMovedDjLineRulesGiveTodaysVerdicts
 
         public Task InitializeAsync()
         {
-            (legacyNamed, ruleNamed) = CatchphraseParity.Verdicts(new CatchphraseLimitsRule(new RepetitionCheck()), Cases);
+            (legacyNamed, ruleNamed) = CatchphraseParity.Verdicts(JudgingOnlyCatchphraseLimits.Rule(), Cases);
             return Task.CompletedTask;
         }
 
@@ -553,7 +553,7 @@ public static class FeatureMovedDjLineRulesGiveTodaysVerdicts
             var rule = new RepeatPhrasesRule(new RepetitionCheck());
             preview = rule.Judge(RepeatParity.DjSnapshot(Repeat, preview: true));
             onAir = rule.Judge(RepeatParity.DjSnapshot(Repeat));
-            var limits = new CatchphraseLimitsRule(new RepetitionCheck());
+            var limits = JudgingOnlyCatchphraseLimits.Rule();
             catchphrasePreview = limits.Judge(CatchphraseParity.Snapshot(Catchphrase, preview: true));
             catchphraseOnAir = limits.Judge(CatchphraseParity.Snapshot(Catchphrase));
             return Task.CompletedTask;
@@ -584,7 +584,7 @@ public static class FeatureMovedDjLineRulesGiveTodaysVerdicts
         {
             var said = new CatchphraseParityCase(
                 "Well log it that was a banger tonight", [], CappedQuirk: "Finish a break with \"log it that was a banger\" now and then");
-            flag = new CatchphraseLimitsRule(new RepetitionCheck()).Judge(CatchphraseParity.Snapshot(said, withMemo: false));
+            flag = JudgingOnlyCatchphraseLimits.Rule().Judge(CatchphraseParity.Snapshot(said, withMemo: false));
             return Task.CompletedTask;
         }
 

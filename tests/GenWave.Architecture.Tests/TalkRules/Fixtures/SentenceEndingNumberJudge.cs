@@ -13,7 +13,7 @@ public sealed class SentenceEndingNumberJudge : IJudgingTalkRule
 
     public TalkKinds OnByDefault => TalkKinds.Chat;
 
-    public TalkRuleDescription Describe() => new("Sentence ending number.", "Flags a line with words past the limit of 40.", "A test.", "None.");
+    public TalkRuleDescription Describe() => new("Sentence ending number", "Flags a line with words past the limit of 40.", "A test.", "None.");
 
     public RuleFlag? Judge(TalkSnapshot after) => null;
 }

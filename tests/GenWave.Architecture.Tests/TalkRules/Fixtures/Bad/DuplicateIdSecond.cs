@@ -11,7 +11,7 @@ public sealed class DuplicateIdSecond : IJudgingTalkRule
 
     public TalkKinds OnByDefault => TalkKinds.Chat;
 
-    public TalkRuleDescription Describe() => new("Duplicate Second.", "Judges nothing.", "A test.", "None.");
+    public TalkRuleDescription Describe() => new("Duplicate Second", "Judges nothing.", "A test.", "None.");
 
     public RuleFlag? Judge(TalkSnapshot after) => null;
 }

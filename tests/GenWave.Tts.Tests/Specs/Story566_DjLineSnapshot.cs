@@ -272,11 +272,16 @@ public static class FeatureDjLineSnapshot
 
     sealed class UnusedRuleBook : ITalkRuleBook
     {
+        public IReadOnlyList<ITalkRule> Rules => [];
+
+        public ValueTask<IReadOnlyDictionary<string, bool>> SwitchesAsync(TalkKinds kind, CancellationToken ct) =>
+            ValueTask.FromResult<IReadOnlyDictionary<string, bool>>(new Dictionary<string, bool>());
+
         public ValueTask<TalkShaping> ShapeAsync(TalkSnapshot before, CancellationToken ct) => throw new InvalidOperationException();
 
         public ValueTask<TalkList<RuleVerdict>> JudgeAsync(TalkSnapshot after, CancellationToken ct) => throw new InvalidOperationException();
 
-        public ValueTask AcceptedAsync(TalkSnapshot accepted, CancellationToken ct) => throw new InvalidOperationException();
+        public ValueTask<TalkList<string>> AcceptedAsync(TalkSnapshot accepted, CancellationToken ct) => throw new InvalidOperationException();
     }
 
     sealed class SilentCheckLog : ITalkCheckLog
@@ -316,12 +321,18 @@ public static class FeatureDjLineSnapshot
 
     sealed class EmptyRuleBook : ITalkRuleBook
     {
+        public IReadOnlyList<ITalkRule> Rules => [];
+
+        public ValueTask<IReadOnlyDictionary<string, bool>> SwitchesAsync(TalkKinds kind, CancellationToken ct) =>
+            ValueTask.FromResult<IReadOnlyDictionary<string, bool>>(new Dictionary<string, bool>());
+
         public ValueTask<TalkShaping> ShapeAsync(TalkSnapshot before, CancellationToken ct) => throw new InvalidOperationException();
 
         public ValueTask<TalkList<RuleVerdict>> JudgeAsync(TalkSnapshot after, CancellationToken ct) =>
             ValueTask.FromResult(TalkList<RuleVerdict>.Empty);
 
-        public ValueTask AcceptedAsync(TalkSnapshot accepted, CancellationToken ct) => ValueTask.CompletedTask;
+        public ValueTask<TalkList<string>> AcceptedAsync(TalkSnapshot accepted, CancellationToken ct) =>
+            ValueTask.FromResult(TalkList<string>.Empty);
     }
 
     // Feature: a rejected preview is recorded as what it was, a dropped line (T788, F220.19). WritePreviewAsync never templates.

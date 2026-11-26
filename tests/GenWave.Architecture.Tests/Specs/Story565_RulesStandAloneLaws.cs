@@ -99,6 +99,10 @@ public static class FeatureRulesStandAloneLaws
             Assert.Contains(RuleKnowsNoOtherLaw.Violations([typeof(RuleTakingTheSwitches)]), violation => violation.Contains(nameof(RuleTakingTheSwitches), StringComparison.Ordinal));
 
         [Fact]
+        public void TakingTheSwitchboardFailsTheLaw() =>
+            Assert.Contains(RuleKnowsNoOtherLaw.Violations([typeof(RuleTakingTheSwitchboard)]), violation => violation.Contains(nameof(RuleTakingTheSwitchboard), StringComparison.Ordinal));
+
+        [Fact]
         public void TakingAnArrayOfRulesFailsTheLaw() =>
             Assert.Contains(RuleKnowsNoOtherLaw.Violations([typeof(RuleTakingARuleArray)]), violation => violation.Contains(nameof(RuleTakingARuleArray), StringComparison.Ordinal));
 

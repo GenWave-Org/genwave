@@ -9,7 +9,7 @@ namespace GenWave.TalkRules;
 
 public static class TalkRuleServiceCollectionExtensions
 {
-    /// <summary>Registers every <see cref="ITalkRule"/> in GenWave.TalkRules, the rule book, the replay, the shared-run <see cref="IRepetitionCheck"/> the repeat judge takes (TryAdd), and the in-memory switch stand-in (registered with TryAdd: an earlier <see cref="ITalkRuleSwitches"/> registration wins; a later one must use Replace). A new rule is one file, no edit here (F220.2).</summary>
+    /// <summary>Registers every <see cref="ITalkRule"/> in GenWave.TalkRules, the rule book, the replay, the shared-run <see cref="IRepetitionCheck"/> the repeat judge takes, the <see cref="IMemoryBreakGate"/> the memory shapers share and the <see cref="ISelfNameRoll"/> the name rule rolls and the <see cref="ITalkRuleSwitchboard"/> (all TryAdd), plus the in-memory switch stand-in, also TryAdd: an earlier <see cref="ITalkRuleSwitches"/> registration wins, and a later one must use Replace, as the host's Postgres store does. A new rule is one file, no edit here (F220.2).</summary>
     public static IServiceCollection AddTalkRules(this IServiceCollection services) =>
         services.AddTalkRules(typeof(TalkRuleBook).Assembly);
 
@@ -22,7 +22,10 @@ public static class TalkRuleServiceCollectionExtensions
         }
 
         services.TryAddSingleton<IRepetitionCheck, RepetitionCheck>(); // the pure shared-run check the repeat-phrases judge takes
+        services.TryAddSingleton<IMemoryBreakGate, MemoryBreakGate>(); // the memory test the callbacks and never-mention rules share
+        services.TryAddSingleton<ISelfNameRoll, SelfNameRoll>(); // the one name roll the self-name rule takes: Random.Shared at today's odds
         services.TryAddSingleton<ITalkRuleSwitches, InMemoryTalkRuleSwitches>();
+        services.TryAddSingleton<ITalkRuleSwitchboard, TalkRuleSwitchboard>(); // the one door a switch change goes through: refuses an unknown rule or a kind it cannot cover
         services.TryAddSingleton<TalkRuleBook>();
         services.TryAddSingleton<ITalkRuleBook>(provider => provider.GetRequiredService<TalkRuleBook>());
         services.TryAddSingleton<ITalkRuleReplay, TalkRuleReplay>(); // reads the check log through ITalkCheckStore, which the host registers

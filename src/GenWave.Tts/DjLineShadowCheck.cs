@@ -14,8 +14,8 @@ namespace GenWave.Tts;
 /// Runs inline, not fire-and-forget: the rules are pure and fast, the row is queued and never awaited
 /// (<see cref="ITalkCheckLog.TryRecord"/>), and an inline call leaves no unobserved task to lose at shutdown. The
 /// <see cref="ShadowCheckSupport.JudgeBudget"/> bounds only the async parts (the switches and the snapshot): a rule's own
-/// <c>Judge</c> is synchronous and takes no token, so it cannot be cut short. Only <see cref="TalkRulesMode.Shadow"/> judges: <see cref="TalkRulesMode.Rules"/> has
-/// no flow yet (PLAN T800), so it airs as legacy and records nothing; a shadow row would be a lie and a rules row too.
+/// <c>Judge</c> is synchronous and takes no token, so it cannot be cut short. Only <see cref="TalkRulesMode.Shadow"/> judges: rules mode has its own flow (<see cref="DjLineRulesFlow"/>, PLAN T800), which
+/// writes its own rows, so this hook stays silent there.
 /// </remarks>
 public sealed class DjLineShadowCheck(
     IOptionsMonitor<TalkRulesOptions> options,

@@ -17,7 +17,7 @@ public sealed class CleanLanguageRule : IJudgingTalkRule
     public TalkKinds OnByDefault => TalkKinds.Ad;
 
     public TalkRuleDescription Describe() => new(
-        "Clean language.",
+        "Clean language",
         "Flags an ad that uses a swear word from the station's list of words, but only when the station's audience is set to Everyone. Spelling tricks like swapped letters or spaces are seen through. With any other audience this rule does nothing.",
         "A station for everyone should not air swearing in its ads.",
         "An ad that calls the sponsor's rival a rude name.");
