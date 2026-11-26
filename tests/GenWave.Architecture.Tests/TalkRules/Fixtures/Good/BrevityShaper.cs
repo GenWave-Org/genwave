@@ -12,7 +12,7 @@ public sealed class BrevityShaper : IShapingTalkRule
     public TalkKinds OnByDefault => TalkKinds.DjLine;
 
     public TalkRuleDescription Describe() => new(
-        "Brevity note.",
+        "Brevity note",
         "Asks the writer to keep it short.",
         "Short talk keeps the music moving.",
         "The prompt gains the note: keep it short.");

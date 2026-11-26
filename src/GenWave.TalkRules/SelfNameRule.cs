@@ -21,7 +21,7 @@ public sealed class SelfNameRule(ISelfNameRoll roll, IPersonaStore personas, IPe
     public TalkKinds OnByDefault => TalkKinds.DjLine;
 
     public TalkRuleDescription Describe() => new(
-        "Says their own name sometimes.",
+        "Says their own name sometimes",
         $"On about {LlmPromptBuilder.SelfNameMentionProbability:P0} of breaks, asks the DJ to work their own on-air name in once, where it lands naturally. A DJ with no personality text of their own is never asked.",
         "Real radio DJs now and then say who they are, and a name said every break would turn into a tic.",
         "The roll lands, and the lead-in is asked to say \"you're with Flip\".");

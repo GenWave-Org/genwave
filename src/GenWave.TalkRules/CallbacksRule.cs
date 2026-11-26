@@ -28,7 +28,7 @@ public sealed class CallbacksRule(IBreakCallbacks callbacks, IMemoryBreakGate ga
     public TalkKinds OnByDefault => TalkKinds.DjLine;
 
     public TalkRuleDescription Describe() => new(
-        "Callbacks.",
+        "Callbacks",
         "Now and then asks a lead-in or a back-announce to work in one thing the DJ remembers, in a few words and without saying that they remember it. A DJ gets at most the number of callbacks an hour the setting allows, never two in ten minutes, and the memory must have a word of its own that is not a name on the station. A callback counts as used when the line that aired says one of that memory's words. Only talk that aired counts: talk that was thrown away uses nothing up. Switched off, no memory is offered.",
         "A DJ who remembers the listener's life now and then sounds like someone who has been here all along.",
         "The DJ has a dog named Daisy. The lead-in says \"Daisy would have howled at this one\", so the callback is used.");

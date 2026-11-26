@@ -16,7 +16,7 @@ public sealed class HistoryAwareShaper(ITalkLineStore store) : IShapingTalkRule
     public TalkKinds OnByDefault => TalkKinds.DjLine;
 
     public TalkRuleDescription Describe() => new(
-        "History aware.",
+        "History aware",
         "Asks the writer to avoid lines it has used before.",
         "Fresh talk keeps listeners from hearing the same thing twice.",
         "The prompt gains the note: use fresh words.");

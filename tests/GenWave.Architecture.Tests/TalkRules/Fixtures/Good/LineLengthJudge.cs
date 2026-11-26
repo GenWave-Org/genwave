@@ -14,7 +14,7 @@ public sealed class LineLengthJudge : IJudgingTalkRule
     public TalkKinds OnByDefault => TalkKinds.Chat | TalkKinds.Ad;
 
     public TalkRuleDescription Describe() => new(
-        "Line length cap.",
+        "Line length cap",
         "Flags a line of more than 40 words.",
         "Long lines lose the listener.",
         "A fifty word sentence is flagged.");

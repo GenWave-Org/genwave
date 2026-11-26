@@ -19,7 +19,7 @@ public sealed class NeverMentionRule(IMemoryRecallSource recall, IMemoryBreakGat
     public TalkKinds OnByDefault => TalkKinds.DjLine;
 
     public TalkRuleDescription Describe() => new(
-        "Never mention finished topics.",
+        "Never mention finished topics",
         "Gives the DJ a short list of things they let go of in the last week (up to ten, newest first) and tells them never to mention them. It adds nothing when there is nothing on the list. It only works while the DJ's memory is on.",
         "A DJ who keeps bringing up something they decided to forget sounds like they cannot listen to themselves.",
         "The DJ let go of the story about the transmitter failing, so the prompt lists it and the next lead-in leaves it out.");

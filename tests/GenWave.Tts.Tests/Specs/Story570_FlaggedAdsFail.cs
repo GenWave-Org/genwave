@@ -38,7 +38,7 @@ public static class FeatureFlaggedAdsFail
 
         public TalkKinds OnByDefault => TalkKinds.Ad;
 
-        public TalkRuleDescription Describe() => new("Zeta recorder.", "-", "-", "-");
+        public TalkRuleDescription Describe() => new("Zeta recorder", "-", "-", "-");
 
         public ValueTask AcceptedAsync(TalkSnapshot accepted, CancellationToken ct)
         {
@@ -57,7 +57,7 @@ public static class FeatureFlaggedAdsFail
         {
             harness = new AdRulesSpecHarness(
                 [Clean, CleanAgain],
-                [Judge("b-rule", "Bravo rule.", s => Always("Ask B.", s)), Judge("a-rule", "Alpha rule.", s => Always("Ask A.", s))]);
+                [Judge("b-rule", "Bravo rule", s => Always("Ask B.", s)), Judge("a-rule", "Alpha rule", s => Always("Ask A.", s))]);
             result = await harness.WriteAsync();
         }
 
@@ -98,7 +98,7 @@ public static class FeatureFlaggedAdsFail
         {
             harness = new AdRulesSpecHarness(
                 [Clean, CleanAgain],
-                [Judge("b-rule", "Bravo rule.", s => FirstAttemptOnly(AskB, s)), Judge("a-rule", "Alpha rule.", s => FirstAttemptOnly(AskA, s))]);
+                [Judge("b-rule", "Bravo rule", s => FirstAttemptOnly(AskB, s)), Judge("a-rule", "Alpha rule", s => FirstAttemptOnly(AskA, s))]);
             result = await harness.WriteAsync();
         }
 
@@ -130,7 +130,7 @@ public static class FeatureFlaggedAdsFail
     // F220.12 — a clean ad airs as cleaned, and the phone rewrite is not applied (a wrong number is the phone rule's to flag)
     public sealed class ScenarioACleanAd : IAsyncLifetime
     {
-        readonly AdRulesSpecHarness harness = new([AdRulesSpecHarness.WrongPhone], [Judge("a-rule", "Alpha rule.", Never)]);
+        readonly AdRulesSpecHarness harness = new([AdRulesSpecHarness.WrongPhone], [Judge("a-rule", "Alpha rule", Never)]);
         AdScriptWriteResult result = null!;
 
         public async Task InitializeAsync() => result = await harness.WriteAsync();
@@ -187,7 +187,7 @@ public static class FeatureFlaggedAdsFail
         {
             recorder = new RowCountingRecorder(log);
             await new AdRulesSpecHarness(
-                [Clean, CleanAgain], [Judge("a-rule", "Alpha rule.", s => Always("Ask.", s)), recorder], checkLog: log).WriteAsync();
+                [Clean, CleanAgain], [Judge("a-rule", "Alpha rule", s => Always("Ask.", s)), recorder], checkLog: log).WriteAsync();
         }
 
         public Task DisposeAsync() => Task.CompletedTask;
@@ -199,7 +199,7 @@ public static class FeatureFlaggedAdsFail
     // F220.11 — a reply that fails the fixed shape checks fails the spot: no rule runs and nothing is re-asked
     public sealed class ScenarioTheCleanUpFails : IAsyncLifetime
     {
-        readonly ScriptedJudgingRule judge = Judge("a-rule", "Alpha rule.", s => Always("Ask.", s));
+        readonly ScriptedJudgingRule judge = Judge("a-rule", "Alpha rule", s => Always("Ask.", s));
         AdRulesSpecHarness harness = null!;
         AdScriptWriteResult result = null!;
 
@@ -233,7 +233,7 @@ public static class FeatureFlaggedAdsFail
 
         public async Task InitializeAsync()
         {
-            harness = new AdRulesSpecHarness([Clean, CleanAgain], [Judge("a-rule", "Alpha rule.", s => Always("Ask.", s))]);
+            harness = new AdRulesSpecHarness([Clean, CleanAgain], [Judge("a-rule", "Alpha rule", s => Always("Ask.", s))]);
             await harness.WriteAsync();
         }
 
@@ -306,7 +306,7 @@ public static class FeatureFlaggedAdsFail
         readonly CountingMonitor monitor = new();
 
         public async Task InitializeAsync() =>
-            await new AdRulesSpecHarness([Clean], [Judge("a-rule", "Alpha rule.", Never)], modeMonitor: monitor).WriteAsync();
+            await new AdRulesSpecHarness([Clean], [Judge("a-rule", "Alpha rule", Never)], modeMonitor: monitor).WriteAsync();
 
         public Task DisposeAsync() => Task.CompletedTask;
 
@@ -322,7 +322,7 @@ public static class FeatureFlaggedAdsFail
         public async Task InitializeAsync()
         {
             var harness = new AdRulesSpecHarness(
-                [Clean], [new ScriptedShapingRule("b-recorder", "Bravo recorder.", recordThrows: true, covers: TalkKinds.Ad)]);
+                [Clean], [new ScriptedShapingRule("b-recorder", "Bravo recorder", recordThrows: true, covers: TalkKinds.Ad)]);
             await harness.WriteAsync();
             broken = harness.Events.Events.OfType<RuleBroken>().Single();
         }

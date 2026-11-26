@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api-fetch";
+import { formatDayAtTime } from "@/lib/format-clock";
 import {
   narrowFlaggedAttempts,
   kindLabel,
@@ -218,7 +219,7 @@ export function TalkRulesClient({ initialRules, mode }: TalkRulesClientProps): R
                       {state.lines.map((line) => (
                         <li key={line.checkId} className="rounded-[6px] border border-line p-3">
                           <p className="text-[0.8rem] text-mute">
-                            {line.dj ?? "No DJ"} · {kindLabel(line.kind)} · {outcomeLabel(line.outcome)}
+                            {formatDayAtTime(line.when)} · {line.dj ?? "No DJ"} · {kindLabel(line.kind)} · {outcomeLabel(line.outcome)}
                           </p>
                           <p className="mt-1 break-words text-ink">{line.words}</p>
                         </li>

@@ -33,7 +33,7 @@ public sealed class RepeatPhrasesRule(IRepetitionCheck sharedRun) : IJudgingTalk
     public TalkKinds OnByDefault => TalkKinds.DjLine | TalkKinds.Chat;
 
     public TalkRuleDescription Describe() => new(
-        "No repeated phrases.",
+        "No repeated phrases",
         $"Flags a line that repeats a run of {RepetitionCheck.MinRunWords} or more words in a row from one of that speaker's last {LlmCopyWriter.RepetitionWindow} lines (a chat looks at their last {CrosstalkLineMemory.Window}). A line that was a stand-in template is not counted, and neither are the speaker's and station's names, or the track details. On a single-DJ line the speaker's own catchphrases are skipped too, but in a chat they are not.",
         "Hearing the same sentence again and again makes the station sound like a loop.",
         "The speaker said \"that was a really great song\" earlier, and the new line says it again.");

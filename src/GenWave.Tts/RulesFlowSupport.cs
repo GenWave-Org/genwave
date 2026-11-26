@@ -123,7 +123,7 @@ internal sealed class RulesFlowSupport(ITalkRuleBook ruleBook, ITalkCheckLog che
         }
     }
 
-    /// <summary>The rule's plain name without its closing full stop, as the booth row words it; the id when the rule is unknown.</summary>
+    /// <summary>The rule's plain name, as the booth row words it; the id when the rule is unknown.</summary>
     public string NameOf(string ruleId) =>
-        ruleBook.Rules.FirstOrDefault(rule => rule.Id == ruleId)?.Describe().Name.TrimEnd('.') ?? ruleId;
+        ruleBook.Rules.FirstOrDefault(rule => rule.Id == ruleId)?.Describe().Name ?? ruleId;
 }

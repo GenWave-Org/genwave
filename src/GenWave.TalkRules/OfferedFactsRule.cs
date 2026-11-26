@@ -17,7 +17,7 @@ public sealed class OfferedFactsRule : IJudgingTalkRule
     public TalkKinds OnByDefault => TalkKinds.DjLine | TalkKinds.Chat;
 
     public TalkRuleDescription Describe() => new(
-        "Only offered facts.",
+        "Only offered facts",
         "Flags a number, a day of the week or a weather word that the facts offered for this talk never state. A chat is offered no facts, so any weather word in it is flagged. A line with no facts offered is not judged.",
         "Talk that invents a temperature, a day or the weather tells listeners something untrue.",
         "The facts say it is 21 degrees, and the line says it is 25 degrees and snowing.");

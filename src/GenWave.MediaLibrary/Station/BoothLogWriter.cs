@@ -216,7 +216,7 @@ sealed class BoothLogWriter(
         };
 
     static string Summarize(RuleBroken b) =>
-        $"{b.RuleName} could not {(b.Step == RuleBrokenStep.Record ? "record" : "shape")} {b.Speaker}'s {TalkWord(b.Talk)}";
+        $"{b.RuleName} could not {(b.Step == RuleBrokenStep.Record ? "save" : "prepare")} {b.Speaker}'s {TalkWord(b.Talk)}";
 
     static string TalkWord(RuleFlagTalk talk) => talk switch
     {

@@ -154,6 +154,11 @@ describe("Feature: The Talk rules page", () => {
       expect(await screen.findByText(/Asked again/)).toBeInTheDocument();
     });
 
+    it("shows when each flagged line was checked", async () => {
+      // Jest pins TZ to UTC (jest.config.js), so the browser-zone formatter is deterministic here.
+      expect(await screen.findByText(/^Nov 20 at 10:00 AM · Flip/)).toBeInTheDocument();
+    });
+
     it("shows the kind of each flagged line", async () => {
       expect(await screen.findByText(/DJ lines ·/)).toBeInTheDocument();
     });

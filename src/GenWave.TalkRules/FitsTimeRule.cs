@@ -20,7 +20,7 @@ public sealed class FitsTimeRule : IJudgingTalkRule
     public TalkKinds OnByDefault => TalkKinds.Chat | TalkKinds.Ad;
 
     public TalkRuleDescription Describe() => new(
-        "Fits the time.",
+        "Fits the time",
         $"Flags a chat or an ad that would take longer to say than the time it has. Reading time is the number of characters, spaces and punctuation included, divided by {AdScriptValidator.CharsPerSecond:0} a second. A chat may run to its target length. An ad may run to its spot length plus the extra allowance set for ads (40 percent unless changed), and a line of an ad that has been recorded before counts as long as that recording took if it was longer.",
         "Talk that runs over its time gets cut off or pushes the music back.",
         "A 30 second ad whose words take 50 seconds to read.");

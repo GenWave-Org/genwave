@@ -13,7 +13,7 @@ public sealed class OwnerMessageRule : IJudgingTalkRule
     public TalkKinds OnByDefault => TalkKinds.DjLine;
 
     public TalkRuleDescription Describe() => new(
-        "Says the owner's message.",
+        "Says the owner's message",
         "Flags an announcement that leaves out or rewords the owner's message. The owner's words must appear in order. Capital letters and punctuation do not matter.",
         "The owner wrote the message, and the announcement is meant to say it, not a paraphrase of it.",
         "The owner wrote that dinner is ready, and the line talks about food without saying so.");

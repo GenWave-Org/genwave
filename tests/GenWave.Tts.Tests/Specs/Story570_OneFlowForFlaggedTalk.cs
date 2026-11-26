@@ -30,8 +30,8 @@ public static class FeatureOneFlowForFlaggedTalk
     // AC1 — mode rules, a clean reply
     public sealed class ScenarioACleanReply : IAsyncLifetime
     {
-        readonly ScriptedJudgingRule judge = new("a-rule", "Alpha rule.", Never);
-        readonly ScriptedShapingRule recorder = new("z-recorder", "Zeta recorder.");
+        readonly ScriptedJudgingRule judge = new("a-rule", "Alpha rule", Never);
+        readonly ScriptedShapingRule recorder = new("z-recorder", "Zeta recorder");
         RulesSpecHarness harness = null!;
         SegmentCopy copy = null!;
 
@@ -80,8 +80,8 @@ public static class FeatureOneFlowForFlaggedTalk
         {
             harness = new RulesSpecHarness(
                 [First, Second],
-                [new ScriptedJudgingRule("b-rule", "Bravo rule.", s => FirstAttemptOnly(AskB, s)),
-                 new ScriptedJudgingRule("a-rule", "Alpha rule.", s => FirstAttemptOnly(AskA, s))]);
+                [new ScriptedJudgingRule("b-rule", "Bravo rule", s => FirstAttemptOnly(AskB, s)),
+                 new ScriptedJudgingRule("a-rule", "Alpha rule", s => FirstAttemptOnly(AskA, s))]);
             copy = await harness.WriteAsync();
         }
 
@@ -132,7 +132,7 @@ public static class FeatureOneFlowForFlaggedTalk
         public async Task InitializeAsync()
         {
             harness = new RulesSpecHarness(
-                [First, Second], [new ScriptedJudgingRule("a-rule", "Alpha rule.", s => Always("Ask.", s))]);
+                [First, Second], [new ScriptedJudgingRule("a-rule", "Alpha rule", s => Always("Ask.", s))]);
             await harness.WriteAsync();
         }
 
@@ -158,7 +158,7 @@ public static class FeatureOneFlowForFlaggedTalk
         public async Task InitializeAsync()
         {
             harness = new RulesSpecHarness(
-                [First, Second], [new ScriptedJudgingRule("a-rule", "Alpha rule.", s => Always("Ask.", s))], kind: SegmentKind.SignOff);
+                [First, Second], [new ScriptedJudgingRule("a-rule", "Alpha rule", s => Always("Ask.", s))], kind: SegmentKind.SignOff);
             await harness.WriteAsync();
         }
 
@@ -181,7 +181,7 @@ public static class FeatureOneFlowForFlaggedTalk
         {
             harness = new ChatRulesSpecHarness(
                 [ChatRulesSpecHarness.Clean, ChatRulesSpecHarness.CleanAgain],
-                [new ScriptedJudgingRule("a-rule", "Alpha rule.", s => Always("Ask.", s), TalkKinds.Chat)]);
+                [new ScriptedJudgingRule("a-rule", "Alpha rule", s => Always("Ask.", s), TalkKinds.Chat)]);
             result = await harness.WriteAsync();
         }
 
@@ -264,7 +264,7 @@ public static class FeatureOneFlowForFlaggedTalk
     // Dean 11-25: allowed - a quirk card with no soul whose selection comes back empty may be offered recent lines in rules mode
     public sealed class ScenarioAQuirkCardWithNoSoulAndAnEmptySelectionHasRecentLines : IAsyncLifetime
     {
-        readonly ScriptedShapingRule shaper = new("b-shaper", "Bravo shaper.");
+        readonly ScriptedShapingRule shaper = new("b-shaper", "Bravo shaper");
 
         public async Task InitializeAsync()
         {
@@ -290,7 +290,7 @@ public static class FeatureOneFlowForFlaggedTalk
         public async Task InitializeAsync()
         {
             harness = new RulesSpecHarness(
-                [First, Second], [new ScriptedJudgingRule("a-rule", "Alpha rule.", s => FirstAttemptOnly("Ask.", s))]);
+                [First, Second], [new ScriptedJudgingRule("a-rule", "Alpha rule", s => FirstAttemptOnly("Ask.", s))]);
             await harness.WriteAsync();
         }
 
@@ -318,7 +318,7 @@ public static class FeatureOneFlowForFlaggedTalk
         public async Task InitializeAsync()
         {
             harness = new RulesSpecHarness(
-                [First, Second], [new ScriptedJudgingRule("a-rule", "Alpha rule.", s => Always("Ask.", s))]);
+                [First, Second], [new ScriptedJudgingRule("a-rule", "Alpha rule", s => Always("Ask.", s))]);
             await harness.WriteAsync();
         }
 
@@ -336,7 +336,7 @@ public static class FeatureOneFlowForFlaggedTalk
         public async Task InitializeAsync()
         {
             harness = new RulesSpecHarness(
-                [First, Second], [new ScriptedJudgingRule("a-rule", "Alpha rule.", s => Always("Ask.", s))], kind: SegmentKind.SignOff);
+                [First, Second], [new ScriptedJudgingRule("a-rule", "Alpha rule", s => Always("Ask.", s))], kind: SegmentKind.SignOff);
             await harness.WriteAsync();
         }
 
@@ -351,13 +351,13 @@ public static class FeatureOneFlowForFlaggedTalk
     public sealed class ScenarioACallbackOnRejectedTalk : IAsyncLifetime
     {
         readonly RecordingCallbackStore store = new("has a dog named Daisy");
-        readonly ScriptedShapingRule recorder = new("z-recorder", "Zeta recorder.");
+        readonly ScriptedShapingRule recorder = new("z-recorder", "Zeta recorder");
 
         public async Task InitializeAsync()
         {
             var harness = new RulesSpecHarness(
                 [First, Second],
-                [new ScriptedJudgingRule("a-rule", "Alpha rule.", s => Always("Ask.", s)), recorder, CallbacksRuleFor(store)]);
+                [new ScriptedJudgingRule("a-rule", "Alpha rule", s => Always("Ask.", s)), recorder, CallbacksRuleFor(store)]);
             await harness.WriteAsync();
         }
 
@@ -394,7 +394,7 @@ public static class FeatureOneFlowForFlaggedTalk
     // AC10 — an empty reply
     public sealed class ScenarioAnEmptyReply : IAsyncLifetime
     {
-        readonly ScriptedJudgingRule judge = new("a-rule", "Alpha rule.", s => Always("Ask.", s));
+        readonly ScriptedJudgingRule judge = new("a-rule", "Alpha rule", s => Always("Ask.", s));
         RulesSpecHarness harness = null!;
 
         public async Task InitializeAsync()
@@ -453,7 +453,7 @@ public static class FeatureOneFlowForFlaggedTalk
     // F220.9 — a rule that breaks never stops the talk
     public sealed class ScenarioAShaperThrows : IAsyncLifetime
     {
-        readonly ScriptedShapingRule shaper = new("b-shaper", "Bravo shaper.", shapeThrows: true);
+        readonly ScriptedShapingRule shaper = new("b-shaper", "Bravo shaper", shapeThrows: true);
         RulesSpecHarness harness = null!;
         SegmentCopy copy = null!;
         RuleBroken broken = null!;
@@ -509,7 +509,7 @@ public static class FeatureOneFlowForFlaggedTalk
         {
             harness = new RulesSpecHarness(
                 [First, Second],
-                [new ScriptedShapingRule("b-shaper", "Bravo shaper.", shapeThrows: true), new ScriptedJudgingRule("a-rule", "Alpha rule.", s => FirstAttemptOnly("Ask.", s))]);
+                [new ScriptedShapingRule("b-shaper", "Bravo shaper", shapeThrows: true), new ScriptedJudgingRule("a-rule", "Alpha rule", s => FirstAttemptOnly("Ask.", s))]);
             await harness.WriteAsync();
         }
 
@@ -524,7 +524,7 @@ public static class FeatureOneFlowForFlaggedTalk
 
     public sealed class ScenarioARecorderThrows : IAsyncLifetime
     {
-        readonly ScriptedShapingRule recorder = new("b-recorder", "Bravo recorder.", recordThrows: true);
+        readonly ScriptedShapingRule recorder = new("b-recorder", "Bravo recorder", recordThrows: true);
         RulesSpecHarness harness = null!;
         SegmentCopy copy = null!;
 
@@ -561,7 +561,7 @@ public static class FeatureOneFlowForFlaggedTalk
     // T800 — an accepted announcement has no utterance, but the recording rules still hear of it (F220.13)
     public sealed class ScenarioAnAcceptedAnnouncement : IAsyncLifetime
     {
-        readonly ScriptedShapingRule recorder = new("z-recorder", "Zeta recorder.");
+        readonly ScriptedShapingRule recorder = new("z-recorder", "Zeta recorder");
         RulesSpecHarness harness = null!;
         string? aired;
 
@@ -609,7 +609,7 @@ public static class FeatureOneFlowForFlaggedTalk
         readonly CountingMonitor monitor = new();
 
         public async Task InitializeAsync() =>
-            await new RulesSpecHarness([First], [new ScriptedJudgingRule("a-rule", "Alpha rule.", Never)], modeMonitor: monitor).WriteAsync();
+            await new RulesSpecHarness([First], [new ScriptedJudgingRule("a-rule", "Alpha rule", Never)], modeMonitor: monitor).WriteAsync();
 
         public Task DisposeAsync() => Task.CompletedTask;
 
@@ -620,8 +620,8 @@ public static class FeatureOneFlowForFlaggedTalk
     // T798 notes — the taste notes and the extra-line flag reach the snapshots the rules see
     public sealed class ScenarioATasteBreakFollowsAnEarlierOne : IAsyncLifetime
     {
-        readonly ScriptedJudgingRule judge = new("a-rule", "Alpha rule.", Never);
-        readonly ScriptedShapingRule shaper = new("b-shaper", "Bravo shaper.");
+        readonly ScriptedJudgingRule judge = new("a-rule", "Alpha rule", Never);
+        readonly ScriptedShapingRule shaper = new("b-shaper", "Bravo shaper");
 
         public async Task InitializeAsync()
         {
@@ -659,7 +659,7 @@ public static class FeatureOneFlowForFlaggedTalk
 
     public sealed class ScenarioABreakWithNoPickAndNoExtraLine : IAsyncLifetime
     {
-        readonly ScriptedShapingRule shaper = new("b-shaper", "Bravo shaper.");
+        readonly ScriptedShapingRule shaper = new("b-shaper", "Bravo shaper");
 
         public async Task InitializeAsync()
         {
@@ -679,8 +679,8 @@ public static class FeatureOneFlowForFlaggedTalk
     // Dean 11-25 — recent lines only where legacy offers them
     public sealed class ScenarioABareDjHasRecentLines : IAsyncLifetime
     {
-        readonly ScriptedShapingRule shaper = new("b-shaper", "Bravo shaper.");
-        readonly ScriptedShapingRule bareShaper = new("b-shaper", "Bravo shaper.");
+        readonly ScriptedShapingRule shaper = new("b-shaper", "Bravo shaper");
+        readonly ScriptedShapingRule bareShaper = new("b-shaper", "Bravo shaper");
 
         public async Task InitializeAsync()
         {
@@ -751,12 +751,12 @@ public static class FeatureOneFlowForFlaggedTalk
     // F220.29 — a preview never airs, yet every written attempt is kept: its accepted row is written, no recorder is told
     public sealed class ScenarioAPreviewWithACleanReply : IAsyncLifetime
     {
-        readonly ScriptedShapingRule recorder = new("z-recorder", "Zeta recorder.");
+        readonly ScriptedShapingRule recorder = new("z-recorder", "Zeta recorder");
         RulesSpecHarness harness = null!;
 
         public async Task InitializeAsync()
         {
-            harness = new RulesSpecHarness([First], [new ScriptedJudgingRule("a-rule", "Alpha rule.", Never), recorder]);
+            harness = new RulesSpecHarness([First], [new ScriptedJudgingRule("a-rule", "Alpha rule", Never), recorder]);
             await harness.Writer.WritePreviewAsync(harness.Request, personaOverride: null, CancellationToken.None);
         }
 
@@ -782,7 +782,7 @@ public static class FeatureOneFlowForFlaggedTalk
         public async Task InitializeAsync()
         {
             harness = new RulesSpecHarness(
-                [First, Second], [new ScriptedJudgingRule("a-rule", "Alpha rule.", s => FirstAttemptOnly("Ask.", s))]);
+                [First, Second], [new ScriptedJudgingRule("a-rule", "Alpha rule", s => FirstAttemptOnly("Ask.", s))]);
             await harness.Writer.WritePreviewAsync(harness.Request, personaOverride: null, CancellationToken.None);
         }
 
@@ -800,7 +800,7 @@ public static class FeatureOneFlowForFlaggedTalk
 
     public sealed class ScenarioLegacyModeWithTheFlowWired : IAsyncLifetime
     {
-        readonly ScriptedJudgingRule judge = new("a-rule", "Alpha rule.", s => Always("Ask.", s));
+        readonly ScriptedJudgingRule judge = new("a-rule", "Alpha rule", s => Always("Ask.", s));
         RulesSpecHarness harness = null!;
 
         public async Task InitializeAsync()

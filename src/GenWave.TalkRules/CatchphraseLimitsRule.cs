@@ -38,7 +38,7 @@ public sealed class CatchphraseLimitsRule(
     public TalkKinds OnByDefault => TalkKinds.DjLine;
 
     public TalkRuleDescription Describe() => new(
-        "Catchphrase limits.",
+        "Catchphrase limits",
         $"Flags a line that says a catchphrase the speaker may not say right now: a quirk with a limit per shift that was not offered for this line, or a tagline that is used up. Unless the card sets its own limits, a tagline is used up after {TaglineLedger.DefaultMaxPerHour} uses in an hour, or when one of the speaker's last {TaglineLedger.DefaultMinBreaksApart} lines used it. A catchphrase counts as said when the line holds a run of its words in a row (at least {RepetitionCheck.QuirkRunWords} words, the whole phrase if it is shorter, or half of a long phrase). For a quirk, the phrase is its quoted words, or its last four words when nothing is quoted. A preview is not judged.",
         "A catchphrase said every break stops being a catchphrase and becomes a tic.",
         "The speaker's tagline was said two lines ago, and the new line says it again.");

@@ -24,7 +24,7 @@ public sealed class VaryTasteRule : IShapingTalkRule
     public TalkKinds OnByDefault => TalkKinds.DjLine;
 
     public TalkRuleDescription Describe() => new(
-        "Varies taste notes.",
+        "Varies taste notes",
         "When the song was picked for a taste the DJ already mentioned on the last break, asks the DJ to word it differently or leave it out. A preview and an owner's announcement are left out, and a new taste starts afresh.",
         "The same remark about the DJ's taste, break after break, sounds like a script.",
         "Two lead-ins in a row are for songs picked for the same favourite artist, so the second is told to vary it.");

@@ -13,7 +13,7 @@ public sealed class FirstCallOnlyJudge : IJudgingTalkRule
 
     public TalkKinds OnByDefault => CanCover;
 
-    public TalkRuleDescription Describe() => new("First call only.", "Flags the first thing it sees.", "A test.", "None.");
+    public TalkRuleDescription Describe() => new("First call only", "Flags the first thing it sees.", "A test.", "None.");
 
     public RuleFlag? Judge(TalkSnapshot after) =>
         calls++ == 0 ? new RuleFlag("First", "Write it again.", string.Empty) : null;

@@ -17,7 +17,7 @@ public sealed class StationDetailsRule : IJudgingTalkRule
     public TalkKinds OnByDefault => TalkKinds.Chat;
 
     public TalkRuleDescription Describe() => new(
-        "No made-up station details.",
+        "No made-up station details",
         "Flags a chat that names a station frequency like 98.7 FM, a station's letter code like KXYZ, or a date like August 20. A bare year like 2026 and a date like the 5th of count as dates. The station's own name is left alone.",
         "A chat is made up, so any real-looking frequency, letter code or date would be invented.",
         "The neighbor says you are listening to 98.7 FM.");

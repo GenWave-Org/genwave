@@ -17,7 +17,7 @@ public sealed class OtherBrandsRule : IJudgingTalkRule
     public TalkKinds OnByDefault => TalkKinds.Ad;
 
     public TalkRuleDescription Describe() => new(
-        "No other brands.",
+        "No other brands",
         "Flags an ad that names a real company or product from the station's list of brands, such as a soft drink or a shoe maker. Spelling tricks like swapped letters or spaces are seen through. The sponsor's own name is allowed, unless the sponsor came from a pack of made-up sponsors.",
         "An ad for one sponsor should not advertise, or poke fun at, someone else's real brand.",
         "An ad for a local diner that says it is better than Coca Cola.");

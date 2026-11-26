@@ -19,7 +19,7 @@ public sealed class DayAndTimeRule : IJudgingTalkRule, IShapingTalkRule
     public TalkKinds OnByDefault => TalkKinds.DjLine | TalkKinds.Chat;
 
     public TalkRuleDescription Describe() => new(
-        "Right day and time.",
+        "Right day and time",
         "Flags a day of the week, or a time of day like morning or tonight, that does not match the station's clock when the line was written. A track title, the owner's message and the station's own name are left alone. Before the line is written, the writer is also told the day and the time of day, and not to name another.",
         "Saying it is Monday on a Sunday, or morning at night, tells listeners something untrue.",
         "The clock says Sunday evening, and the line says Monday morning.");

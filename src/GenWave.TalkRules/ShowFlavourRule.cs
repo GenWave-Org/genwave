@@ -22,7 +22,7 @@ public sealed class ShowFlavourRule(IShowFlavorLineSource source) : IShapingTalk
     public TalkKinds OnByDefault => TalkKinds.DjLine;
 
     public TalkRuleDescription Describe() => new(
-        "Show flavour.",
+        "Show flavour",
         "Now and then, as often as the show patter setting allows, lets a lead-in or a back-announce colour its delivery with the flavour text of the show that is on the air. It never rides on a break that already carries a context fact or a crosstalk, and a preview never asks.",
         "A show that sounds like itself gives the schedule a character.",
         "The Night Shift show is on, its flavour is due, and the lead-in is told the show is about cold coffee.");

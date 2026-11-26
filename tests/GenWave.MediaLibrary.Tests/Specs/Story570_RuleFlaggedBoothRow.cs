@@ -121,8 +121,8 @@ public static class FeatureRuleFlaggedBoothRow
         public Task DisposeAsync() => Task.CompletedTask;
 
         [Theory]
-        [InlineData(RuleBrokenStep.Shape, RuleFlagTalk.Line, "Fresh taste notes could not shape DJ Nova's line")]
-        [InlineData(RuleBrokenStep.Record, RuleFlagTalk.Chat, "Fresh taste notes could not record DJ Nova's chat")]
+        [InlineData(RuleBrokenStep.Shape, RuleFlagTalk.Line, "Fresh taste notes could not prepare DJ Nova's line")]
+        [InlineData(RuleBrokenStep.Record, RuleFlagTalk.Chat, "Fresh taste notes could not save DJ Nova's chat")]
         public async Task TheSummaryNamesTheRuleTheStepTheDjAndTheTalk(RuleBrokenStep step, RuleFlagTalk talk, string expected)
         {
             var row = await PublishAndCaptureAsync(new RuleBroken(7, "Fresh taste notes", "DJ Nova", step) { Talk = talk });
@@ -149,7 +149,7 @@ public static class FeatureRuleFlaggedBoothRow
 
         [Fact]
         public void TheSummaryNamesTheSponsorAndTheAd() =>
-            Assert.Equal("Fresh taste notes could not record Cravin's Diner's ad", row.Summary);
+            Assert.Equal("Fresh taste notes could not save Cravin's Diner's ad", row.Summary);
 
         [Fact]
         public void TheRowIsKeyedOnNoPersona() => Assert.Null(row.PersonaId);

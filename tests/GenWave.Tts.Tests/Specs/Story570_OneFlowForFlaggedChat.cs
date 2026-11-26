@@ -27,8 +27,8 @@ public static class FeatureOneFlowForFlaggedChat
     // AC1 — a clean chat
     public sealed class ScenarioACleanChat : IAsyncLifetime
     {
-        readonly ScriptedJudgingRule judge = Judge("a-rule", "Alpha rule.", Never);
-        readonly ScriptedShapingRule recorder = new("z-recorder", "Zeta recorder.", covers: TalkKinds.Chat);
+        readonly ScriptedJudgingRule judge = Judge("a-rule", "Alpha rule", Never);
+        readonly ScriptedShapingRule recorder = new("z-recorder", "Zeta recorder", covers: TalkKinds.Chat);
         ChatRulesSpecHarness harness = null!;
         CrosstalkWriteResult result = null!;
 
@@ -80,7 +80,7 @@ public static class FeatureOneFlowForFlaggedChat
         {
             harness = new ChatRulesSpecHarness(
                 [Clean, CleanAgain],
-                [Judge("b-rule", "Bravo rule.", s => FirstAttemptOnly(AskB, s)), Judge("a-rule", "Alpha rule.", s => FirstAttemptOnly(AskA, s))]);
+                [Judge("b-rule", "Bravo rule", s => FirstAttemptOnly(AskB, s)), Judge("a-rule", "Alpha rule", s => FirstAttemptOnly(AskA, s))]);
             result = await harness.WriteAsync();
         }
 
@@ -119,7 +119,7 @@ public static class FeatureOneFlowForFlaggedChat
         public async Task InitializeAsync()
         {
             harness = new ChatRulesSpecHarness(
-                [Clean, CleanAgain], [Judge("a-rule", "Alpha rule.", s => FirstAttemptOnly("Ask.", s))]);
+                [Clean, CleanAgain], [Judge("a-rule", "Alpha rule", s => FirstAttemptOnly("Ask.", s))]);
             await harness.WriteAsync();
         }
 
@@ -153,7 +153,7 @@ public static class FeatureOneFlowForFlaggedChat
         public async Task InitializeAsync()
         {
             harness = new ChatRulesSpecHarness(
-                [Clean, CleanAgain], [Judge("a-rule", "Alpha rule.", s => new RuleFlag("flagged", "Ask.", "evidence"))]);
+                [Clean, CleanAgain], [Judge("a-rule", "Alpha rule", s => new RuleFlag("flagged", "Ask.", "evidence"))]);
             await harness.WriteAsync();
         }
 
@@ -174,7 +174,7 @@ public static class FeatureOneFlowForFlaggedChat
     // F220.11 — a clean-up failure keeps today's path: no rule runs, no re-ask
     public sealed class ScenarioTheCleanUpFails : IAsyncLifetime
     {
-        readonly ScriptedJudgingRule judge = Judge("a-rule", "Alpha rule.", Never);
+        readonly ScriptedJudgingRule judge = Judge("a-rule", "Alpha rule", Never);
         ChatRulesSpecHarness harness = null!;
         CrosstalkWriteResult result = null!;
 
@@ -208,7 +208,7 @@ public static class FeatureOneFlowForFlaggedChat
         public async Task InitializeAsync()
         {
             harness = new ChatRulesSpecHarness(
-                [Clean, "Just some words with no speaker tags."], [Judge("a-rule", "Alpha rule.", s => FirstAttemptOnly("Ask.", s))]);
+                [Clean, "Just some words with no speaker tags."], [Judge("a-rule", "Alpha rule", s => FirstAttemptOnly("Ask.", s))]);
             result = await harness.WriteAsync();
         }
 
@@ -239,7 +239,7 @@ public static class FeatureOneFlowForFlaggedChat
 
         public async Task InitializeAsync()
         {
-            harness = new ChatRulesSpecHarness([Clean], [Judge("a-rule", "Alpha rule.", Never)], snapshots: new ThrowingSnapshots());
+            harness = new ChatRulesSpecHarness([Clean], [Judge("a-rule", "Alpha rule", Never)], snapshots: new ThrowingSnapshots());
             await harness.WriteAsync();
         }
 
@@ -269,7 +269,7 @@ public static class FeatureOneFlowForFlaggedChat
                 ShiftKey.Unscheduled(ChatRulesSpecHarness.HostId, new DateOnly(2026, 11, 9)), Earlier, false, DateTimeOffset.UnixEpoch, null));
             harness = new ChatRulesSpecHarness(
                 [Repeating, CleanAgain],
-                [Judge("a-rule", "Alpha rule.", s => s.Lines.Any(l => l.Text.Contains(Earlier, StringComparison.Ordinal)) ? new RuleFlag("flagged", "Say it fresh.", "repeat") : null)],
+                [Judge("a-rule", "Alpha rule", s => s.Lines.Any(l => l.Text.Contains(Earlier, StringComparison.Ordinal)) ? new RuleFlag("flagged", "Say it fresh.", "repeat") : null)],
                 utterances: store);
             result = await harness.WriteAsync();
         }
@@ -299,7 +299,7 @@ public static class FeatureOneFlowForFlaggedChat
         {
             harness = new ChatRulesSpecHarness(
                 [Clean, CleanAgain],
-                [new ScriptedShapingRule("b-shaper", "Bravo shaper.", shapeThrows: true, covers: TalkKinds.Chat), Judge("a-rule", "Alpha rule.", s => FirstAttemptOnly("Ask.", s))]);
+                [new ScriptedShapingRule("b-shaper", "Bravo shaper", shapeThrows: true, covers: TalkKinds.Chat), Judge("a-rule", "Alpha rule", s => FirstAttemptOnly("Ask.", s))]);
             await harness.WriteAsync();
         }
 
@@ -315,7 +315,7 @@ public static class FeatureOneFlowForFlaggedChat
     // F220.9 — an accepted chat tells the recorders first, and only then is its row written
     public sealed class ScenarioARecorderThrows : IAsyncLifetime
     {
-        readonly ScriptedShapingRule recorder = new("b-recorder", "Bravo recorder.", recordThrows: true, covers: TalkKinds.Chat);
+        readonly ScriptedShapingRule recorder = new("b-recorder", "Bravo recorder", recordThrows: true, covers: TalkKinds.Chat);
         ChatRulesSpecHarness harness = null!;
         CrosstalkWriteResult result = null!;
         RuleBroken broken = null!;
@@ -362,12 +362,12 @@ public static class FeatureOneFlowForFlaggedChat
     // F220.15 — a rejected chat is not told to the recorders
     public sealed class ScenarioARejectedChatIsNotRecorded : IAsyncLifetime
     {
-        readonly ScriptedShapingRule recorder = new("z-recorder", "Zeta recorder.", covers: TalkKinds.Chat);
+        readonly ScriptedShapingRule recorder = new("z-recorder", "Zeta recorder", covers: TalkKinds.Chat);
 
         public async Task InitializeAsync() =>
             await new ChatRulesSpecHarness(
                 [Clean, CleanAgain],
-                [Judge("a-rule", "Alpha rule.", s => new RuleFlag("flagged", "Ask.", "evidence")), recorder]).WriteAsync();
+                [Judge("a-rule", "Alpha rule", s => new RuleFlag("flagged", "Ask.", "evidence")), recorder]).WriteAsync();
 
         public Task DisposeAsync() => Task.CompletedTask;
 
@@ -378,7 +378,7 @@ public static class FeatureOneFlowForFlaggedChat
     // F220.10 — the shaper runs once, before the first ask, over an empty script
     public sealed class ScenarioTheShaperRunsFirst : IAsyncLifetime
     {
-        readonly ScriptedShapingRule shaper = new("b-shaper", "Bravo shaper.", "Keep it brief.", covers: TalkKinds.Chat);
+        readonly ScriptedShapingRule shaper = new("b-shaper", "Bravo shaper", "Keep it brief.", covers: TalkKinds.Chat);
         ChatRulesSpecHarness harness = null!;
 
         public async Task InitializeAsync()
@@ -427,7 +427,7 @@ public static class FeatureOneFlowForFlaggedChat
         readonly CountingMonitor monitor = new();
 
         public async Task InitializeAsync() =>
-            await new ChatRulesSpecHarness([Clean], [Judge("a-rule", "Alpha rule.", Never)], modeMonitor: monitor).WriteAsync();
+            await new ChatRulesSpecHarness([Clean], [Judge("a-rule", "Alpha rule", Never)], modeMonitor: monitor).WriteAsync();
 
         public Task DisposeAsync() => Task.CompletedTask;
 

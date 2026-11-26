@@ -13,7 +13,7 @@ public sealed class DecimalHidingJudge : IJudgingTalkRule
 
     public TalkKinds OnByDefault => TalkKinds.Chat;
 
-    public TalkRuleDescription Describe() => new("Decimal hiding.", "Flags a pause of more than 1.5 seconds.", "A test.", "None.");
+    public TalkRuleDescription Describe() => new("Decimal hiding", "Flags a pause of more than 1.5 seconds.", "A test.", "None.");
 
     public RuleFlag? Judge(TalkSnapshot after) => null;
 }

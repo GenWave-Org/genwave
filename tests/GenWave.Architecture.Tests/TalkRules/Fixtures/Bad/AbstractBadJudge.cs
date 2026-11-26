@@ -16,7 +16,7 @@ public abstract class AbstractBadJudge : IJudgingTalkRule
 
     public TalkKinds OnByDefault => TalkKinds.DjLine;
 
-    public TalkRuleDescription Describe() => new("Bad.", "Bad.", "Bad.", "Bad.");
+    public TalkRuleDescription Describe() => new("Bad", "Bad.", "Bad.", "Bad.");
 
     public RuleFlag? Judge(TalkSnapshot after) => null;
 }

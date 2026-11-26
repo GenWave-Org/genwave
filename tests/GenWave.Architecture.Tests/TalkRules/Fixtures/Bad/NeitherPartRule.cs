@@ -11,5 +11,5 @@ public sealed class NeitherPartRule : ITalkRule
 
     public TalkKinds OnByDefault => TalkKinds.Chat;
 
-    public TalkRuleDescription Describe() => new("Neither part.", "Does nothing at all.", "A test.", "None.");
+    public TalkRuleDescription Describe() => new("Neither part", "Does nothing at all.", "A test.", "None.");
 }
