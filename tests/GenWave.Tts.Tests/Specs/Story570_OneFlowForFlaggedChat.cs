@@ -290,17 +290,41 @@ public static class FeatureOneFlowForFlaggedChat
             Assert.Contains(Earlier, harness.CheckLog.Records[0].Cleaned, StringComparison.Ordinal);
     }
 
+    // T804a (F220.9) — the shaper runs once per request, so a flagged-then-accepted chat is one breakage, not one per attempt
+    public sealed class ScenarioAShaperThrowsAndTheChatIsReAsked : IAsyncLifetime
+    {
+        ChatRulesSpecHarness harness = null!;
+
+        public async Task InitializeAsync()
+        {
+            harness = new ChatRulesSpecHarness(
+                [Clean, CleanAgain],
+                [new ScriptedShapingRule("b-shaper", "Bravo shaper.", shapeThrows: true, covers: TalkKinds.Chat), Judge("a-rule", "Alpha rule.", s => FirstAttemptOnly("Ask.", s))]);
+            await harness.WriteAsync();
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void TheChatWasReAsked() => Assert.Equal(2, harness.UserPrompts.Count);
+
+        [Fact]
+        public void TheBoothHearsOfTheBreakageOnce() => Assert.Single(harness.Events.Events.OfType<RuleBroken>());
+    }
+
     // F220.9 — an accepted chat tells the recorders first, and only then is its row written
     public sealed class ScenarioARecorderThrows : IAsyncLifetime
     {
         readonly ScriptedShapingRule recorder = new("b-recorder", "Bravo recorder.", recordThrows: true, covers: TalkKinds.Chat);
         ChatRulesSpecHarness harness = null!;
         CrosstalkWriteResult result = null!;
+        RuleBroken broken = null!;
 
         public async Task InitializeAsync()
         {
             harness = new ChatRulesSpecHarness([Clean], [recorder]);
             result = await harness.WriteAsync();
+            broken = harness.Events.Events.OfType<RuleBroken>().Single();
         }
 
         public Task DisposeAsync() => Task.CompletedTask;
@@ -320,6 +344,19 @@ public static class FeatureOneFlowForFlaggedChat
 
         [Fact]
         public void TheStoredRowIsStillAccepted() => Assert.Equal(TalkOutcome.Accepted, Assert.Single(harness.CheckLog.Records).Outcome);
+
+        // T804a — the booth hears of it once, naming the host and saying chat
+        [Fact]
+        public void TheBrokenEventSaysRecord() => Assert.Equal(RuleBrokenStep.Record, broken.Step);
+
+        [Fact]
+        public void TheBrokenEventNamesTheHost() => Assert.Equal("Nova", broken.Speaker);
+
+        [Fact]
+        public void TheBrokenEventSaysChat() => Assert.Equal(RuleFlagTalk.Chat, broken.Talk);
+
+        [Fact]
+        public void TheBrokenEventIsKeyedOnTheHost() => Assert.Equal(ChatRulesSpecHarness.HostId, broken.PersonaId);
     }
 
     // F220.15 — a rejected chat is not told to the recorders

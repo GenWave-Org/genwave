@@ -151,6 +151,83 @@ public static class FeatureSwitchARulePerKindOfTalk
                 Repeat.GetProperty("flags7d").EnumerateObject().Select(kind => (kind.Name, kind.Value.GetInt32())));
     }
 
+    // T804a — GET /api/talk-rules also counts last week's "could not run" per kind (F220.9, option B). The rows: 2 chats with a broken shaper, 1 chat
+    // whose verdict is flagged AND broken (counts in both lists), 1 DJ line with a broken recorder; not counted are a flag that is not broken and a clean chat.
+    // A broken verdict is counted whatever its switch says. A switched-off one is rare but possible: ShapeAsync and JudgeAsync read the switches separately, so a flip between the two reads gives one. It still counts, because the shaper did run and throw.
+    public sealed class ScenarioBrokenRulesAreCounted : RulesApiOverPostgres
+    {
+        const string RuleId = "repeat-phrases";
+
+        JsonElement rule;
+
+        public override async Task InitializeAsync()
+        {
+            await base.InitializeAsync();
+            await AppendAsync(Row(TalkKinds.Chat, new RuleVerdict(RuleId, true, null, Broken: TalkRuleReasons.CouldNotShape)));
+            await AppendAsync(Row(TalkKinds.Chat, new RuleVerdict(RuleId, true, null, Broken: TalkRuleReasons.CouldNotShape)));
+            await AppendAsync(Row(TalkKinds.Chat, new RuleVerdict(RuleId, true, RepeatFlag, Broken: TalkRuleReasons.CouldNotRecord)));
+            await AppendAsync(Row(TalkKinds.DjLine, new RuleVerdict(RuleId, true, null, Broken: TalkRuleReasons.CouldNotRecord)));
+            await AppendAsync(Row(TalkKinds.Chat, new RuleVerdict(RuleId, true, RepeatFlag)));
+            await AppendAsync(Row(TalkKinds.Chat, new RuleVerdict(RuleId, true, null)));
+            using var body = JsonDocument.Parse(await Client.GetStringAsync("/api/talk-rules"));
+            rule = body.RootElement.EnumerateArray().Single(entry => entry.GetProperty("id").GetString() == RuleId).Clone();
+        }
+
+        [Fact]
+        public void EachRuleHasLastWeeksBrokenCountsPerKind() =>
+            Assert.Equal(
+                [("dj-line", 1), ("chat", 3)],
+                rule.GetProperty("broken7d").EnumerateObject().Select(kind => (kind.Name, kind.Value.GetInt32())));
+
+        [Fact]
+        public void AFlaggedAndBrokenVerdictIsInTheFlagCountToo() =>
+            Assert.Equal(2, rule.GetProperty("flags7d").GetProperty("chat").GetInt32());
+    }
+
+    // T804a — a shaper failure is stamped on every judged attempt of one request, so only attempt 1 counts it; "Could not record" is only on the accepted attempt, whichever it is.
+    public sealed class ScenarioALaterAttemptIsCountedOnlyForRecording : RulesApiOverPostgres
+    {
+        const string RuleId = "repeat-phrases";
+
+        JsonElement rule;
+
+        public override async Task InitializeAsync()
+        {
+            await base.InitializeAsync();
+            var attemptTwo = ChatSnapshot() with { Attempt = 2 };
+            await AppendAsync(Row(TalkKinds.Chat, new RuleVerdict(RuleId, true, null, Broken: TalkRuleReasons.CouldNotShape), snapshot: attemptTwo));
+            await AppendAsync(Row(TalkKinds.DjLine, new RuleVerdict(RuleId, true, null, Broken: TalkRuleReasons.CouldNotRecord), snapshot: attemptTwo with { Kind = TalkKinds.DjLine }));
+            using var body = JsonDocument.Parse(await Client.GetStringAsync("/api/talk-rules"));
+            rule = body.RootElement.EnumerateArray().Single(entry => entry.GetProperty("id").GetString() == RuleId).Clone();
+        }
+
+        [Fact]
+        public void AnAttemptTwoCouldNotShapeIsNotCounted() => Assert.Equal(0, rule.GetProperty("broken7d").GetProperty("chat").GetInt32());
+
+        [Fact]
+        public void AnAttemptTwoCouldNotRecordIsCounted() => Assert.Equal(1, rule.GetProperty("broken7d").GetProperty("dj-line").GetInt32());
+    }
+
+    // The shaper and the recorder both broke on the accepted attempt 2: Mark joins the reasons, and the record part still counts.
+    public sealed class ScenarioAJoinedShapeAndRecordBreakageIsCounted : RulesApiOverPostgres
+    {
+        const string RuleId = "repeat-phrases";
+
+        JsonElement rule;
+
+        public override async Task InitializeAsync()
+        {
+            await base.InitializeAsync();
+            var attemptTwo = ChatSnapshot() with { Attempt = 2 };
+            await AppendAsync(Row(TalkKinds.Chat, new RuleVerdict(RuleId, true, null, Broken: $"{TalkRuleReasons.CouldNotShape}, {TalkRuleReasons.CouldNotRecord}"), snapshot: attemptTwo));
+            using var body = JsonDocument.Parse(await Client.GetStringAsync("/api/talk-rules"));
+            rule = body.RootElement.EnumerateArray().Single(entry => entry.GetProperty("id").GetString() == RuleId).Clone();
+        }
+
+        [Fact]
+        public void ItCountsOnceForTheRecordPart() => Assert.Equal(1, rule.GetProperty("broken7d").GetProperty("chat").GetInt32());
+    }
+
     // AC2 — no switch row
     // The host's registration extension (AddTalkRuleSwitchStore) over a bare ServiceCollection, not the composed host, on a real station database: the Postgres store, no row, the rule book.
     [Trait("Category", "Integration")]
@@ -376,8 +453,8 @@ public static class FeatureSwitchARulePerKindOfTalk
     // The rules API reads no database here: nothing is flagged.
     sealed class NoFlags : ITalkFlagReader
     {
-        public Task<IReadOnlyList<TalkRuleFlagCount>> CountFlagsAsync(DateTimeOffset since, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<TalkRuleFlagCount>>([]);
+        public Task<IReadOnlyList<TalkRuleVerdictCount>> CountVerdictsAsync(DateTimeOffset since, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<TalkRuleVerdictCount>>([]);
 
         public Task<IReadOnlyList<TalkFlaggedAttempt>> LatestFlagsAsync(string ruleId, DateTimeOffset since, int limit, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<TalkFlaggedAttempt>>([]);

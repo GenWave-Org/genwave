@@ -38,6 +38,10 @@ function totalFlagged(rule: TalkRuleDto): number {
   return rule.canCover.reduce((sum, kind) => sum + (rule.flags7d[kind] ?? 0), 0);
 }
 
+function totalBroken(rule: TalkRuleDto): number {
+  return rule.canCover.reduce((sum, kind) => sum + (rule.broken7d[kind] ?? 0), 0);
+}
+
 function linesLabel(count: number): string {
   return `${count} ${count === 1 ? "line" : "lines"}`;
 }
@@ -150,6 +154,7 @@ export function TalkRulesClient({ initialRules, mode }: TalkRulesClientProps): R
           const state = flags[rule.id];
           const isOpen = open === rule.id;
           const replayed = replayCounts?.[rule.id];
+          const broken = totalBroken(rule);
           return (
             <li key={rule.id} className="rounded-[6px] border border-line bg-surface p-4">
               <h2 className="text-[0.95rem] font-semibold text-ink">{rule.name}</h2>
@@ -179,6 +184,11 @@ export function TalkRulesClient({ initialRules, mode }: TalkRulesClientProps): R
                   ` (${rule.canCover.map((kind) => `${TALK_KIND_LABELS[kind]} ${rule.flags7d[kind] ?? 0}`).join(", ")})`}
                 .
               </p>
+              {broken > 0 && (
+                <p className="mt-1 text-[0.8rem] text-mute">
+                  Could not run {broken} {broken === 1 ? "time" : "times"} in the last 7 days.
+                </p>
+              )}
               {replayed !== undefined && (
                 <p className="mt-1 text-[0.8rem] text-ink">
                   Checked against last week: {linesLabel(replayed)} flagged.

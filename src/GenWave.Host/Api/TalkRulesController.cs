@@ -28,7 +28,7 @@ public sealed class TalkRulesController(
     private const string CompareLegacy = "legacy";
     private const int ListFlagsDays = 7;
 
-    /// <summary>GET /api/talk-rules — every rule: how it explains itself, each kind's switch (defaults applied) and last week's flags per kind (F220.24).</summary>
+    /// <summary>GET /api/talk-rules — every rule: how it explains itself, each kind's switch (defaults applied) and last week's flags and could-not-run counts per kind (F220.24, F220.9).</summary>
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<TalkRuleDto>>> List(CancellationToken ct)
     {
@@ -39,7 +39,7 @@ public sealed class TalkRulesController(
         }
 
         var since = timeProvider.GetUtcNow().AddDays(-ListFlagsDays);
-        var counts = (await flags.CountFlagsAsync(since, ct)).ToDictionary(count => (count.RuleId, count.Kind), count => count.Count);
+        var counts = (await flags.CountVerdictsAsync(since, ct)).ToDictionary(count => (count.RuleId, count.Kind));
 
         var rules = book.Rules.Select(rule =>
         {
@@ -55,7 +55,8 @@ public sealed class TalkRulesController(
                 covered.ToDictionary(
                     TalkKindSlugs.Of,
                     kind => switchesByKind[kind][rule.Id]),
-                covered.ToDictionary(TalkKindSlugs.Of, kind => counts.GetValueOrDefault((rule.Id, kind))));
+                covered.ToDictionary(TalkKindSlugs.Of, kind => counts.GetValueOrDefault((rule.Id, kind))?.Flagged ?? 0),
+                covered.ToDictionary(TalkKindSlugs.Of, kind => counts.GetValueOrDefault((rule.Id, kind))?.Broken ?? 0));
         }).ToList();
 
         return Ok(rules);

@@ -18,6 +18,7 @@ const RULES: TalkRuleDto[] = [
     canCover: ["dj-line", "chat"],
     switches: { "dj-line": false, chat: true },
     flags7d: { "dj-line": 3, chat: 1 },
+    broken7d: { "dj-line": 1, chat: 1 },
   },
   {
     id: "ad-phone",
@@ -28,6 +29,7 @@ const RULES: TalkRuleDto[] = [
     canCover: ["ad"],
     switches: { ad: true },
     flags7d: { ad: 2 },
+    broken7d: {},
   },
 ];
 
@@ -225,6 +227,24 @@ describe("Feature: The Talk rules page", () => {
       const adRule = screen.getByRole("heading", { name: "Ad phone numbers" }).closest("li")!;
 
       expect(within(adRule).queryByRole("switch", { name: /DJ lines/ })).not.toBeInTheDocument();
+    });
+  });
+
+  describe("Scenario: a rule could not run (T804a)", () => {
+    beforeEach(() => renderPage());
+
+    it("shows how many times, only for a rule where N is above zero", () => {
+      expect(paragraphsStartingWith("Could not run")).toEqual(["Could not run 2 times in the last 7 days.", ""]);
+    });
+  });
+
+  describe("Scenario: a rule could not run once (T804a)", () => {
+    beforeEach(() => {
+      render(<TalkRulesClient initialRules={[{ ...RULES[0]!, broken7d: { chat: 1 } }]} mode="shadow" />);
+    });
+
+    it("says time, not times", () => {
+      expect(paragraphsStartingWith("Could not run")).toEqual(["Could not run 1 time in the last 7 days."]);
     });
   });
 

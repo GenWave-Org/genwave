@@ -48,8 +48,11 @@ internal sealed class RulesFlowSupport(ITalkRuleBook ruleBook, ITalkCheckLog che
 
     /// <summary>Writes one attempt's rules-mode <c>talk_check</c> row (F220.29). The row is queued, never awaited.</summary>
     public void Write(
-        long? personaId, string raw, string? cleaned, TalkSnapshot snapshot, TalkList<RuleVerdict> verdicts, TalkOutcome outcome) =>
+        long? personaId, string raw, string? cleaned, TalkSnapshot snapshot, TalkList<RuleVerdict> verdicts, TalkOutcome outcome)
+    {
+        PublishBroken(personaId, snapshot, verdicts);
         checkLog.TryRecord(new TalkCheckRecord(personaId, TalkCheckMode.Rules, raw, cleaned, snapshot, verdicts, null, outcome));
+    }
 
     /// <summary>
     /// Tells the recording rules about accepted talk (F220.13, F220.15), then writes the accepted attempt's row with any recorder
@@ -84,6 +87,40 @@ internal sealed class RulesFlowSupport(ITalkRuleBook ruleBook, ITalkCheckLog che
     {
         foreach (var flagged in flags)
             events.Publish(new RuleFlagged(personaId, NameOf(flagged.Verdict.RuleId), speaker, outcome) { Talk = talk });
+    }
+
+    /// <summary>
+    /// One <c>rule-broken</c> booth row per rule step that threw on this attempt (F220.9): the ONE place a flow's breakage reaches the
+    /// booth, because every attempt's row goes through <see cref="Write"/>. Rows are keyed on <paramref name="personaId"/> and name the
+    /// DJ off the snapshot's speakers (a chat's host is its first), or the sponsor for an ad. A line or chat with no persona or no
+    /// named speaker has no row to key it on, as <see cref="PublishFlags"/>' callers skip it.
+    /// </summary>
+    void PublishBroken(long? personaId, TalkSnapshot snapshot, TalkList<RuleVerdict> verdicts)
+    {
+        var talk = snapshot.Kind switch
+        {
+            TalkKinds.Chat => RuleFlagTalk.Chat,
+            TalkKinds.Ad => RuleFlagTalk.Ad,
+            _ => RuleFlagTalk.Line,
+        };
+        var speaker = talk == RuleFlagTalk.Ad
+            ? snapshot.Ad?.SponsorName
+            : snapshot.Speakers.FirstOrDefault(s => s.PersonaId == personaId)?.Name;
+        if (string.IsNullOrEmpty(speaker) || (talk != RuleFlagTalk.Ad && personaId is null))
+            return;
+
+        foreach (var verdict in verdicts)
+        {
+            if (verdict.Broken is not { } broken)
+                continue;
+
+            var name = NameOf(verdict.RuleId);
+            // The shaper runs once per request but marks every judged attempt, so only attempt 1 speaks for it.
+            if (snapshot.Attempt == 1 && broken.Contains(TalkRuleReasons.CouldNotShape, StringComparison.Ordinal))
+                events.Publish(new RuleBroken(personaId, name, speaker, RuleBrokenStep.Shape) { Talk = talk });
+            if (broken.Contains(TalkRuleReasons.CouldNotRecord, StringComparison.Ordinal))
+                events.Publish(new RuleBroken(personaId, name, speaker, RuleBrokenStep.Record) { Talk = talk });
+        }
     }
 
     /// <summary>The rule's plain name without its closing full stop, as the booth row words it; the id when the rule is unknown.</summary>

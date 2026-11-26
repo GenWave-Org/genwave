@@ -456,11 +456,13 @@ public static class FeatureOneFlowForFlaggedTalk
         readonly ScriptedShapingRule shaper = new("b-shaper", "Bravo shaper.", shapeThrows: true);
         RulesSpecHarness harness = null!;
         SegmentCopy copy = null!;
+        RuleBroken broken = null!;
 
         public async Task InitializeAsync()
         {
             harness = new RulesSpecHarness([First], [shaper]);
             copy = await harness.WriteAsync();
+            broken = harness.Events.Events.OfType<RuleBroken>().Single();
         }
 
         public Task DisposeAsync() => Task.CompletedTask;
@@ -482,6 +484,42 @@ public static class FeatureOneFlowForFlaggedTalk
         [Fact]
         public void TheBreakageIsNotAFlag() =>
             Assert.Null(harness.CheckLog.Records[0].Verdicts.Single(v => v.RuleId == "b-shaper").Flag);
+
+        // T804a — the booth hears of it, once, naming the rule and the DJ
+        [Fact]
+        public void OneRuleBrokenEventSaysShape() =>
+            Assert.Equal(RuleBrokenStep.Shape, Assert.Single(harness.Events.Events.OfType<RuleBroken>()).Step);
+
+        [Fact]
+        public void TheBrokenEventNamesTheRule() => Assert.Equal("Bravo shaper", broken.RuleName);
+
+        [Fact]
+        public void TheBrokenEventNamesTheDj() => Assert.Equal("DJ Nova", broken.Speaker);
+
+        [Fact]
+        public void TheBrokenEventSaysLine() => Assert.Equal(RuleFlagTalk.Line, broken.Talk);
+    }
+
+    // T804a (F220.9) — the shaper runs once per request, so a flagged-then-accepted line is one breakage, not one per attempt
+    public sealed class ScenarioAShaperThrowsAndTheLineIsReAsked : IAsyncLifetime
+    {
+        RulesSpecHarness harness = null!;
+
+        public async Task InitializeAsync()
+        {
+            harness = new RulesSpecHarness(
+                [First, Second],
+                [new ScriptedShapingRule("b-shaper", "Bravo shaper.", shapeThrows: true), new ScriptedJudgingRule("a-rule", "Alpha rule.", s => FirstAttemptOnly("Ask.", s))]);
+            await harness.WriteAsync();
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void TheLineWasReAsked() => Assert.Equal(2, harness.UserPrompts.Count);
+
+        [Fact]
+        public void TheBoothHearsOfTheBreakageOnce() => Assert.Single(harness.Events.Events.OfType<RuleBroken>());
     }
 
     public sealed class ScenarioARecorderThrows : IAsyncLifetime
@@ -513,6 +551,11 @@ public static class FeatureOneFlowForFlaggedTalk
 
         [Fact]
         public void TheStoredRowIsStillAccepted() => Assert.Equal(TalkOutcome.Accepted, Assert.Single(harness.CheckLog.Records).Outcome);
+
+        // T804a — the booth hears of it, once
+        [Fact]
+        public void OneRuleBrokenEventSaysRecord() =>
+            Assert.Equal(RuleBrokenStep.Record, Assert.Single(harness.Events.Events.OfType<RuleBroken>()).Step);
     }
 
     // T800 — an accepted announcement has no utterance, but the recording rules still hear of it (F220.13)

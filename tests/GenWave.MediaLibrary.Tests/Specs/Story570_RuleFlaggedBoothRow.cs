@@ -109,4 +109,49 @@ public static class FeatureRuleFlaggedBoothRow
         [Fact]
         public void TheRowIsKeyedOnNoPersona() => Assert.Null(row.PersonaId);
     }
+
+    // T804a (F220.9) — a shaper or recorder that threw is a rule-broken row with no outcome suffix
+    public sealed class ScenarioABrokenRule : IAsyncLifetime
+    {
+        BoothLogAppendRequest shapeRow = null!;
+
+        public async Task InitializeAsync() =>
+            shapeRow = await PublishAndCaptureAsync(new RuleBroken(7, "Fresh taste notes", "DJ Nova", RuleBrokenStep.Shape));
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Theory]
+        [InlineData(RuleBrokenStep.Shape, RuleFlagTalk.Line, "Fresh taste notes could not shape DJ Nova's line")]
+        [InlineData(RuleBrokenStep.Record, RuleFlagTalk.Chat, "Fresh taste notes could not record DJ Nova's chat")]
+        public async Task TheSummaryNamesTheRuleTheStepTheDjAndTheTalk(RuleBrokenStep step, RuleFlagTalk talk, string expected)
+        {
+            var row = await PublishAndCaptureAsync(new RuleBroken(7, "Fresh taste notes", "DJ Nova", step) { Talk = talk });
+
+            Assert.Equal(expected, row.Summary);
+        }
+
+        [Fact]
+        public void TheRowKindIsRuleBroken() => Assert.Equal("rule-broken", shapeRow.Kind);
+
+        [Fact]
+        public void TheRowNamesThePersona() => Assert.Equal(7L, shapeRow.PersonaId);
+    }
+
+    public sealed class ScenarioABrokenAdRule : IAsyncLifetime
+    {
+        BoothLogAppendRequest row = null!;
+
+        public async Task InitializeAsync() =>
+            row = await PublishAndCaptureAsync(
+                new RuleBroken(null, "Fresh taste notes", "Cravin's Diner", RuleBrokenStep.Record) { Talk = RuleFlagTalk.Ad });
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void TheSummaryNamesTheSponsorAndTheAd() =>
+            Assert.Equal("Fresh taste notes could not record Cravin's Diner's ad", row.Summary);
+
+        [Fact]
+        public void TheRowIsKeyedOnNoPersona() => Assert.Null(row.PersonaId);
+    }
 }

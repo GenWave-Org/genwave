@@ -313,4 +313,32 @@ public static class FeatureFlaggedAdsFail
         [Fact]
         public void TheLiveModeIsReadOnceForTheAd() => Assert.Equal(1, monitor.Reads);
     }
+
+    // T804a (F220.9) — an ad's recorder that throws reaches the booth, naming the sponsor and no persona
+    public sealed class ScenarioAnAdRecorderThrows : IAsyncLifetime
+    {
+        RuleBroken broken = null!;
+
+        public async Task InitializeAsync()
+        {
+            var harness = new AdRulesSpecHarness(
+                [Clean], [new ScriptedShapingRule("b-recorder", "Bravo recorder.", recordThrows: true, covers: TalkKinds.Ad)]);
+            await harness.WriteAsync();
+            broken = harness.Events.Events.OfType<RuleBroken>().Single();
+        }
+
+        public Task DisposeAsync() => Task.CompletedTask;
+
+        [Fact]
+        public void TheBrokenEventSaysRecord() => Assert.Equal(RuleBrokenStep.Record, broken.Step);
+
+        [Fact]
+        public void TheBrokenEventSaysAd() => Assert.Equal(RuleFlagTalk.Ad, broken.Talk);
+
+        [Fact]
+        public void TheBrokenEventHasNoPersona() => Assert.Null(broken.PersonaId);
+
+        [Fact]
+        public void TheBrokenEventNamesTheSponsor() => Assert.Equal(AdRulesSpecHarness.SponsorName, broken.Speaker);
+    }
 }

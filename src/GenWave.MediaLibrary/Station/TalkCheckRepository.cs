@@ -24,17 +24,24 @@ sealed class TalkCheckRepository(Lazy<NpgsqlDataSource> dataSource, IOptionsMoni
 
         """;
 
-    // A flag = the verdict is on and holds a flag object whose reason is not "Could not check" (TalkRuleReasons.CouldNotCheck), the
-    // same test as db/55's view. A broken shaper/recorder is stored apart from the flag, so it needs no exclusion.
-    const string CountFlagsSql =
+    // One pass over last week's verdicts, two counts (the flag list and the could-not-run list share it).
+    // A flag = the verdict is on and holds a flag object whose reason is not "Could not check" (TalkRuleReasons.CouldNotCheck), the same
+    // test as db/55's view. A broken shaper/recorder is stored apart from the flag, so it needs no exclusion.
+    // Broken = the verdict holds a non-empty "broken" key (a shaper or recorder that threw, F220.9). A flagged-and-broken verdict is in
+    // both counts. The shaper runs once per request but stamps its mark on every judged attempt, so "Could not shape" counts on attempt 1
+    // only; "Could not record" is only ever on the accepted attempt, and Mark joins reasons ("Could not shape, Could not record"), so it is a substring test. A broken verdict counts whatever its switch says: the switches are
+    // read separately for shaping and judging, so a flip between the two reads can leave a switched-off one, and the shaper did run and throw.
+    const string CountVerdictsSql =
         """
-        select v.key as rule_id, c.talk_kind, count(*)::int as flags
+        select v.key as rule_id, c.talk_kind,
+               (count(*) filter (where v.value ->> 'on' = 'true'
+                                   and jsonb_typeof(v.value -> 'flag') = 'object'
+                                   and v.value -> 'flag' ->> 'reason' <> @CouldNotCheck))::int as flagged,
+               (count(*) filter (where jsonb_typeof(v.value -> 'broken') = 'string'
+                                   and (c.attempt = 1 or strpos(v.value ->> 'broken', @CouldNotRecord) > 0)))::int as broken
         from station.talk_check c
         cross join lateral jsonb_each(c.verdicts) v
         where c.checked_at >= @Since
-          and v.value ->> 'on' = 'true'
-          and jsonb_typeof(v.value -> 'flag') = 'object'
-          and v.value -> 'flag' ->> 'reason' <> @CouldNotCheck
         group by v.key, c.talk_kind
         """;
 
@@ -120,15 +127,18 @@ sealed class TalkCheckRepository(Lazy<NpgsqlDataSource> dataSource, IOptionsMoni
         return rows.Select(r => r.ToEntry()).ToList();
     }
 
-    public async Task<IReadOnlyList<TalkRuleFlagCount>> CountFlagsAsync(DateTimeOffset since, CancellationToken ct)
+    public async Task<IReadOnlyList<TalkRuleVerdictCount>> CountVerdictsAsync(DateTimeOffset since, CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
-        var rows = await conn.QueryAsync<FlagCountRow>(new CommandDefinition(
-            CountFlagsSql,
-            new { Since = since, CouldNotCheck = TalkRuleReasons.CouldNotCheck },
+        var rows = await conn.QueryAsync<VerdictCountRow>(new CommandDefinition(
+            CountVerdictsSql,
+            new { Since = since, CouldNotCheck = TalkRuleReasons.CouldNotCheck, CouldNotRecord = TalkRuleReasons.CouldNotRecord },
             cancellationToken: ct));
 
-        return rows.Select(r => new TalkRuleFlagCount(r.RuleId, TalkStoredTokens.Parse<TalkKinds>(r.TalkKind), r.Flags)).ToList();
+        return rows
+            .Where(r => r.Flagged > 0 || r.Broken > 0)
+            .Select(r => new TalkRuleVerdictCount(r.RuleId, TalkStoredTokens.Parse<TalkKinds>(r.TalkKind), r.Flagged, r.Broken))
+            .ToList();
     }
 
     public async Task<IReadOnlyList<TalkFlaggedAttempt>> LatestFlagsAsync(string ruleId, DateTimeOffset since, int limit, CancellationToken ct)
@@ -150,7 +160,7 @@ sealed class TalkCheckRepository(Lazy<NpgsqlDataSource> dataSource, IOptionsMoni
             .ToList();
     }
 
-    sealed record FlagCountRow(string RuleId, string TalkKind, int Flags);
+    sealed record VerdictCountRow(string RuleId, string TalkKind, int Flagged, int Broken);
 
     sealed record FlaggedAttemptRow(long Id, DateTime CheckedAt, string? Dj, string TalkKind, string? Words, string Outcome);
 

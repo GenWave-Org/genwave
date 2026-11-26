@@ -47,6 +47,8 @@ export interface TalkRuleDto {
   canCover: TalkKind[];
   switches: Partial<Record<TalkKind, boolean>>;
   flags7d: Partial<Record<TalkKind, number>>;
+  /** Attempts where the rule's shaper or recorder threw (F220.9); absent from an older host. */
+  broken7d: Partial<Record<TalkKind, number>>;
 }
 
 export interface TalkFlaggedAttemptDto {
@@ -103,6 +105,7 @@ function narrowRule(raw: unknown): TalkRuleDto | null {
     canCover: canCover.filter(isTalkKind),
     switches: narrowKindMap(raw["switches"], isBoolean),
     flags7d: narrowKindMap(raw["flags7d"], isNumber),
+    broken7d: narrowKindMap(raw["broken7d"], isNumber),
   };
 }
 

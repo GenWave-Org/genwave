@@ -7,8 +7,8 @@ namespace GenWave.Core.TalkRules;
 /// </summary>
 public interface ITalkFlagReader
 {
-    /// <summary>How many attempts each rule flagged per kind of talk, for rows written at or after <paramref name="since"/>. Only non-zero counts come back.</summary>
-    Task<IReadOnlyList<TalkRuleFlagCount>> CountFlagsAsync(DateTimeOffset since, CancellationToken ct);
+    /// <summary>Per rule and kind of talk, how many attempts it flagged and how many its shaper or recorder broke on (F220.9), for rows written at or after <paramref name="since"/>. Only pairs with a non-zero count come back.</summary>
+    Task<IReadOnlyList<TalkRuleVerdictCount>> CountVerdictsAsync(DateTimeOffset since, CancellationToken ct);
 
     /// <summary>The newest attempts <paramref name="ruleId"/> flagged at or after <paramref name="since"/>, newest first, at most <paramref name="limit"/> (clamped to 1..100).</summary>
     Task<IReadOnlyList<TalkFlaggedAttempt>> LatestFlagsAsync(string ruleId, DateTimeOffset since, int limit, CancellationToken ct);
