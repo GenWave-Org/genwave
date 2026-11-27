@@ -15,6 +15,9 @@ updates:
         versions: ["11.*"]
       - dependency-name: "Microsoft.AspNetCore.*"
         versions: ["11.*"]
+      # Npgsql majors track .NET (11.0 needs Microsoft.Extensions.*.Abstractions 11, gh-#1036).
+      - dependency-name: "Npgsql"
+        versions: ["11.*"]
   - package-ecosystem: npm
     directory: /admin-ui
     schedule:
