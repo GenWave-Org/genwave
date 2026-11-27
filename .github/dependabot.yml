@@ -15,6 +15,12 @@ updates:
         versions: ["11.*"]
       - dependency-name: "Microsoft.AspNetCore.*"
         versions: ["11.*"]
+      # Named outright: the wildcard above did not stop this one (gh-#1035 went 10.11.0 -> 11.0.1).
+      - dependency-name: "Microsoft.Extensions.TimeProvider.Testing"
+        versions: ["11.*"]
+      # Npgsql majors track .NET (11.0 needs Microsoft.Extensions.*.Abstractions 11, gh-#1036).
+      - dependency-name: "Npgsql"
+        versions: ["11.*"]
   - package-ecosystem: npm
     directory: /admin-ui
     schedule:
